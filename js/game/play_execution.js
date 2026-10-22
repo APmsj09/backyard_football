@@ -1683,49 +1683,42 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         d.isEngaged && getDistance(pState, d) < 3.0
                     );
 
-                    // Evaluate the closest immediate threat, not whichever
-                    // defender happens to appear first in the array.
-                    const nearestImmediateThreat = unblockedRushers
-                        .map(defender => ({
-                            defender,
-                            distance: getDistance(pState, defender)
-                        }))
-                        .filter(entry => entry.distance < 3.2)
-                        .sort((a, b) => a.distance - b.distance)[0];
-
-                    const immediateThreat = nearestImmediateThreat?.defender ?? null;
-                    const immediateThreatDistance =
-                        nearestImmediateThreat?.distance ?? Infinity;
-
-                    // Scrambling should depend on athletic mobility, not IQ alone.
-                    const qbMobility =
-                        ((pState.agility || pState.agi || 50) * 0.55) +
-                        ((pState.speed || pState.spd || 50) * 0.45);
-
-                    const shouldEmergencyScramble = Boolean(
-                        immediateThreat &&
+                    // REALISTIC POCKET COLLAPSE & EARLY ESCAPE:
+                    // Check unblocked rushers AND collapsing blocks within 5.0 yards.
+                    const allThreatsNearPocket = defenseStates.filter(d =>
+                        d.stunnedTicks === 0 &&
+                        getDistance(pState, d) < 5.0 &&
                         (
-                            (qbMobility >= 68 && immediateThreatDistance <= 3.2) ||
-                            (qbMobility >= 55 && immediateThreatDistance <= 2.0)
+                            (!d.isBlocked && !d.isEngaged) ||
+                            (d.isEngaged && (d.strength || d.str || 50) > 65) // Collapsing bull-rusher
                         )
                     );
 
+                    const nearestThreat = allThreatsNearPocket.sort(
+                        (a, b) => getDistance(pState, a) - getDistance(pState, b)
+                    )[0];
+
+                    const threatDist = nearestThreat ? getDistance(pState, nearestThreat) : Infinity;
+                    const qbMobility = ((pState.agility || 50) * 0.55) + ((pState.speed || 50) * 0.45);
+
+                    // Athletes escape early (4.5y out); pocket statues wait until 2.8y out
+                    const scrambleTriggerDist = 2.4 + (qbMobility / 100) * 2.4; // 2.4y to 4.8y
+                    const shouldEmergencyScramble = nearestThreat && threatDist <= scrambleTriggerDist;
+
                     if (shouldEmergencyScramble) {
-                        if (!pState.rolloutDir) {
-                            pState.rolloutDir =
-                                immediateThreat.x > pState.x ? -1 : 1;
-                        }
+                        // Roll away from the incoming rusher toward open sideline grass
+                        const escapeSide = nearestThreat.x > pState.x ? -1 : 1;
+                        pState.rolloutDir = escapeSide;
 
                         pState.action = 'qb_scramble';
                         pState.isBallCarrier = true;
                         playState.qbIntent = 'scramble';
 
-                        setPointIntent(
-                            pState,
-                            pState.x + (pState.rolloutDir * 7),
-                            pState.y + 1.5,
-                            0.5
-                        );
+                        // Angle wide outside the tackle box
+                        const escapeX = Math.max(3.0, Math.min(FIELD_WIDTH - 3.0, pState.x + (escapeSide * 8.5)));
+                        const escapeY = pState.y + 1.5;
+
+                        setPointIntent(pState, escapeX, escapeY, 0.5);
 
                         pState.loggedRollout = true;
 
@@ -1740,59 +1733,41 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         break;
                     }
 
-                    const edgePressureLeft = defenseStates.some(d => d.x < pState.x - 2.5 && getDistance(pState, d) < 4.5);
-                    const edgePressureRight = defenseStates.some(d => d.x > pState.x + 2.5 && getDistance(pState, d) < 4.5);
-                    const interiorClean = !defenseStates.some(d => Math.abs(d.x - pState.x) <= 2.0 && d.y > pState.y && d.y < LOS);
+                    // ACTIVE POCKET FOOTWORK & SLIDING:
+                    // Step up when edge rushers loop deep, or slide horizontally away from pressure.
+                    const edgePressureLeft = defenseStates.some(d => d.x < pState.x - 2.0 && getDistance(pState, d) < 5.0);
+                    const edgePressureRight = defenseStates.some(d => d.x > pState.x + 2.0 && getDistance(pState, d) < 5.0);
+                    const interiorPressure = defenseStates.some(d => Math.abs(d.x - pState.x) <= 2.2 && d.y > pState.y && d.y < LOS + 1.0);
 
-                    if ((edgePressureLeft || edgePressureRight || collapsingDefenders.length > 0) && interiorClean && qbIQ > 45) {
-                        idealY = Math.min(LOS - 1.2, pState.dropbackTargetY + 2.0);
-                        if (pState._lastPocketAction !== 'climb') {
-                            logPlayDebug('QB_POCKET_MOVE', `${pState.name} steps up into the clean pocket`, { targetY: Number(idealY.toFixed(1)) });
-                            pState._lastPocketAction = 'climb';
-                        }
+                    let slideX = idealX;
+                    let slideY = idealY;
+
+                    // 1. Step up into the pocket when edge rushers bend around the tackles
+                    if ((edgePressureLeft || edgePressureRight) && !interiorPressure) {
+                        slideY = Math.min(LOS - 1.5, pState.dropbackTargetY + 2.5);
                     }
 
-                    if (pState._pocketSlideLock > 0) {
-                        pState._pocketSlideLock--;
-                        break;
+                    // 2. Slide laterally away from collapsing side
+                    if (edgePressureLeft && !edgePressureRight) {
+                        slideX = Math.min(pState.initialX + 3.0, pState.x + 1.8);
+                    } else if (edgePressureRight && !edgePressureLeft) {
+                        slideX = Math.max(pState.initialX - 3.0, pState.x - 1.8);
                     }
 
-                    if (unblockedRushers.length > 0 && qbIQ > 40) {
-                        let desiredX = idealX;
-                        let desiredY = idealY;
-                        let leftPressure = 0;
-                        let rightPressure = 0;
-                        let upTheMiddle = 0;
+                    // 3. Step back or give ground if interior DTs push the middle
+                    if (interiorPressure) {
+                        slideY = Math.max(LOS - 10.0, pState.y - 1.5);
+                        // Escape to the side with more room
+                        slideX += (pState.x < CENTER_X ? -2.0 : 2.0);
+                    }
 
-                        unblockedRushers.forEach(r => {
-                            const dx = r.x - pState.x;
-                            const dy = r.y - pState.y;
-                            const dist = Math.max(0.1, Math.hypot(dx, dy));
-                            const threatLevel = 10 / dist;
-                            if (dx < -1.5) leftPressure += threatLevel;
-                            if (dx > 1.5) rightPressure += threatLevel;
-                            if (Math.abs(dx) <= 1.5 && dy > 0) upTheMiddle += threatLevel;
-                        });
-
-                        const pressureDiff = rightPressure - leftPressure;
-
-                        if (Math.abs(pressureDiff) > 2.0) {
-                            desiredX -= Math.sign(pressureDiff) * Math.min(2.5, Math.abs(pressureDiff));
-                        }
-
-                        if ((leftPressure > 2.0 || rightPressure > 2.0) && upTheMiddle < 1.5 && qbIQ > 65) {
-                            desiredY += 3.0;
-                        } else if (upTheMiddle > 2.0) {
-                            desiredY -= 2.0;
-                        }
-
-                        const targetX = Math.max(pState.initialX - 6, Math.min(pState.initialX + 6, desiredX));
-                        const targetY = Math.max(LOS - 12.0, Math.min(LOS - 1, desiredY));
-
-                        setPointIntent(pState, targetX, targetY, 0.35);
-                        pState._pocketSlideLock = 10;
+                    const hasMovedPocket = Math.hypot(slideX - pState.x, slideY - pState.y) > 0.4;
+                    if (hasMovedPocket) {
+                        // Smoothly step and slide in the pocket with fluid intent
+                        setPointIntent(pState, slideX, slideY, 0.4);
+                        pState.movementMode = 'POINT';
                     } else {
-                        setHoldIntent(pState, idealX, idealY);
+                        setHoldIntent(pState, slideX, slideY);
                     }
                     break;
                 }
@@ -2389,17 +2364,24 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         predX += leverageDir;
                     }
 
-                    if (dist <= TACKLE_CUTOFF_DISTANCE) {
+                    // SACK CLOSING FIX: When rushing a quarterback behind the line of scrimmage,
+                    // drive directly through the QB! Do NOT aim short and park 1.15 yards away.
+                    const isQBSackPursuit = chaseTarget.role === 'QB' && chaseTarget.y <= LOS + 0.5;
+
+                    if (dist <= TACKLE_CUTOFF_DISTANCE && !isQBSackPursuit) {
                         const dxToCarrier = chaseTarget.x - pState.x;
                         const dyToCarrier = chaseTarget.y - pState.y;
                         const gap = Math.max(0.001, Math.hypot(dxToCarrier, dyToCarrier));
 
-                        // Aim just short of the carrier's center so the defender
-                        // approaches tackle range rather than charging through the target.
-                        const approachGap = Math.min(1.15, Math.max(0, dist - 0.25));
+                        // Only apply a breakdown cushion on open-field runners, and keep it tight (0.35y max)
+                        const approachGap = Math.min(0.35, Math.max(0, dist - 0.5));
 
                         predX = chaseTarget.x - (dxToCarrier / gap) * approachGap;
                         predY = chaseTarget.y - (dyToCarrier / gap) * approachGap;
+                    } else if (isQBSackPursuit) {
+                        // Drive straight through the quarterback's center
+                        predX = chaseTarget.x;
+                        predY = chaseTarget.y;
                     }
 
                     const pursuitTargetY = getPursuitTargetY(

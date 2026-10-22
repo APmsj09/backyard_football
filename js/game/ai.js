@@ -591,12 +591,15 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     const LOS = playState.lineOfScrimmage || 60;
     const isBehindLine = runner.y < LOS + 1.2;
 
-    // Backfield vision should include a usable bounce lane for ordinary runners.
-    // IQ expands that search, while speed still limits how sharply a runner
-    // can redirect without losing momentum.
+    // Backfield vision: RBs follow interior gaps, but scrambling QBs escaping
+    // the pocket need wide perimeter vision (8-12 yards) to reach open sideline grass!
     if (isBehindLine) {
-        const visionExpansion = Math.max(0, (iq - 50) / 12.5);
-        maxLateral = Math.min(maxLateral, 3.0 + visionExpansion);
+        if (runner.role === 'QB') {
+            maxLateral = Math.min(maxLateral, 10.0 + (agility / 20));
+        } else {
+            const visionExpansion = Math.max(0, (iq - 50) / 12.5);
+            maxLateral = Math.min(maxLateral, 3.0 + visionExpansion);
+        }
     }
 
     const DEFENDER_REACTION_RANGE = 6.5;
@@ -725,6 +728,16 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         // When the middle is congested, make a wider lane a genuine option.
         const centerThreatDetected = isBehindLine && centerThreat > 6.0;
 
+        // SCRAMBLE DIRECTION FIX: A scrambling QB escaping the pocket behind the line
+        // should avoid diving into the congested interior A/B gaps (offset < 2.5y)
+        // and strongly favor breaking outside the tackle box toward daylight.
+        if (isBehindLine && runner.role === 'QB') {
+            if (Math.abs(offset) < 2.5) {
+                score -= 65; // Heavily penalize running into the interior trench pile
+            } else {
+                score += 35; // Strongly reward breaking outside the tackles
+            }
+        }
         // On designed outside stretch/toss plays, heavily penalize reversing back across the formation
         const isOutsideRun = playState.playKey?.includes('Stretch') || playState.playKey?.includes('Toss') || playState.playKey?.includes('Sweep');
         const runDirection = (playState.playKey?.endsWith('Left') || playState.playKey?.includes('_l')) ? -1 : 1;
@@ -1880,21 +1893,30 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const panicFactor = 1.0 + ((100 - qbPoise) / 100); 
         const sandlotEgoBoost = qbEgo > 70 ? 1.3 : 1.0;
 
-        if (!decisionMade && openLane && (isPressured || allReadsExhausted || playState.tick > 60)) {
+        // BACKYARD ROLLOUT & SCRAMBLE TRIGGER:
+        // Mobile QBs escape the pocket proactively rather than taking sacks.
+        if (!decisionMade && (isPressured || allReadsExhausted || playState.tick > 50)) {
             const qbSpeed = qbAttrs.physical?.speed || 50;
-            const mobilityDesire = ((qbAgility * 0.5) + (qbSpeed * 0.5)) / 100;
+            const mobilityDesire = ((qbAgility * 0.55) + (qbSpeed * 0.45)) / 100;
             const personalityUrgency = (qbProfile?.riskTolerance ?? 1.0) * panicFactor * sandlotEgoBoost;
 
-            let scrambleChance = mobilityDesire * 0.012 * personalityUrgency;
-            if (allReadsExhausted) scrambleChance *= 2.5;
-            if (isPressured) scrambleChance *= 2.5;
+            let scrambleChance = mobilityDesire * 0.018 * personalityUrgency;
+            if (allReadsExhausted) scrambleChance *= 3.0;
+            if (isPressured) scrambleChance *= 3.5;
 
             if (Math.random() < scrambleChance) {
-                qbState.action = 'run_path';
+                // Break out in qb_scramble mode so the QB rolls outside the tackle box first
+                qbState.action = 'qb_scramble';
                 qbState.isBallCarrier = true;
                 playState.qbIntent = 'scramble';
+
+                // Roll toward the side with more open space
+                const spaceLeft = qbState.x;
+                const spaceRight = FIELD_WIDTH - qbState.x;
+                qbState.rolloutDir = spaceRight >= spaceLeft ? 1 : -1;
+
                 if (gameLog && !qbState.hasLoggedScramble) {
-                    gameLog.push(`🏃 ${qbState.name} tucks it and runs upfield!`);
+                    gameLog.push(`🏃 ${qbState.name} breaks out of the pocket and scrambles outside!`);
                     qbState.hasLoggedScramble = true;
                 }
                 return;

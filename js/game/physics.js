@@ -430,8 +430,12 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // DECISIVE BRAKING FOR FIXED TARGETS (HOLD & POINT)
+    // Pursuers and pass rushers must NEVER trigger arrival braking! They run through contact to make the tackle.
+    const isDynamicPursuer = pState.action === 'pursuit' || pState.action?.includes('rush') || pState.action?.includes('blitz');
+
     if (
         !isOffBalanceThisTick &&
+        !isDynamicPursuer &&
         (pState.movementMode === 'HOLD' || pState.movementMode === 'POINT')
     ) {
         if (distToTarget <= arrivalRadius) {
@@ -528,33 +532,18 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 8. DECELERATION (Braking / Planting) ---
-    const pursuitStopDistance =
-    pState.action === 'pursuit'
-        ? Math.max(
-            4.5,
-            (currentSpeed * currentSpeed) /
-                (2 * Math.max(0.1, maxDecelerationYPS2)) +
-                arrivalRadius
-        )
-        : 0;
-
-    const isPursuitApproach =
-        pState.action === 'pursuit' &&
-        distToTarget < pursuitStopDistance;
-
-    // Pass rushers, blitzers, and dynamic runners must NOT brake when closing in on their target!
+    // SACK & TACKLE DRIVE FIX:
+    // Defenders in pursuit must NOT decelerate 4.5 yards before reaching the carrier!
+    // They close with full sprint speed until physical tackle range (0.5y) is reached.
     const isAggressiveAttackAction = [
         'run_path', 'run_route', 'tracking_ball', 'pursuit',
         'pass_rush', 'blitz', 'blitz_gap', 'blitz_edge', 'run_gap_A'
     ].includes(pState.action);
 
     const isStopping =
-        isPursuitApproach ||
-        (
-            distToTarget < 2.5 &&
-            !isAggressiveAttackAction &&
-            pState.movementMode !== 'ROUTE'
-        );
+        distToTarget < 2.5 &&
+        !isAggressiveAttackAction &&
+        pState.movementMode !== 'ROUTE';
 
     let arrivalFactor = 1.0;
 
