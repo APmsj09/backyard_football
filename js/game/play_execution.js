@@ -1039,6 +1039,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     const assignedThreats = new Set();
 
     const runCarrierForBlocking =
+    // After a completed pass, establish the blocking lane around the
+    // actual receiver rather than an unrelated RB route.
+    (isPassCompleted && ballCarrierState?.isOffense
+        ? ballCarrierState
+        : null) ||
     // Prefer the designed RB path during a normal handoff run.
     offenseStates.find(p =>
         p.slot === 'RB1' &&
@@ -1066,7 +1071,27 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
     const assignBlockerTarget = (blocker, threats) => {
         if (blocker.isEngaged) return;
-        if (playType === 'run' && Number.isFinite(runLaneX)) {
+
+        const isPostCatchBlock = Boolean(
+            isPassCompleted &&
+            ballCarrierState?.isOffense
+        );
+
+        // Clear the old pass-protection assignment once on the
+        // transition to post-catch blocking. Preserve target locking
+        // after the new blocking assignment has been selected.
+        if (
+            isPostCatchBlock &&
+            !blocker._postCatchBlockingStarted
+        ) {
+            blocker.dynamicTargetId = null;
+            blocker._postCatchBlockingStarted = true;
+        }
+
+        if (
+            (playType === 'run' || isPostCatchBlock) &&
+            Number.isFinite(runLaneX)
+        ) {
             blocker.blockLaneX = runLaneX;
         }
         const isScreenPlay = playState.playKey?.includes('Screen');
@@ -1134,11 +1159,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         const validThreats = threats.filter(t =>
             !assignedThreats.has(t.id) &&
             getDistance(blocker, t) < VISION_RANGE &&
-            t.y > blocker.y - 1.5
+            t.y > blocker.y - 1.5 &&
+            (
+                !isPostCatchBlock ||
+                t.y >= ballCarrierState.y - 2.5
+            )
         );
 
         let target = null;
-        const isPassPlay = playType === 'pass';
+        const isPassPlay = playType === 'pass' && !isPassCompleted;
 
         const blockerProfile = getDecisionProfile(blocker, playState.tick);
         const blockerIQ = blockerProfile?.awareness ?? (blocker.playbookIQ || blocker.iq || 50);
@@ -1242,7 +1271,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 !t.isEngaged &&
                 !t.isBlocked &&
                 getDistance(blocker, t) < 14.0 &&
-                t.y > blocker.y - 2.0
+                t.y > blocker.y - 2.0 &&
+                (
+                    !isPostCatchBlock ||
+                    t.y >= ballCarrierState.y - 2.5
+                )
             );
             if (currentThreat) {
                 target = currentThreat;
@@ -1267,6 +1300,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     d.stunnedTicks === 0 &&
                     d.y > blocker.y - 0.5 &&
                     d.y < blocker.y + 8.0 &&
+                    (
+                        !isPostCatchBlock ||
+                        d.y >= ballCarrierState.y - 2.5
+                    ) &&
                     Math.abs(d.x - laneX) < 8.0
                 )
                 .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];

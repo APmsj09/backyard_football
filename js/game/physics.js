@@ -711,7 +711,31 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // --- 10. COLLISION DEFLECTION ---
+    // Diagnostic snapshot: separate steering behavior from changes
+    // introduced by physical collision resolution.
+    const telemetryBeforeCollision = telemetryActive
+        ? {
+            x: pState.x,
+            y: pState.y,
+            vx: pState.vx,
+            vy: pState.vy
+        }
+        : null;
+
     resolveNewtonianCollisions(pState, allPlayers);
+
+    const telemetryCollisionResponse = telemetryBeforeCollision
+        ? {
+            positionDelta: {
+                x: pState.x - telemetryBeforeCollision.x,
+                y: pState.y - telemetryBeforeCollision.y
+            },
+            velocityDelta: {
+                x: pState.vx - telemetryBeforeCollision.vx,
+                y: pState.vy - telemetryBeforeCollision.vy
+            }
+        }
+        : null;
 
     // --- 11. FINALIZE MOVEMENT ---
     pState.x += pState.vx * dt;
@@ -865,6 +889,54 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
                         maxPossibleSpeed: Number(maxPossibleSpeed.toFixed(2)),
                         gapFriction: Number(gapFriction.toFixed(2)),
                         isSqueezing: Boolean(pState.isSqueezing),
+
+                        movementMath: {
+                            dt: Number(dt.toFixed(4)),
+                            baseMaxSpeed: Number(baseMaxSpeed.toFixed(2)),
+                            actionMultiplier: Number(actionMult.toFixed(2)),
+                            contactModifier: Number(contactModifier.toFixed(2)),
+                            turningPenalty: Number(turningPenalty.toFixed(2)),
+                            effectiveMaxSpeed: Number(effectiveMaxSpeed.toFixed(2)),
+                            arrivalFactor: Number(arrivalFactor.toFixed(2)),
+                            targetSpeed: Number(clampedTargetSpeed.toFixed(2)),
+
+                            targetVelocity: {
+                                x: Number(targetVx.toFixed(2)),
+                                y: Number(targetVy.toFixed(2))
+                            },
+
+                            targetDirectionAlignment: Number(
+                                targetDirectionAlignment.toFixed(3)
+                            ),
+                            isBraking,
+
+                            effectiveAccelerationYPS2: Number(
+                                effectiveAccelerationYPS2.toFixed(2)
+                            ),
+                            maxVelocityChange: Number(
+                                maxVelocityChange.toFixed(3)
+                            ),
+
+                            velocityBeforeCollision: telemetryBeforeCollision
+                                ? {
+                                    x: Number(telemetryBeforeCollision.vx.toFixed(2)),
+                                    y: Number(telemetryBeforeCollision.vy.toFixed(2))
+                                }
+                                : null
+                        },
+
+                        collisionResponse: telemetryCollisionResponse
+                            ? {
+                                positionDelta: {
+                                    x: Number(telemetryCollisionResponse.positionDelta.x.toFixed(3)),
+                                    y: Number(telemetryCollisionResponse.positionDelta.y.toFixed(3))
+                                },
+                                velocityDelta: {
+                                    x: Number(telemetryCollisionResponse.velocityDelta.x.toFixed(3)),
+                                    y: Number(telemetryCollisionResponse.velocityDelta.y.toFixed(3))
+                                }
+                            }
+                            : null,
 
                         nearbyPlayers
                     },
