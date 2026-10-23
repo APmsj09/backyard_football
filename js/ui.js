@@ -4133,7 +4133,26 @@ function renderDepthChartTab(gameState) {
     renderFormationPills('defense', defenseFormations, gs.playerTeam.formations.defense);
     renderDepthChartSide('offense', gs);
     renderDepthChartSide('defense', gs);
-    renderPositionalOveralls();
+
+    const activeSub = document.querySelector(".depth-chart-tab.active")?.dataset.subTab || "depth-order";
+    const offensePane = document.getElementById("depth-chart-offense-pane");
+    const defensePane = document.getElementById("depth-chart-defense-pane");
+    const overallsPane = document.getElementById("positional-overalls-container");
+    const depthOrderPane = document.getElementById("depth-order-container");
+    const playbookPane = document.getElementById("playbook-manager-container");
+    const practicePane = document.getElementById("practice-manager-container");
+
+    if (offensePane) offensePane.classList.toggle("hidden", activeSub !== "offense");
+    if (defensePane) defensePane.classList.toggle("hidden", activeSub !== "defense");
+    if (overallsPane) overallsPane.classList.toggle("hidden", activeSub !== "overalls");
+    if (depthOrderPane) depthOrderPane.classList.toggle("hidden", activeSub !== "depth-order");
+    if (playbookPane) playbookPane.classList.toggle("hidden", activeSub !== "playbook");
+    if (practicePane) practicePane.classList.toggle("hidden", activeSub !== "practice");
+
+    if (activeSub === "depth-order") renderDepthOrderPane(gs);
+    else if (activeSub === "overalls") renderPositionalOveralls();
+    else if (activeSub === "playbook") renderPlaybookManager(gs);
+    else if (activeSub === "practice") renderPracticeManager(gs);
 }
 
 function renderFormationPills(side, formationMap, selectedKey) {
@@ -5435,34 +5454,36 @@ export function setupDepthChartTabs() {
         });
     };
 
-    // Normalize the initial state as well as later tab changes.
-    setActiveTabStyle(
-        document.querySelector(".depth-chart-tab.active")?.dataset.subTab || "depth-order"
-    );
+    const switchSubTab = (subTab) => {
+        setActiveTabStyle(subTab);
+
+        const offensePane = document.getElementById("depth-chart-offense-pane");
+        const defensePane = document.getElementById("depth-chart-defense-pane");
+        const overallsPane = document.getElementById("positional-overalls-container");
+        const depthOrderPane = document.getElementById("depth-order-container");
+        const playbookPane = document.getElementById("playbook-manager-container");
+        const practicePane = document.getElementById("practice-manager-container");
+
+        if (offensePane) offensePane.classList.toggle("hidden", subTab !== "offense");
+        if (defensePane) defensePane.classList.toggle("hidden", subTab !== "defense");
+        if (overallsPane) overallsPane.classList.toggle("hidden", subTab !== "overalls");
+        if (depthOrderPane) depthOrderPane.classList.toggle("hidden", subTab !== "depth-order");
+        if (playbookPane) playbookPane.classList.toggle("hidden", subTab !== "playbook");
+        if (practicePane) practicePane.classList.toggle("hidden", subTab !== "practice");
+
+        const gs = getGameState();
+        if (subTab === "overalls") renderPositionalOveralls();
+        if (subTab === "depth-order") renderDepthOrderPane(gs);
+        if (subTab === "playbook") renderPlaybookManager(gs);
+        if (subTab === "practice") renderPracticeManager(gs);
+    };
+
+    const initialSubTab = document.querySelector(".depth-chart-tab.active")?.dataset.subTab || "depth-order";
+    switchSubTab(initialSubTab);
 
     subTabs.forEach(tab => {
         tab.addEventListener("click", () => {
-            const subTab = tab.dataset.subTab;
-            setActiveTabStyle(subTab);
-
-            const offensePane = document.getElementById("depth-chart-offense-pane");
-            const defensePane = document.getElementById("depth-chart-defense-pane");
-            const overallsPane = document.getElementById("positional-overalls-container");
-            const depthOrderPane = document.getElementById("depth-order-container");
-            const playbookPane = document.getElementById("playbook-manager-container");
-            const practicePane = document.getElementById("practice-manager-container");
-
-            if (offensePane) offensePane.classList.toggle("hidden", subTab !== "offense");
-            if (defensePane) defensePane.classList.toggle("hidden", subTab !== "defense");
-            if (overallsPane) overallsPane.classList.toggle("hidden", subTab !== "overalls");
-            if (depthOrderPane) depthOrderPane.classList.toggle("hidden", subTab !== "depth-order");
-            if (playbookPane) playbookPane.classList.toggle("hidden", subTab !== "playbook");
-            if (practicePane) practicePane.classList.toggle("hidden", subTab !== "practice");
-
-            if (subTab === "overalls") renderPositionalOveralls();
-            if (subTab === "depth-order") renderDepthOrderPane(getGameState());
-            if (subTab === "playbook") renderPlaybookManager(getGameState());
-            if (subTab === "practice") renderPracticeManager(getGameState());
+            switchSubTab(tab.dataset.subTab);
         });
     });
 }

@@ -136,6 +136,12 @@ export function renderDepthOrderPane(gameState) {
 
 // Position-specific key skills to display in the swap modal
 const POSITION_KEY_SKILLS = {
+    PR: [
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+        { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 },
+        { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 },
+        { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 }
+    ],
     QB: [
         { label: 'ACC', get: p => p.attributes?.technical?.throwingAccuracy ?? 50 },
         { label: 'POW', get: p => p.attributes?.technical?.throwPower ?? p.attributes?.physical?.strength ?? 50 },
