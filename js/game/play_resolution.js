@@ -1889,7 +1889,7 @@ export function determineDefensivePlayCall(
             offense.formations?.offense
         : offense.formations?.offense;
 
-    // Update aggregate counters only after the calls are chosen.
+    /*// Update aggregate counters only after the calls are chosen.
     // The current offensive call never affects this defensive decision.
     recordPlaycallSnapshot(
         offense,
@@ -1899,7 +1899,7 @@ export function determineDefensivePlayCall(
         playcallSituation,
         observedOffenseFormation,
         defenseFormationName
-    );
+    );*/
 
     return selectedKey;
 }
