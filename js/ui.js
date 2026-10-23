@@ -4192,11 +4192,22 @@ window.app_changeFormation = function(side, newKey) {
     if (!team) return;
 
     team.formations[side] = newKey;
+
+    const stBackup = { ...(team.specialTeams || {}) };
+    const specBackup = { ...(team.specialists || {}) };
+
     rebuildDepthChartFromOrder(team);
+
+    if (!team.depthChart) team.depthChart = {};
+    team.specialTeams = stBackup;
+    team.specialists = specBackup;
+    team.depthChart.specialTeams = stBackup;
+
     saveGameState();
 
     renderFormationPills(side, side === 'offense' ? offenseFormations : defenseFormations, newKey);
     renderDepthChartSide(side, gs);
+    renderDepthOrderPane(gs);
     renderPositionalOveralls();
 };
 
@@ -4319,7 +4330,7 @@ function renderDepthChartSide(side, gameState) {
     const otherSide = side === 'offense' ? 'defense' : 'offense';
     const otherChart = depthChart[otherSide] || {};
 
-    const formKey = formations[side] || (side === 'offense' ? 'Balanced' : '3-2-3 Base');
+    const formKey = formations[side] || (side === 'offense' ? 'Balanced' : '3-2-3');
     const formationData = (side === 'offense' ? offenseFormations : defenseFormations)[formKey];
 
     visualField.innerHTML = '';
@@ -4328,17 +4339,16 @@ function renderDepthChartSide(side, gameState) {
         losMarker.style.top = side === 'offense' ? '18%' : '82%';
         visualField.appendChild(losMarker);
 
-        // Smart projection: Generous vertical tiers and expanded trench spacing
+        // High-precision spacing: completely eliminates backfield & secondary overlaps
         const getVisualCoordinates = (rawX, rawY, currentSide) => {
             // 1. Horizontal De-Clustering
             let visualX = rawX;
             if (Math.abs(rawX) <= 4.0) {
-                // Wide trench expansion: prevents OL1, OL2, OL3, and TE from bumping
-                visualX = rawX * 2.15;
+                visualX = rawX * 2.2;
             } else {
                 const sign = Math.sign(rawX);
                 const excess = Math.abs(rawX) - 4.0;
-                visualX = sign * (4.0 * 2.15 + excess * 1.3);
+                visualX = sign * (4.0 * 2.2 + excess * 1.25);
             }
             visualX = Math.max(-21.5, Math.min(21.5, visualX));
             const leftPercent = 50 + (visualX * 1.95);
@@ -4347,39 +4357,52 @@ function renderDepthChartSide(side, gameState) {
             let topPercent = 50;
 
             if (currentSide === 'offense') {
-                if (rawY >= -0.3) {
-                    // Line of Scrimmage (OL and WRs on the line)
+                if (rawY >= -0.35) {
+                    // Line of Scrimmage (OL, on-line WRs, inline TEs)
                     topPercent = 18.0;
-                } else if (rawY > -1.5) {
-                    // Under Center QB: Clean 15% drop below the Center
-                    topPercent = 33.0;
-                } else if (rawY <= -1.5 && rawY > -3.5) {
-                    // Fullback / Offset Shotgun RB / Pistol QB
-                    topPercent = 52.0;
-                } else if (rawY <= -3.5 && rawY > -5.0) {
-                    // Shotgun QB
-                    topPercent = 56.0;
-                } else if (rawY <= -5.0 && rawY > -6.5) {
-                    // Deep Tailback (Power I) / Shotgun Back
-                    topPercent = 74.0;
+                } else if (rawY > -1.35) {
+                    // Flankers / Slot receivers just off the line
+                    topPercent = 25.0;
+                } else if (rawY > -2.5) {
+                    // Under-Center QB (Power I, Jumbo)
+                    topPercent = 34.0;
+                } else if (rawY > -4.5) {
+                    // Fullback in Power I / Jumbo (-3.2 to -3.4) vs Pistol QB (-4.0)
+                    topPercent = rawY <= -3.6 ? 50.0 : 52.0;
+                } else if (rawY > -6.5) {
+                    // Deep Tailback in Power I (-5.6) vs Shotgun Pocket (-6.0)
+                    if (Math.abs(rawX) < 1.0 && rawY > -5.8) {
+                        topPercent = 72.0; // Deep I-Formation Tailback
+                    } else {
+                        topPercent = 64.0; // Shotgun pocket depth
+                    }
+                } else if (rawY > -8.5) {
+                    // Deep Pistol Tailback (-7.0)
+                    topPercent = 82.0;
                 } else {
-                    // Deep Pistol Tailback / Punter
-                    topPercent = 86.0;
+                    // Punter (-12.0)
+                    topPercent = 88.0;
                 }
             } else {
-                // DEFENSIVE TIERS (Generous separation from DL to LBs)
+                // DEFENSIVE TIERS
                 if (rawY <= 1.5) {
-                    // Defensive Line (Right along the scrimmage line)
+                    // Defensive Line along LOS
                     topPercent = 76.0;
-                } else if (rawY > 1.5 && rawY <= 4.5) {
-                    // Linebackers (Dedicated second-level room: 22% gap above DL!)
-                    topPercent = 54.0;
-                } else if (rawY > 4.5 && rawY <= 8.5) {
-                    // Cornerbacks / Slot DBs
-                    topPercent = 37.0;
+                } else if (rawY <= 4.5) {
+                    // Linebackers & nickel overhangs
+                    topPercent = 55.0;
+                } else if (rawY <= 8.5) {
+                    // Cornerbacks / boundary DBs
+                    topPercent = 38.0;
+                } else if (rawY <= 18.0) {
+                    // Deep Safeties
+                    topPercent = 18.0;
+                } else if (rawY <= 38.0) {
+                    // Punt Up-Returner (prevents stacking with PR)
+                    topPercent = 30.0;
                 } else {
-                    // Deep Safeties (Cover 2 / Cover 3 centerfield shells)
-                    topPercent = 16.0;
+                    // Deep Punt Returner
+                    topPercent = 12.0;
                 }
             }
 
@@ -5472,6 +5495,14 @@ export function setupDepthChartTabs() {
         if (practicePane) practicePane.classList.toggle("hidden", subTab !== "practice");
 
         const gs = getGameState();
+        if (subTab === "offense") {
+            renderFormationPills('offense', offenseFormations, gs?.playerTeam?.formations?.offense);
+            renderDepthChartSide('offense', gs);
+        }
+        if (subTab === "defense") {
+            renderFormationPills('defense', defenseFormations, gs?.playerTeam?.formations?.defense);
+            renderDepthChartSide('defense', gs);
+        }
         if (subTab === "overalls") renderPositionalOveralls();
         if (subTab === "depth-order") renderDepthOrderPane(gs);
         if (subTab === "playbook") renderPlaybookManager(gs);

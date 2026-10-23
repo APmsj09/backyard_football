@@ -22,7 +22,7 @@ export function renderDepthOrderPane(gameState) {
     const roster = Game.getRosterObjects(team);
 
     const offFormKey = team.formations?.offense || 'Balanced';
-    const defFormKey = team.formations?.defense || '3-2-3 Base';
+    const defFormKey = team.formations?.defense || '3-2-3';
     const offChart = team.depthChart?.offense || {};
     const defChart = team.depthChart?.defense || {};
     const stChart = team.specialTeams;
