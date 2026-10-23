@@ -25,7 +25,7 @@ const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
 const CENTER_X = FIELD_WIDTH / 2;
 
-const PASS_INTERCEPT_STEPS = 12;
+const PASS_INTERCEPT_STEPS = 24;
 const PASS_INTERCEPT_SPEED_FACTOR = 0.82;
 const PASS_INTERCEPT_MARGIN = 0.85;
 
@@ -88,9 +88,15 @@ function getReachablePassInterceptionPoint(pState, ballState) {
     const playerVX = Number.isFinite(pState.vx) ? pState.vx : 0;
     const playerVY = Number.isFinite(pState.vy) ? pState.vy : 0;
 
-    // Check vertical reach (standing reach + vertical jump) ~2.3 - 2.8 yards
-    const jumpingStat = pState.jump || pState.jumping || 50;
-    const maxVerticalReach = 2.1 + (jumpingStat / 100) * 0.7;
+    // Use the same vertical catch envelope as the collision handler.
+    // Otherwise, the interception planner can reject a high-but-catchable
+    // point and send the defender toward the landing spot instead.
+    const playerHeight = pState.hgt || pState.height || 70;
+    const verticalLeap =
+        (pState.jumping || pState.agi || pState.agility || 50) / 100;
+
+    const maxVerticalReach =
+        (playerHeight / 36) + 1.2 + (verticalLeap * 0.7);
 
     const startZ = Number.isFinite(ballState.z) ? ballState.z : 2.0;
     const ballVZ = Number.isFinite(ballState.vz) ? ballState.vz : 0;
@@ -3199,11 +3205,14 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             let perfectX = targetRec.x + cushionX;
             let perfectY = targetRec.y + cushionY;
 
-            // FIX: If covering a backfield RB, hold leverage at the line of scrimmage (LOS + 1.2y) 
-            // instead of diving into the interior pocket where linemen are blocking.
-            if (targetSlot.startsWith('RB') && targetRec.y < LOS) {
+            // Keep RB coverage leverage consistent as the back crosses
+            // the line of scrimmage. Toggling this adjustment at LOS causes
+            // the defender's target to jump several yards between ticks.
+            if (targetSlot.startsWith('RB')) {
+                // Maintain a minimum coverage depth on the defensive side.
                 perfectY = Math.max(LOS + 1.2, perfectY);
-                // Maintain outside leverage to meet the RB at the sideline
+
+                // Maintain outside leverage both before and after the crossing.
                 const outsideDir = targetRec.x < CENTER_X ? -1.5 : 1.5;
                 perfectX += outsideDir;
             }
