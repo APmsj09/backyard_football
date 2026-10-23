@@ -2324,12 +2324,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                     pState.contactReduction = distToNode < 1.0 ? 0.8 : 1.0;
 
-                    // FIX: Increment stall counter when player is making negligible progress
-                    if (Math.hypot(pState.vx || 0, pState.vy || 0) < 0.8) {
-                        pState._routeWaypointStallTicks = (pState._routeWaypointStallTicks || 0) + 1;
-                    } else {
-                        pState._routeWaypointStallTicks = Math.max(0, (pState._routeWaypointStallTicks || 0) - 1);
-                    }
+                    // Route stall ticks are tracked by updatePlayerPosition()
+                    // using actual progress toward the current waypoint.
+                    // Do not update the same counter from total speed here:
+                    // lateral movement against coverage is not route progress.
 
                     const hasPassedNodeY =
                         (pState.vy > 0 && pState.y >= pt.y) ||

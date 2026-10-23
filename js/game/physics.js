@@ -646,6 +646,146 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         }
     }
 
+    // ROUTE-RUNNER RECOVERY:
+    // If a receiver has persistently stalled while approaching a route
+    // waypoint, temporarily steer around an opposing player occupying
+    // the direct path. Keep the original waypoint intact.
+    const isRouteRunner =
+        pState.isOffense &&
+        pState.action === 'run_route' &&
+        pState.movementMode === 'ROUTE';
+
+    const isPassTargetTracker =
+        pState.isOffense &&
+        pState.action === 'tracking_ball' &&
+        pState.movementMode === 'POINT';
+
+    if (
+        (isRouteRunner || isPassTargetTracker) &&
+        distToTarget > 1.5 &&
+        (Number(pState._routeWaypointStallTicks) || 0) >= 4
+    ) {
+        const pathLengthSquared = distToTarget * distToTarget;
+
+        let nearestAlongPath = Infinity;
+        let routeObstacle = null;
+        let avoidanceSide = 0;
+
+        for (const other of allPlayers) {
+            // Only react to opposing players. Ignore self and ghost
+            // players that do not participate in physical collisions.
+            if (
+                other.id === pState.id ||
+                other.isOffense === pState.isOffense ||
+                other.ghostTicks > 0
+            ) {
+                continue;
+            }
+
+            const offsetX = other.x - pState.x;
+            const offsetY = other.y - pState.y;
+
+            // Project the opponent onto the receiver's direct path
+            // toward the current route waypoint.
+            const alongPath = (
+                (offsetX * dx) + (offsetY * dy)
+            ) / pathLengthSquared;
+
+            // Consider obstructions between the receiver and waypoint,
+            // including a defender occupying the waypoint itself.
+            if (
+                alongPath <= 0 ||
+                alongPath > 1.05 ||
+                alongPath >= nearestAlongPath
+            ) {
+                continue;
+            }
+
+            const lateralDistance = Math.abs(
+                (offsetX * dy) - (offsetY * dx)
+            ) / safeDist;
+
+            // Only respond to opponents close enough to obstruct the
+            // receiver's direct physical path.
+            if (lateralDistance >= 1.55) {
+                continue;
+            }
+
+            nearestAlongPath = alongPath;
+            routeObstacle = other;
+
+            // Choose the side opposite the defender's position relative
+            // to the intended route. Use a consistent fallback when the
+            // defender is almost exactly on the route centerline.
+            const cross = (dx * offsetY) - (dy * offsetX);
+
+            avoidanceSide =
+                Math.abs(cross) > (0.15 * safeDist)
+                    ? (cross < 0 ? -1 : 1)
+                    : (pState.x < other.x ? -1 : 1);
+        }
+
+        if (routeObstacle && avoidanceSide !== 0) {
+            const directX = steeringX;
+            const directY = steeringY;
+
+            // Blend forward progress with a lateral sidestep.
+            // Steering remains subject to normal agility, acceleration,
+            // speed limits, and physical collision resolution.
+            const sidestepStrength = 0.95;
+
+            steeringX =
+                directX +
+                (directY * avoidanceSide * sidestepStrength);
+
+            steeringY =
+                directY -
+                (directX * avoidanceSide * sidestepStrength);
+
+            const steeringMagnitude = Math.hypot(
+                steeringX,
+                steeringY
+            );
+
+            if (steeringMagnitude > 0.001) {
+                steeringX /= steeringMagnitude;
+                steeringY /= steeringMagnitude;
+            }
+
+            // Log only when the obstructing defender changes.
+            if (
+                telemetryActive &&
+                pState._lastRouteAvoidanceDefenderId !== routeObstacle.id
+            ) {
+                logPlayDebug(
+                    'ROUTE_OBSTACLE_AVOIDANCE',
+                    `${pState.name} sidesteps ${routeObstacle.name} while moving toward a target`,
+                    {
+                        receiver: pState.name,
+                        defender: routeObstacle.name,
+                        defenderId: routeObstacle.id,
+                        routeTarget: {
+                            x: Number(targetX.toFixed(2)),
+                            y: Number(targetY.toFixed(2))
+                        },
+                        distanceToTarget: Number(
+                            distToTarget.toFixed(2)
+                        ),
+                        stallTicks: pState._routeWaypointStallTicks,
+                        avoidanceSide
+                    },
+                    telemetryTick
+                );
+            }
+
+            pState._lastRouteAvoidanceDefenderId = routeObstacle.id;
+        } else {
+            pState._lastRouteAvoidanceDefenderId = null;
+        }
+    } else {
+        pState._lastRouteAvoidanceDefenderId = null;
+    }
+
     const targetVx = steeringX * clampedTargetSpeed;
     const targetVy = steeringY * clampedTargetSpeed;
 
@@ -772,8 +912,21 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         y: targetY
     };
 
+    const isReceiverNavigation =
+        pState.isOffense &&
+        (
+            (
+                pState.action === 'run_route' &&
+                pState.movementMode === 'ROUTE'
+            ) ||
+            (
+                pState.action === 'tracking_ball' &&
+                pState.movementMode === 'POINT'
+            )
+        );
+
     const isStalledRouteWaypoint =
-        pState.action === 'run_route' &&
+        isReceiverNavigation &&
         distToTarget > 2.0 &&
         routeProgressTowardTarget < 0.03 &&
         !isJammedThisTick &&
@@ -835,30 +988,118 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
                 pState._telemetryStallTicks >= 8 &&
                 !pState._telemetryStallLogged
             ) {
+                const routeVectorX = targetX - pState.x;
+                const routeVectorY = targetY - pState.y;
+                const routeVectorLength = Math.hypot(
+                    routeVectorX,
+                    routeVectorY
+                );
+                const routeVectorLengthSquared =
+                    routeVectorLength * routeVectorLength;
+
+                const routeWaypoint =
+                    pState.action === 'run_route'
+                        ? pState.routePath?.[pState.currentPathIndex] ?? null
+                        : null;
+
+                const routeContext = pState.action === 'run_route'
+                    ? {
+                        assignment: pState.assignment ?? null,
+                        currentPathIndex: pState.currentPathIndex ?? null,
+                        routeLength: pState.routePath?.length ?? 0,
+                        currentWaypoint: routeWaypoint
+                            ? {
+                                x: Number(routeWaypoint.x.toFixed(2)),
+                                y: Number(routeWaypoint.y.toFixed(2))
+                            }
+                            : null,
+                        waypointDistance: routeWaypoint
+                            ? Number(
+                                getDistance(pState, routeWaypoint).toFixed(2)
+                            )
+                            : null,
+                        waypointStallTicks:
+                            pState._routeWaypointStallTicks || 0,
+                        avoidanceDefenderId:
+                            pState._lastRouteAvoidanceDefenderId ?? null,
+                        intentMode: pState._intent?.mode ?? null,
+                        intentTarget: pState._intent
+                            ? {
+                                x: Number(
+                                    pState._intent.targetX.toFixed(2)
+                                ),
+                                y: Number(
+                                    pState._intent.targetY.toFixed(2)
+                                )
+                            }
+                            : null
+                    }
+                    : null;
+
                 const nearbyPlayers = allPlayers
                     .filter(other =>
                         other.id !== pState.id &&
-                        getDistance(pState, other) < 1.5
+                        getDistance(pState, other) <
+                            (pState.action === 'run_route' ? 4.5 : 1.5)
                     )
-                    .slice(0, 4)
-                    .map(other => ({
-                        id: other.id,
-                        name: other.name,
-                        action: other.action ?? null,
-                        distance: Number(
-                            getDistance(pState, other).toFixed(2)
-                        ),
-                        isBlocked: Boolean(other.isBlocked),
-                        isEngaged: Boolean(other.isEngaged),
-                        stunnedTicks: other.stunnedTicks ?? 0
-                    }));
+                    .sort((a, b) =>
+                        getDistance(pState, a) - getDistance(pState, b)
+                    )
+                    .slice(0, 6)
+                    .map(other => {
+                        const offsetX = other.x - pState.x;
+                        const offsetY = other.y - pState.y;
 
+                        const alongPath =
+                            routeVectorLengthSquared > 0.001
+                                ? (
+                                    (offsetX * routeVectorX) +
+                                    (offsetY * routeVectorY)
+                                ) / routeVectorLengthSquared
+                                : null;
+
+                        const lateralPathDistance =
+                            routeVectorLength > 0.001
+                                ? Math.abs(
+                                    (offsetX * routeVectorY) -
+                                    (offsetY * routeVectorX)
+                                ) / routeVectorLength
+                                : null;
+
+                        return {
+                            id: other.id,
+                            name: other.name,
+                            slot: other.slot ?? null,
+                            role: other.role ?? null,
+                            action: other.action ?? null,
+                            isOffense: Boolean(other.isOffense),
+                            x: Number(other.x.toFixed(2)),
+                            y: Number(other.y.toFixed(2)),
+                            distance: Number(
+                                getDistance(pState, other).toFixed(2)
+                            ),
+                            alongPathFraction:
+                                alongPath === null
+                                    ? null
+                                    : Number(alongPath.toFixed(2)),
+                            lateralPathDistance:
+                                lateralPathDistance === null
+                                    ? null
+                                    : Number(
+                                        lateralPathDistance.toFixed(2)
+                                    ),
+                            isBlocked: Boolean(other.isBlocked),
+                            isEngaged: Boolean(other.isEngaged),
+                            stunnedTicks: other.stunnedTicks ?? 0
+                        };
+                    });
                 logPlayDebug(
                     'MOVEMENT_STALL',
                     `${pState.name} is failing to approach the target`,
                     {
                         action: pState.action ?? null,
                         movementMode: pState.movementMode ?? null,
+                        routeContext,
 
                         position: {
                             x: Number(pState.x.toFixed(2)),
