@@ -806,32 +806,176 @@ function restoreActiveFaMarket(market) {
 
 const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
 
-// Automatically writes to storage and handles browser quota/replace locks without user input
-function autoWriteStorage(key, value) {
+// Measure serialized state and identify its largest sections when saving fails.
+function getSerializedByteLength(value) {
+    if (typeof TextEncoder !== 'undefined') {
+        return new TextEncoder().encode(value).length;
+    }
+
+    return value.length * 2;
+}
+
+function logSaveSizeBreakdown(data, serialized, label) {
+    const fields = Object.entries(data || {}).map(([key, value]) => {
+        try {
+            const json = JSON.stringify(value);
+
+            return {
+                key,
+                bytes: getSerializedByteLength(json ?? 'undefined')
+            };
+        } catch (error) {
+            return {
+                key,
+                bytes: 0,
+                error: true
+            };
+        }
+    });
+
+    fields.sort((a, b) => b.bytes - a.bytes);
+
+    const totalBytes = getSerializedByteLength(serialized);
+    const largestFields = fields.slice(0, 8).map(field =>
+        field.error
+            ? `${field.key}: not serializable`
+            : `${field.key}: ${(field.bytes / 1024 / 1024).toFixed(2)} MiB`
+    );
+
+    console.warn(
+        `[SAVE] ${label}: ${(totalBytes / 1024 / 1024).toFixed(2)} MiB. ` +
+        `Largest sections: ${largestFields.join(' | ')}`
+    );
+}
+
+// Save team.coaches as the canonical coach records.
+// Repeated team.coach and team.staff.coach aliases are restored on load.
+function compactTeamCoachAliasesForSave(team) {
+    const cleanTeam = { ...team };
+    const coaches = Array.isArray(team?.coaches)
+        ? team.coaches
+        : [];
+
+    const getCoachIndex = candidate => {
+        if (!candidate) return -1;
+
+        return coaches.findIndex(coach =>
+            coach &&
+            (
+                coach === candidate ||
+                (
+                    coach.id != null &&
+                    candidate.id != null &&
+                    String(coach.id) === String(candidate.id)
+                )
+            )
+        );
+    };
+
+    const coachAliasIndex = getCoachIndex(team?.coach);
+
+    if (coachAliasIndex >= 0) {
+        cleanTeam._savedCoachAliasIndex = coachAliasIndex;
+        delete cleanTeam.coach;
+    }
+
+    if (
+        team?.staff &&
+        typeof team.staff === 'object' &&
+        !Array.isArray(team.staff)
+    ) {
+        const staffCoachIndex = getCoachIndex(team.staff.coach);
+
+        if (staffCoachIndex >= 0) {
+            cleanTeam.staff = { ...team.staff };
+            delete cleanTeam.staff.coach;
+
+            cleanTeam._savedStaffCoachAliasIndex = staffCoachIndex;
+        }
+    }
+
+    return cleanTeam;
+}
+
+// Restore the normal runtime references after loading a compact save.
+function restoreTeamCoachAliases(team) {
+    if (!team || typeof team !== 'object') return;
+
+    const coaches = Array.isArray(team.coaches)
+        ? team.coaches
+        : [];
+
+    const getCoachIndex = candidate => {
+        if (!candidate) return -1;
+
+        return coaches.findIndex(coach =>
+            coach &&
+            (
+                coach === candidate ||
+                (
+                    coach.id != null &&
+                    candidate.id != null &&
+                    String(coach.id) === String(candidate.id)
+                )
+            )
+        );
+    };
+
+    if (Number.isInteger(team._savedCoachAliasIndex)) {
+        team.coach = coaches[team._savedCoachAliasIndex] || null;
+    } else {
+        const coachIndex = getCoachIndex(team.coach);
+
+        if (coachIndex >= 0) {
+            team.coach = coaches[coachIndex];
+        }
+    }
+
+    if (Number.isInteger(team._savedStaffCoachAliasIndex)) {
+        if (
+            !team.staff ||
+            typeof team.staff !== 'object' ||
+            Array.isArray(team.staff)
+        ) {
+            team.staff = {};
+        }
+
+        team.staff.coach =
+            coaches[team._savedStaffCoachAliasIndex] || null;
+    } else if (team.staff?.coach) {
+        const staffCoachIndex = getCoachIndex(team.staff.coach);
+
+        if (staffCoachIndex >= 0) {
+            team.staff.coach = coaches[staffCoachIndex];
+        }
+    }
+
+    delete team._savedCoachAliasIndex;
+    delete team._savedStaffCoachAliasIndex;
+}
+
+// A failed write must never delete the last valid save or unrelated data.
+function autoWriteStorage(
+    key,
+    value,
+    dataForDiagnostics = null,
+    label = 'Save'
+) {
     try {
         localStorage.setItem(key, value);
         return true;
-    } catch (e1) {
-        // Free old key slot first to prevent browser double-buffering quota errors
-        try {
-            localStorage.removeItem(key);
-            localStorage.setItem(key, value);
-            return true;
-        } catch (e2) {
-            // Automatically clean any other stale/test keys from localStorage to guarantee room
-            try {
-                for (let i = localStorage.length - 1; i >= 0; i--) {
-                    const k = localStorage.key(i);
-                    if (k && k !== key) {
-                        localStorage.removeItem(k);
-                    }
-                }
-                localStorage.setItem(key, value);
-                return true;
-            } catch (e3) {
-                return false;
-            }
+    } catch (error) {
+        console.error(
+            `[SAVE] ${label} failed. Existing "${key}" data and other ` +
+            `localStorage entries were left untouched.`,
+            error
+        );
+
+        if (dataForDiagnostics) {
+            logSaveSizeBreakdown(dataForDiagnostics, value, label);
         }
+
+        return false;
     }
 }
 
@@ -959,7 +1103,7 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
 
         // 5. TEAMS & SCOUTING COMPACT
         dataToSave.teams = (dataToSave.teams || []).map(team => {
-            const cleanTeam = { ...team };
+            const cleanTeam = compactTeamCoachAliasesForSave(team);
             delete cleanTeam.recentPlayHistory;
             delete cleanTeam.playCallHistory;
             delete cleanTeam._captainFlavorLogged;
@@ -1017,7 +1161,14 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
         }
 
         const serialized = JSON.stringify(dataToSave);
-        return autoWriteStorage(saveKey, serialized);
+
+        if (autoWriteStorage(saveKey, serialized, dataToSave, 'Primary save')) {
+            return true;
+        }
+
+        throw new Error(
+            'Primary save write failed; attempting emergency compression.'
+        );
     } catch (e) {
         console.error('Primary save failed, attempting emergency fallback save:', e);
         try {
@@ -1047,7 +1198,7 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
             }
 
             dataToSave.teams = (dataToSave.teams || []).map(team => {
-                const cleanTeam = { ...team };
+                const cleanTeam = compactTeamCoachAliasesForSave(team);
                 delete cleanTeam.recentPlayHistory;
                 delete cleanTeam.playCallHistory;
                 delete cleanTeam._captainFlavorLogged;
@@ -1068,7 +1219,24 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
                 });
 
             const fallbackSerialized = JSON.stringify(dataToSave);
-            return autoWriteStorage(saveKey, fallbackSerialized);
+
+            if (
+                autoWriteStorage(
+                    saveKey,
+                    fallbackSerialized,
+                    dataToSave,
+                    'Emergency compressed save'
+                )
+            ) {
+                return true;
+            }
+
+            console.error(
+                '[SAVE] Emergency save also failed. The previous save was preserved, ' +
+                'but the latest changes could not be saved.'
+            );
+
+            return false;
         } catch (fallbackErr) {
             console.error('Critical save failure:', fallbackErr);
             return false;
@@ -1084,6 +1252,9 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
         const loaded = JSON.parse(saved);
         game = loaded;
         game._activeFaMarket = restoreActiveFaMarket(game._activeFaMarket);
+
+        // Reconnect compacted coach aliases to the canonical team.coaches records.
+        (game.teams || []).forEach(restoreTeamCoachAliases);
 
         playerMap.clear();
         if (Array.isArray(game.players)) {
