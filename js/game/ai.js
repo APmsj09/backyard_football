@@ -2069,60 +2069,116 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         // NATURAL SCRAMBLE EVALUATION:
         // Prefer continuing the passing progression over taking off early.
-        const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 3.5 && d.y < qbState.y + 1);
-        const allReadsExhausted = numReadsVisible >= progression.length && (!bestTargetEval || bestTargetEval.score < THROW_THRESHOLD);
+                const allReadsExhausted =
+            numReadsVisible >= progression.length &&
+            (!bestTargetEval || bestTargetEval.score < THROW_THRESHOLD);
+
+        const qbSpeed = qbAttrs.physical?.speed || 50;
+        const mobilityDesire =
+            ((qbAgility * 0.5) + (qbSpeed * 0.5)) / 100;
+        const personalityUrgency = qbProfile?.riskTolerance ?? 1.0;
 
         const pressureDistance = pressureDefender
             ? getDistance(qbState, pressureDefender)
             : Infinity;
 
-        // Only scramble early when a defender is genuinely closing on the QB.
-        const urgentScramblePressure =
-            isPressured && pressureDistance <= 2.5;
+        // A clean pocket is not pressure. Early escapes require a defender
+        // actually closing within three yards.
+        const immediatePressureEscape =
+            isPressured && pressureDistance <= 3.0;
 
-        // Give the QB 20 additional ticks after the normal dropback window
-        // to reassess the pass before a clean-pocket scramble is allowed.
-        const scrambleGraceTicks = 20;
-        const allReadsExhaustedLongEnough =
+        // Estimate the available straight-ahead running room.
+        let nearestDefenderAhead = Infinity;
+
+        defenseStates.forEach(defender => {
+            if (
+                defender.isBlocked ||
+                defender.isEngaged ||
+                defender.stunnedTicks > 0
+            ) {
+                return;
+            }
+
+            const lateralDistance = Math.abs(defender.x - qbState.x);
+            const forwardDistance = defender.y - qbState.y;
+
+            if (
+                lateralDistance <= 3.5 &&
+                forwardDistance > 0.5
+            ) {
+                nearestDefenderAhead = Math.min(
+                    nearestDefenderAhead,
+                    forwardDistance
+                );
+            }
+        });
+
+        const openRunningYards = Math.max(
+            0,
+            (Number.isFinite(nearestDefenderAhead)
+                ? nearestDefenderAhead
+                : 30) - 1.5
+        );
+
+        // Without immediate pressure, stay in the pocket longer.
+        // Only consider a scramble late, with every read exhausted and
+        // a useful amount of open field ahead.
+        const lateCleanPocketEscape =
             allReadsExhausted &&
-            playState.tick >= MIN_DROPBACK_TICKS + scrambleGraceTicks;
-
-        // Late fallback: avoid holding the ball indefinitely when every
-        // read has failed and the QB still has a viable running lane.
-        const lateScrambleFallback =
-            allReadsExhausted && playState.tick >= 100;
+            playState.tick >= 90 &&
+            openRunningYards >= 5.0;
 
         if (
             !decisionMade &&
-            openLane &&
-            (
-                urgentScramblePressure ||
-                allReadsExhaustedLongEnough ||
-                lateScrambleFallback
-            )
+            (immediatePressureEscape || lateCleanPocketEscape)
         ) {
-            const qbSpeed = qbAttrs.physical?.speed || 50;
-            const mobilityDesire = ((qbAgility * 0.5) + (qbSpeed * 0.5)) / 100; // 0.2 to 0.95
-            const personalityUrgency = qbProfile?.riskTolerance ?? 1.0;
+            let scrambleChance =
+                mobilityDesire * 0.006 * personalityUrgency;
 
-            let scrambleChance = mobilityDesire * 0.006 * personalityUrgency;
-
-            if (allReadsExhaustedLongEnough || lateScrambleFallback) {
-                scrambleChance *= 2.5;
-            }
-
-            if (urgentScramblePressure) {
+            if (immediatePressureEscape) {
                 scrambleChance *= 2.0;
+            } else {
+                // A clean-pocket scramble remains possible, but is less likely.
+                scrambleChance *= 0.8;
             }
 
             if (Math.random() < scrambleChance) {
                 qbState.action = 'run_path';
                 qbState.isBallCarrier = true;
                 playState.qbIntent = 'scramble';
+
+                if (debugEnabled) {
+                    logPlayDebug(
+                        'QB_SCRAMBLE',
+                        `${qbState.name} commits to a scramble`,
+                        {
+                            reason: immediatePressureEscape
+                                ? 'immediate_pressure'
+                                : 'late_clean_pocket_open_lane',
+                            pressureDistance: Number.isFinite(pressureDistance)
+                                ? Number(pressureDistance.toFixed(2))
+                                : null,
+                            openRunningYards: Number(
+                                openRunningYards.toFixed(1)
+                            ),
+                            allReadsExhausted,
+                            visibleReads: numReadsVisible,
+                            totalReads: progression.length,
+                            scrambleChance: Number(
+                                scrambleChance.toFixed(4)
+                            )
+                        },
+                        playState.tick
+                    );
+                }
+
                 if (gameLog && !qbState.hasLoggedScramble) {
-                    gameLog.push(`🏃 ${qbState.name} tucks it and runs upfield!`);
+                    gameLog.push(
+                        `🏃 ${qbState.name} tucks it and runs upfield!`
+                    );
                     qbState.hasLoggedScramble = true;
                 }
+
                 return;
             }
         }
@@ -2171,10 +2227,45 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             .filter(v => v !== null)
             .sort((a, b) => b.score - a.score)[0];
 
-        if (bestAvailableOption && riskTolerance > 1.04 && Math.random() < 0.40) {
+        const isHighLeverageSituation =
+            isDesperationTime ||
+            (down >= 3 && yardsToGo >= 6);
+
+        const forcedThrowScore = bestAvailableOption?.score ?? -Infinity;
+        const forcedThrowChance = isDesperationTime ? 0.25 : 0.10;
+
+        const shouldForceThrow = Boolean(
+            bestAvailableOption &&
+            forcedThrowScore >= 20 &&
+            riskTolerance >= 1.10 &&
+            isHighLeverageSituation &&
+            Math.random() < forcedThrowChance
+        );
+
+        if (shouldForceThrow) {
             targetPlayerState = bestAvailableOption.info.state;
             actionTaken = "Forced Throw";
             decisionMade = true;
+
+            if (debugEnabled) {
+                logPlayDebug(
+                    'QB_FORCED_THROW',
+                    `${qbState.name} accepts a risky passing option`,
+                    {
+                        targetSlot: targetPlayerState.slot,
+                        targetScore: Number(
+                            forcedThrowScore.toFixed(1)
+                        ),
+                        riskTolerance: Number(
+                            riskTolerance.toFixed(2)
+                        ),
+                        down,
+                        yardsToGo,
+                        isDesperationTime
+                    },
+                    playState.tick
+                );
+            }
         } else if (willThrowAway) {
             actionTaken = "Throw Away";
         } else if (

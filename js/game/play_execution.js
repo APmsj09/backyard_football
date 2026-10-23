@@ -925,7 +925,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 setPointIntent(pState, pState.targetX, pState.targetY, 0.6); // FIX: Returner needed movement intent
             } else if (!pState.isOffense) {
                 const nearestOff = offenseStates
-                    .filter(o => !o.isEngaged && o.y < pState.y + 5 && o.y > pState.y - 15)
+                    .filter(o =>
+                        !o.isEngaged &&
+                        !o.isBlocked &&
+                        o.y < pState.y + 5 &&
+                        o.y > pState.y - 15
+                    )
                     .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
                 if (nearestOff) {
@@ -937,7 +942,40 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     pState.targetY = ballCarrierState.y - 3;
                     pState.action = 'run_block'; // FIX: Was mislabeled as 'run_path' for blockers
                 }
-                setPointIntent(pState, pState.targetX, pState.targetY, 0.45); // FIX: Escort blockers needed movement intent
+                setPointIntent(pState, pState.targetX, pState.targetY, 0.45);
+
+                // Convert a close escort assignment into a real blocking
+                // engagement instead of letting the two players run through
+                // the same space without establishing a block battle.
+                if (
+                    nearestOff &&
+                    !nearestOff.isEngaged &&
+                    !nearestOff.isBlocked &&
+                    getDistance(pState, nearestOff) < 1.8
+                ) {
+                    const strDiff =
+                        (pState.str || 50) - (nearestOff.str || 50);
+
+                    pState.isEngaged = true;
+                    pState.engagedWith = nearestOff;
+
+                    nearestOff.isEngaged = true;
+                    nearestOff.isBlocked = true;
+                    nearestOff.blockedBy = pState;
+
+                    pState.vx *= 0.15;
+                    pState.vy *= 0.15;
+                    nearestOff.vx *= 0.15;
+                    nearestOff.vy *= 0.15;
+
+                    playState.blockBattles.push({
+                        blocker: pState,
+                        defender: nearestOff,
+                        status: 'ongoing',
+                        battleScore: strDiff / 10,
+                        startTick: playState.tick
+                    });
+                }
             } else if (pState.isOffense) {
                 const dist = getDistance(pState, ballCarrierState);
                 const leadTime = dist / 15;
@@ -950,7 +988,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             }
             pState.targetX = Math.max(1, Math.min(52.3, pState.targetX));
             pState.targetY = Math.max(1, Math.min(119.0, pState.targetY));
-            resolveMovementIntent(pState);
+
+            if (!pState.isEngaged && !pState.isBlocked) {
+                resolveMovementIntent(pState);
+            }
         });
         return;
     }
@@ -977,16 +1018,23 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     const linemen = offenseStates.filter(
         p => !p.isEngaged && p.slot.startsWith('OL')
     );
-    // FIX: Only pass designated blockers into assignBlockerTarget.
-    // Do NOT include wide receivers who transitioned to run_block to escort a live ball carrier downfield!
-        const otherBlockers = offenseStates.filter(
+    // Include designated blockers and screen-wall assignments, but do not
+    // pull ordinary receivers into blocker targeting just because they are
+    // escorting a live ball carrier.
+    const isScreenPlay = playState.playKey?.includes('Screen');
+
+    const otherBlockers = offenseStates.filter(
         p => !p.isEngaged &&
              !p.slot.startsWith('OL') &&
              (
                  p.assignment?.includes('block') ||
-                 (playType === 'run' && p.assignment?.startsWith('lead_'))
+                 (playType === 'run' && p.assignment?.startsWith('lead_')) ||
+                 (isScreenPlay && p.assignment?.includes('Wall'))
              ) &&
-             (p.action === 'pass_block' || p.action === 'run_block')
+             (
+                 p.action?.includes('block') ||
+                 (isScreenPlay && p.assignment?.includes('Wall'))
+             )
     );
     const assignedThreats = new Set();
 
@@ -1028,14 +1076,30 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 blocker.targetX = blocker.initialX;
                 blocker.targetY = blocker.y - 1.5;
                 blocker.contactReduction = 0.5;
+
+                setPointIntent(
+                    blocker,
+                    blocker.targetX,
+                    blocker.targetY,
+                    0.35
+                );
+
                 return;
             } else {
                 const targetRec = playState.activePlayers.find(p => p.assignment === 'Screen_Wait');
                 if (targetRec) {
                     blocker.targetX = targetRec.x + (blocker.initialX > CENTER_X ? -3 : 3);
                     blocker.targetY = targetRec.y + 3.0;
-                    blocker.action = 'run_path';
+                    blocker.action = 'run_block';
                     blocker.contactReduction = 1.4;
+
+                    setPointIntent(
+                        blocker,
+                        blocker.targetX,
+                        blocker.targetY,
+                        0.45
+                    );
+
                     return;
                 }
             }
@@ -1277,7 +1341,18 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 blocker.contactReduction = 1.2;
+                blocker.action = 'run_block';
             }
+
+            // Publish the selected blocking approach point as the active
+            // movement intent. Otherwise, the previous route or pocket
+            // intent can override the new blocker target.
+            setPointIntent(
+                blocker,
+                blocker.targetX,
+                blocker.targetY,
+                isPassPlay ? 0.45 : 0.5
+            );
 
             if (getDistance(blocker, target) < 1.8 && !target.isEngaged) {
                 const strDiff = (blocker.str || 50) - (target.str || 50);
@@ -1415,6 +1490,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         );
                         pState.targetY = Math.max(10, landY - depthAhead);
                         pState.action = 'run_block';
+
+                        setPointIntent(
+                            pState,
+                            pState.targetX,
+                            pState.targetY,
+                            0.45
+                        );
                     }
 
                     return;
@@ -1485,6 +1567,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 );
                 pState.targetY = Math.max(10, landY - 8);
                 pState.action = 'run_block';
+
+                setPointIntent(
+                    pState,
+                    pState.targetX,
+                    pState.targetY,
+                    0.45
+                );
+
                 return;
             }
         }
@@ -1783,6 +1873,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                 case 'pass_block':
                 case 'run_block':
+                case 'lead_block':
+                case 'screen_block':
                     setPointIntent(pState, pState.targetX, pState.targetY, 0.35);
                     break;
 
@@ -1839,6 +1931,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         const distToDrop = Math.abs(pState.y - pState.dropbackTargetY);
                         if (distToDrop < 0.35 || pState.y <= (pState.dropbackTargetY + 0.1)) {
                             pState.hasCompletedDropback = true;
+                            pState.dropbackCompleteTick = playState.tick;
                             pState.dropbackPhase = 'set';
                             pState._pocketAnchorX = pState.initialX;
                             pState._pocketAnchorY = pState.dropbackTargetY;
@@ -1880,9 +1973,18 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const threatDist = nearestThreat ? getDistance(pState, nearestThreat) : Infinity;
                     const qbMobility = ((pState.agility || 50) * 0.55) + ((pState.speed || 50) * 0.45);
 
-                    // Athletes escape early (4.5y out); pocket statues wait until 2.8y out
-                    const scrambleTriggerDist = 2.4 + (qbMobility / 100) * 2.4; // 2.4y to 4.8y
-                    const shouldEmergencyScramble = nearestThreat && threatDist <= scrambleTriggerDist;
+                    // Escape only when pressure is genuinely imminent.
+                    // Mobile QBs get slightly more room to react, but should
+                    // not abandon a functioning pocket just because pressure is nearby.
+                    const scrambleTriggerDist =
+                        qbMobility >= 75 ? 2.0 :
+                        qbMobility >= 55 ? 1.6 :
+                        1.25;
+
+                    const shouldEmergencyScramble = Boolean(
+                        nearestThreat &&
+                        threatDist <= scrambleTriggerDist
+                    );
 
                     if (shouldEmergencyScramble) {
                         // Roll away from the incoming rusher toward open sideline grass
