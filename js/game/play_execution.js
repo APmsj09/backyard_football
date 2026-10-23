@@ -292,6 +292,10 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 const playerFitsSlot = candidate =>
                     Boolean(
                         candidate &&
+                        Array.isArray(team.roster) &&
+                        team.roster.includes(candidate.id) &&
+                        candidate.teamId === team.id &&
+                        !['departed', 'retired'].includes(candidate.status?.type) &&
                         !usedDefensivePlayersThisSnap.has(candidate.id) &&
                         isPlayerViableForPosition(candidate, requiredPosition) &&
                         (
@@ -3161,13 +3165,36 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 }
             }
 
-            if (targetRec.y < LOS + 3 && getDistance(pState, targetRec) < 3.0) {
+                        if (targetRec.y < LOS + 3 && getDistance(pState, targetRec) < 3.0) {
                 if (typeof pState.jamDecisionMade === 'undefined') {
                     pState.jamDecisionMade = true;
-                    const jamChance = (defCoverSkill + defIQ) / 200;
+
+                    // A successful press depends on the defender's skill,
+                    // but fast and agile receivers are harder to disrupt.
+                    const receiverRelease = targetRec.agility || targetRec.agi || 50;
+                    const defenderAgility = pState.agility || pState.agi || 50;
+
+                    const speedAdvantage = Math.max(0, recSpeed - defSpeed);
+                    const releaseAdvantage = Math.max(
+                        0,
+                        receiverRelease - defenderAgility
+                    );
+
+                    const jamChance = Math.max(
+                        0.10,
+                        Math.min(
+                            0.60,
+                            0.10 +
+                                (defCoverSkill * 0.003) +
+                                (defIQ * 0.0015) -
+                                (speedAdvantage * 0.003) -
+                                (releaseAdvantage * 0.0015)
+                        )
+                    );
+
                     if (Math.random() < jamChance) {
                         pState.isJamming = true;
-                        pState.jamTicks = 15;
+                        pState.jamTicks = 10;
                     }
                 }
             }
@@ -3180,8 +3207,12 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
                 // A jam should disrupt the release through coverage,
                 // not directly move the receiver's world coordinates.
-                pState.targetX = targetRec.x - (dx / dist) * 0.5;
-                pState.targetY = targetRec.y - (dy / dist) * 0.5;
+                // Allow brief press contact without continuously crowding
+                // the receiver's movement path.
+                const JAM_SEPARATION = 1.1;
+
+                pState.targetX = targetRec.x - (dx / dist) * JAM_SEPARATION;
+                pState.targetY = targetRec.y - (dy / dist) * JAM_SEPARATION;
 
                 // Keep movement intent synchronized before the early return.
                 setPointIntent(

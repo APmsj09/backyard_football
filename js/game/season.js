@@ -2995,9 +2995,42 @@ export function advanceToOffseason() {
 
     // Re-compile valid rosters based on the updated universal player pool
     game.teams.forEach(team => {
-        team.roster = game.players
-            .filter(p => p.teamId === team.id && (!p.status || p.status.duration === 0 || p.status.type === 'healthy'))
+                team.roster = game.players
+            .filter(p =>
+                p &&
+                p.teamId === team.id &&
+                !['retired', 'departed', 'temporary'].includes(p.status?.type) &&
+                (!p.status || p.status.duration === 0 || p.status.type === 'healthy')
+            )
             .map(p => p.id);
+
+        // Remove special-team and package assignments that reference players
+        // who no longer belong to this team's active roster.
+        const activeRosterIds = new Set(team.roster);
+
+        const isActiveTeamPlayer = playerId => {
+            const player = playerId ? getPlayer(playerId) : null;
+
+            return Boolean(
+                player &&
+                activeRosterIds.has(player.id) &&
+                player.teamId === team.id &&
+                !['retired', 'departed', 'temporary'].includes(player.status?.type)
+            );
+        };
+
+        const previousSpecialTeams =
+            team.specialTeams ?? team.depthChart?.specialTeams ?? {};
+
+        team.specialTeams = Object.fromEntries(
+            Object.entries(previousSpecialTeams)
+                .filter(([, playerId]) => isActiveTeamPlayer(playerId))
+        );
+
+        team.specialists = Object.fromEntries(
+            Object.entries(team.specialists ?? {})
+                .filter(([, playerId]) => isActiveTeamPlayer(playerId))
+        );
 
         // Safeguard: Never let CPU teams drop below the threshold needed to field an 8v8 unit
         if (!team.isPlayerControlled && team.leagueType === 'main' && team.roster.length < 11) {
@@ -3011,6 +3044,11 @@ export function advanceToOffseason() {
             team.depthChart.defense = Object.fromEntries(defSlots.map(slot => [slot, null]));
             team.depthChart.special = { P: null };
         }
+
+        if (team.depthChart) {
+            team.depthChart.specialTeams = team.specialTeams;
+        }
+
         team.wins = 0; team.losses = 0; team.ties = 0;
 
         if (team.socialProfile) {
