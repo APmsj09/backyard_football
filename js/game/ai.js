@@ -2056,54 +2056,59 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         }
 
         // NATURAL SCRAMBLE EVALUATION:
-        // Driven by athleticism (Agility/Speed), personality (Risk Tolerance/Ego), and progression state.
+        // Prefer continuing the passing progression over taking off early.
         const openLane = !defenseStates.some(d => !d.isBlocked && !d.isEngaged && Math.abs(d.x - qbState.x) < 3.5 && d.y < qbState.y + 1);
         const allReadsExhausted = numReadsVisible >= progression.length && (!bestTargetEval || bestTargetEval.score < THROW_THRESHOLD);
 
-        // BACKYARD QB INSTINCTS:
-        // Scrambling is driven by Poise (Decision Quality + Dependability) and Ego.
-        // A composed 12-year-old prodigy stands tall in the pocket, while an undisciplined 18-year-old panics and runs.
-        const qbEgo = qbProfile?.ego ?? (qbState.personality?.ego || 50);
-        const qbPoise = ((qbProfile?.decisionQuality ?? 50) * 0.6) + ((qbProfile?.assignmentDiscipline ?? 50) * 0.4);
-        
-        // Low poise multiplies the urge to flee the pocket; high poise keeps them grounded.
-        const panicFactor = 1.0 + ((100 - qbPoise) / 100); 
-        const sandlotEgoBoost = qbEgo > 70 ? 1.3 : 1.0;
+        const pressureDistance = pressureDefender
+            ? getDistance(qbState, pressureDefender)
+            : Infinity;
 
-        // BACKYARD ROLLOUT & SCRAMBLE TRIGGER:
-        // Ordinary pressure should not cause an immediate rollout before
-        // the QB has had time to execute the dropback and read the defense.
-        // An imminent sack can still force an emergency response.
-        const rolloutEligible =
-            playState.tick >= MIN_DROPBACK_TICKS ||
-            imminentSackDefender;
+        // Only scramble early when a defender is genuinely closing on the QB.
+        const urgentScramblePressure =
+            isPressured && pressureDistance <= 2.5;
+
+        // Give the QB 20 additional ticks after the normal dropback window
+        // to reassess the pass before a clean-pocket scramble is allowed.
+        const scrambleGraceTicks = 20;
+        const allReadsExhaustedLongEnough =
+            allReadsExhausted &&
+            playState.tick >= MIN_DROPBACK_TICKS + scrambleGraceTicks;
+
+        // Late fallback: avoid holding the ball indefinitely when every
+        // read has failed and the QB still has a viable running lane.
+        const lateScrambleFallback =
+            allReadsExhausted && playState.tick >= 100;
 
         if (
             !decisionMade &&
-            rolloutEligible &&
-            (isPressured || allReadsExhausted || playState.tick > 50)
+            openLane &&
+            (
+                urgentScramblePressure ||
+                allReadsExhaustedLongEnough ||
+                lateScrambleFallback
+            )
         ) {
             const qbSpeed = qbAttrs.physical?.speed || 50;
-            const mobilityDesire = ((qbAgility * 0.55) + (qbSpeed * 0.45)) / 100;
-            const personalityUrgency = (qbProfile?.riskTolerance ?? 1.0) * panicFactor * sandlotEgoBoost;
+            const mobilityDesire = ((qbAgility * 0.5) + (qbSpeed * 0.5)) / 100; // 0.2 to 0.95
+            const personalityUrgency = qbProfile?.riskTolerance ?? 1.0;
 
-            let scrambleChance = mobilityDesire * 0.018 * personalityUrgency;
-            if (allReadsExhausted) scrambleChance *= 3.0;
-            if (isPressured) scrambleChance *= 3.5;
+            let scrambleChance = mobilityDesire * 0.006 * personalityUrgency;
+
+            if (allReadsExhaustedLongEnough || lateScrambleFallback) {
+                scrambleChance *= 2.5;
+            }
+
+            if (urgentScramblePressure) {
+                scrambleChance *= 2.0;
+            }
 
             if (Math.random() < scrambleChance) {
-                // Break out in qb_scramble mode so the QB rolls outside the tackle box first
-                qbState.action = 'qb_scramble';
+                qbState.action = 'run_path';
                 qbState.isBallCarrier = true;
                 playState.qbIntent = 'scramble';
-
-                // Roll toward the side with more open space
-                const spaceLeft = qbState.x;
-                const spaceRight = FIELD_WIDTH - qbState.x;
-                qbState.rolloutDir = spaceRight >= spaceLeft ? 1 : -1;
-
                 if (gameLog && !qbState.hasLoggedScramble) {
-                    gameLog.push(`🏃 ${qbState.name} breaks out of the pocket and scrambles outside!`);
+                    gameLog.push(`🏃 ${qbState.name} tucks it and runs upfield!`);
                     qbState.hasLoggedScramble = true;
                 }
                 return;
