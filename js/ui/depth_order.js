@@ -10,14 +10,12 @@ export function renderDepthOrderPane(gameState) {
 
     const team = gameState.playerTeam;
 
-    // Isolate specialTeams on team so rebuildDepthChartFromOrder cannot destroy it
-    if (!team.specialTeams) {
-        team.specialTeams = team.depthChart?.specialTeams || {};
-    }
+    // Isolate specialTeams & specialists directly on team object
+    if (!team.specialTeams) team.specialTeams = team.depthChart?.specialTeams || {};
+    if (!team.specialists) team.specialists = {};
 
     Game.rebuildDepthChartFromOrder(team);
 
-    // Re-link specialTeams after rebuild
     if (!team.depthChart) team.depthChart = {};
     team.depthChart.specialTeams = team.specialTeams;
 
@@ -28,17 +26,24 @@ export function renderDepthOrderPane(gameState) {
     const offChart = team.depthChart?.offense || {};
     const defChart = team.depthChart?.defense || {};
     const stChart = team.specialTeams;
+    const specChart = team.specialists;
 
     const renderSlotCard = (slot, side) => {
         let playerId;
         if (side === 'offense') playerId = offChart[slot];
         else if (side === 'defense') playerId = defChart[slot];
-        else playerId = stChart[slot];
+        else if (side === 'specialTeams') playerId = stChart[slot];
+        else playerId = specChart[slot];
 
         const player = roster.find(p => p && p.id === playerId);
         const posKey = slot.replace(/\d/g, '');
-        const evalPosKey = posKey === 'PR' ? 'WR' : (posKey === 'P' ? 'QB' : posKey);
-        const isLocked = side === 'specialTeams'
+        let evalPosKey = posKey;
+        if (posKey === 'PR' || posKey === 'SLOT') evalPosKey = 'WR';
+        else if (posKey === 'P') evalPosKey = 'QB';
+        else if (posKey === 'FB') evalPosKey = 'TE';
+        else if (posKey === 'NCB') evalPosKey = 'DB';
+
+        const isLocked = (side === 'specialTeams' || side === 'specialists')
             ? Boolean(playerId)
             : team.slotOverrides?.[side]?.[slot] !== undefined;
 
@@ -57,8 +62,7 @@ export function renderDepthOrderPane(gameState) {
         const ovr = calculateOverall(player, evalPosKey);
         const isIronman = Object.values(offChart).includes(player.id) && Object.values(defChart).includes(player.id);
         const energy = Math.max(0, Math.round(100 - (player.fatigue || 0)));
-
-        const badgeColor = side === 'offense' ? 'bg-blue-900 text-blue-200' : (side === 'defense' ? 'bg-rose-900 text-rose-200' : 'bg-amber-900 text-amber-200');
+        const badgeColor = side === 'offense' ? 'bg-blue-900 text-blue-200' : (side === 'defense' ? 'bg-rose-900 text-rose-200' : (side === 'specialTeams' ? 'bg-amber-900 text-amber-200' : 'bg-indigo-900 text-indigo-200'));
 
         return `
             <div class="bg-white border ${isLocked ? 'border-amber-400 shadow-sm' : 'border-slate-200'} p-2.5 rounded flex justify-between items-center hover:border-slate-400 transition cursor-pointer"
@@ -134,19 +138,40 @@ export function renderDepthOrderPane(gameState) {
                 </div>
             </div>
 
-            <!-- Special Teams -->
-            <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2 h-fit">
-                <div class="flex justify-between items-center border-b border-slate-200 pb-2">
-                    <h4 class="font-black text-xs text-amber-900 uppercase tracking-wider">Special Teams</h4>
-                    <span class="text-[10px] text-slate-500 font-mono">Specialists</span>
+            <!-- Special Teams & Situational Specialists (Col 3) -->
+            <div class="space-y-4">
+                <!-- Special Teams -->
+                <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
+                    <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+                        <h4 class="font-black text-xs text-amber-900 uppercase tracking-wider">Special Teams</h4>
+                        <span class="text-[10px] text-slate-500 font-mono">Specialists</span>
+                    </div>
+                    <div class="space-y-1.5">
+                        ${renderSlotCard('PR', 'specialTeams')}
+                        ${renderSlotCard('P', 'specialTeams')}
+                    </div>
+                    <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200 space-y-0.5">
+                        <div><b>PR:</b> Punt returner (Speed & Hands).</div>
+                        <div><b>P:</b> Punter (Throw Power & Accuracy).</div>
+                    </div>
                 </div>
-                <div class="space-y-1.5">
-                    ${renderSlotCard('PR', 'specialTeams')}
-                    ${renderSlotCard('P', 'specialTeams')}
-                </div>
-                <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200 space-y-0.5">
-                    <div><b>PR:</b> Punt returner (Speed & Hands).</div>
-                    <div><b>P:</b> Punter (Throw Power & Accuracy).</div>
+
+                <!-- Package Specialists -->
+                <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
+                    <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+                        <h4 class="font-black text-xs text-indigo-900 uppercase tracking-wider">Package Specialists</h4>
+                        <span class="text-[10px] text-slate-500 font-mono">Sub-Packages</span>
+                    </div>
+                    <div class="space-y-1.5">
+                        ${renderSlotCard('FB', 'specialists')}
+                        ${renderSlotCard('SLOT', 'specialists')}
+                        ${renderSlotCard('NCB', 'specialists')}
+                    </div>
+                    <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200 space-y-0.5">
+                        <div><b>FB:</b> Lead blocker in Power/Jumbo sets.</div>
+                        <div><b>SLOT:</b> Slot WR in Spread/Trips sets.</div>
+                        <div><b>NCB:</b> Extra DB in Nickel/Dime packages.</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -160,6 +185,30 @@ const POSITION_KEY_SKILLS = {
         { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 },
         { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 },
         { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 }
+    ],
+    P: [
+        { label: 'POW', get: p => p.attributes?.technical?.throwPower ?? p.attributes?.physical?.strength ?? 50 },
+        { label: 'ACC', get: p => p.attributes?.technical?.throwingAccuracy ?? 50 },
+        { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
+        { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 }
+    ],
+    FB: [
+        { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
+        { label: 'BLK', get: p => p.attributes?.technical?.blocking ?? 50 },
+        { label: 'WGT', get: p => `${p.attributes?.physical?.weight ?? 180}#` },
+        { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 }
+    ],
+    SLOT: [
+        { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 },
+        { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 },
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+        { label: 'IQ',  get: p => p.attributes?.mental?.playbookIQ ?? 50 }
+    ],
+    NCB: [
+        { label: 'COV', get: p => (p.attributes?.technical?.coverage || p.attributes?.technical?.passCoverage) ?? 50 },
+        { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 },
+        { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
+        { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 }
     ],
     QB: [
         { label: 'ACC', get: p => p.attributes?.technical?.throwingAccuracy ?? 50 },
@@ -212,10 +261,10 @@ const POSITION_KEY_SKILLS = {
 };
 
 window.openSlotPicker = function(arg1, arg2) {
-    // Normalize arguments (side, slot) or (slot, side)
-    const isFirstSide = (arg1 === 'offense' || arg1 === 'defense' || arg1 === 'specialTeams');
-    const side = isFirstSide ? arg1 : arg2;
-    const slot = isFirstSide ? arg2 : arg1;
+    // Normalize arguments so order doesn't matter: (side, slot) or (slot, side)
+    const isSide = (arg) => ['offense', 'defense', 'specialTeams', 'specialists'].includes(arg);
+    const side = isSide(arg1) ? arg1 : (isSide(arg2) ? arg2 : 'specialists');
+    const slot = !isSide(arg1) ? arg1 : arg2;
 
     const gs = getGameState();
     const team = gs?.playerTeam;
@@ -223,12 +272,17 @@ window.openSlotPicker = function(arg1, arg2) {
 
     const roster = Game.getRosterObjects(team);
     const posKey = slot.replace(/\d/g, '');
-    const evalPosKey = posKey === 'PR' ? 'WR' : (posKey === 'P' ? 'QB' : posKey);
+    let evalPosKey = posKey;
+    if (posKey === 'PR' || posKey === 'SLOT') evalPosKey = 'WR';
+    else if (posKey === 'P') evalPosKey = 'QB';
+    else if (posKey === 'FB') evalPosKey = 'TE';
+    else if (posKey === 'NCB') evalPosKey = 'DB';
 
     let activeChart;
     if (side === 'offense') activeChart = team.depthChart?.offense || {};
     else if (side === 'defense') activeChart = team.depthChart?.defense || {};
-    else activeChart = team.specialTeams || team.depthChart?.specialTeams || {};
+    else if (side === 'specialTeams') activeChart = team.specialTeams || team.depthChart?.specialTeams || {};
+    else activeChart = team.specialists || {};
 
     const otherSide = side === 'offense' ? 'defense' : 'offense';
     const otherChart = team.depthChart?.[otherSide] || {};
@@ -404,26 +458,24 @@ window.commitSlotAssignment = function(playerId, slot, side) {
 
         if (side === 'specialTeams') {
             if (!team.specialTeams) team.specialTeams = {};
-            if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
-            if (!team.slotOverrides.specialTeams) team.slotOverrides.specialTeams = {};
-
-            if (!playerId) {
-                delete team.specialTeams[slot];
-                delete team.slotOverrides.specialTeams[slot];
-            } else {
-                team.specialTeams[slot] = playerId;
-                team.slotOverrides.specialTeams[slot] = playerId;
-            }
+            if (!playerId) delete team.specialTeams[slot];
+            else team.specialTeams[slot] = playerId;
+        } else if (side === 'specialists') {
+            if (!team.specialists) team.specialists = {};
+            if (!playerId) delete team.specialists[slot];
+            else team.specialists[slot] = playerId;
         } else {
             Game.assignPlayerToSlot(team, playerId, slot, side);
         }
 
         const stBackup = { ...(team.specialTeams || {}) };
+        const specBackup = { ...(team.specialists || {}) };
 
         Game.rebuildDepthChartFromOrder(team);
 
         if (!team.depthChart) team.depthChart = {};
         team.specialTeams = stBackup;
+        team.specialists = specBackup;
         team.depthChart.specialTeams = stBackup;
 
         saveGameState();
@@ -445,9 +497,9 @@ window.autoOptimizeLineup = function() {
     Game.populateNaturalDepthOrder(team);
     Game.rebuildDepthChartFromOrder(team);
 
-    // Auto-pick best returner (Speed + Agility + Hands) and punter (Throw Power)
     const roster = Game.getRosterObjects(team);
     if (roster.length > 0) {
+        // Special Teams
         const bestReturner = [...roster].sort((a, b) => {
             const scoreA = (a.attributes?.physical?.speed || 50) + (a.attributes?.physical?.agility || 50) + (a.attributes?.technical?.catchingHands || 50);
             const scoreB = (b.attributes?.physical?.speed || 50) + (b.attributes?.physical?.agility || 50) + (b.attributes?.technical?.catchingHands || 50);
@@ -460,10 +512,35 @@ window.autoOptimizeLineup = function() {
             return powB - powA;
         })[0];
 
+        // Situational Specialists
+        const bestFB = [...roster].sort((a, b) => {
+            const scoreA = (a.attributes?.physical?.strength || 50) + (a.attributes?.technical?.blocking || 50);
+            const scoreB = (b.attributes?.physical?.strength || 50) + (b.attributes?.technical?.blocking || 50);
+            return scoreB - scoreA;
+        })[0];
+
+        const bestSlot = [...roster].sort((a, b) => {
+            const scoreA = (a.attributes?.physical?.agility || 50) + (a.attributes?.technical?.catchingHands || 50);
+            const scoreB = (b.attributes?.physical?.agility || 50) + (b.attributes?.technical?.catchingHands || 50);
+            return scoreB - scoreA;
+        })[0];
+
+        const bestNCB = [...roster].sort((a, b) => {
+            const scoreA = ((a.attributes?.technical?.coverage || a.attributes?.technical?.passCoverage) || 50) + (a.attributes?.physical?.agility || 50);
+            const scoreB = ((b.attributes?.technical?.coverage || b.attributes?.technical?.passCoverage) || 50) + (b.attributes?.physical?.agility || 50);
+            return scoreB - scoreA;
+        })[0];
+
         team.specialTeams = {
             PR: bestReturner?.id || null,
             P: bestPunter?.id || null
         };
+        team.specialists = {
+            FB: bestFB?.id || null,
+            SLOT: bestSlot?.id || null,
+            NCB: bestNCB?.id || null
+        };
+
         if (!team.depthChart) team.depthChart = {};
         team.depthChart.specialTeams = team.specialTeams;
     }
@@ -480,6 +557,7 @@ window.resetDepthChartOverrides = function() {
 
     team.slotOverrides = { offense: {}, defense: {}, specialTeams: {} };
     team.specialTeams = {};
+    team.specialists = {};
     if (team.depthChart) team.depthChart.specialTeams = {};
     Game.rebuildDepthChartFromOrder(team);
     saveGameState();

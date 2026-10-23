@@ -2808,11 +2808,21 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     }
 
                     // Do NOT subtract approachGap. Drive through the ball carrier's center of mass to initiate contact.
-                    const pursuitTargetY = getPursuitTargetY(
+                    let pursuitTargetY = getPursuitTargetY(
                         pState,
                         chaseTarget,
                         predY
                     );
+
+                    // Close-range pursuit should prioritize contact over predicting a future position.
+                    // Otherwise, the defender can keep chasing a point beyond the runner.
+                    if (dist <= 5.5) {
+                        predX = chaseTarget.x;
+                        pursuitTargetY = chaseTarget.y;
+                    }
+
+                    // The scoring line is y=110. Never pursue a projected target beyond it.
+                    pursuitTargetY = Math.min(109.5, pursuitTargetY);
 
                     setPointIntent(pState, predX, pursuitTargetY, 0.5);
 

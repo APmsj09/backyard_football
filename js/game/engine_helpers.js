@@ -103,6 +103,12 @@ export function resolveDepthForPlay(offense, defense) {
                 pId = team.specialTeams?.PR || team.depthChart?.specialTeams?.PR;
             } else if (formationName === 'Punt' && slot === 'QB1') {
                 pId = team.specialTeams?.P || team.depthChart?.specialTeams?.P || team.depthChart[side]?.[slot];
+            } else if (slot === 'RB2' || slot === 'FB') {
+                pId = team.specialists?.FB || team.depthChart[side]?.[slot];
+            } else if (slot === 'WR3') {
+                pId = team.specialists?.SLOT || team.depthChart[side]?.[slot];
+            } else if (slot === 'DB4') {
+                pId = team.specialists?.NCB || team.depthChart[side]?.[slot];
             } else {
                 pId = team.depthChart[side]?.[slot];
             }
