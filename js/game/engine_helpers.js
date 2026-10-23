@@ -98,9 +98,14 @@ export function resolveDepthForPlay(offense, defense) {
         const sortedSlots = [...formationData.slots].sort((a, b) => getPriority(b) - getPriority(a));
 
         sortedSlots.forEach(slot => {
-            let pId = slot === 'PR' 
-                ? team.depthChart.specialTeams?.PR 
-                : team.depthChart[side]?.[slot];
+            let pId;
+            if (slot === 'PR') {
+                pId = team.specialTeams?.PR || team.depthChart?.specialTeams?.PR;
+            } else if (formationName === 'Punt' && slot === 'QB1') {
+                pId = team.specialTeams?.P || team.depthChart?.specialTeams?.P || team.depthChart[side]?.[slot];
+            } else {
+                pId = team.depthChart[side]?.[slot];
+            }
 
             if (!pId || usedThisPlay.has(pId)) {
                 const candidates = rosterIds

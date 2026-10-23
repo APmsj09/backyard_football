@@ -2453,10 +2453,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 return;
             }
 
+            // Defensive pursuit awareness should match the distance used
+            // for play diagnosis. Otherwise a defender can recognize a run
+            // but fail to pursue its ball carrier until much closer.
             const defenderVision = getPerceptionContext(
                 pState,
                 playState.tick,
-                14,
+                22,
                 21,
                 3.2
             );

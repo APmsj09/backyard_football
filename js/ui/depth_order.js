@@ -9,24 +9,38 @@ export function renderDepthOrderPane(gameState) {
     if (!pane || !gameState?.playerTeam) return;
 
     const team = gameState.playerTeam;
+
+    // Isolate specialTeams on team so rebuildDepthChartFromOrder cannot destroy it
+    if (!team.specialTeams) {
+        team.specialTeams = team.depthChart?.specialTeams || {};
+    }
+
     Game.rebuildDepthChartFromOrder(team);
+
+    // Re-link specialTeams after rebuild
+    if (!team.depthChart) team.depthChart = {};
+    team.depthChart.specialTeams = team.specialTeams;
+
     const roster = Game.getRosterObjects(team);
 
     const offFormKey = team.formations?.offense || 'Balanced';
     const defFormKey = team.formations?.defense || '3-2-3 Base';
     const offChart = team.depthChart?.offense || {};
     const defChart = team.depthChart?.defense || {};
-    const stChart = team.depthChart?.specialTeams || {};
+    const stChart = team.specialTeams;
 
     const renderSlotCard = (slot, side) => {
         let playerId;
         if (side === 'offense') playerId = offChart[slot];
         else if (side === 'defense') playerId = defChart[slot];
-        else if (side === 'specialTeams') playerId = stChart[slot];
-        
-        const player = roster.find(p => p.id === playerId);
+        else playerId = stChart[slot];
+
+        const player = roster.find(p => p && p.id === playerId);
         const posKey = slot.replace(/\d/g, '');
-        const isLocked = team.slotOverrides?.[side]?.[slot] !== undefined;
+        const evalPosKey = posKey === 'PR' ? 'WR' : (posKey === 'P' ? 'QB' : posKey);
+        const isLocked = side === 'specialTeams'
+            ? Boolean(playerId)
+            : team.slotOverrides?.[side]?.[slot] !== undefined;
 
         if (!player) {
             return `
@@ -40,15 +54,17 @@ export function renderDepthOrderPane(gameState) {
                 </div>`;
         }
 
-        const ovr = calculateOverall(player, posKey);
+        const ovr = calculateOverall(player, evalPosKey);
         const isIronman = Object.values(offChart).includes(player.id) && Object.values(defChart).includes(player.id);
         const energy = Math.max(0, Math.round(100 - (player.fatigue || 0)));
+
+        const badgeColor = side === 'offense' ? 'bg-blue-900 text-blue-200' : (side === 'defense' ? 'bg-rose-900 text-rose-200' : 'bg-amber-900 text-amber-200');
 
         return `
             <div class="bg-white border ${isLocked ? 'border-amber-400 shadow-sm' : 'border-slate-200'} p-2.5 rounded flex justify-between items-center hover:border-slate-400 transition cursor-pointer"
                  onclick="window.openSlotPicker('${slot}', '${side}')">
                 <div class="flex items-center gap-2.5 min-w-0">
-                    <div class="w-8 h-8 rounded font-black text-xs flex items-center justify-center shrink-0 ${side === 'offense' ? 'bg-blue-900 text-blue-200' : 'bg-rose-900 text-rose-200'}">
+                    <div class="w-8 h-8 rounded font-black text-xs flex items-center justify-center shrink-0 ${badgeColor}">
                         ${slot}
                     </div>
                     <div class="min-w-0">
@@ -66,14 +82,14 @@ export function renderDepthOrderPane(gameState) {
                 </div>
                 <div class="text-right shrink-0 pl-2">
                     <span class="text-base font-black ${ovr >= 70 ? 'text-emerald-700' : 'text-slate-800'}">${ovr}</span>
-                    <span class="text-[9px] text-slate-400 uppercase font-bold block -mt-1">OVR</span>
+                    <span class="text-[9px] text-slate-400 uppercase font-bold block -mt-1">${posKey} OVR</span>
                 </div>
             </div>`;
     };
 
     pane.innerHTML = `
         <!-- Scheme Header & Quick Actions -->
-        <div class="mb-4 bg-slate-900 text-white rounded p-3 flex flex-wrap justify-between items-center gap-3">
+        <div class="mb-4 bg-slate-900 text-white rounded p-3 flex flex-wrap justify-between items-center gap-3 shrink-0">
             <div class="flex items-center gap-4">
                 <div>
                     <span class="text-slate-400 text-[10px] font-bold uppercase block tracking-wider">Offensive Scheme</span>
@@ -96,8 +112,8 @@ export function renderDepthOrderPane(gameState) {
             </div>
         </div>
 
-        <!-- Unified Lineup Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- 3-Column Unified Lineup Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 pb-6">
             <!-- Offensive Starters -->
             <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
                 <div class="flex justify-between items-center border-b border-slate-200 pb-2">
@@ -122,12 +138,15 @@ export function renderDepthOrderPane(gameState) {
             <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2 h-fit">
                 <div class="flex justify-between items-center border-b border-slate-200 pb-2">
                     <h4 class="font-black text-xs text-amber-900 uppercase tracking-wider">Special Teams</h4>
+                    <span class="text-[10px] text-slate-500 font-mono">Specialists</span>
                 </div>
                 <div class="space-y-1.5">
                     ${renderSlotCard('PR', 'specialTeams')}
+                    ${renderSlotCard('P', 'specialTeams')}
                 </div>
-                <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200">
-                    Assign your most explosive athlete to return punts. Evaluated heavily on Speed, Agility and Hands.
+                <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200 space-y-0.5">
+                    <div><b>PR:</b> Punt returner (Speed & Hands).</div>
+                    <div><b>P:</b> Punter (Throw Power & Accuracy).</div>
                 </div>
             </div>
         </div>
@@ -193,7 +212,7 @@ const POSITION_KEY_SKILLS = {
 };
 
 window.openSlotPicker = function(arg1, arg2) {
-    // 1. Normalize arguments so order doesn't matter: (side, slot) or (slot, side)
+    // Normalize arguments (side, slot) or (slot, side)
     const isFirstSide = (arg1 === 'offense' || arg1 === 'defense' || arg1 === 'specialTeams');
     const side = isFirstSide ? arg1 : arg2;
     const slot = isFirstSide ? arg2 : arg1;
@@ -203,25 +222,26 @@ window.openSlotPicker = function(arg1, arg2) {
     if (!team || !side || !slot) return;
 
     const roster = Game.getRosterObjects(team);
-    const posKey = slot.replace(/\d/g, '') === 'PR' ? 'WR' : slot.replace(/\d/g, ''); // Default PR evaluation to WR skills
-    
-    let activeChart;
-    if (side === 'offense') activeChart = team.depthChart.offense;
-    else if (side === 'defense') activeChart = team.depthChart.defense;
-    else activeChart = team.depthChart.specialTeams || {};
-    
-    const otherSide = side === 'offense' ? 'defense' : 'offense';
-    const otherChart = team.depthChart[otherSide] || {};
-    
-    const currentStarterId = activeChart[slot];
-    const currentStarter = roster.find(p => p.id === currentStarterId);
-    const currentStarterOvr = currentStarter ? calculateOverall(currentStarter, posKey) : null;
+    const posKey = slot.replace(/\d/g, '');
+    const evalPosKey = posKey === 'PR' ? 'WR' : (posKey === 'P' ? 'QB' : posKey);
 
-    const skillConfigs = POSITION_KEY_SKILLS[posKey] || POSITION_KEY_SKILLS['WR'];
+    let activeChart;
+    if (side === 'offense') activeChart = team.depthChart?.offense || {};
+    else if (side === 'defense') activeChart = team.depthChart?.defense || {};
+    else activeChart = team.specialTeams || team.depthChart?.specialTeams || {};
+
+    const otherSide = side === 'offense' ? 'defense' : 'offense';
+    const otherChart = team.depthChart?.[otherSide] || {};
+
+    const currentStarterId = activeChart[slot];
+    const currentStarter = roster.find(p => p && p.id === currentStarterId);
+    const currentStarterOvr = currentStarter ? calculateOverall(currentStarter, evalPosKey) : null;
+
+    const skillConfigs = POSITION_KEY_SKILLS[posKey] || POSITION_KEY_SKILLS[evalPosKey] || POSITION_KEY_SKILLS['WR'];
 
     // Rank all players by suitability for this position
     const candidates = roster.map(p => {
-        const ovr = calculateOverall(p, posKey);
+        const ovr = calculateOverall(p, evalPosKey);
         const isCurrentStarter = p.id === currentStarterId;
         const existingSlotThisSide = Object.entries(activeChart).find(([s, id]) => id === p.id && s !== slot)?.[0] || null;
         const startsOnOtherSide = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
@@ -377,23 +397,43 @@ window.openSlotPicker = function(arg1, arg2) {
 window.app_openSlotModal = window.openSlotPicker;
 
 window.commitSlotAssignment = function(playerId, slot, side) {
-    const gs = getGameState();
-    const team = gs?.playerTeam;
-    if (!team) return;
+    try {
+        const gs = getGameState();
+        const team = gs?.playerTeam;
+        if (!team) return;
 
-    if (side === 'specialTeams' && !team.depthChart.specialTeams) {
-        team.depthChart.specialTeams = {};
+        if (side === 'specialTeams') {
+            if (!team.specialTeams) team.specialTeams = {};
+            if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
+            if (!team.slotOverrides.specialTeams) team.slotOverrides.specialTeams = {};
+
+            if (!playerId) {
+                delete team.specialTeams[slot];
+                delete team.slotOverrides.specialTeams[slot];
+            } else {
+                team.specialTeams[slot] = playerId;
+                team.slotOverrides.specialTeams[slot] = playerId;
+            }
+        } else {
+            Game.assignPlayerToSlot(team, playerId, slot, side);
+        }
+
+        const stBackup = { ...(team.specialTeams || {}) };
+
+        Game.rebuildDepthChartFromOrder(team);
+
+        if (!team.depthChart) team.depthChart = {};
+        team.specialTeams = stBackup;
+        team.depthChart.specialTeams = stBackup;
+
+        saveGameState();
+        hideModal();
+        renderDepthOrderPane(gs);
+        document.dispatchEvent(new CustomEvent('refresh-ui'));
+    } catch (err) {
+        console.error('Error committing slot assignment:', err);
+        hideModal();
     }
-
-    Game.assignPlayerToSlot(team, playerId, slot, side);
-    Game.rebuildDepthChartFromOrder(team);
-    saveGameState();
-    
-    // FIX: Using hideModal from ui.js instead of undefined Game.hideModal
-    hideModal();
-    
-    renderDepthOrderPane(gs);
-    document.dispatchEvent(new CustomEvent('refresh-ui'));
 };
 
 window.autoOptimizeLineup = function() {
@@ -401,9 +441,33 @@ window.autoOptimizeLineup = function() {
     const team = gs?.playerTeam;
     if (!team) return;
 
-    team.slotOverrides = { offense: {}, defense: {} };
+    team.slotOverrides = { offense: {}, defense: {}, specialTeams: {} };
     Game.populateNaturalDepthOrder(team);
     Game.rebuildDepthChartFromOrder(team);
+
+    // Auto-pick best returner (Speed + Agility + Hands) and punter (Throw Power)
+    const roster = Game.getRosterObjects(team);
+    if (roster.length > 0) {
+        const bestReturner = [...roster].sort((a, b) => {
+            const scoreA = (a.attributes?.physical?.speed || 50) + (a.attributes?.physical?.agility || 50) + (a.attributes?.technical?.catchingHands || 50);
+            const scoreB = (b.attributes?.physical?.speed || 50) + (b.attributes?.physical?.agility || 50) + (b.attributes?.technical?.catchingHands || 50);
+            return scoreB - scoreA;
+        })[0];
+
+        const bestPunter = [...roster].sort((a, b) => {
+            const powA = a.attributes?.technical?.throwPower ?? a.attributes?.physical?.strength ?? 50;
+            const powB = b.attributes?.technical?.throwPower ?? b.attributes?.physical?.strength ?? 50;
+            return powB - powA;
+        })[0];
+
+        team.specialTeams = {
+            PR: bestReturner?.id || null,
+            P: bestPunter?.id || null
+        };
+        if (!team.depthChart) team.depthChart = {};
+        team.depthChart.specialTeams = team.specialTeams;
+    }
+
     saveGameState();
     renderDepthOrderPane(gs);
     document.dispatchEvent(new CustomEvent('refresh-ui'));
@@ -414,7 +478,9 @@ window.resetDepthChartOverrides = function() {
     const team = gs?.playerTeam;
     if (!team) return;
 
-    team.slotOverrides = { offense: {}, defense: {} };
+    team.slotOverrides = { offense: {}, defense: {}, specialTeams: {} };
+    team.specialTeams = {};
+    if (team.depthChart) team.depthChart.specialTeams = {};
     Game.rebuildDepthChartFromOrder(team);
     saveGameState();
     renderDepthOrderPane(gs);
