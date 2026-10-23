@@ -1863,24 +1863,36 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         return;
     }
 
-    let scanSpeedBase = Math.max(7, (115 - qbProcessing) / 3.0);
+        // QB progression timing:
+    // Average processors take about 20 ticks (0.8 seconds) to advance
+    // to another read. Elite QBs process faster, but cannot scan instantly.
+    let scanSpeedBase = Math.max(15, (150 - qbProcessing) / 5.0);
 
     if (isPressured) {
+        // Pressure speeds up decisions modestly without granting instant
+        // knowledge of the entire route progression.
         const pressureProcessingMod = 1.05 - (qbDecision / 220);
-        scanSpeedBase *= Math.max(0.60, pressureProcessingMod);
+        scanSpeedBase *= Math.max(0.85, pressureProcessingMod);
     }
 
-    // FIX: Progression scanning only starts once the QB plants their back foot.
-    // During the dropback, the QB stays locked on Read #1.
+    // Progression scanning starts once the QB completes the dropback.
+    // Until then, the QB remains focused primarily on Read #1.
     if (qbState.hasCompletedDropback) {
         qbState.ticksSetInPocket = (qbState.ticksSetInPocket || 0) + 1;
     } else {
         qbState.ticksSetInPocket = 0;
     }
 
-    const numReadsVisible = isHotReadSituation 
-        ? progression.length 
-        : Math.min(progression.length, 1 + Math.floor(qbState.ticksSetInPocket / scanSpeedBase));
+    const timedReadsVisible = Math.min(
+        progression.length,
+        1 + Math.floor(qbState.ticksSetInPocket / scanSpeedBase)
+    );
+
+    // A hot read gives the QB an immediate outlet beyond the primary read.
+    // It does not instantly reveal every receiver in the progression.
+    const numReadsVisible = isHotReadSituation
+        ? Math.min(progression.length, Math.max(2, timedReadsVisible))
+        : timedReadsVisible;
 
     // DEEPER FIX: Scale dropback duration by play type. 
     // Quick passes can fire at ~1.3s (32 ticks), but deep drops need at least 1.7s (42 ticks) to develop.

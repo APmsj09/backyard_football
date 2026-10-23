@@ -23,7 +23,7 @@ import {
     setupInitialPlayerStates, updatePlayerTargets
 } from './play_execution.js';
 import {
-    autoMakeSubstitutions, checkCaptainDiscipline, aiSetDepthChart
+    autoMakeSubstitutions, aiSetDepthChart
 } from './depth_chart.js';
 import {
     offenseFormations, defenseFormations, offensivePlaybook, defensivePlaybook
@@ -33,10 +33,518 @@ import { updatePlayerPosition, getDistance } from './physics.js';
 import { TICK_DURATION_SECONDS } from './simulation_config.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
 import { recordCoachDevelopmentOutcome } from './staff.js';
+import {
+    getOffensivePlayKnowledge,
+    getDefensivePlayKnowledge,
+    getTendencyAdjustment
+} from './playcalling_knowledge.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
 const WEEKS_IN_SEASON = 9;
+
+// Lightweight playcalling knowledge + aggregate tendency tracking.
+const PLAYCALL_POSITION_SLOTS = {
+    QB: ['QB1'], RB: ['RB1'], WR: ['WR1', 'WR2'], TE: ['TE1'],
+    OL: ['OL1', 'OL2', 'OL3'], DL: ['DL1', 'DL2', 'DL3', 'DL4'],
+    LB: ['LB1', 'LB2', 'LB3'], DB: ['DB1', 'DB2', 'DB3', 'DB4', 'DB5']
+};
+
+function getPlaycallSituationKey(down, yardsToGo, ballOn, scoreDiff, drivesRemaining) {
+    if (ballOn >= 95 && yardsToGo <= 3) return 'goalLine';
+    if (drivesRemaining <= 2 && scoreDiff <= -8) return 'trailingLate';
+    if (drivesRemaining <= 2 && scoreDiff >= 8) return 'protectLead';
+    if (ballOn >= 80) return 'redZone';
+    if (ballOn <= 10) return 'backedUp';
+    if (yardsToGo <= 2) return 'shortYardage';
+    if ((down === 3 && yardsToGo >= 8) || (down === 4 && yardsToGo >= 5) ||
+        (down === 2 && yardsToGo >= 10)) return 'passingDown';
+    return 'earlyDown';
+}
+
+function getPersonnelGroupKey(formationName, side) {
+    const form = side === 'offense'
+        ? offenseFormations[formationName]
+        : defenseFormations[formationName];
+    const p = form?.personnel || {};
+
+    if (side === 'offense') {
+        const wr = Number(p.WR) || 0;
+        const rb = Number(p.RB) || 0;
+        const te = Number(p.TE) || 0;
+
+        if (wr >= 3) return 'spread';
+        if (rb >= 2 || te >= 2 || rb + te >= 3 ||
+            (wr <= 1 && rb + te >= 2)) return 'heavy';
+        if (te >= 1 && wr >= 2) return 'balancedTE';
+        return 'balanced';
+    }
+
+    const db = Number(p.DB) || 0;
+    const front = (Number(p.DL) || 0) + (Number(p.LB) || 0);
+
+    if (db >= 4) return 'passHeavy';
+    if (front >= 5) return 'runHeavy';
+    if (db <= 2) return 'frontHeavy';
+    return 'balanced';
+}
+
+function getPlaycallKnowledgeAdjustment(knowledge, team, side, situationKey) {
+    const fit = knowledge?.situations?.[situationKey];
+
+    // Catalog values: 1 = less suitable, 2 = neutral, 3 = favorable.
+    let adjustment = Number.isFinite(fit)
+        ? Math.max(-2, Math.min(2, (fit - 2) * 2))
+        : 0;
+
+    const chart = team?.depthChart?.[side] || {};
+    const roster = getRosterObjects(team) || [];
+    const positionAverages = [];
+
+    for (const position of knowledge?.keyPositions || []) {
+        const ratings = [];
+
+        for (const slot of PLAYCALL_POSITION_SLOTS[position] || []) {
+            const id = chart[slot];
+            if (!id) continue;
+
+            const player = getPlayer(id) ||
+                roster.find(p => p?.id === id);
+            if (!player) continue;
+
+            let value = 0;
+            try {
+                value = calculateOverall(player, position);
+            } catch {
+                value = 0;
+            }
+
+            if (Number.isFinite(value) && value > 0) {
+                ratings.push(value);
+            }
+        }
+
+        if (ratings.length) {
+            positionAverages.push(
+                ratings.reduce((a, b) => a + b, 0) / ratings.length
+            );
+        }
+    }
+
+    if (positionAverages.length) {
+        const average = positionAverages.reduce((a, b) => a + b, 0) /
+            positionAverages.length;
+
+        // Personnel matters, but cannot overpower situation or coaching style.
+        adjustment += Math.max(-3, Math.min(3, (average - 60) * 0.10));
+    }
+
+    return adjustment;
+}
+
+function getPlaycallCounter(team, source, opponentId, side) {
+    if (!team) return null;
+
+    team.playcallTendencies ||= {
+        version: 1,
+        own: {},
+        opponents: {}
+    };
+
+    const root = team.playcallTendencies;
+    root.own ||= {};
+    root.opponents ||= {};
+
+    let owner = root.own;
+
+    if (source === 'opponents') {
+        if (opponentId == null) return null;
+        owner = root.opponents[String(opponentId)] ||= {};
+    }
+
+    return owner[side] ||= {
+        total: 0,
+        byPlay: {},
+        bySituation: {},
+        bySituationAndPersonnel: {}
+    };
+}
+
+function incrementCallCount(team, source, opponentId, side, playKey, situationKey, personnelGroup) {
+    if (!playKey) return;
+
+    const c = getPlaycallCounter(team, source, opponentId, side);
+    if (!c) return;
+
+    const increment = (obj, key) => {
+        obj[key] = Math.min(1000000, (Number(obj[key]) || 0) + 1);
+    };
+
+    c.total = Math.min(1000000, (Number(c.total) || 0) + 1);
+    increment(c.byPlay, playKey);
+
+    c.bySituation[situationKey] ||= {};
+    increment(c.bySituation[situationKey], playKey);
+
+    c.bySituationAndPersonnel[situationKey] ||= {};
+    c.bySituationAndPersonnel[situationKey][personnelGroup] ||= {};
+    increment(c.bySituationAndPersonnel[situationKey][personnelGroup], playKey);
+}
+
+function sumCallCounts(counts) {
+    return Object.values(counts || {}).reduce(
+        (sum, value) => sum + Math.max(0, Number(value) || 0),
+        0
+    );
+}
+
+function getRelevantOpponentCounts(counter, situationKey, personnelGroup) {
+    const exact =
+        counter?.bySituationAndPersonnel?.[situationKey]?.[personnelGroup];
+
+    if (sumCallCounts(exact) > 0) return exact;
+
+    const situational = counter?.bySituation?.[situationKey];
+    if (sumCallCounts(situational) > 0) return situational;
+
+    return counter?.byPlay || {};
+}
+
+function getOffenseVsDefenseEdge(offenseKnowledge, defenseKnowledge) {
+    const type = offenseKnowledge?.archetype;
+    if (!type || !defenseKnowledge) return 0;
+
+    let edge =
+        (defenseKnowledge.vulnerableTo?.includes(type) ? 1 : 0) -
+        (defenseKnowledge.protectsAgainst?.includes(type) ? 1 : 0);
+
+    // Some catalog strengths describe broad defensive styles.
+    const attacks = offenseKnowledge.attacks || [];
+    const defType = defenseKnowledge.archetype;
+
+    if (attacks.includes('aggressiveBlitz') &&
+        ['manBlitz', 'zoneBlitz'].includes(defType)) edge += 0.5;
+
+    if (attacks.includes('softZone') &&
+        ['zoneCover2', 'zoneCover3', 'balancedZone', 'splitFieldZone'].includes(defType)) {
+        edge += 0.5;
+    }
+
+    if (attacks.includes('singleHigh') &&
+        ['zoneCover3', 'manCoverage'].includes(defType)) edge += 0.5;
+
+    return Math.max(-1, Math.min(1, edge));
+}
+
+function getOpponentMatchupAdjustment({
+    team,
+    opponentId,
+    observedSide,
+    situationKey,
+    personnelGroup,
+    candidateKnowledge,
+    candidateSide,
+    prepPoints,
+    coachSkill
+} = {}) {
+    if (
+        !team ||
+        opponentId == null ||
+        !candidateKnowledge ||
+        !['offense', 'defense'].includes(observedSide) ||
+        !['offense', 'defense'].includes(candidateSide)
+    ) {
+        return 0;
+    }
+
+    const report = getUnlockedOpponentTendencyBucket(
+        team,
+        opponentId,
+        observedSide,
+        situationKey,
+        personnelGroup,
+        Number(prepPoints) || 0
+    );
+
+    if (!report) return 0;
+
+    const observedPlaybook = observedSide === 'offense'
+        ? offensivePlaybook
+        : defensivePlaybook;
+
+    const getObservedKnowledge = observedSide === 'offense'
+        ? getOffensivePlayKnowledge
+        : getDefensivePlayKnowledge;
+
+    // Aggregate calls by tactical archetype instead of retaining
+    // individual snap records.
+    const summarizeBucket = bucket => {
+        const summary = {
+            totalCalls: 0,
+            runCalls: 0,
+            passCalls: 0,
+            blitzCalls: 0,
+            profiles: Object.create(null)
+        };
+
+        for (const [key, rawCount] of Object.entries(
+            bucket?.byPlay || {}
+        )) {
+            const count = Number(rawCount);
+            const play = observedPlaybook[key];
+
+            if (
+                !play ||
+                !Number.isFinite(count) ||
+                count <= 0
+            ) {
+                continue;
+            }
+
+            const knowledge = getObservedKnowledge(key, play);
+            if (!knowledge?.archetype) continue;
+
+            summary.totalCalls += count;
+
+            if (observedSide === 'offense') {
+                if (play.type === 'run') {
+                    summary.runCalls += count;
+                } else if (play.type === 'pass') {
+                    summary.passCalls += count;
+                }
+            } else if (
+                knowledge.isBlitz ||
+                play.blitz ||
+                play.tags?.includes('blitz')
+            ) {
+                summary.blitzCalls += count;
+            }
+
+            const archetype = knowledge.archetype;
+
+            if (!summary.profiles[archetype]) {
+                summary.profiles[archetype] = {
+                    calls: 0,
+                    attacks: new Set(),
+                    protectsAgainst: new Set(),
+                    vulnerableTo: new Set(),
+                    isBlitz: false
+                };
+            }
+
+            const profile = summary.profiles[archetype];
+
+            profile.calls += count;
+            profile.isBlitz ||= Boolean(knowledge.isBlitz);
+
+            for (const concept of knowledge.attacks || []) {
+                profile.attacks.add(concept);
+            }
+
+            for (const concept of knowledge.protectsAgainst || []) {
+                profile.protectsAgainst.add(concept);
+            }
+
+            for (const concept of knowledge.vulnerableTo || []) {
+                profile.vulnerableTo.add(concept);
+            }
+        }
+
+        return summary;
+    };
+
+    const overall = summarizeBucket(report.overall);
+    const sample = summarizeBucket(report.bucket);
+
+    if (overall.totalCalls <= 0 || sample.totalCalls <= 0) {
+        return 0;
+    }
+
+    const boundedPrep = Math.max(
+        0,
+        Math.min(12, Number(prepPoints) || 0)
+    );
+
+    const boundedCoachSkill = Math.max(
+        0,
+        Math.min(100, Number(coachSkill) || 50)
+    );
+
+    const minimumSample = report.level === 'situationPersonnel'
+        ? 6
+        : report.level === 'broad'
+            ? 8
+            : 4;
+
+    const confidence = Math.max(
+        0,
+        Math.min(
+            1,
+            Math.sqrt(boundedPrep / 12) *
+            Math.sqrt(
+                Math.min(1, sample.totalCalls / (minimumSample * 2))
+            )
+        )
+    );
+
+    const styleWeight = Math.max(
+        0.2,
+        Math.min(1, boundedCoachSkill / 100)
+    );
+
+    // Broad reports use simple tendencies only. Detailed reports
+    // compare a situation/personnel sample with the opponent's
+    // overall call distribution.
+    if (report.level === 'broad') {
+        if (observedSide === 'offense' && candidateSide === 'defense') {
+            const knownRunPassCalls = sample.runCalls + sample.passCalls;
+
+            if (knownRunPassCalls <= 0) return 0;
+
+            const runRate = sample.runCalls / knownRunPassCalls;
+
+            const runBias = getTendencyAdjustment({
+                observedRate: runRate,
+                expectedRate: 0.5,
+                confidence,
+                coachStyleWeight: styleWeight,
+                maxAdjustment: 3
+            });
+
+            const defArchetype = candidateKnowledge.archetype;
+            const protectsAgainstRun = [
+                'runFit',
+                'insideRun',
+                'outsideRun',
+                'powerRun'
+            ].includes(defArchetype) ||
+                (candidateKnowledge.protectsAgainst || []).some(concept =>
+                    ['insideRun', 'outsideRun', 'powerRun'].includes(concept)
+                );
+
+            const protectsAgainstPass =
+                (candidateKnowledge.protectsAgainst || []).some(concept =>
+                    [
+                        'verticalPass',
+                        'quickPass',
+                        'crossingPass',
+                        'balancedPass',
+                        'screenPass',
+                        'floodPass'
+                    ].includes(concept)
+                );
+
+            if (runBias > 0 && protectsAgainstRun) {
+                return Math.min(3, runBias);
+            }
+
+            if (runBias < 0 && protectsAgainstPass) {
+                return Math.min(3, Math.abs(runBias));
+            }
+
+            return 0;
+        }
+
+        if (observedSide === 'defense' && candidateSide === 'offense') {
+            const blitzRate = sample.blitzCalls / sample.totalCalls;
+
+            const blitzBias = getTendencyAdjustment({
+                observedRate: blitzRate,
+                expectedRate: 0.35,
+                confidence,
+                coachStyleWeight: styleWeight,
+                maxAdjustment: 3
+            });
+
+            // A high blitz rate makes quick answers and screens more
+            // attractive, but doesn't force the offense to call them.
+            const attacksPressure =
+                candidateKnowledge.archetype === 'quickPass' ||
+                candidateKnowledge.archetype === 'screenPass' ||
+                (candidateKnowledge.attacks || []).some(concept =>
+                    ['aggressiveBlitz', 'upfieldRush', 'limitedProtection'].includes(concept)
+                );
+
+            return blitzBias > 0 && attacksPressure
+                ? Math.min(3, blitzBias)
+                : 0;
+        }
+
+        return 0;
+    }
+
+    let matchupAdjustment = 0;
+
+    for (const [archetype, sampledProfile] of Object.entries(
+        sample.profiles
+    )) {
+        const overallProfile = overall.profiles[archetype];
+
+        if (!overallProfile || sampledProfile.calls <= 0) continue;
+
+        const observedRate =
+            sampledProfile.calls / sample.totalCalls;
+
+        const expectedRate =
+            overallProfile.calls / overall.totalCalls;
+
+        // Only counter tendencies that are stronger in this sample
+        // than in the opponent's overall behavior.
+        const signal = getTendencyAdjustment({
+            observedRate,
+            expectedRate,
+            confidence,
+            coachStyleWeight: styleWeight,
+            maxAdjustment: 3
+        });
+
+        if (signal <= 0) continue;
+
+        let countersTendency = false;
+        let vulnerableToTendency = false;
+
+        if (candidateSide === 'offense' && observedSide === 'defense') {
+            countersTendency =
+                sampledProfile.vulnerableTo.has(candidateKnowledge.archetype) ||
+                (candidateKnowledge.attacks || []).some(concept =>
+                    sampledProfile.vulnerableTo.has(concept)
+                );
+
+            vulnerableToTendency =
+                sampledProfile.protectsAgainst.has(candidateKnowledge.archetype) ||
+                (candidateKnowledge.vulnerableTo || []).some(concept =>
+                    sampledProfile.attacks.has(concept)
+                );
+        } else if (
+            candidateSide === 'defense' &&
+            observedSide === 'offense'
+        ) {
+            countersTendency =
+                (candidateKnowledge.protectsAgainst || []).includes(archetype) ||
+                (candidateKnowledge.protectsAgainst || []).some(concept =>
+                    sampledProfile.attacks.has(concept)
+                );
+
+            vulnerableToTendency =
+                (candidateKnowledge.vulnerableTo || []).includes(archetype) ||
+                (candidateKnowledge.vulnerableTo || []).some(concept =>
+                    sampledProfile.attacks.has(concept)
+                );
+        }
+
+        if (countersTendency && !vulnerableToTendency) {
+            matchupAdjustment += signal;
+        } else if (vulnerableToTendency && !countersTendency) {
+            matchupAdjustment -= signal;
+        }
+    }
+
+    // Prevent multiple observed patterns from overpowering the base call.
+    return Math.max(
+        -5,
+        Math.min(5, matchupAdjustment)
+    );
+}
 
 
 function initiateLateralToss(playState, thrower, receiver, purpose) {
@@ -420,6 +928,10 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     const isDesperation = drivesRemaining <= 2 && scoreDiff <= -8;
     const isChewClock = drivesRemaining <= 2 && scoreDiff >= 8;
 
+    const playcallSituation = getPlaycallSituationKey(
+        down, yardsToGo, ballOn, scoreDiff, drivesRemaining
+    );
+
     // Base run probability influenced by Situational Clipboard
     const sit = offense.gameplan?.situational || { earlyDownTendency: 55, thirdAndLongAggressiveness: 50 };
     let runProbability = sit.earlyDownTendency / 100; // 0.0 to 1.0
@@ -525,6 +1037,7 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
         const play = offensivePlaybook[key];
         const tags = play.tags || [];
         let score = 50;
+
 
         // ======================================================
         // 1. RUN/PASS TENDENCY = SOFT PRIOR
@@ -727,6 +1240,45 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
             }
         }
 
+        // Tactical knowledge: situation and key personnel.
+        // Apply this adjustment once and keep it bounded.
+        const tacticalKnowledge = getOffensivePlayKnowledge(key, play);
+
+        const boundedKnowledgeAdjustment =
+            getPlaycallKnowledgeAdjustment(
+                tacticalKnowledge,
+                offense,
+                'offense',
+                playcallSituation
+            );
+
+        score += Math.max(
+            -8,
+            Math.min(8, Number(boundedKnowledgeAdjustment) || 0)
+        );
+
+        const candidateFormationName =
+            getOffensiveFormationForPlay(offense, key) || formationName;
+
+        score += getOpponentMatchupAdjustment({
+            team: offense,
+            opponentId: defense?.id,
+            observedSide: 'defense',
+            situationKey: playcallSituation,
+
+            // These counts describe the opponent's defensive personnel,
+            // not the offensive formation being considered.
+            personnelGroup: getPersonnelGroupKey(
+                defense?.formations?.defense || '3-2-3',
+                'defense'
+            ),
+
+            candidateKnowledge: tacticalKnowledge,
+            candidateSide: 'offense',
+            prepPoints: offensivePrepPoints,
+            coachSkill: offenseSkill(coach)
+        });
+
         return {
             key,
             score: Math.max(1, score)
@@ -788,7 +1340,7 @@ export function isPlayCompatibleWithDefense(play, formationName) {
 export function determineDefensiveFormation(defense, offenseFormationName, down, yardsToGo, gameLog, ballOn = 50) {
     if (offenseFormationName === 'Punt') return 'Punt_Return';
 
-    const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
+    //const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
     const offData = offenseFormations[offenseFormationName];
     const personnel = offData ? offData.personnel : { WR: 2, RB: 1 };
     const wrCount = personnel.WR || 2;
@@ -816,52 +1368,166 @@ export function determineDefensiveFormation(defense, offenseFormationName, down,
         return best;
     };
 
-    if (captainIsSharp) {
-        if (yardsToGo <= 2 && isGoalLineSituation) {
-            return pickMax(v =>
-                (v.personnel?.DL || 0) + (v.personnel?.LB || 0)
-            ) || coachPref || defEntries[0]?.[0];
-        }
-
-        // Away from the goal line, a sharp captain sometimes uses a heavy front,
-        // but should not automatically do so on every short-yardage play.
-        if (yardsToGo <= 2 && Math.random() < 0.40) {
-            return pickMax(v =>
-                (v.personnel?.DL || 0) + (v.personnel?.LB || 0)
-            ) || coachPref || defEntries[0]?.[0];
-        }
-        if ((down === 3 && yardsToGo > 8) || (down === 4 && yardsToGo > 5)) {
-            const candidate = pickMax(v => (v.personnel?.DB || 0));
-            return candidate || coachPref || Object.keys(defenseFormations)[0];
-        }
-        if (wrCount >= 4) {
-            const d4 = defEntries.find(([k, v]) => (v.personnel?.DB || 0) >= 4);
-            return (d4 && d4[0]) || pickMax(v => (v.personnel?.DB || 0)) || coachPref || Object.keys(defenseFormations)[0];
-        }
-        if (heavyCount >= 3 || personnel.RB >= 2) {
-            const heavy = pickMax(v => (v.personnel?.DL || 0) + (v.personnel?.LB || 0));
-            return heavy || coachPref || Object.keys(defenseFormations)[0];
-        }
-        if (coachPref) return coachPref;
-        return pickMax(v => -Math.abs((v.personnel?.DB || 0) - wrCount)) || Object.keys(defenseFormations)[0];
-    } else {
-        const validFormations = defEntries.map(([key]) => key);
-        const currentFormation = defense.formations?.defense;
-
-        if (Math.random() < 0.5) {
-            if (validFormations.includes(currentFormation)) {
-                return currentFormation;
-            }
-            if (coachPref && validFormations.includes(coachPref)) {
-                return coachPref;
-            }
-        }
-
-        return getRandom(validFormations) || '3-2-3';
+    if (yardsToGo <= 2 && isGoalLineSituation) {
+        return pickMax(v =>
+            (v.personnel?.DL || 0) + (v.personnel?.LB || 0)
+        ) || coachPref || defEntries[0]?.[0];
     }
+
+    // Away from the goal line, occasionally use a heavier front
+    // on short yardage without making it the automatic choice.
+    if (yardsToGo <= 2 && Math.random() < 0.40) {
+        return pickMax(v =>
+            (v.personnel?.DL || 0) + (v.personnel?.LB || 0)
+        ) || coachPref || defEntries[0]?.[0];
+    }
+
+    if ((down === 3 && yardsToGo > 8) || (down === 4 && yardsToGo > 5)) {
+        const candidate = pickMax(v => (v.personnel?.DB || 0));
+        return candidate || coachPref || defEntries[0]?.[0];
+    }
+
+    if (wrCount >= 4) {
+        const d4 = defEntries.find(([k, v]) => (v.personnel?.DB || 0) >= 4);
+        return (d4 && d4[0]) ||
+            pickMax(v => (v.personnel?.DB || 0)) ||
+            coachPref ||
+            defEntries[0]?.[0];
+    }
+
+    if (heavyCount >= 3 || (personnel.RB || 0) >= 2) {
+        const heavy = pickMax(v =>
+            (v.personnel?.DL || 0) + (v.personnel?.LB || 0)
+        );
+        return heavy || coachPref || defEntries[0]?.[0];
+    }
+
+    if (coachPref) return coachPref;
+
+        return pickMax(v =>
+        -Math.abs((v.personnel?.DB || 0) - wrCount)
+    ) || defEntries[0]?.[0];
 }
 
-export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ballOn, scoreDiff, gameLog, drivesRemaining) {
+function getUnlockedOpponentTendencyBucket(
+    team,
+    opponentId,
+    calledSide,
+    situationKey,
+    personnelGroupKey,
+    prepPoints
+) {
+    if (!team || opponentId == null || prepPoints < 3) {
+        return null;
+    }
+
+    const overall =
+        team.playcallTendencies?.snapCounts?.opponents?.[
+            String(opponentId)
+        ]?.[calledSide];
+
+    if (!overall?.byPlay || !(overall.totalCalls > 0)) {
+        return null;
+    }
+
+    // Try the most detailed report first, then fall back to
+    // the best lower-detail report with enough observations.
+    if (prepPoints >= 12) {
+        const combined =
+            overall.bySituationPersonnel?.[
+                `${situationKey}::${personnelGroupKey}`
+            ];
+
+        if (combined && combined.totalCalls >= 6) {
+            return {
+                overall,
+                bucket: combined,
+                level: 'situationPersonnel'
+            };
+        }
+    }
+
+    if (prepPoints >= 9) {
+        const personnel = overall.byPersonnel?.[personnelGroupKey];
+
+        if (personnel && personnel.totalCalls >= 4) {
+            return {
+                overall,
+                bucket: personnel,
+                level: 'personnel'
+            };
+        }
+    }
+
+    if (prepPoints >= 6) {
+        const situation = overall.bySituation?.[situationKey];
+
+        if (situation && situation.totalCalls >= 4) {
+            return {
+                overall,
+                bucket: situation,
+                level: 'situation'
+            };
+        }
+    }
+
+    if (prepPoints >= 3 && overall.totalCalls >= 8) {
+        return {
+            overall,
+            bucket: overall,
+            level: 'broad'
+        };
+    }
+
+    return null;
+}
+
+function getOffensiveArchetypeTendencyProfiles(bucket) {
+    const profiles = Object.create(null);
+
+    for (const [playKey, rawCount] of Object.entries(
+        bucket?.byPlay || {}
+    )) {
+        const play = offensivePlaybook[playKey];
+        const count = Number(rawCount);
+
+        if (!play || !Number.isFinite(count) || count <= 0) {
+            continue;
+        }
+
+        const knowledge = getOffensivePlayKnowledge(playKey, play);
+        const archetype = knowledge?.archetype;
+
+        if (!archetype) continue;
+
+        if (!profiles[archetype]) {
+            profiles[archetype] = {
+                calls: 0,
+                attacks: new Set(),
+                vulnerableTo: new Set()
+            };
+        }
+
+        const profile = profiles[archetype];
+
+        profile.calls += count;
+
+        for (const concept of knowledge.attacks || []) {
+            profile.attacks.add(concept);
+        }
+
+        for (const concept of knowledge.vulnerableTo || []) {
+            profile.vulnerableTo.add(concept);
+        }
+    }
+
+    return profiles;
+}
+
+export function determineDefensivePlayCall(
+    defense, offense, down, yardsToGo, ballOn, scoreDiff,
+    gameLog, drivesRemaining, currentOffensivePlayKey = null
+) {
     const defenseFormationName = defense.formations.defense;
     // 4 Standard Defensive Fundamentals (Always locked: Cover 2, Cover 1 Man, Man Blitz, Goal Line)
     const BACKYARD_BASICS_DEF = [
@@ -954,7 +1620,12 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
         (down === 3 && yardsToGo >= 8) ||
         (down === 4 && yardsToGo >= 5) ||
         (down === 2 && yardsToGo >= 10);
-        const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
+
+    const playcallSituation = getPlaycallSituationKey(
+        down, yardsToGo, ballOn, scoreDiff, drivesRemaining
+    );
+
+    //const captainIsSharp = checkCaptainDiscipline(defense, gameLog);
 
     const staffPreparation = defense.gameplan?.staffPreparation;
     const preparationIsCurrent =
@@ -1076,6 +1747,24 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
         const tags = play.tags || [];
         let score = 50;
 
+        // Tactical knowledge: favor defensive calls suited to
+        // the current situation and the available personnel.
+        const playKnowledge = getDefensivePlayKnowledge(key, play);
+
+        const knowledgeAdjustment = getPlaycallKnowledgeAdjustment(
+            playKnowledge,
+            defense,
+            'defense',
+            playcallSituation
+        );
+
+        // Keep knowledge useful without allowing it to dominate
+        // coaching, preparation, or situational decisions.
+        score += Math.max(
+            -8,
+            Math.min(8, Number(knowledgeAdjustment) || 0)
+        );
+
         // Incorporate Defense Aggressiveness Setting
         if (play.blitz) {
             score += (aggro - 0.5) * 50; // High aggro heavily boosts blitzes
@@ -1140,19 +1829,38 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
             score -= 100; // Never call Prevent inside the 20-yard line
         }
 
-        if (captainIsSharp) {
-            if (isGoalLineSituation) {
-                if (tags.includes('runStop')) score += 35;
-                if (tags.includes('blitz')) score += 12;
-            } else if (isShort) {
-                // Anticipate the run without treating it as a certainty.
-                if (tags.includes('runStop')) score += 14;
-                if (tags.includes('blitz')) score += 6;
-            } else if (isLong) {
-                if (tags.includes('prevent') && ballOn < 80) score += 25;
-                if (tags.includes('cover3')) score += 15;
-            }
+        if (isGoalLineSituation) {
+            if (tags.includes('runStop')) score += 35;
+            if (tags.includes('blitz')) score += 12;
+        } else if (isShort) {
+            // Anticipate the run without treating it as a certainty.
+            if (tags.includes('runStop')) score += 14;
+            if (tags.includes('blitz')) score += 6;
+        } else if (isLong) {
+            if (tags.includes('prevent') && ballOn < 80) score += 25;
+            if (tags.includes('cover3')) score += 15;
         }
+
+        const tacticalKnowledge = getDefensivePlayKnowledge(key, play);
+
+        score += getPlaycallKnowledgeAdjustment(
+            tacticalKnowledge, defense, 'defense', playcallSituation
+        );
+
+        score += getOpponentMatchupAdjustment({
+            team: defense,
+            opponentId: offense?.id,
+            observedSide: 'offense',
+            situationKey: playcallSituation,
+            personnelGroup: getPersonnelGroupKey(
+                defenseFormationName, 'defense'
+            ),
+            candidateKnowledge: tacticalKnowledge,
+            candidateSide: 'defense',
+            prepPoints: defensivePrepPoints,
+            coachSkill: defensiveCoachSkill
+        });
+
         return { key, score: Math.max(1, score) };
     });
 
@@ -1161,11 +1869,39 @@ export function determineDefensivePlayCall(defense, offense, down, yardsToGo, ba
     const totalScore = topOptions.reduce((sum, p) => sum + p.score, 0);
 
     let roll = Math.random() * totalScore;
+    let selectedKey = topOptions[0].key;
+
     for (const option of topOptions) {
-        if (roll < option.score) return option.key;
+        if (roll < option.score) {
+            selectedKey = option.key;
+            break;
+        }
         roll -= option.score;
     }
-    return topOptions[0].key;
+
+    const observedOffenseKey = currentOffensivePlayKey ||
+        offense.recentPlayHistory?.[
+            offense.recentPlayHistory.length - 1
+        ] || null;
+
+    const observedOffenseFormation = observedOffenseKey
+        ? getOffensiveFormationForPlay(offense, observedOffenseKey) ||
+            offense.formations?.offense
+        : offense.formations?.offense;
+
+    // Update aggregate counters only after the calls are chosen.
+    // The current offensive call never affects this defensive decision.
+    recordPlaycallSnapshot(
+        offense,
+        defense,
+        observedOffenseKey,
+        selectedKey,
+        playcallSituation,
+        observedOffenseFormation,
+        defenseFormationName
+    );
+
+    return selectedKey;
 }
 
 function shouldReleaseFleaFlickerPitch(rb, playState, tick) {
@@ -1192,6 +1928,141 @@ function shouldReleaseFleaFlickerPitch(rb, playState, tick) {
 
         return getDistance(defender, rb) <= 3.5;
     });
+}
+
+function incrementPlaycallAggregateCount(
+    bucket,
+    playKey,
+    situationKey,
+    personnelGroupKey
+) {
+    if (!bucket || !playKey) return;
+
+    const incrementCount = (counts, key) => {
+        if (!key) return;
+
+        counts[key] = (Number(counts[key]) || 0) + 1;
+    };
+
+    const incrementGroupedCount = (groups, groupKey) => {
+        if (!groupKey) return;
+
+        if (!groups[groupKey]) {
+            groups[groupKey] = {
+                totalCalls: 0,
+                byPlay: {}
+            };
+        }
+
+        const group = groups[groupKey];
+
+        group.totalCalls = (Number(group.totalCalls) || 0) + 1;
+        incrementCount(group.byPlay, playKey);
+    };
+
+    bucket.totalCalls = (Number(bucket.totalCalls) || 0) + 1;
+
+    bucket.byPlay ||= {};
+    bucket.bySituation ||= {};
+    bucket.byPersonnel ||= {};
+    bucket.bySituationPersonnel ||= {};
+
+    incrementCount(bucket.byPlay, playKey);
+
+    incrementGroupedCount(
+        bucket.bySituation,
+        situationKey
+    );
+
+    incrementGroupedCount(
+        bucket.byPersonnel,
+        personnelGroupKey
+    );
+
+    incrementGroupedCount(
+        bucket.bySituationPersonnel,
+        `${situationKey}::${personnelGroupKey}`
+    );
+}
+
+function recordPlaycallAggregateSnapshot(
+    team,
+    perspective,
+    calledSide,
+    playKey,
+    situationKey,
+    personnelGroupKey,
+    opponentId = null
+) {
+    if (
+        !team ||
+        !playKey ||
+        !situationKey ||
+        !personnelGroupKey
+    ) {
+        return;
+    }
+
+    if (
+        !team.playcallTendencies ||
+        typeof team.playcallTendencies !== 'object'
+    ) {
+        team.playcallTendencies = {
+            version: 1,
+            own: {},
+            opponents: {}
+        };
+    }
+
+    const tendencies = team.playcallTendencies;
+
+    // Tendencies are season-specific. Do not let outdated scouting
+    // data carry forward after teams and personnel have changed.
+    const currentSeason =
+        game?.year != null && Number.isFinite(Number(game.year))
+            ? Number(game.year)
+            : null;
+
+    if (
+        !tendencies.snapCounts ||
+        (
+            currentSeason !== null &&
+            tendencies.snapCounts.season !== currentSeason
+        )
+    ) {
+        tendencies.snapCounts = {
+            version: 1,
+            season: currentSeason,
+            own: {},
+            opponents: {}
+        };
+    }
+
+    let bucket;
+
+    if (perspective === 'opponent') {
+        if (opponentId == null) return;
+
+        const opponentKey = String(opponentId);
+
+        tendencies.snapCounts.opponents[opponentKey] ||= {};
+
+        const opponentCounts =
+            tendencies.snapCounts.opponents[opponentKey];
+
+        opponentCounts[calledSide] ||= {};
+        bucket = opponentCounts[calledSide];
+    } else {
+        tendencies.snapCounts.own[calledSide] ||= {};
+        bucket = tendencies.snapCounts.own[calledSide];
+    }
+
+    incrementPlaycallAggregateCount(
+        bucket,
+        playKey,
+        situationKey,
+        personnelGroupKey
+    );
 }
 
 export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey, context, options, isLive = false) {
@@ -1249,6 +2120,67 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         JSON.stringify(offensivePlaybook[finalOffensivePlayKey])
     );
 
+    // Snapshot the actual calls at the snap, including any completed audible.
+    const tendencySituation = getPlaycallSituationKey(
+        down,
+        yardsToGo,
+        ballOn,
+        scoreDiff,
+        context.drivesRemaining
+    );
+
+    const offensePersonnelGroup = getPersonnelGroupKey(
+        offense.formations?.offense || 'Balanced',
+        'offense'
+    );
+
+    const defensePersonnelGroup = getPersonnelGroupKey(
+        defense.formations?.defense || '3-2-3',
+        'defense'
+    );
+
+    // Offense records its own call.
+    recordPlaycallAggregateSnapshot(
+        offense,
+        'own',
+        'offense',
+        finalOffensivePlayKey,
+        tendencySituation,
+        offensePersonnelGroup
+    );
+
+    // Defense records what it observed the offense call.
+    recordPlaycallAggregateSnapshot(
+        defense,
+        'opponent',
+        'offense',
+        finalOffensivePlayKey,
+        tendencySituation,
+        offensePersonnelGroup,
+        offense.id
+    );
+
+    // Defense records its own call.
+    recordPlaycallAggregateSnapshot(
+        defense,
+        'own',
+        'defense',
+        defensivePlayKey,
+        tendencySituation,
+        defensePersonnelGroup
+    );
+
+    // Offense records what it observed the defense call.
+    recordPlaycallAggregateSnapshot(
+        offense,
+        'opponent',
+        'defense',
+        defensivePlayKey,
+        tendencySituation,
+        defensePersonnelGroup,
+        defense.id
+    );
+
     let playState = {
         playIsLive: true, tick: 0,
         visualizationFrames: isLive ? [] : null,
@@ -1285,6 +2217,91 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             ballHash,
             finalOffensivePlayKey
         );
+
+        // Don't learn from plays that never reach player setup,
+        // or from special-teams snaps.
+        const defensivePlay = defensivePlaybook[defensivePlayKey];
+
+        const isSpecialTeamsSnap =
+            play.type === 'punt' ||
+            play.tags?.includes('specialTeams') ||
+            defensivePlayKey === 'Punt_Return' ||
+            defensivePlay?.tags?.includes('specialTeams');
+
+        if (
+            !isSpecialTeamsSnap &&
+            defensivePlay &&
+            typeof recordPlaycallAggregateSnapshot === 'function'
+        ) {
+            const offenseSituation = getPlaycallSituationKey(
+                down,
+                yardsToGo,
+                ballOn,
+                scoreDiff,
+                context.drivesRemaining
+            );
+
+            // Reverse the score differential for the defense's perspective.
+            const defenseSituation = getPlaycallSituationKey(
+                down,
+                yardsToGo,
+                ballOn,
+                -scoreDiff,
+                context.drivesRemaining
+            );
+
+            const offensePersonnelGroup = getPersonnelGroupKey(
+                offense.formations?.offense || 'Balanced',
+                'offense'
+            );
+
+            const defensePersonnelGroup = getPersonnelGroupKey(
+                defense.formations?.defense || '3-2-3',
+                'defense'
+            );
+
+            // Offense's own call.
+            recordPlaycallAggregateSnapshot(
+                offense,
+                'own',
+                'offense',
+                finalOffensivePlayKey,
+                offenseSituation,
+                offensePersonnelGroup
+            );
+
+            // Defense observes the offense's call.
+            recordPlaycallAggregateSnapshot(
+                defense,
+                'opponent',
+                'offense',
+                finalOffensivePlayKey,
+                offenseSituation,
+                offensePersonnelGroup,
+                offense.id
+            );
+
+            // Defense's own call.
+            recordPlaycallAggregateSnapshot(
+                defense,
+                'own',
+                'defense',
+                defensivePlayKey,
+                defenseSituation,
+                defensePersonnelGroup
+            );
+
+            // Offense observes the defense's call.
+            recordPlaycallAggregateSnapshot(
+                offense,
+                'opponent',
+                'defense',
+                defensivePlayKey,
+                defenseSituation,
+                defensePersonnelGroup,
+                defense.id
+            );
+        }
 
         initPlayTelemetry(context, playState, finalOffensivePlayKey, defensivePlayKey);
         // Record the actual starting state AFTER player setup.
@@ -2268,7 +3285,8 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
             gameInstance.ballOn,
             scoreDiff,
             gameInstance.gameLog,
-            drivesRemaining
+            drivesRemaining,
+            offPlayKey
         );
 
         const legalGoalLineCall =
