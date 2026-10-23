@@ -1368,7 +1368,7 @@ export const defensivePlaybook = {
         tags: ['runStop', 'blitz'],
         assignments: {
             'DL1': 'run_gap_A_left', 'DL2': 'run_gap_A_left', 'DL3': 'run_gap_A_right', 'DL4': 'run_gap_A_right',
-            'LB1': 'blitz_edge', 'LB2': 'blitz_edge',
+            'LB1': 'blitz_edge', 'LB2': 'zone_short_middle',
             'DB1': 'man_cover_X', 'DB2': 'man_cover_Z'
         }
     },

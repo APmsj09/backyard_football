@@ -1765,15 +1765,53 @@ export function determineDefensivePlayCall(
             Math.min(8, Number(knowledgeAdjustment) || 0)
         );
 
-        // Incorporate Defense Aggressiveness Setting
+                // Aggressiveness should favor pressure without making every blitz
+        // outrank sound coverage. All-out calls incur a separate risk cost below.
         if (play.blitz) {
-            score += (aggro - 0.5) * 50; // High aggro heavily boosts blitzes
+            score += (aggro - 0.5) * 28;
         }
         if (play.concept === 'Man') {
-            score += (aggro - 0.5) * 20; // High aggro prefers Man
+            score += (aggro - 0.5) * 12;
         }
         if (tags.includes('prevent') || tags.includes('safeZone')) {
-            score -= (aggro - 0.5) * 40; // Low aggro heavily boosts prevent/safe zones
+            score -= (aggro - 0.5) * 30;
+        }
+
+        // Estimate how many defenders are committed to rushing.
+        // Run-gap assignments count because those defenders can also
+        // leave coverage responsibilities behind when the offense passes.
+        const assignmentValues = Object.values(play.assignments || {})
+            .map(assignment => String(assignment || '').toLowerCase());
+
+        const rushCount = assignmentValues.filter(assignment =>
+            /pass_rush|blitz|rush|run_gap/.test(assignment)
+        ).length;
+
+        const hasUnderneathMiddleHelp = assignmentValues.some(assignment =>
+            /zone_short_middle|zone_hook_curl_middle|man_cover_y|man_cover_te\d*/.test(assignment)
+        );
+
+        const isLikelyPass = isPassHeavyThreat || isLong || yardsToGo >= 6;
+        const extraRushers = Math.max(0, rushCount - 4);
+
+        // Five or more rushers increase the risk of leaving receivers open.
+        // Passing situations receive the strongest penalty; short-yardage
+        // and goal-line situations retain some freedom to attack.
+        if (play.blitz && extraRushers > 0) {
+            const riskPenaltyPerRusher = isLikelyPass ? 24 : 18;
+            const situationRelief = isGoalLineSituation
+                ? 0.35
+                : (isShort ? 0.65 : 1.0);
+
+            score -= extraRushers * riskPenaltyPerRusher * situationRelief;
+        }
+
+        // A heavy rush without underneath help is especially vulnerable
+        // to quick throws over the middle, including TE routes.
+        if (play.blitz && rushCount >= 5 && !hasUnderneathMiddleHelp) {
+            score -= isGoalLineSituation
+                ? 5
+                : (isLikelyPass ? 18 : 12);
         }
 
         // Opponent-specific adjustments scale with defensive coaching quality.
@@ -2404,8 +2442,11 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     const isFleaFlicker =
                         playState.playKey === 'Trick_Flea_Flicker';
 
+                    // Play-action keys can begin with a formation prefix,
+                    // such as Power_PA_PowerPass_Slide.
                     const isPlayAction =
-                        playState.playKey?.startsWith('PA_');
+                        playState.playKey?.startsWith('PA_') ||
+                        playState.playKey?.includes('_PA_');
 
                     const isBootleg =
                         playState.playKey === 'PA_Bootleg_Right';

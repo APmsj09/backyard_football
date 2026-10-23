@@ -1054,17 +1054,51 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     // escorting a live ball carrier.
     const isScreenPlay = playState.playKey?.includes('Screen');
 
+    // The Trips Bubble Screen's H/Y receivers are lead blockers.
+    // They become eligible to block after finishing their route or once
+    // the intended screen pass has been completed.
+    const isReadyScreenLeadBlocker = p => Boolean(
+        isScreenPlay &&
+        p &&
+        p.id !== ballCarrierState?.id &&
+        p.assignment?.includes('WR_Screen_Lead') &&
+        (
+            isPassCompleted ||
+            p.action === 'route_complete' ||
+            (
+                Array.isArray(p.routePath) &&
+                p.routePath.length > 0 &&
+                p.currentPathIndex >= p.routePath.length
+            )
+        )
+    );
+
+    // Use the screen receiver's lane as the reference for lead blocking.
+    const screenReceiverForBlocking = isScreenPlay
+        ? offenseStates.find(p =>
+            p.id !== ballCarrierState?.id &&
+            (
+                p.assignment === 'Bubble' ||
+                p.assignment?.includes('Tunnel_Screen_Catch') ||
+                p.assignment?.includes('WR_Screen_Catch') ||
+                p.assignment === 'Screen_Wait'
+            )
+        )
+        : null;
+
     const otherBlockers = offenseStates.filter(
         p => !p.isEngaged &&
              !p.slot.startsWith('OL') &&
              (
                  p.assignment?.includes('block') ||
                  (playType === 'run' && p.assignment?.startsWith('lead_')) ||
-                 (isScreenPlay && p.assignment?.includes('Wall'))
+                 (isScreenPlay && p.assignment?.includes('Wall')) ||
+                 isReadyScreenLeadBlocker(p)
              ) &&
              (
                  p.action?.includes('block') ||
-                 (isScreenPlay && p.assignment?.includes('Wall'))
+                 (isScreenPlay && p.assignment?.includes('Wall')) ||
+                 isReadyScreenLeadBlocker(p)
              )
     );
     const assignedThreats = new Set();
@@ -1074,6 +1108,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     // actual receiver rather than an unrelated RB route.
     (isPassCompleted && ballCarrierState?.isOffense
         ? ballCarrierState
+        : null) ||
+    // Before the catch, use the designed screen receiver's lane.
+    (!isPassCompleted
+        ? screenReceiverForBlocking
         : null) ||
     // Prefer the designed RB path during a normal handoff run.
     offenseStates.find(p =>
@@ -1107,6 +1145,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             isPassCompleted &&
             ballCarrierState?.isOffense
         );
+
+        const isScreenLeadBlocker =
+            isReadyScreenLeadBlocker(blocker);
+
+        // Lead blockers can identify downfield defenders once their screen
+        // route is finished, even before the pass is caught.
+        const blockerThreats =
+            isScreenLeadBlocker && !isPassCompleted
+                ? defenseStates.filter(t =>
+                    !t.isBlocked &&
+                    !t.isEngaged &&
+                    t.stunnedTicks <= 0
+                )
+                : threats;
 
         // Clear the old pass-protection assignment once on the
         // transition to post-catch blocking. Preserve target locking
@@ -1187,7 +1239,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         }
 
         const VISION_RANGE = isPulling ? 2.0 : 10.0;
-        const validThreats = threats.filter(t =>
+        const validThreats = blockerThreats.filter(t =>
             !assignedThreats.has(t.id) &&
             getDistance(blocker, t) < VISION_RANGE &&
             t.y > blocker.y - 1.5 &&
@@ -1198,7 +1250,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         );
 
         let target = null;
-        const isPassPlay = playType === 'pass' && !isPassCompleted;
+        const isPassPlay =
+            playType === 'pass' &&
+            !isPassCompleted &&
+            !isScreenLeadBlocker;
 
         const blockerProfile = getDecisionProfile(blocker, playState.tick);
         const blockerIQ = blockerProfile?.awareness ?? (blocker.playbookIQ || blocker.iq || 50);
@@ -1299,7 +1354,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
         // FIX: Allow a locked target to remain valid up to 14 yards so blockers don't drop targets on small movements
         if (blocker.dynamicTargetId) {
-            const currentThreat = threats.find(t =>
+            const currentThreat = blockerThreats.find(t =>
                 t.id === blocker.dynamicTargetId &&
                 !assignedThreats.has(t.id) &&
                 !t.isEngaged &&
@@ -1324,7 +1379,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
         // FIX 1: If an offensive lineman is UNCOVERED on a run play (or pancaked his man),
         // actively CLIMB to the second level to block a linebacker or safety ahead of the run!
-        if (!target && (playType === 'run' || isPassCompleted)) {
+        if (
+            !target &&
+            (
+                playType === 'run' ||
+                isPassCompleted ||
+                isScreenLeadBlocker
+            )
+        ) {
             const laneX = blocker.blockLaneX ?? runLaneX;
             const secondLevelThreat = defenseStates
                 .filter(d =>
@@ -1449,7 +1511,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             }
         } else {
             // FIX 3: If no threat exists, advance with the play instead of freezing at pre-snap initialX!
-            if (playType === 'run' || isPassCompleted) {
+            if (
+                playType === 'run' ||
+                isPassCompleted ||
+                isScreenLeadBlocker
+            ) {
                 // DEEPER FIX: Set the target far downfield so the blocker sprints instead of stutter-stepping
                 blocker.targetX = blocker.x;
                 blocker.targetY = Math.min(115, blocker.y + 15.0); // 15 yards ahead
@@ -2433,18 +2499,35 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         }
 
         if (!pState.isOffense) {
-            // FIX: If a pass has been completed, all defenders alert to the ball carrier immediately
+                        // After a completed pass, defenders pursue the actual ball carrier.
             if (isPassCompleted && ballCarrierState) {
                 const dist = getDistance(pState, ballCarrierState);
                 const leadTime = Math.min(1.2, Math.max(0.3, dist / 16));
-                let predX = ballCarrierState.x + ((ballCarrierState.vx || 0) * leadTime);
-                let predY = ballCarrierState.y + Math.max(1.5, (ballCarrierState.vy || 0) * leadTime);
 
-                const pursuitTargetY = getPursuitTargetY(
-                    pState,
-                    ballCarrierState,
-                    predY
-                );
+                let predX =
+                    ballCarrierState.x + ((ballCarrierState.vx || 0) * leadTime);
+
+                let predY =
+                    ballCarrierState.y + ((ballCarrierState.vy || 0) * leadTime);
+
+                let pursuitTargetY;
+
+                // At close range, prioritize making contact rather than chasing
+                // another predicted point beyond the receiver.
+                if (dist <= 5.5) {
+                    predX = ballCarrierState.x;
+                    pursuitTargetY = ballCarrierState.y;
+                } else {
+                    pursuitTargetY = getPursuitTargetY(
+                        pState,
+                        ballCarrierState,
+                        predY
+                    );
+
+                    // Keep distant pursuit targets on the field instead of
+                    // sending defenders beyond the scoring line.
+                    pursuitTargetY = Math.min(109.5, pursuitTargetY);
+                }
 
                 pState.targetX = predX;
                 pState.targetY = pursuitTargetY;
