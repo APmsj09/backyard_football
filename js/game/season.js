@@ -3153,10 +3153,14 @@ export function advanceToOffseason() {
 
     // 🚀 PERFORMANCE & MEMORY LEAK FIX
     // 1. Purge players who are retired/departed and NOT in the Hall of Fame
-    const hofIds = new Set((game.hallOfFame || []).map(p => p.id));
+    const hofIds = new Set(
+        (game.hallOfFame || [])
+            .map(p => (typeof p === 'object' && p !== null ? p.id : p))
+            .filter(Boolean)
+    );
     game.players = game.players.filter(p => {
         if (p.status?.type === 'retired' || p.status?.type === 'departed') {
-            return hofIds.has(p.id);
+            return hofIds.has(p.id) || hofIds.has(String(p.id));
         }
         return true;
     });
