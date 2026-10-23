@@ -279,6 +279,9 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 if (['DE', 'DT', 'NT'].includes(requiredPosition)) {
                     requiredPosition = 'DL';
                 }
+                if (requiredPosition === 'PR') {
+                    requiredPosition = 'WR'; // Evaluate returners based on WR skills (Speed, Agility, Hands)
+                }
 
                 const playerFitsSlot = candidate =>
                     Boolean(
@@ -581,7 +584,9 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 if (!assignment) {
                     const isManConcept = defPlay.concept === 'Man';
 
-                    if (slot.startsWith('DL')) {
+                    if (slot === 'PR') {
+                        assignment = 'punt_return';
+                    } else if (slot.startsWith('DL')) {
                         assignment = defPlay.blitz
                             ? 'pass_rush'
                             : 'run_gap_A';
@@ -1511,7 +1516,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                 // FIX: Before the ball is kicked, hold positions near the line of scrimmage
                 if (!ballInAir && !returnerHasBall) {
-                    const isDeepReturner = pState.slot === 'DB3' || pState.slot === 'DB4';
+                    const isDeepReturner = pState.slot === 'PR' || pState.slot === 'DB3' || pState.slot === 'DB4';
                     if (!isDeepReturner) {
                         pState.targetX = pState.initialX;
                         pState.targetY = Math.max(LOS + 2.0, pState.initialY);
@@ -1522,6 +1527,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 const primaryReturner =
+                    playState.activePlayers.find(
+                        p => !p.isOffense && p.slot === 'PR'
+                    ) ||
                     playState.activePlayers.find(
                         p => !p.isOffense && p.slot === 'DB3'
                     ) ||
@@ -1547,7 +1555,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         // Establish a staggered wall instead of crowding the catch.
                         const xOffset =
                             (pState.initialX - CENTER_X) * 0.55;
-                        const isUpReturner = pState.slot === 'DB4';
+                        const isUpReturner = pState.id !== primaryReturner?.id && (pState.slot === 'DB4' || pState.slot === 'DB3');
                         const depthAhead = isUpReturner ? 6 : 12;
 
                         pState.targetX = Math.max(

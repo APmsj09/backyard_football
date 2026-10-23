@@ -98,7 +98,10 @@ export function resolveDepthForPlay(offense, defense) {
         const sortedSlots = [...formationData.slots].sort((a, b) => getPriority(b) - getPriority(a));
 
         sortedSlots.forEach(slot => {
-            let pId = team.depthChart[side]?.[slot];
+            let pId = slot === 'PR' 
+                ? team.depthChart.specialTeams?.PR 
+                : team.depthChart[side]?.[slot];
+
             if (!pId || usedThisPlay.has(pId)) {
                 const candidates = rosterIds
                     .map(id => getPlayer(id))

@@ -2,6 +2,7 @@ import * as Game from '../game.js';
 import { getGameState, saveGameState } from '../game/state.js';
 import { calculateOverall, estimateBestPosition } from '../game/player.js';
 import { showModal, hideModal } from '../ui.js';
+import { formatHeight } from '../utils.js';
 
 export function renderDepthOrderPane(gameState) {
     const pane = document.getElementById("depth-order-container");
@@ -15,9 +16,14 @@ export function renderDepthOrderPane(gameState) {
     const defFormKey = team.formations?.defense || '3-2-3 Base';
     const offChart = team.depthChart?.offense || {};
     const defChart = team.depthChart?.defense || {};
+    const stChart = team.depthChart?.specialTeams || {};
 
     const renderSlotCard = (slot, side) => {
-        const playerId = side === 'offense' ? offChart[slot] : defChart[slot];
+        let playerId;
+        if (side === 'offense') playerId = offChart[slot];
+        else if (side === 'defense') playerId = defChart[slot];
+        else if (side === 'specialTeams') playerId = stChart[slot];
+        
         const player = roster.find(p => p.id === playerId);
         const posKey = slot.replace(/\d/g, '');
         const isLocked = team.slotOverrides?.[side]?.[slot] !== undefined;
@@ -91,12 +97,11 @@ export function renderDepthOrderPane(gameState) {
         </div>
 
         <!-- Unified Lineup Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <!-- Offensive Starters -->
             <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
                 <div class="flex justify-between items-center border-b border-slate-200 pb-2">
                     <h4 class="font-black text-xs text-blue-900 uppercase tracking-wider">Starting Offense</h4>
-                    <span class="text-[10px] text-slate-500">Click a card to replace starter</span>
                 </div>
                 <div class="space-y-1.5">
                     ${Object.keys(offChart).map(slot => renderSlotCard(slot, 'offense')).join('')}
@@ -107,10 +112,22 @@ export function renderDepthOrderPane(gameState) {
             <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
                 <div class="flex justify-between items-center border-b border-slate-200 pb-2">
                     <h4 class="font-black text-xs text-rose-900 uppercase tracking-wider">Starting Defense</h4>
-                    <span class="text-[10px] text-slate-500">Click a card to replace starter</span>
                 </div>
                 <div class="space-y-1.5">
                     ${Object.keys(defChart).map(slot => renderSlotCard(slot, 'defense')).join('')}
+                </div>
+            </div>
+
+            <!-- Special Teams -->
+            <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2 h-fit">
+                <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+                    <h4 class="font-black text-xs text-amber-900 uppercase tracking-wider">Special Teams</h4>
+                </div>
+                <div class="space-y-1.5">
+                    ${renderSlotCard('PR', 'specialTeams')}
+                </div>
+                <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200">
+                    Assign your most explosive athlete to return punts. Evaluated heavily on Speed, Agility and Hands.
                 </div>
             </div>
         </div>
@@ -171,7 +188,7 @@ const POSITION_KEY_SKILLS = {
 
 window.openSlotPicker = function(arg1, arg2) {
     // 1. Normalize arguments so order doesn't matter: (side, slot) or (slot, side)
-    const isFirstSide = (arg1 === 'offense' || arg1 === 'defense');
+    const isFirstSide = (arg1 === 'offense' || arg1 === 'defense' || arg1 === 'specialTeams');
     const side = isFirstSide ? arg1 : arg2;
     const slot = isFirstSide ? arg2 : arg1;
 
@@ -180,8 +197,13 @@ window.openSlotPicker = function(arg1, arg2) {
     if (!team || !side || !slot) return;
 
     const roster = Game.getRosterObjects(team);
-    const posKey = slot.replace(/\d/g, '');
-    const activeChart = side === 'offense' ? team.depthChart.offense : team.depthChart.defense;
+    const posKey = slot.replace(/\d/g, '') === 'PR' ? 'WR' : slot.replace(/\d/g, ''); // Default PR evaluation to WR skills
+    
+    let activeChart;
+    if (side === 'offense') activeChart = team.depthChart.offense;
+    else if (side === 'defense') activeChart = team.depthChart.defense;
+    else activeChart = team.depthChart.specialTeams || {};
+    
     const otherSide = side === 'offense' ? 'defense' : 'offense';
     const otherChart = team.depthChart[otherSide] || {};
     
@@ -197,6 +219,7 @@ window.openSlotPicker = function(arg1, arg2) {
         const isCurrentStarter = p.id === currentStarterId;
         const existingSlotThisSide = Object.entries(activeChart).find(([s, id]) => id === p.id && s !== slot)?.[0] || null;
         const startsOnOtherSide = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
+        const otherOvr = startsOnOtherSide ? calculateOverall(p, startsOnOtherSide.replace(/\d/g, '')) : null;
 
         return {
             player: p,
@@ -204,6 +227,7 @@ window.openSlotPicker = function(arg1, arg2) {
             isCurrentStarter,
             existingSlotThisSide,
             startsOnOtherSide,
+            otherOvr,
             delta: currentStarterOvr !== null && !isCurrentStarter ? (ovr - currentStarterOvr) : 0
         };
     }).sort((a, b) => b.ovr - a.ovr);
@@ -235,12 +259,16 @@ window.openSlotPicker = function(arg1, arg2) {
             </div>
 
             <!-- Candidate Roster List -->
-            <div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                ${candidates.map(({ player, ovr, isCurrentStarter, existingSlotThisSide, startsOnOtherSide, delta }) => {
+            <div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1 pb-4">
+                ${candidates.map(({ player, ovr, isCurrentStarter, existingSlotThisSide, startsOnOtherSide, otherOvr, delta }) => {
                     const natPos = player.pos || estimateBestPosition(player);
                     const energy = Math.max(0, Math.round(100 - (player.fatigue || 0)));
                     const energyColor = energy >= 75 ? 'bg-emerald-500' : (energy >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+                    const stamina = player.attributes?.physical?.stamina || 50;
                     const isInjured = player.status?.duration > 0;
+                    const height = player.attributes?.physical?.height || 70;
+                    const weight = player.attributes?.physical?.weight || 200;
+                    const pot = player.potential || '?';
 
                     // Build skill stat pills with color highlights for high ratings (>= 70)
                     const skillPillsHtml = skillConfigs.map(cfg => {
@@ -249,7 +277,7 @@ window.openSlotPicker = function(arg1, arg2) {
                         const isMid = typeof val === 'number' && val >= 55;
                         const valColor = isHigh ? 'text-emerald-700 font-black' : (isMid ? 'text-slate-900 font-bold' : 'text-slate-500');
                         return `
-                            <span class="bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[10px]">
+                            <span class="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-[10px] shadow-sm">
                                 <span class="text-slate-400 font-normal">${cfg.label}:</span>
                                 <b class="${valColor}">${val}</b>
                             </span>`;
@@ -268,43 +296,64 @@ window.openSlotPicker = function(arg1, arg2) {
                         : (existingSlotThisSide ? 'bg-blue-50/30 border-blue-200 hover:border-blue-400' : 'bg-white border-slate-200 hover:border-slate-400');
 
                     return `
-                    <div class="p-2.5 rounded border ${cardBg} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 transition">
-                        <!-- Left: Identity & Status Badges -->
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2 flex-wrap">
-                                <span class="font-bold text-slate-900 text-xs">${player.name}</span>
-                                <span class="text-[9px] bg-slate-100 text-slate-700 font-mono font-bold px-1.5 py-0.2 rounded border">#${player.number || '--'} • Nat: ${natPos}</span>
-                                ${isCurrentStarter ? '<span class="text-[8.5px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.2 rounded uppercase">Current Starter</span>' : ''}
-                                ${existingSlotThisSide ? `<span class="text-[8.5px] bg-blue-100 text-blue-900 border border-blue-300 font-black px-1.5 py-0.2 rounded uppercase">⇄ Starts at ${existingSlotThisSide} (Swap)</span>` : ''}
-                                ${startsOnOtherSide ? `<span class="text-[8.5px] bg-indigo-100 text-indigo-900 border border-indigo-200 font-bold px-1.5 py-0.2 rounded">⚡ ${startsOnOtherSide} (${otherSide.substring(0,3).toUpperCase()})</span>` : ''}
-                                ${isInjured ? `<span class="text-[8.5px] bg-rose-100 text-rose-800 font-bold px-1 rounded">🩹 Out ${player.status.duration}w</span>` : ''}
+                    <div class="p-3 rounded border ${cardBg} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 transition cursor-pointer" onclick="window.commitSlotAssignment('${player.id}', '${slot}', '${side}')">
+                        <!-- Left Info -->
+                        <div class="flex-1 min-w-0 w-full">
+                            <!-- Top row: Name, physicals -->
+                            <div class="flex items-center justify-between gap-2 flex-wrap mb-1.5">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-black text-slate-900 text-sm">${player.name}</span>
+                                    <span class="text-[10px] text-slate-500 font-mono border-l border-slate-300 pl-2">#${player.number || '--'} • Nat: ${natPos}</span>
+                                </div>
+                                <div class="text-[10px] text-slate-500 font-mono font-semibold">
+                                    ${player.age}yo • <b class="text-amber-700">${pot} Pot</b> • ${formatHeight(height)} • ${weight}lbs
+                                </div>
                             </div>
 
-                            <!-- Middle: Position-Specific Key Skills & Stamina -->
-                            <div class="flex flex-wrap items-center gap-1.5 mt-2 font-mono text-[10px]">
-                                <div class="flex items-center gap-1 mr-2">
-                                    <span class="text-slate-400 text-[9px] uppercase">Energy:</span>
-                                    <div class="w-10 bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                                        <div class="${energyColor} h-full" style="width: ${energy}%"></div>
+                            <!-- Badges Row -->
+                            <div class="flex items-center gap-1.5 flex-wrap mb-2">
+                                ${isCurrentStarter ? '<span class="text-[9px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.5 rounded uppercase">Current Starter</span>' : ''}
+                                ${existingSlotThisSide ? `<span class="text-[9px] bg-blue-100 text-blue-900 border border-blue-300 font-black px-1.5 py-0.5 rounded uppercase">⇄ Starts at ${existingSlotThisSide}</span>` : ''}
+                                ${startsOnOtherSide ? `<span class="text-[9px] bg-indigo-100 text-indigo-900 border border-indigo-200 font-bold px-1.5 py-0.5 rounded">⚡ 2-Way: ${startsOnOtherSide} (${otherOvr})</span>` : ''}
+                                ${isInjured ? `<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-1.5 py-0.5 rounded">🩹 Out ${player.status.duration}w</span>` : ''}
+                            </div>
+
+                            <!-- Bottom row: Stamina/Energy + Skills -->
+                            <div class="flex flex-wrap xl:flex-nowrap items-center justify-between gap-2 bg-slate-50 p-1.5 rounded border border-slate-200/60">
+                                <div class="flex items-center gap-3 font-mono text-[10px]">
+                                    <div class="flex items-center gap-1.5" title="In-game fatigue. Recovers between plays or via snacks.">
+                                        <span class="text-slate-400 uppercase text-[9px]">NRG</span>
+                                        <div class="w-10 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                            <div class="${energyColor} h-full" style="width: ${energy}%"></div>
+                                        </div>
+                                        <span class="${energy < 60 ? 'text-rose-600 font-bold' : 'text-slate-600'} w-5 text-right">${energy}%</span>
                                     </div>
-                                    <span class="${energy < 60 ? 'text-rose-600 font-bold' : 'text-slate-600'} text-[10px]">${energy}%</span>
+                                    <div class="flex items-center gap-1.5" title="Stamina attribute. How slowly they lose energy.">
+                                        <span class="text-slate-400 uppercase text-[9px]">STM</span>
+                                        <div class="w-10 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                            <div class="${stamina >= 70 ? 'bg-emerald-400' : (stamina >= 50 ? 'bg-blue-400' : 'bg-amber-400')} h-full" style="width: ${stamina}%"></div>
+                                        </div>
+                                        <span class="text-slate-600 font-bold w-4 text-right">${stamina}</span>
+                                    </div>
                                 </div>
-                                ${skillPillsHtml}
+                                <div class="flex items-center gap-1 font-mono text-[10px]">
+                                    ${skillPillsHtml}
+                                </div>
                             </div>
                         </div>
 
-                        <!-- Right: Overall Rating & Action Button -->
-                        <div class="flex items-center gap-3 shrink-0 self-end sm:self-center pl-2">
-                            <div class="text-right">
+                        <!-- Right: Action & OVR -->
+                        <div class="flex flex-row sm:flex-col items-center justify-between sm:justify-center gap-3 shrink-0 self-stretch sm:self-center pl-0 sm:pl-3 border-t sm:border-t-0 sm:border-l border-slate-200 pt-3 sm:pt-0 mt-2 sm:mt-0 w-full sm:w-auto">
+                            <div class="text-center flex flex-row sm:flex-col items-center sm:items-end gap-2 sm:gap-0 w-full sm:w-auto justify-between">
                                 <div class="flex items-baseline justify-end gap-1">
-                                    <span class="text-base font-black ${ovr >= 70 ? 'text-emerald-700' : 'text-slate-800'}">${ovr}</span>
+                                    <span class="text-xl font-black ${ovr >= 70 ? 'text-emerald-700' : (ovr >= 50 ? 'text-slate-800' : 'text-slate-400')}">${ovr}</span>
                                     ${deltaBadge}
                                 </div>
-                                <span class="text-[8px] text-slate-400 font-bold uppercase block -mt-1">${posKey} OVR</span>
+                                <span class="text-[9px] text-slate-400 font-bold uppercase block sm:-mt-1">${posKey} OVR</span>
                             </div>
 
-                            <button class="bg-slate-900 hover:bg-slate-800 text-white font-black px-3.5 py-1.5 rounded text-xs uppercase tracking-wider shadow-sm transition"
-                                    onclick="window.commitSlotAssignment('${player.id}', '${slot}', '${side}')">
+                            <button class="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-black px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition whitespace-nowrap"
+                                    onclick="event.stopPropagation(); window.commitSlotAssignment('${player.id}', '${slot}', '${side}')">
                                 ${isCurrentStarter ? 'Keep' : (existingSlotThisSide ? 'Swap' : 'Assign')}
                             </button>
                         </div>
@@ -325,6 +374,10 @@ window.commitSlotAssignment = function(playerId, slot, side) {
     const gs = getGameState();
     const team = gs?.playerTeam;
     if (!team) return;
+
+    if (side === 'specialTeams' && !team.depthChart.specialTeams) {
+        team.depthChart.specialTeams = {};
+    }
 
     Game.assignPlayerToSlot(team, playerId, slot, side);
     Game.rebuildDepthChartFromOrder(team);

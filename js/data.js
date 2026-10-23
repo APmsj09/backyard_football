@@ -1182,7 +1182,7 @@ export const defenseFormations = {
 
     'Punt_Return': {
         name: 'Punt Return',
-        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3', 'DB4'],
+        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'PR', 'DB4'],
         coordinates: {
             DL1: [-1.5, 1.0],
             DL2: [1.5, 1.0],
@@ -1190,7 +1190,7 @@ export const defenseFormations = {
             LB2: [4.0, 3.5],
             DB1: [-12.0, 8.0],
             DB2: [12.0, 8.0],
-            DB3: [0, 48.0],  // Main Returner
+            PR: [0, 48.0],   // Main Returner
             DB4: [0, 36.0]   // Up-Returner
         }
     }
@@ -1693,7 +1693,7 @@ export const defensivePlaybook = {
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush',
             'LB1': 'run_block', 'LB2': 'run_block',
-            'DB1': 'punt_return', 'DB2': 'punt_return', 'DB3': 'punt_return', 'DB4': 'punt_return'
+            'DB1': 'punt_return', 'DB2': 'punt_return', 'PR': 'punt_return', 'DB4': 'punt_return'
         }
     }
 };

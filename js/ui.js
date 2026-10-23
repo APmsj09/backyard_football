@@ -4129,101 +4129,57 @@ function renderDepthChartTab(gameState) {
     const gs = getGameState();
     if (!gs?.playerTeam) return;
 
-    renderFormationDropdown('offense', offenseFormations, gs.playerTeam.formations.offense);
-    renderFormationDropdown('defense', defenseFormations, gs.playerTeam.formations.defense);
+    renderFormationPills('offense', offenseFormations, gs.playerTeam.formations.offense);
+    renderFormationPills('defense', defenseFormations, gs.playerTeam.formations.defense);
     renderDepthChartSide('offense', gs);
     renderDepthChartSide('defense', gs);
     renderPositionalOveralls();
 }
 
-function renderFormationDropdown(side, formationMap, selectedKey) {
-    const select = document.getElementById(`${side}-formation-select`);
-    if (!select) return;
-    select.innerHTML = Object.entries(formationMap)
-        .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
-        .map(([k, v]) => `<option value="${k}" ${k === selectedKey ? 'selected' : ''}>${v.name}</option>`)
-        .join('');
+function renderFormationPills(side, formationMap, selectedKey) {
+    const container = document.getElementById(`${side}-formation-pills`);
+    if (!container) return;
 
-    // Instant live synchronization: immediately update diagram and positions upon selection
-    select.onchange = (e) => {
-        const gs = getGameState();
-        const team = gs?.playerTeam;
-        if (!team) return;
+    const entries = Object.entries(formationMap).filter(([k]) => k !== 'Punt' && k !== 'Punt_Return');
 
-        team.formations[side] = e.target.value;
-        rebuildDepthChartFromOrder(team);
-        saveGameState();
+    container.innerHTML = entries.map(([key, form]) => {
+        const isSelected = key === selectedKey;
+        const personnel = form?.personnel || {};
+        const pBadge = Object.entries(personnel)
+            .filter(([_, count]) => count > 0)
+            .map(([pos, count]) => `${count}${pos}`)
+            .join(' · ');
 
-        // Immediately update visual field and depth breakdown without tab hopping
-        renderDepthChartSide(side, gs);
-        renderPositionalOveralls();
-        renderFormationDropdown(side, formationMap, team.formations[side]);
-    };
-
-    // Add an inline Auto-Set button right next to the formation dropdown if not already present
-    const parentContainer = select.parentElement;
-    if (parentContainer && !parentContainer.querySelector('.auto-lineup-btn')) {
-        const autoBtn = document.createElement('button');
-        autoBtn.className = 'auto-lineup-btn ml-3 px-3 py-1.5 bg-slate-900 text-white rounded text-xs font-bold hover:bg-slate-800 transition shadow-sm uppercase tracking-wider';
-        autoBtn.innerHTML = '⚡ Auto-Set Best';
-        autoBtn.onclick = () => window.app_autoResetLineup();
-        parentContainer.appendChild(autoBtn);
-    }
-
-    const formation = formationMap[selectedKey];
-    const personnel = formation?.personnel || {};
-
-    const personnelText = Object.entries(personnel)
-        .filter(([_, count]) => count > 0)
-        .map(([pos, count]) => `${count} ${pos}`)
-        .join(' • ');
-
-    let identityText = '';
-
-    if (side === 'offense') {
-        const labels = {
-            Spread: 'Wide spacing • passing-friendly',
-            Trips: 'Floods one side • stresses coverage',
-            TripsLeft: 'Floods one side • stresses coverage',
-            Empty: 'Maximum width • no RB protection',
-            Power: 'Heavy set • downhill run threat',
-            Jumbo: 'Heavy package • short-yardage power',
-            Pistol: 'Balanced run/pass look',
-            Wildcat: 'RB-led offense • QB as decoy',
-            Balanced: 'Balanced personnel • flexible attack'
-        };
-
-        identityText = labels[selectedKey] || 'Flexible offensive package';
-    } else {
-        const labels = {
-            '3-2-3': 'Balanced front • coverage flexibility',
-            '2-3-3': 'Extra linebacker • stronger underneath',
-            '4-2-2': 'Heavy front • designed to stop the run',
-            '4-1-3': 'Extra DB • passing situations',
-            '3-1-4': 'Hybrid defense • speed and flexibility',
-            '3-0-5': 'Maximum coverage • vulnerable to the run'
-        };
-
-        identityText = labels[selectedKey] || 'Flexible defensive package';
-    }
-
-    const existingInfo = parentContainer.querySelector('.formation-info');
-    if (existingInfo) existingInfo.remove();
-
-    const info = document.createElement('div');
-    info.className = 'formation-info mt-2 text-[10px] text-slate-500 leading-relaxed';
-
-    info.innerHTML = `
-    <div class="font-mono font-bold text-slate-700">
-        ${personnelText || 'Personnel not specified'}
-    </div>
-    <div class="mt-0.5">
-        ${identityText}
-    </div>
-`;
-
-    parentContainer.appendChild(info);
+        return `
+            <button class="px-2.5 py-1.5 rounded text-left transition border flex flex-col justify-between ${
+                isSelected 
+                    ? (side === 'offense' ? 'bg-blue-900 border-blue-950 text-white shadow-sm' : 'bg-rose-900 border-rose-950 text-white shadow-sm') 
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300'
+            }" onclick="window.app_changeFormation('${side}', '${key}')">
+                <div class="flex items-center gap-1.5">
+                    <span class="font-black text-xs leading-none">${form.name || key}</span>
+                    ${isSelected ? '<span class="text-[8px] bg-white/20 px-1 rounded font-bold uppercase">Active</span>' : ''}
+                </div>
+                <span class="text-[9px] font-mono mt-0.5 ${isSelected ? 'text-slate-200' : 'text-slate-500'}">
+                    ${pBadge || 'Standard'}
+                </span>
+            </button>`;
+    }).join('');
 }
+
+window.app_changeFormation = function(side, newKey) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team) return;
+
+    team.formations[side] = newKey;
+    rebuildDepthChartFromOrder(team);
+    saveGameState();
+
+    renderFormationPills(side, side === 'offense' ? offenseFormations : defenseFormations, newKey);
+    renderDepthChartSide(side, gs);
+    renderPositionalOveralls();
+};
 
 function renderPositionalOveralls() {
     const pane = document.getElementById("positional-overalls-container");
@@ -4232,178 +4188,105 @@ function renderPositionalOveralls() {
 
     const team = gs.playerTeam;
     const roster = getUIRosterObjects(team);
-    const depthOrder = team.depthOrder || {};
-    const displayOrder = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
-
-    // Map which starter slots players currently occupy
-    const activeStarterMap = new Map();
+    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     const offChart = team.depthChart?.offense || {};
     const defChart = team.depthChart?.defense || {};
-    Object.entries(offChart).forEach(([slot, pId]) => { if (pId) activeStarterMap.set(pId, slot); });
-    Object.entries(defChart).forEach(([slot, pId]) => { if (pId) activeStarterMap.set(pId, slot); });
+    const stChart = team.depthChart?.specialTeams || {};
 
-    // Key attribute definitions per position for compact stat bars
-    const keyAttrConfig = {
-        QB: [
-            { label: 'ACC', get: p => p.attributes?.technical?.throwingAccuracy ?? 50 },
-            { label: 'POW', get: p => p.attributes?.technical?.throwPower ?? p.attributes?.physical?.strength ?? 50 },
-            { label: 'IQ', get: p => p.attributes?.mental?.playbookIQ ?? 50 }
-        ],
-        RB: [
-            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
-            { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 },
-            { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 }
-        ],
-        WR: [
-            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
-            { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 },
-            { label: 'AGI', get: p => p.attributes?.physical?.agility ?? 50 }
-        ],
-        TE: [
-            { label: 'HND', get: p => p.attributes?.technical?.catchingHands ?? 50 },
-            { label: 'BLK', get: p => p.attributes?.technical?.blocking ?? 50 },
-            { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 }
-        ],
-        OL: [
-            { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
-            { label: 'BLK', get: p => p.attributes?.technical?.blocking ?? 50 },
-            { label: 'WGT', get: p => `${p.attributes?.physical?.weight ?? 200}#` }
-        ],
-        DL: [
-            { label: 'STR', get: p => p.attributes?.physical?.strength ?? 50 },
-            { label: 'BSH', get: p => p.attributes?.technical?.blockShedding ?? 50 },
-            { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 }
-        ],
-        LB: [
-            { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 },
-            { label: 'IQ', get: p => p.attributes?.mental?.playbookIQ ?? 50 },
-            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 }
-        ],
-        DB: [
-            { label: 'SPD', get: p => p.attributes?.physical?.speed ?? 50 },
-            { label: 'COV', get: p => (p.attributes?.technical?.coverage || p.attributes?.technical?.passCoverage) ?? 50 },
-            { label: 'TKL', get: p => p.attributes?.technical?.tackling ?? 50 }
-        ]
-    };
-
-    // Calculate group starter strength to give high-level strategic intelligence
-    const groupInsights = displayOrder.map(pos => {
-        const pIds = depthOrder[pos] || [];
-        const topPlayer = pIds.length ? roster.find(p => p.id === pIds[0]) : null;
-        const ovr = topPlayer ? calculateOverall(topPlayer, pos) : 0;
-        return { pos, topOvr: ovr, topName: topPlayer ? topPlayer.name : 'None' };
-    }).sort((a, b) => b.topOvr - a.topOvr);
-
-    const strongestGroup = groupInsights[0];
-    const weakestGroup = groupInsights[groupInsights.length - 1];
-
-    let html = `
-    <!-- Top Strategic Context Header -->
-    <div class="mb-4 bg-slate-900 text-white rounded-sm p-3 border border-slate-700 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shrink-0">
-        <div class="flex items-center gap-4 text-xs">
-            <div>
-                <span class="text-slate-400 uppercase text-[10px] font-bold tracking-wider block">Strongest Unit</span>
-                <span class="font-black text-emerald-400 text-sm">${strongestGroup.pos} Room</span> 
-                <span class="text-slate-300">(${strongestGroup.topName} • ${strongestGroup.topOvr} OVR)</span>
-            </div>
-            <div class="border-l border-slate-700 pl-4">
-                <span class="text-slate-400 uppercase text-[10px] font-bold tracking-wider block">
-                    Lowest-Rated Room
-                </span>
-                <span class="font-black text-amber-400 text-sm">
-                    ${weakestGroup.pos} Room
-                </span>
-                <span class="text-slate-300">
-                    (${weakestGroup.topName} • ${weakestGroup.topOvr} OVR)
-                </span>
-            </div>
-        </div>
-        <div class="text-[11px] text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded border border-slate-700">
-            <span class="text-slate-400 font-bold uppercase text-[9px] block">Active Schemes</span>
-            Offense: <b class="text-white">${team.formations?.offense || 'Balanced'}</b> | Defense: <b class="text-white">${team.formations?.defense || '3-2-3'}</b>
-        </div>
-    </div>
-
-    <!-- Positional Overall Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 pb-6">`;
-
-    displayOrder.forEach(pos => {
-        const pIds = depthOrder[pos] || [];
-        const players = pIds.map(id => roster.find(p => p && p.id === id)).filter(Boolean);
-        const topOvr = players.length > 0 ? calculateOverall(players[0], pos) : 0;
-        const attrsConfig = keyAttrConfig[pos] || [];
-
-        html += `
-        <div class="bg-white rounded-sm border border-slate-300 shadow-sm overflow-hidden flex flex-col">
-            <div class="bg-slate-800 px-3 py-2 flex justify-between items-center text-white border-b border-slate-700">
-                <div class="flex items-center gap-2">
-                    <span class="font-black text-sm tracking-wider uppercase">${pos} DEPTH</span>
-                    <span class="text-[10px] font-semibold text-slate-300 bg-slate-700 px-1.5 py-0.5 rounded">Starter: ${topOvr}</span>
-                </div>
-                <span class="text-[10px] font-bold bg-slate-700 px-2 py-0.5 rounded text-slate-200">${players.length} Players</span>
-            </div>
-            
-            <div class="flex-1 overflow-y-auto max-h-80 p-1.5 space-y-1 divide-y divide-slate-100">
-                ${players.map((p, i) => {
-            const ovr = calculateOverall(p, pos);
-            const natPos = p.pos || estimateBestPosition(p);
-            const isOffPosition = natPos !== pos;
-            const starterSlot = activeStarterMap.get(p.id);
-            const isStarterHere = starterSlot && starterSlot.startsWith(pos);
-            const isStarterElsewhere = starterSlot && !starterSlot.startsWith(pos);
-
-            const statusAlert = p.status?.duration > 0
-                ? `<span class="text-[9px] text-rose-600 font-bold ml-1" title="${p.status.description || 'Unavailable'}">🩹 ${p.status.duration}w</span>`
-                : '';
-
-            const energy = Math.round(100 - (p.fatigue || 0));
-            const energyBadge = energy < 65
-                ? `<span class="text-[8px] bg-amber-100 text-amber-800 px-1 rounded font-bold" title="Low Stamina">${energy}%</span>`
-                : '';
-
-            // Key stats preview row
-            const statPills = attrsConfig.map(a =>
-                `<span class="mr-1.5"><b class="text-slate-400 font-normal">${a.label}:</b> <span class="text-slate-700 font-semibold">${a.get(p)}</span></span>`
-            ).join('');
-
-            return `
-                    <div class="p-1.5 rounded hover:bg-slate-50 transition cursor-pointer group flex items-center justify-between"
-                         onclick="app.openPlayerCard('${p.id}')"
-                         title="Click to view scouting dossier for ${p.name}">
-                        
-                        <div class="flex flex-col truncate pr-2 flex-1">
-                            <div class="flex items-center gap-1.5 truncate">
-                                <span class="font-mono text-xs font-bold text-slate-400 w-4">${i + 1}.</span>
-                                <span class="font-bold text-xs text-slate-900 group-hover:text-amber-600 truncate">${p.name}</span>
-                                ${statusAlert}
-                                ${energyBadge}
-                                ${isStarterHere ? `<span class="text-[8px] bg-emerald-100 text-emerald-800 font-black px-1 rounded uppercase tracking-tight border border-emerald-300">START • ${starterSlot}</span>` : ''}
-                                ${isStarterElsewhere ? `<span class="text-[8px] bg-slate-100 text-slate-600 font-bold px-1 rounded uppercase tracking-tight" title="Starting at ${starterSlot}">• ${starterSlot}</span>` : ''}
-                            </div>
-                            
-                            <!-- Micro-meta row: Age, Potential, Natural Pos, Key Stats -->
-                            <div class="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5 font-mono">
-                                <span class="text-slate-400">${p.age}yo</span>
-                                <span class="font-bold text-slate-600">Pot:${p.potential || '?'}</span>
-                                ${isOffPosition ? `<span class="text-amber-700 bg-amber-50 px-1 rounded text-[9px] font-sans font-bold" title="Natural Position">NAT: ${natPos}</span>` : ''}
-                                <span class="hidden sm:inline border-l border-slate-200 pl-1.5 text-[9px] text-slate-600 truncate">${statPills}</span>
-                            </div>
-                        </div>
-
-                        <div class="text-right shrink-0">
-                            <span class="font-black text-sm ${ovr >= 40 ? 'text-emerald-700' : (ovr >= 30 ? 'text-slate-900' : 'text-slate-400')}">${ovr}</span>
-                            <span class="text-[9px] text-slate-400 block font-bold uppercase -mt-1 tracking-tighter">OVR</span>
-                        </div>
-                    </div>`;
-        }).join('')}
-                
-                ${players.length === 0 ? `<div class="p-4 text-center text-xs text-slate-400 italic">No players available for this position.</div>` : ''}
-            </div>
-        </div>`;
+    // Calculate room quality for the top summary cards
+    const roomSummaries = positions.map(pos => {
+        const ratings = roster.map(p => calculateOverall(p, pos)).sort((a, b) => b - a);
+        const top1 = ratings[0] || 0;
+        const top2 = ratings[1] || 0;
+        return { pos, top1, top2, avg: Math.round((top1 + top2) / 2) };
     });
 
-    html += `</div>`;
-    pane.innerHTML = html;
+    pane.innerHTML = `
+        <!-- Top Strategic Radar: Position Room Strength -->
+        <div class="mb-3 bg-slate-900 text-white rounded p-3 border border-slate-700 shadow-sm shrink-0">
+            <div class="flex justify-between items-center mb-2 pb-1 border-b border-slate-800">
+                <span class="text-[10px] font-black uppercase tracking-wider text-amber-400">Franchise Position Room Strength</span>
+                <span class="text-[10px] text-slate-400 font-mono">Starter / Backup OVR</span>
+            </div>
+            <div class="grid grid-cols-4 sm:grid-cols-8 gap-2">
+                ${roomSummaries.map(r => `
+                    <div class="bg-slate-800/80 p-2 rounded border border-slate-700 text-center">
+                        <span class="text-[10px] font-black uppercase text-slate-300 block">${r.pos}</span>
+                        <span class="text-sm font-black ${r.top1 >= 65 ? 'text-emerald-400' : (r.top1 >= 50 ? 'text-amber-400' : 'text-slate-400')}">${r.top1}</span>
+                        <span class="text-[9px] text-slate-400 block font-mono">bup: ${r.top2}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+
+        <!-- Master 8-Way Versatility Matrix Table -->
+        <div class="bg-white rounded border border-slate-200 shadow-sm overflow-x-auto">
+            <table class="min-w-full text-xs font-mono">
+                <thead class="bg-slate-900 text-white uppercase text-[10px] tracking-wider select-none">
+                    <tr>
+                        <th class="py-2.5 px-3 text-left font-sans">Player</th>
+                        <th class="py-2.5 px-2 text-center">Nat</th>
+                        <th class="py-2.5 px-2 text-center">Age</th>
+                        <th class="py-2.5 px-2 text-center">Pot</th>
+                        <th class="py-2.5 px-2 text-center text-amber-400" title="Stamina: High stamina prevents two-way fatigue burn">STM</th>
+                        <th class="py-2.5 px-2 text-center text-blue-300">QB</th>
+                        <th class="py-2.5 px-2 text-center text-blue-300">RB</th>
+                        <th class="py-2.5 px-2 text-center text-blue-300">WR</th>
+                        <th class="py-2.5 px-2 text-center text-blue-300">TE</th>
+                        <th class="py-2.5 px-2 text-center text-blue-300">OL</th>
+                        <th class="py-2.5 px-2 text-center text-rose-300">DL</th>
+                        <th class="py-2.5 px-2 text-center text-rose-300">LB</th>
+                        <th class="py-2.5 px-2 text-center text-rose-300">DB</th>
+                        <th class="py-2.5 px-3 text-left font-sans">Active Role</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    ${roster.map(p => {
+                        const fits = getBestTwoWayFits(p);
+                        const natPos = p.pos || estimateBestPosition(p);
+                        const stamina = p.attributes?.physical?.stamina || 50;
+
+                        // Check active roles
+                        const offSlot = Object.entries(offChart).find(([_, id]) => id === p.id)?.[0];
+                        const defSlot = Object.entries(defChart).find(([_, id]) => id === p.id)?.[0];
+                        const isPR = stChart['PR'] === p.id;
+
+                        let rolesBadge = '';
+                        if (offSlot && defSlot) rolesBadge = `<span class="bg-amber-100 text-amber-900 border border-amber-300 px-1 rounded text-[9px] font-black font-sans">⚡ ${offSlot} & ${defSlot}</span>`;
+                        else if (offSlot) rolesBadge = `<span class="bg-blue-50 text-blue-800 border border-blue-200 px-1 rounded text-[9px] font-bold font-sans">${offSlot}</span>`;
+                        else if (defSlot) rolesBadge = `<span class="bg-red-50 text-red-800 border border-red-200 px-1 rounded text-[9px] font-bold font-sans">${defSlot}</span>`;
+                        else rolesBadge = `<span class="text-slate-400 font-sans text-[10px]">Reserve</span>`;
+
+                        if (isPR) rolesBadge += ` <span class="bg-purple-100 text-purple-900 border border-purple-200 px-1 rounded text-[9px] font-black font-sans">PR</span>`;
+
+                        return `
+                        <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
+                            <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate max-w-[130px]">
+                                <span>${p.name}</span>
+                                <span class="text-slate-400 font-mono text-[10px] ml-1">#${p.number || '--'}</span>
+                            </td>
+                            <td class="text-center py-2 px-2"><span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${natPos}</span></td>
+                            <td class="text-center py-2 px-2 text-slate-600">${p.age}</td>
+                            <td class="text-center py-2 px-2 font-bold ${p.potential === 'A' ? 'text-amber-600' : 'text-slate-500'}">${p.potential || '?'}</td>
+                            <td class="text-center py-2 px-2 font-bold ${stamina >= 70 ? 'text-emerald-700' : (stamina <= 45 ? 'text-rose-600' : 'text-slate-700')}">${stamina}</td>
+                            ${positions.map(pos => {
+                                const ovr = calculateOverall(p, pos);
+                                const isBestOff = pos === fits.offense.position;
+                                const isBestDef = pos === fits.defense.position;
+                                let cellClass = 'text-slate-400';
+                                if (isBestOff) cellClass = 'bg-emerald-50 text-emerald-900 font-black border-x border-emerald-200';
+                                else if (isBestDef) cellClass = 'bg-blue-50 text-blue-900 font-black border-x border-blue-200';
+                                else if (ovr >= 50) cellClass = 'text-slate-800 font-semibold';
+
+                                return `<td class="text-center py-2 px-2 ${cellClass}">${ovr}</td>`;
+                            }).join('')}
+                            <td class="py-2 px-3">${rolesBadge}</td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
 }
 
 function renderDepthChartSide(side, gameState) {
@@ -5554,7 +5437,7 @@ export function setupDepthChartTabs() {
 
     // Normalize the initial state as well as later tab changes.
     setActiveTabStyle(
-        document.querySelector(".depth-chart-tab.active")?.dataset.subTab || "offense"
+        document.querySelector(".depth-chart-tab.active")?.dataset.subTab || "depth-order"
     );
 
     subTabs.forEach(tab => {
