@@ -347,30 +347,35 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 ? getAssignment(slot, assignments, formationMapping, true)
                 : defAssignments[slot];
 
-            const rb2NeedsDropbackClearance =
-                isOffense &&
-                slot === 'RB2' &&
-                (
-                    // If the play doesn't use the fullback, keep him
-                    // out of the QB's handoff/dropback path.
-                    !assignment ||
+            const isBackfieldPlayer =
+                slot.startsWith('RB') ||
+                slot === 'FB';
 
-                    // On passes, stationary blocking assignments can
-                    // leave RB2 directly in the QB's dropback lane.
+            const backNeedsDropbackClearance =
+                isOffense &&
+                isBackfieldPlayer &&
+                (
+                    // Preserve the existing RB2 behavior when unassigned.
+                    (slot === 'RB2' && !assignment) ||
+
+                    // On pass plays, backs whose routes or assignments
+                    // can cross the QB's dropback lane need clearance.
                     (
                         play.type === 'pass' &&
-                        [
-                            'pass_block',
-                            'run_block',
-                            'CheckRelease'
-                        ].includes(assignment)
+                        (
+                            !assignment ||
+                            assignment.startsWith('run_') ||
+                            [
+                                'pass_block',
+                                'CheckRelease'
+                            ].includes(assignment)
+                        )
                     )
                 );
 
-            if (rb2NeedsDropbackClearance) {
-                // An unused fullback can check and release on passes.
-                // On runs, leave him unassigned rather than inventing
-                // a new blocking or handoff responsibility.
+            if (backNeedsDropbackClearance) {
+                // An unassigned back on a passing play checks and releases
+                // instead of remaining idle in the QB's dropback lane.
                 if (!assignment && play.type === 'pass') {
                     assignment = 'CheckRelease';
                 }
@@ -383,13 +388,34 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     qbInitialState &&
                     Math.abs(startX - qbInitialState.x) < 1.5
                 ) {
+                    const preferredOffsetX = qbInitialState.x + 2.2;
+                    const alternateOffsetX = qbInitialState.x - 2.2;
+
+                    // Use the opposite side near the right boundary rather
+                    // than clamping the back back into the QB's lane.
+                    const offsetX =
+                        preferredOffsetX <= FIELD_WIDTH - 0.5
+                            ? preferredOffsetX
+                            : alternateOffsetX;
+
                     const validatedOffset = validateFormationCoordinate(
-                        qbInitialState.x + 2.2,
+                        offsetX,
                         startY
                     );
 
                     startX = validatedOffset.x;
                     startY = validatedOffset.y;
+
+                    // Keep formation-based assignments and coverage
+                    // alignment consistent with the adjusted starting spot.
+                    const initialBackState = initialOffenseStates.find(
+                        player => player.slot === slot
+                    );
+
+                    if (initialBackState) {
+                        initialBackState.x = startX;
+                        initialBackState.y = startY;
+                    }
                 }
             }
 

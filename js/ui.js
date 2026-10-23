@@ -598,14 +598,24 @@ export function showModal(title, bodyHtml, onConfirm = null, confirmText = 'Conf
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = cancelText;
     cancelBtn.className = 'btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg text-sm';
-    cancelBtn.onclick = () => { if (onCancel) onCancel(); hideModal(); };
+
+    let confirmBtn = null;
+
+    cancelBtn.onclick = () => {
+        cancelBtn.disabled = true;
+        if (confirmBtn) confirmBtn.disabled = true;
+        hideModal();
+        if (onCancel) onCancel();
+    };
     actionsDiv.appendChild(cancelBtn);
 
     if (onConfirm) {
-        const confirmBtn = document.createElement('button');
+        confirmBtn = document.createElement('button');
         confirmBtn.textContent = confirmText;
         confirmBtn.className = 'btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg text-sm';
         confirmBtn.onclick = () => {
+            confirmBtn.disabled = true;
+            cancelBtn.disabled = true;
             hideModal();
             if (onConfirm) onConfirm();
         };

@@ -807,7 +807,6 @@ function restoreActiveFaMarket(market) {
 const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
 
 export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
-    // Support calling saveGameState(game), saveGameState('key'), or saveGameState(game, 'key')
     let activeGame = game;
     let saveKey = DEFAULT_SAVE_KEY;
 
@@ -823,30 +822,60 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
         return false;
     }
 
+    // Helper to strip heavy play-by-play logs from match objects
+    const cleanMatchData = (m) => {
+        if (!m || typeof m !== 'object') return null;
+        const {
+            home,
+            away,
+            gameLog,
+            plays,
+            playByPlay,
+            events,
+            statEvents,
+            drives,
+            driveChart,
+            telemetry,
+            ...rest
+        } = m;
+
+        return {
+            ...rest,
+            homeId: home?.id ?? m.homeId,
+            awayId: away?.id ?? m.awayId
+        };
+    };
+
     try {
         const dataToSave = { ...activeGame };
         dataToSave._activeFaMarket = serializeActiveFaMarket(activeGame._activeFaMarket);
         delete dataToSave.relationships;
         delete dataToSave._faMarketCache;
 
-        // 1. COMPRESS SCHEDULE: Preserve match metadata while stripping heavy team object references
+        // 1. COMPRESS SCHEDULE: Strip team references AND heavy play-by-play match logs
         if (Array.isArray(dataToSave.schedule)) {
-            dataToSave.schedule = dataToSave.schedule.map(m => {
-                const { home, away, ...rest } = m;
-                return {
-                    ...rest,
-                    homeId: home?.id ?? m.homeId,
-                    awayId: away?.id ?? m.awayId
-                };
-            });
+            dataToSave.schedule = dataToSave.schedule
+                .map(cleanMatchData)
+                .filter(Boolean);
         }
 
-        // 2. PURGE DEPARTED/RETIRED PLAYERS & COMPACT ACTIVE ONES
-        const hofIds = new Set((activeGame.hallOfFame || []).map(p => (typeof p === 'object' ? p?.id : p)).filter(Boolean));
+        // 2. PURGE DEPARTED/RETIRED PLAYERS & DEDUPLICATE HOF
+        const hofIds = new Set(
+            (activeGame.hallOfFame || [])
+                .map(p => (typeof p === 'object' && p !== null ? p.id : p))
+                .filter(id => id != null)
+        );
+
         dataToSave.players = (dataToSave.players || [])
             .filter(p => {
-                if (p.status?.type === 'retired' || p.status?.type === 'departed') {
-                    return hofIds.has(p.id);
+                if (!p || p.id == null) return false;
+                const isRetired =
+                    p.status?.type === 'retired' ||
+                    p.status?.type === 'departed' ||
+                    p.status === 'retired' ||
+                    p.retired === true;
+                if (isRetired) {
+                    return hofIds.has(p.id) || hofIds.has(String(p.id));
                 }
                 return true;
             })
@@ -858,6 +887,8 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
                 delete cleanP._distToCarrier;
                 delete cleanP.velocity;
                 delete cleanP.scouting;
+                delete cleanP.gameLog;
+                delete cleanP.recentPlays;
 
                 if (cleanP.progression && cleanP.progression.length > 5) {
                     cleanP.progression = cleanP.progression.slice(-5);
@@ -869,29 +900,62 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
                 return cleanP;
             });
 
-        // 3. CLEAN TEAMS (Strip CPU scouting reports to avoid 5MB quota errors)
-        const userTeamId = activeGame.playerTeam?.id;
+        const activePlayerIds = new Set(dataToSave.players.map(p => String(p.id)));
+
+        // 3. STORE DUPLICATE ARRAYS AS COMPACT IDS
+        // playerTeam, freeAgents, and hallOfFame will be rehydrated from playerMap/teamById on load
+        const resolvedPlayerTeamId = activeGame.playerTeam?.id ?? activeGame.playerTeam;
+        dataToSave.playerTeam = resolvedPlayerTeamId != null ? String(resolvedPlayerTeamId) : null;
+
+        if (Array.isArray(dataToSave.freeAgents)) {
+            dataToSave.freeAgents = dataToSave.freeAgents
+                .map(p => (typeof p === 'object' && p !== null ? p.id : p))
+                .filter(id => id != null);
+        }
+
+        dataToSave.hallOfFame = Array.from(hofIds);
+
+        if (Array.isArray(dataToSave.draftPool)) {
+            dataToSave.draftPool = dataToSave.draftPool
+                .map(p => (typeof p === 'object' && p !== null ? p.id : p))
+                .filter(id => id != null);
+        }
+
+        // 4. CLEAN TEAMS & COMPACT SCOUTING REPORTS
         dataToSave.teams = (dataToSave.teams || []).map(team => {
             const cleanTeam = { ...team };
             delete cleanTeam.recentPlayHistory;
+            delete cleanTeam.playCallHistory;
             delete cleanTeam._captainFlavorLogged;
 
-            // Only retain scouting reports for the human player's team to save massive space
-            if (String(team.id) !== String(userTeamId)) {
+            // Strip CPU scouting reports; prune inactive/empty player reports for user team
+            const isUserTeam = String(team.id) === String(resolvedPlayerTeamId);
+            if (!isUserTeam) {
                 delete cleanTeam.scoutingReports;
+            } else if (cleanTeam.scoutingReports && typeof cleanTeam.scoutingReports === 'object') {
+                const compactReports = {};
+                for (const [pId, rep] of Object.entries(cleanTeam.scoutingReports)) {
+                    if (!rep) continue;
+                    const hasScoutingProgress = rep.level > 0 || (rep.progressPoints && rep.progressPoints > 0);
+                    if (hasScoutingProgress && activePlayerIds.has(String(pId))) {
+                        compactReports[pId] = rep;
+                    }
+                }
+                cleanTeam.scoutingReports = compactReports;
             }
             return cleanTeam;
         });
 
-        // 4. CAP ARRAY HISTORIES
+        // 5. CAP HISTORIES AND LOGS
         if (dataToSave.messages?.length > 20) {
             dataToSave.messages = dataToSave.messages.slice(0, 20);
         }
 
-        if (dataToSave.gameResults) {
+        if (Array.isArray(dataToSave.gameResults)) {
             dataToSave.gameResults = dataToSave.gameResults.slice(-8).map(res => ({
                 ...res,
-                gameLog: []
+                gameLog: [],
+                plays: []
             }));
         }
 
@@ -899,8 +963,21 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
             dataToSave.pickHistory = dataToSave.pickHistory.slice(-60);
         }
 
-        if (dataToSave.history?.seasons?.length > 12) {
-            dataToSave.history.seasons = dataToSave.history.seasons.slice(-12);
+        if (Array.isArray(dataToSave.history?.seasons)) {
+            if (dataToSave.history.seasons.length > 8) {
+                dataToSave.history.seasons = dataToSave.history.seasons.slice(-8);
+            }
+            dataToSave.history.seasons = dataToSave.history.seasons.map(s => {
+                if (!s || typeof s !== 'object') return s;
+                const cleanSeason = { ...s };
+                delete cleanSeason.gameLogs;
+                delete cleanSeason.plays;
+                delete cleanSeason.playByPlay;
+                if (Array.isArray(cleanSeason.schedule)) {
+                    cleanSeason.schedule = cleanSeason.schedule.map(cleanMatchData).filter(Boolean);
+                }
+                return cleanSeason;
+            });
         }
 
         const serialized = JSON.stringify(dataToSave);
@@ -918,20 +995,29 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
             delete dataToSave.pickHistory;
             delete dataToSave.history;
 
+            const resolvedPlayerTeamId = activeGame.playerTeam?.id ?? activeGame.playerTeam;
+            dataToSave.playerTeam = resolvedPlayerTeamId != null ? String(resolvedPlayerTeamId) : null;
+
             if (Array.isArray(dataToSave.schedule)) {
-                dataToSave.schedule = dataToSave.schedule.map(m => {
-                    const { home, away, ...rest } = m;
-                    return {
-                        ...rest,
-                        homeId: home?.id ?? m.homeId,
-                        awayId: away?.id ?? m.awayId
-                    };
-                });
+                dataToSave.schedule = dataToSave.schedule.map(cleanMatchData).filter(Boolean);
+            }
+
+            if (Array.isArray(dataToSave.freeAgents)) {
+                dataToSave.freeAgents = dataToSave.freeAgents
+                    .map(p => (typeof p === 'object' && p !== null ? p.id : p))
+                    .filter(id => id != null);
+            }
+
+            if (Array.isArray(dataToSave.draftPool)) {
+                dataToSave.draftPool = dataToSave.draftPool
+                    .map(p => (typeof p === 'object' && p !== null ? p.id : p))
+                    .filter(id => id != null);
             }
 
             dataToSave.teams = (dataToSave.teams || []).map(team => {
                 const cleanTeam = { ...team };
                 delete cleanTeam.recentPlayHistory;
+                delete cleanTeam.playCallHistory;
                 delete cleanTeam._captainFlavorLogged;
                 delete cleanTeam.scoutingReports;
                 return cleanTeam;
@@ -944,6 +1030,7 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
                     delete cp.gameStats;
                     delete cp.bio;
                     delete cp.scouting;
+                    delete cp.gameLog;
                     if (cp.progression) cp.progression = cp.progression.slice(-2);
                     return cp;
                 });
@@ -997,6 +1084,16 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
                 return id != null ? playerMap.get(String(id)) : null;
             })
             .filter(Boolean);
+
+        // Safely rehydrate Draft Pool whether stored as IDs or full objects
+        if (Array.isArray(game.draftPool)) {
+            game.draftPool = game.draftPool
+                .map(p => {
+                    const id = typeof p === 'object' && p !== null ? p.id : p;
+                    return id != null ? (playerMap.get(String(id)) || p) : p;
+                })
+                .filter(Boolean);
+        }
 
         // Safely rehydrate Schedule while handling string/number ID mismatches
         if (Array.isArray(game.schedule)) {

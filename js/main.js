@@ -1922,18 +1922,48 @@ function simulateRestOfWeek() {
 function finishWeekSimulation(results) {
     Game.processEndOfWeek();
     gameState.currentWeek++;
+
+    // 1. Purge transient match telemetry from schedule matches to prevent storage bloat
+    if (Array.isArray(gameState.schedule)) {
+        gameState.schedule.forEach(m => {
+            if (m) {
+                delete m.gameLog;
+                delete m.plays;
+                delete m.playByPlay;
+                delete m.events;
+                delete m.statEvents;
+                delete m.drives;
+                delete m.driveChart;
+                delete m.telemetry;
+                delete m.visualizationFrames;
+            }
+        });
+    }
+
+    // 2. Clear accumulated in-game play call histories from teams
+    if (Array.isArray(gameState.teams)) {
+        gameState.teams.forEach(team => {
+            if (team) {
+                team.recentPlayHistory = [];
+                team.playCallHistory = [];
+                delete team._captainFlavorLogged;
+            }
+        });
+    }
+
+    // 3. Keep the player on the dashboard to review final standings
+    if (gameState.currentWeek < WEEKS_IN_SEASON) {
+        Game.generateWeeklyFreeAgents();
+    }
+
+    // 4. Refresh gameState reference and persist cleanly
+    gameState = Game.getGameState();
     Game.saveGameState(activeSaveKey);
 
     if (results && results.length > 0) {
         UI.showModal(`Week ${gameState.currentWeek} Summary`, buildResultsModalHtml(results));
     }
 
-    // Keep the player on the dashboard to review final standings
-    if (gameState.currentWeek < WEEKS_IN_SEASON) {
-        Game.generateWeeklyFreeAgents();
-    }
-
-    gameState = Game.getGameState();
     UI.renderDashboard(gameState);
     UI.showScreen('dashboard-screen');
 }
