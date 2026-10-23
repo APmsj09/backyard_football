@@ -347,6 +347,52 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 ? getAssignment(slot, assignments, formationMapping, true)
                 : defAssignments[slot];
 
+            const rb2NeedsDropbackClearance =
+                isOffense &&
+                slot === 'RB2' &&
+                (
+                    // If the play doesn't use the fullback, keep him
+                    // out of the QB's handoff/dropback path.
+                    !assignment ||
+
+                    // On passes, stationary blocking assignments can
+                    // leave RB2 directly in the QB's dropback lane.
+                    (
+                        play.type === 'pass' &&
+                        [
+                            'pass_block',
+                            'run_block',
+                            'CheckRelease'
+                        ].includes(assignment)
+                    )
+                );
+
+            if (rb2NeedsDropbackClearance) {
+                // An unused fullback can check and release on passes.
+                // On runs, leave him unassigned rather than inventing
+                // a new blocking or handoff responsibility.
+                if (!assignment && play.type === 'pass') {
+                    assignment = 'CheckRelease';
+                }
+
+                const qbInitialState = initialOffenseStates.find(
+                    player => player.slot?.startsWith('QB')
+                );
+
+                if (
+                    qbInitialState &&
+                    Math.abs(startX - qbInitialState.x) < 1.5
+                ) {
+                    const validatedOffset = validateFormationCoordinate(
+                        qbInitialState.x + 2.2,
+                        startY
+                    );
+
+                    startX = validatedOffset.x;
+                    startY = validatedOffset.y;
+                }
+            }
+
             if (isOffense) {
                 for (const [role, mappedSlot] of Object.entries(formationMapping)) {
                     if (mappedSlot === slot || (Array.isArray(mappedSlot) && mappedSlot.includes(slot))) {
@@ -416,7 +462,14 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             targetX = routePath[0].x; targetY = routePath[0].y;
                         }
                     }
-                } else if (assignment) {
+                } else if (
+                    assignment ||
+                    (play.type === 'pass' && slot === 'RB2')
+                ) {
+                    // An unassigned FB in a passing play must not remain
+                    // idle directly in the QB's under-center dropback lane.
+                    if (!assignment) assignment = 'CheckRelease';
+
                     if (assignment.includes('block')) {
                         action = assignment; targetY = startY + 0.5;
                     } else if (assignment.includes('run_')) {
@@ -1697,6 +1750,18 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                                 startTick: playState.tick
                             });
                         }
+                        break;
+                    }
+
+                    // While the QB is still dropping back, keep the fullback
+                    // in his laterally offset protection lane. Do not move him
+                    // back toward the QB's original position.
+                    if (
+                        pState.slot === 'RB2' &&
+                        qb &&
+                        !qb.hasCompletedDropback
+                    ) {
+                        setHoldIntent(pState, pState.x, pState.y);
                         break;
                     }
 
