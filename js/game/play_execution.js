@@ -340,6 +340,12 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             startX = validated.x;
             startY = validated.y;
 
+            // Keep the formation's original alignment as the anchor.
+            // Coverage assignments may influence alignment, but must not
+            // silently replace the player's starting position.
+            const formationStartX = startX;
+            const formationStartY = startY;
+
             let targetX = startX;
             let targetY = startY;
             let dropbackTargetY = startY;
@@ -605,7 +611,102 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     }
                 }
 
-                if (assignment.startsWith('man_cover_') || assignment === 'def_read') {
+                                if (assignment.startsWith('man_cover_') || assignment === 'def_read') {
+                    let targetSlot = assignment.replace('man_cover_', '');
+                    const offMapping = offenseFormationData.mapping || {};
+
+                    // Resolve conceptual assignments (X, Z, Y) to actual slots.
+                    if (offMapping[targetSlot]) {
+                        const mappedSlot = offMapping[targetSlot];
+                        targetSlot = Array.isArray(mappedSlot)
+                            ? mappedSlot[0]
+                            : mappedSlot;
+
+                        if (assignment !== 'def_read') {
+                            assignment = `man_cover_${targetSlot}`;
+                        }
+                    }
+
+                    const targetExists = initialOffenseStates.some(
+                        o => o.slot === targetSlot
+                    );
+
+                    // Preserve valid, explicit playbook assignments.
+                    // Only select a new target for def_read or an invalid target.
+                    if (!targetExists || assignment === 'def_read') {
+                        const offensiveThreats = initialOffenseStates.filter(o =>
+                            /^(WR|TE|RB)\d*$/.test(o.slot) ||
+                            o.slot === 'FB'
+                        );
+
+                        // Give priority to threats without a primary assignment.
+                        // If every threat already has coverage, allow a helper.
+                        const uncoveredThreats = offensiveThreats.filter(
+                            threat => !coveredOffensiveSlots.has(threat.slot)
+                        );
+
+                        const candidates = uncoveredThreats.length > 0
+                            ? uncoveredThreats
+                            : offensiveThreats;
+
+                        const getTargetScore = threat => {
+                            const targetPosition = threat.slot.replace(/\d+/g, '');
+                            let positionPenalty = 20;
+
+                            // Preserve sensible position priorities while also
+                            // considering how far the defender must move laterally.
+                            if (slot.startsWith('DB')) {
+                                if (targetPosition === 'WR') positionPenalty = 0;
+                                else if (targetPosition === 'TE') positionPenalty = 16;
+                                else if (targetPosition === 'RB' || targetPosition === 'FB') {
+                                    positionPenalty = 28;
+                                }
+                            } else if (slot.startsWith('LB')) {
+                                if (targetPosition === 'RB' || targetPosition === 'FB') {
+                                    positionPenalty = 0;
+                                } else if (targetPosition === 'TE') {
+                                    positionPenalty = 10;
+                                } else if (targetPosition === 'WR') {
+                                    positionPenalty = 24;
+                                }
+                            } else {
+                                if (targetPosition === 'RB' || targetPosition === 'FB') {
+                                    positionPenalty = 0;
+                                } else if (targetPosition === 'TE') {
+                                    positionPenalty = 12;
+                                } else if (targetPosition === 'WR') {
+                                    positionPenalty = 20;
+                                }
+                            }
+
+                            const lateralDistance = Math.abs(
+                                threat.x - formationStartX
+                            );
+
+                            return positionPenalty + lateralDistance * 0.75;
+                        };
+
+                        candidates.sort((a, b) =>
+                            getTargetScore(a) - getTargetScore(b)
+                        );
+
+                        const bestTarget = candidates[0]?.slot;
+
+                        if (bestTarget) {
+                            assignment = `man_cover_${bestTarget}`;
+                            targetSlot = bestTarget;
+                        } else {
+                            assignment = slot.startsWith('DB')
+                                ? 'zone_deep_middle'
+                                : 'zone_hook_curl_middle';
+                        }
+                    }
+
+                    if (assignment.startsWith('man_cover_')) {
+                        assignedPlayerSlot = targetSlot;
+                        coveredOffensiveSlots.add(targetSlot);
+                    }
+                }
                     let targetSlot = assignment.replace('man_cover_', '');
                     const offMapping = offenseFormationData.mapping || {};
 
@@ -674,38 +775,68 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
                 action = assignment;
 
-                if (assignment.startsWith('man_cover_')) {
+                                if (assignment.startsWith('man_cover_')) {
                     const tSlot = assignment.split('_')[2];
                     const tState = initialOffenseStates.find(o => o.slot === tSlot);
 
                     if (tState) {
-                        const isRB = tSlot.startsWith('RB');
+                        const isRB = tSlot.startsWith('RB') || tSlot === 'FB';
+                        const isLB = slot.startsWith('LB');
+                        const isDB = slot.startsWith('DB');
                         const isSlot = tSlot.includes('TE') || tSlot === 'WR3';
-                        let xOffset = (tState.x < CENTER_X) ? (isSlot ? 1.0 : -0.5) : (isSlot ? -1.0 : 0.5);
+
+                        let xOffset = (tState.x < CENTER_X)
+                            ? (isSlot ? 1.0 : -0.5)
+                            : (isSlot ? -1.0 : 0.5);
+
                         let yOffset = playState.lineOfScrimmage >= 95 ? 1.0 : 2.0;
 
-                        // FIX: Linebackers covering backfield runners must sit at LB depth (LOS + 4.0y),
-                        // not down in the interior dirt where linemen instantly engage them!
-                        if (isRB) {
-                            const rbSide = tState.x < CENTER_X ? -1.5 : 1.5;
-                            xOffset = rbSide;
-                            yOffset = 4.5;
-                            startX = tState.x + xOffset;
-                            startY = playState.lineOfScrimmage + yOffset; // Anchored relative to LOS, not backfield Y
-                        } else {
-                            const existingCoverers = playState.activePlayers.filter(p => p.assignment === assignment).length;
-                            if (existingCoverers === 1) {
-                                xOffset *= -2.5; yOffset += 2.0;
-                            } else if (existingCoverers >= 2) {
-                                xOffset = 0; yOffset += 5.0;
-                            }
+                        // Keep intentional double coverage staggered.
+                        const existingCoverers = playState.activePlayers.filter(
+                            p => !p.isOffense && p.assignment === assignment
+                        ).length;
 
-                            startX = tState.x + xOffset;
+                        if (existingCoverers === 1) {
+                            xOffset *= -2.5;
+                            yOffset += 2.0;
+                        } else if (existingCoverers >= 2) {
+                            xOffset = 0;
+                            yOffset += 5.0;
+                        }
+
+                        const desiredX = tState.x + (
+                            isRB
+                                ? (tState.x < CENTER_X ? -1.5 : 1.5)
+                                : xOffset
+                        );
+
+                        // Retain each defender's natural side of the formation.
+                        // LBs can shade toward a back, but cannot be pulled across
+                        // the formation into another linebacker's starting lane.
+                        const maxLateralShift = isLB ? 2.5 : (isDB ? 5.0 : 1.5);
+                        const lateralShift = Math.max(
+                            -maxLateralShift,
+                            Math.min(maxLateralShift, desiredX - formationStartX)
+                        );
+
+                        startX = formationStartX + lateralShift;
+
+                        if (isRB && isLB) {
+                            // Preserve the linebacker-depth adjustment.
+                            startY = playState.lineOfScrimmage + 4.5;
+                        } else if (isRB) {
+                            // Do not drag DBs or linemen into LB depth just
+                            // because their coverage target is a back.
+                            startY = Math.max(
+                                formationStartY,
+                                playState.lineOfScrimmage + 1.5
+                            );
+                        } else {
                             startY = tState.y + yOffset;
                         }
 
-                        // FIX: Pre-snap target must mirror their own alignment cushion,
-                        // NOT the receiver's coordinates in the offensive backfield.
+                        // Pre-snap movement targets match the defender's own
+                        // alignment. Coverage pursuit adjusts after the snap.
                         targetX = startX;
                         targetY = startY;
                     }

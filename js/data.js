@@ -641,11 +641,11 @@ export const offensivePlaybook = {
         compatibleFormations: ['Power', 'Jumbo'],
         readProgression: ['RB2', 'Y', 'X'],
         assignments: {
-            'QB': 'qb_scramble', 
-            'RB': 'run_iso_r', 
-            'RB2': 'FB_Flat', 
-            'Y': 'Corner', 
-            'X': 'Post', 
+            'QB': 'qb_setup',
+            'RB': 'run_iso_r',
+            'RB2': 'FB_Flat',
+            'Y': 'Corner',
+            'X': 'Post',
             'OL': 'pass_block'
         }
     },
