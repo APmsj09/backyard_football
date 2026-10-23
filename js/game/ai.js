@@ -148,7 +148,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     let leftScore = 10; let rightScore = 10; let centerScore = 15;
 
     if (qb) {
-        if (qb.action === 'qb_setup' && qb.hasCompletedDropback) passScore += 45;
+        if (qb.action === 'qb_setup' && qb.hasCompletedDropback) passScore += 75;
         else if (qb.action === 'qb_setup' && !qb.hasCompletedDropback) passScore += 20;
         else if (qb.action === 'handoff_setup') runScore += 45;
 
@@ -282,14 +282,18 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
                 qb &&
                 qb.hasBall &&
                 qb.action === 'qb_setup' &&
-                qb.hasCompletedDropback === true &&
-                passBlocks >= 2 &&
-                passBlocks > runBlocks
+                (
+                    (passBlocks >= 2 && passBlocks > runBlocks) ||
+                    qb.hasCompletedDropback === true
+                )
             );
 
             const hasStrongPassRead =
                 hasCrediblePassEvidence &&
-                finalPassScore > finalRunScore + 25;
+                (
+                    finalPassScore > finalRunScore + 25 ||
+                    (qb.hasCompletedDropback === true && finalPassScore > finalRunScore - 15)
+                );
 
             // Count consecutive simulation ticks with sustained evidence.
             // Do not count multiple calls during the same tick as extra time.
@@ -457,10 +461,25 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             if (receiver.role === 'QB' || !receiver.action?.includes('route')) return;
 
             const recDepth = receiver.y - LOS;
-            // In the red zone (distanceToGoal <= 20), intermediate and crossing routes (3-5 yds)
-            // are immediate scoring threats that deep zone defenders must match.
             const distanceToGoal = 110 - LOS;
-            const minMatchDepth = distanceToGoal <= 20 ? 3.0 : 8.0;
+            const safetyIQ = safetyState.playbookIQ || 50;
+            
+            let minMatchDepth = distanceToGoal <= 20 ? 3.0 : 8.0;
+
+            // IQ & Instinct Check: Better safeties consistently realize when there are no deep threats.
+            // But even a low-IQ safety might have a good instinctual feel for the play (random variance).
+            const anyDeepThreat = offenseStates.some(o => o.action?.includes('route') && (o.y - LOS) > 12.0);
+            
+            if (!anyDeepThreat) {
+                // Base awareness plus a random "instinct" roll (-5 to +25)
+                const effectiveAwareness = safetyIQ + (Math.random() * 30 - 5); 
+                
+                if (effectiveAwareness > 60) {
+                    // Smoothly scale the bite depth. 90+ = 4.5 yards, 65 = 7.0 yards.
+                    minMatchDepth = Math.max(4.5, 8.0 - ((effectiveAwareness - 50) / 12)); 
+                }
+            }
+            
             if (recDepth < minMatchDepth) return;
 
             const distFromSafety = getDistance(safetyState, receiver);
@@ -944,11 +963,13 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         const openSpaceReward = Math.min(75, nearestDefDist * 10) * (0.4 + (iqFactor * 0.6));
         score += openSpaceReward;
 
-        // CUTBACK VISION (IQ-Scaled):
-        // If defenders overpursue, high-IQ runners spot backside cutback lanes against the grain
-        if (iq >= 60 && overPursuitDetected) {
-            const cutbackMultiplier = (iq - 50) / 50; // 0.2 to 1.0
-            score += 70 * cutbackMultiplier;
+        // CUTBACK VISION (Instinct & IQ-Scaled):
+        // If defenders overpursue, runners spot backside cutback lanes against the grain.
+        // Smart runners do this reliably; others do it occasionally on pure instinct.
+        const effectiveVision = iq + (Math.random() * 40 - 15);
+        if (effectiveVision >= 55 && overPursuitDetected) {
+            const cutbackMultiplier = Math.max(0.1, Math.min(1.0, (effectiveVision - 40) / 60)); 
+            score += 75 * cutbackMultiplier;
         }
 
         if (debugEnabled) {
@@ -999,14 +1020,15 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     runner._chosenLaneOffset = bestOffset;
 
-    // BACKFIELD PATIENCE (High-IQ Feature):
+    // BACKFIELD PATIENCE (High-IQ & Instinct Feature):
     // If behind or right at the line of scrimmage and traffic is clogged,
-    // a smart, high-IQ runner will throttle down their forward momentum to let blocks develop,
-    // rather than blindly crashing into the back of their own linemen at full speed.
+    // a smart runner will throttle down their forward momentum to let blocks develop.
+    // Lower IQ runners might occasionally show patience based on random instinct.
+    const effectivePoise = iq + (Math.random() * 40 - 15);
 
-    if (isBehindLine && inTraffic && iq >= 70) {
-        // Poise scales with IQ: 90 IQ runners exhibit superior patience compared to 70 IQ runners
-        const poiseFactor = Math.max(0.35, 1.0 - ((iq - 65) / 45)); 
+    if (isBehindLine && inTraffic && effectivePoise >= 65) {
+        // Poise scales smoothly: 90+ effective IQ = excellent patience
+        const poiseFactor = Math.max(0.35, 1.0 - ((effectivePoise - 50) / 50)); 
         bestTargetY = runner.y + (visionDepth * poiseFactor); // Shorten target depth to stall forward rush
         runner.vx *= 0.80; // Gentle velocity check to simulate setting feet behind the block
         runner.vy *= 0.80;
@@ -1289,7 +1311,10 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (typeof qbState.currentReadTargetSlot === 'undefined') qbState.currentReadTargetSlot = progression[0];
 
     // --- ELITE QB EYE MANIPULATION (Looking off Safeties) ---
-    if (qbIQ > 75 && playState.tick < 30 && progression.length > 1) {
+    // Smooth probability: 50 IQ = 0% chance, 90 IQ = ~28% chance to look off safeties
+    const eyeManipChance = Math.max(0, (qbIQ - 50) / 100) * 0.7; 
+    
+    if (playState.tick < 30 && progression.length > 1 && Math.random() < eyeManipChance) {
         const trueTarget = offenseStates.find(o => o.slot === progression[0]);
         if (trueTarget && trueTarget.initialX !== undefined) {
             const decoy = offenseStates.find(o =>
@@ -1515,12 +1540,13 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             score -= 25;
         }
 
-        // Coverage Shell Recognition
+        // Coverage Shell Recognition (Instinct & IQ-Scaled)
         const coverageShell = evaluateCoverageAlignment(defenseStates, playState);
         const isMiddleOfFieldRoute = Math.abs(rec.x - CENTER_X) < 8.0;
 
-        if (depth > 12 && qbIQ >= 55) {
-            const shellAwareness = (qbIQ - 50) / 50;
+        const effectiveShellRecog = qbIQ + (Math.random() * 30 - 10);
+        if (depth > 12 && effectiveShellRecog >= 55) {
+            const shellAwareness = Math.max(0.1, (effectiveShellRecog - 50) / 60);
             if (coverageShell.isTwoHigh) {
                 score += isMiddleOfFieldRoute ? (15 * shellAwareness) : (-8 * shellAwareness);
             } else if (coverageShell.isSingleHigh) {
@@ -1662,7 +1688,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             (playState.timeRemaining <= 150) &&
             ((playState.offenseScore || 0) < (playState.defenseScore || 0));
 
-        if (isLateTrailing && qbDecision > 65) {
+        const situationalIQ = qbDecision + (Math.random() * 40 - 15);
+
+        if (isLateTrailing && situationalIQ > 60) {
             const distToBoundary = Math.min(rec.x, FIELD_WIDTH - rec.x);
 
             if (distToBoundary < 4.0) {
@@ -1680,7 +1708,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             (playState.timeRemaining <= 150) &&
             ((playState.offenseScore || 0) > (playState.defenseScore || 0));
 
-        if (isLateLeading && qbDecision > 60) {
+        if (isLateLeading && situationalIQ > 60) {
             if (depth > 15 && minProjectedSeparation < 3.0) {
                 score -= 20;
             }
@@ -1775,7 +1803,11 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const wouldGainFirstDown = openRunningYards >= distToFirstDown;
 
         let rushScore = openRunningYards * 4.0;
-        if (wouldGainFirstDown) rushScore += (qbIQ > 65 ? 35 : 20);
+        
+        // Smarter QBs value moving the chains more appropriately
+        const situationalBoost = 15 + (qbIQ * 0.25);
+        if (wouldGainFirstDown) rushScore += situationalBoost;
+        
         rushScore += (qbSpeed - 50) * 0.5;
 
         const allReceivers = offenseStates.filter(p => p.slot !== 'QB1' && (p.action.includes('route') || p.action === 'route_complete'));
@@ -1826,7 +1858,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         }
 
         const immediateThreat = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 2.5);
-        if (immediateThreat && qbIQ > 60) {
+        const throwAwayInstinct = qbIQ + (Math.random() * 40 - 15);
+        
+        if (immediateThreat && throwAwayInstinct > 55) {
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👋 ${qbState.name} throws it away under pressure.`, playState);
             if (debugEnabled) {
                 logPlayDebug('QB_THROW_AWAY', `${qbState.name} threw ball away to avoid sack`, {

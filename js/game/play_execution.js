@@ -191,7 +191,7 @@ function getPursuitTargetY(pState, carrier, predictedY) {
 
     // At greater distances, preserve a cushion ahead of the runner without freezing
     // the defender at their own current Y coordinate.
-    const cushion = Math.min(separation * 0.4, 3.5);
+    const cushion = Math.min(separation * 0.5, 6.0);
     return Math.max(carrier.y + cushion, predictedY);
 }
 
@@ -1203,14 +1203,17 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             const laneDiffA = Math.abs(a.x - blocker.initialX);
             const laneDiffB = Math.abs(b.x - blocker.initialX);
 
-            // IQ Layer: Smart linemen (IQ > 60) identify interior A/B gap blitzes threatening the QB
+            // IQ & Instinct Layer: Linemen identify interior blitzes threatening the QB.
+            // Smarter linemen consistently recognize the biggest danger.
             let dangerPriorityA = 0;
             let dangerPriorityB = 0;
 
-            if (blockerIQ > 55 && qb) {
+            const effectiveBlockerIQ = blockerIQ + (Math.random() * 30 - 15);
+
+            if (effectiveBlockerIQ > 55 && qb) {
                 const distToQBA = Math.hypot(a.x - qb.x, a.y - qb.y);
                 const distToQBB = Math.hypot(b.x - qb.x, b.y - qb.y);
-                const iqWeight = (blockerIQ - 50) * 0.35;
+                const iqWeight = Math.max(0.1, (effectiveBlockerIQ - 40) * 0.25);
 
                 if (distToQBA < 4.5) dangerPriorityA -= (5.0 - distToQBA) * iqWeight;
                 if (distToQBB < 4.5) dangerPriorityB -= (5.0 - distToQBB) * iqWeight;
@@ -2142,14 +2145,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const receiverProfile = getDecisionProfile(pState, playState.tick);
                     const recIQ = receiverProfile?.awareness ?? (pState.playbookIQ || pState.iq || 50);
                     
-                    // IQ Layer: High IQ receivers (IQ >= 60) read zone voids and throttle down in windows
-                    // Low IQ receivers run blindly into zone defenders
+                    // IQ & Instinct Layer: Smart receivers read zone voids and throttle down.
+                    // Lower IQ receivers usually run into coverage, but sometimes have a good feel for the soft spot.
+                    const effectiveSettleIQ = recIQ + (Math.random() * 40 - 15);
+                    
                     if (
                         isSettleRoute &&
                         distToNode < 2.0 &&
-                        recIQ >= 60 &&
-                        receiverProfile.decisionQuality >= 55 &&
-                        receiverProfile.assignmentDiscipline >= 35
+                        effectiveSettleIQ > 60
                     ) {
                         const nearbyZoneDefenders = defenseStates.filter(d =>
                             !d.isBlocked && d.y >= LOS + 2.0 && getDistance(pState, d) < 3.2
@@ -2159,7 +2162,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             if (pState._hookDriftX === undefined) {
                                 const nearest = nearbyZoneDefenders.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
                                 const driftDirX = pState.x > nearest.x ? 1.0 : -1.0;
-                                const iqSettlingSpace = 0.8 + ((recIQ - 60) / 40) * 0.8;
+                                const iqSettlingSpace = 0.8 + (Math.max(0, (effectiveSettleIQ - 50)) / 40) * 0.8;
                                 pState._hookDriftX = pState.x + (driftDirX * iqSettlingSpace);
                                 pState._hookDriftY = Math.max(LOS + 1.0, pState.y - 0.4);
                             }
@@ -2259,7 +2262,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             let separated = false;
 
                             // 1. Playground Double-Move Trap (requires double move route design)
-                            if (isDoubleMove && dbIQ < 65 && Math.random() < 0.45) {
+                            // Base bite chance scales down with IQ. High IQ DBs rarely bite, low IQ DBs often bite.
+                            const biteChance = Math.max(0.05, 0.75 - (dbIQ * 0.007));
+                            
+                            if (isDoubleMove && Math.random() < biteChance) {
                                 coverageDefender.stunnedTicks = Math.max(6, 14 - Math.floor(dbIQ / 8));
                                 coverageDefender.vx *= 0.2;
                                 coverageDefender.vy *= 0.2;
@@ -2570,11 +2576,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const receiverIsBlocking = assignedReceiver && (assignedReceiver.action?.includes('block') || assignedReceiver.isEngaged);
 
                 const carrierPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
-                const carrierIsClose = ballCarrierState && getDistance(pState, ballCarrierState) < 6.0;
+                const carrierIsClose = ballCarrierState && getDistance(pState, ballCarrierState) < 8.0;
                 const isHandoffRun = playState.type === 'run' && playState.handoffOccurred;
                 const isConfidentRun = (isRunRead && diagConfidence >= 0.60) || isHandoffRun;
 
-                if (carrierSlot !== targetSlot && !isConfidentRun && !qbScrambling && !carrierPastLOS && !carrierIsClose && !receiverIsBlocking) {
+                if (carrierSlot !== targetSlot && !isConfidentRun && !(qbScrambling && carrierPastLOS) && !carrierPastLOS && !carrierIsClose && !receiverIsBlocking) {
                     shouldPursue = false;
                 }
             }
@@ -2588,7 +2594,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 // 1. Confirmed run read, OR
                 // 2. Ball carrier has crossed the line of scrimmage, OR
                 // 3. Ball carrier has broken into their sector (< 14 yards)
-                if (!isConfidentRun && !qbScrambling && !carrierPastLOS && !isRunReadAtMesh && distToCarrier > 14.0) {
+                if (!isConfidentRun && !(qbScrambling && carrierPastLOS) && !carrierPastLOS && !isRunReadAtMesh && distToCarrier > 14.0) {
                     shouldPursue = false;
                 }
             }
@@ -2674,8 +2680,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const blendFactor = Math.min(1.0, Math.max(0.3, (dist - 0.8) / 3.0)) * effectivePerception;
 
                     // Lead the runner based on distance and closing speed; maintain lead throughout the tackle approach
-                    const maxLeadTime = 0.45;
-                    const leadTime = Math.min(maxLeadTime, Math.max(0.08, dist / (14 + (iq / 5)))) * blendFactor;
+                    const maxLeadTime = Math.min(3.0, dist / 9.0);
+                    const leadTime = Math.min(maxLeadTime, Math.max(0.08, dist / (12 + (iq / 10)))) * blendFactor;
 
                     let predX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
                     let predY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
@@ -2883,9 +2889,13 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             let cushionY = Math.max(distanceToGoal <= 5.0 ? 0.3 : 0.6, (baseCushionY * cushionShrink) - (iqFactor * 0.5) - ((agilityFactor - 1) * 0.3));
             let cushionX = (baseCushionX * cushionShrink) * (0.8 + (iqFactor * 0.2));
 
-            // Speed mismatch adjustment: If the receiver is a burner, smart DBs bail out deeper to prevent getting beat deep
-            if (speedDiff > 12 && defIQ >= 50) {
-                cushionY += 1.5; // Respect deep speed
+            // Speed mismatch adjustment: If the receiver is a burner, DBs should bail out deeper.
+            // High-IQ DBs consistently recognize this pre-snap. Low-IQ DBs might guess wrong or not notice.
+            if (speedDiff > 5) {
+                const respectSpeedChance = Math.max(0.1, (defIQ / 100) + 0.15); // 50 IQ = 65% chance, 90 IQ = 100% chance
+                if (Math.random() < respectSpeedChance) {
+                    cushionY += (speedDiff * 0.12); // Variable cushion based on exact speed difference
+                }
             }
 
             if (targetRec.y < LOS + 3 && getDistance(pState, targetRec) < 3.0) {
@@ -3019,9 +3029,13 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             zoneCenter.y = Math.min(maxDropDepth, LOS + compressedDepth);
         }
         
-        // 1. "Hero Ball" Safety Creep: Impatient low-IQ deep safeties creep downhill toward LOS
-        if (isDeep && iq < 58) {
-            zoneCenter.y = Math.max(LOS + 7.0, zoneCenter.y - 3.5);
+        // 1. "Hero Ball" Safety Creep: Impatient low-IQ deep safeties frequently creep downhill toward LOS.
+        // Higher IQ safeties might occasionally gamble, but rarely.
+        if (isDeep) {
+            const creepChance = Math.max(0.01, 0.60 - (iq * 0.007));
+            if (Math.random() < creepChance) {
+                zoneCenter.y = Math.max(LOS + 7.0, zoneCenter.y - 3.5);
+            }
         }
 
         // 2. Zone Breakdown / Pursuit Trigger
@@ -3037,21 +3051,25 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             }
         }
 
-        // 3. QB Stare-Down Tracking: If QB has low IQ, zone defenders cheat toward his target
+        // 3. QB Stare-Down Tracking: Low-IQ QBs frequently stare down their target, allowing DBs to cheat.
+        // High-IQ QBs disguise their eyes, meaning DBs rarely get an early read.
         const qb = offenseStates.find(o => o.slot?.startsWith('QB'));
-        if (qb && (qb.playbookIQ || 50) < 65 && qb.currentReadTargetSlot) {
-            const primaryRec = offenseStates.find(o => o.slot === qb.currentReadTargetSlot);
-            if (primaryRec && Math.abs(primaryRec.x - zoneCenter.x) < 14) {
-                zoneCenter.x += (primaryRec.x > zoneCenter.x ? 2.0 : -2.0);
+        if (qb && qb.currentReadTargetSlot) {
+            const qbIQ = qb.playbookIQ || 50;
+            const stareDownChance = Math.max(0.05, 0.85 - (qbIQ * 0.008)); // 50 IQ = 45% chance, 90 IQ = 13% chance
+                
+            if (Math.random() < stareDownChance) {
+                const primaryRec = offenseStates.find(o => o.slot === qb.currentReadTargetSlot);
+                if (primaryRec && Math.abs(primaryRec.x - zoneCenter.x) < 14) {
+                       zoneCenter.x += (primaryRec.x > zoneCenter.x ? 2.0 : -2.0);
+                }
             }
         }
 
         const minX = (zone?.minX || 0) - 3.0;
         const maxX = (zone?.maxX || FIELD_WIDTH) + 3.0;
-        // In the red zone, lower minY so deep third/halves detect intermediate crossers
-        const effectiveZoneMinY = (distanceToGoal < 25 && isDeep)
-            ? Math.min(zone?.minY || 0, 3.0)
-            : (zone?.minY || 0);
+        // Allow deep defenders to see intermediate crossing routes even outside the red zone
+        const effectiveZoneMinY = isDeep ? Math.min(zone?.minY || 0, 4.0) : (zone?.minY || 0);
         const minY = LOS + effectiveZoneMinY - 2.0;
         const maxY = Math.min(115.0, LOS + (zone?.maxY || 25.0) + 3.0);
 
@@ -3092,14 +3110,15 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                         )
                         : null;
 
+                const trapAwareness = iq + (Math.random() * 40 - 15);
+                
                 if (
-                    iq > 75 &&
-                    defenderProfile.decisionQuality > 72 &&
-                    defenderProfile.assignmentDiscipline > 50 &&
+                    trapAwareness > 80 &&
                     !isBallInAir &&
                     playState.tick > 25
                 ) {
-                    // Elite safety intentionally sags to bait the throw.
+                    // Smart safety intentionally sags to bait the throw. 
+                    // Lower IQ safeties might occasionally do this on instinct.
                     pState.targetX = primaryThreat.x + (insideLeverageX * 2.5);
                     pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 1.0);
                 } else if (interceptionPoint) {
@@ -3109,17 +3128,40 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                     pState.action = 'tracking_ball';
                     pState.contactReduction = 1.3;
                 } else {
-                    // In red zone, cap leverage tight to the receiver rather than pushing deep into endzone
+                    // Cap leverage tight to the receiver rather than blindly pushing deep into empty space
                     pState.targetX = primaryThreat.x + insideLeverageX;
+                    
+                    let dynamicSafeDepth = LOS + (isDeep ? 10.0 : 0.0);
+                    
+                    // Smooth IQ & Instinct scaling: 
+                    // High-IQ defenders consistently clamp down when there's no deep threat.
+                    // Low-IQ defenders mostly drop deep, but might occasionally bite on a shallow route (gambling).
+                    if (isDeep) {
+                        const anyDeepThreat = offenseStates.some(o => o.action?.includes('route') && (o.y - LOS) > 12.0);
+                        if (!anyDeepThreat) {
+                            const effectiveAwareness = iq + (Math.random() * 40 - 10); // -10 to +30 variance
+                            if (effectiveAwareness > 55) {
+                                // Scales from 9.0 (at 60 awareness) down to 5.0 (at 90+ awareness)
+                                const sinkReduction = Math.min(5.0, (effectiveAwareness - 50) * 0.12);
+                                dynamicSafeDepth = LOS + (10.0 - sinkReduction);
+                            }
+                        }
+                    }
+                    
+                    const minSafeDepth = dynamicSafeDepth;
+                    const desiredDepth = primaryThreat.y + (isDeep ? 3.5 : 1.5);
+                    
                     const leverageDepth = distanceToGoal < 25
                         ? Math.min(zoneCenter.y, primaryThreat.y + 1.8)
-                        : Math.max(zoneCenter.y, primaryThreat.y + 3.5);
+                        : Math.max(minSafeDepth, desiredDepth);
+                        
                     pState.targetY = Math.min(110.5, leverageDepth);
                 }
             } else {
                 // Short Zone
-                if (iq > 75 && !isBallInAir) {
-                    // Bait shallow crossers by drifting slightly away
+                const shortTrapAwareness = iq + (Math.random() * 40 - 15);
+                if (shortTrapAwareness > 80 && !isBallInAir) {
+                    // Bait shallow crossers by drifting slightly away (smart DBs or lucky guesses)
                     pState.targetX = primaryThreat.x + (primaryThreat.vx > 0 ? -2.0 : 2.0);
                     pState.targetY = primaryThreat.y - 2.5;
                 } else {
@@ -3147,9 +3189,26 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 if (qb) {
                     driftX += (qb.x < CENTER_X ? -2.5 : 2.5);
                 }
+                
+                // If there are no threats in the zone, don't drop blindly to maximum depth.
+                // Maintain a reasonable baseline depth.
+                let baselineDepth = isDeep ? LOS + 12.0 : zoneCenter.y;
+                
+                // READ STEPS (IQ & Instinct Scaled): 
+                // High IQ defenders stay patient to read the play.
+                // Low IQ defenders often bail early, BUT we add a random "instinct" roll 
+                // so they aren't rigidly robotic and can occasionally read it perfectly.
+                const instinctRoll = Math.floor(Math.random() * 15);
+                const readWindowTicks = 12 + Math.floor(iq / 3) + instinctRoll; // ~20 to 60 ticks depending on IQ and variance
+                
+                if (isDeep && playState.tick < readWindowTicks) {
+                    // Backpedal speed considers IQ, but also ensures lower IQ players don't just warp backwards
+                    const backpedalSpeed = 0.22 - (iq * 0.0012) + (Math.random() * 0.05); 
+                    baselineDepth = pState.initialY + (playState.tick * Math.max(0.07, backpedalSpeed));
+                }
 
                 pState.dynamicTargetX = driftX;
-                pState.dynamicTargetY = zoneCenter.y;
+                pState.dynamicTargetY = Math.min(zoneCenter.y, baselineDepth);
             }
             pState.targetX = pState.dynamicTargetX || zoneCenter.x;
             pState.targetY = pState.dynamicTargetY || zoneCenter.y;
