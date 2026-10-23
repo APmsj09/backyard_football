@@ -2683,19 +2683,106 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         return;
                     }
 
-                    // Committed pursuit retains tracking awareness even if runner sprints beyond the 21y vision cone
+                                        // Committed pursuit retains tracking awareness even if runner sprints beyond the 21y vision cone.
+                    // Once a defender has identified a live runner, preserve a useful amount of anticipation
+                    // instead of letting weak perception reduce the lead almost to zero.
                     const effectivePerception = hasCommittedToLiveRunner
                         ? Math.max(0.85, carrierPerception)
                         : (isRunReadAtMesh ? runTargetPerception : carrierPerception);
 
-                    const blendFactor = Math.min(1.0, Math.max(0.3, (dist - 0.8) / 3.0)) * effectivePerception;
+                    const predictionConfidence = Math.min(
+                        1.0,
+                        Math.max(0.65, effectivePerception)
+                    );
 
-                    // Lead the runner based on distance and closing speed; maintain lead throughout the tackle approach
+                    const blendFactor =
+                        Math.min(1.0, Math.max(0.3, (dist - 0.8) / 3.0)) *
+                        predictionConfidence;
+
+                    const carrierVX = Number.isFinite(chaseTarget.vx)
+                        ? chaseTarget.vx
+                        : 0;
+                    const carrierVY = Number.isFinite(chaseTarget.vy)
+                        ? chaseTarget.vy
+                        : 0;
+
+                    // Estimate the time needed for this defender to intercept the carrier's current path.
+                    // Use the defender's actual speed profile; do not grant any extra movement speed.
+                    const defenderSpeedYPS =
+                        getPlayerBaseSpeedYPS(pState) *
+                        (pState.fatigueModifier || 1.0);
+
+                    const offsetX = chaseTarget.x - pState.x;
+                    const offsetY = chaseTarget.y - pState.y;
+
+                    const quadraticA =
+                        (carrierVX * carrierVX) +
+                        (carrierVY * carrierVY) -
+                        (defenderSpeedYPS * defenderSpeedYPS);
+
+                    const quadraticB =
+                        2 * ((offsetX * carrierVX) + (offsetY * carrierVY));
+
+                    const quadraticC = dist * dist;
+
+                    // Retain a conservative fallback if a reliable intercept time cannot be calculated.
+                    let interceptTime = dist / (12 + (iq / 10));
+
+                    if (
+                        Number.isFinite(defenderSpeedYPS) &&
+                        defenderSpeedYPS > 0
+                    ) {
+                        const discriminant =
+                            (quadraticB * quadraticB) -
+                            (4 * quadraticA * quadraticC);
+
+                        if (
+                            Math.abs(quadraticA) > 0.001 &&
+                            discriminant >= 0
+                        ) {
+                            const sqrtDiscriminant = Math.sqrt(discriminant);
+
+                            const root1 =
+                                (-quadraticB - sqrtDiscriminant) /
+                                (2 * quadraticA);
+
+                            const root2 =
+                                (-quadraticB + sqrtDiscriminant) /
+                                (2 * quadraticA);
+
+                            const validTimes = [root1, root2].filter(
+                                time => Number.isFinite(time) && time > 0
+                            );
+
+                            if (validTimes.length > 0) {
+                                interceptTime = Math.min(...validTimes);
+                            }
+                        } else if (
+                            Math.abs(quadraticA) <= 0.001 &&
+                            quadraticB < -0.001
+                        ) {
+                            const linearTime = -quadraticC / quadraticB;
+
+                            if (
+                                Number.isFinite(linearTime) &&
+                                linearTime > 0
+                            ) {
+                                interceptTime = linearTime;
+                            }
+                        }
+                    }
+
+                    // Bound the prediction so defenders do not chase an excessively distant future point.
                     const maxLeadTime = Math.min(3.0, dist / 9.0);
-                    const leadTime = Math.min(maxLeadTime, Math.max(0.08, dist / (12 + (iq / 10)))) * blendFactor;
 
-                    let predX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
-                    let predY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
+                    const leadTime =
+                        Math.min(
+                            maxLeadTime,
+                            Math.max(0.08, interceptTime)
+                        ) * blendFactor;
+
+                    let predX = chaseTarget.x + (carrierVX * leadTime);
+                    let predY = chaseTarget.y + (carrierVY * leadTime);
 
                     const isOutsideRun = Math.abs(chaseTarget.x - CENTER_X) > 10.0;
                     const isWidestDefender = (chaseTarget.x > CENTER_X && pState.x >= chaseTarget.x) ||
