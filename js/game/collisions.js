@@ -271,8 +271,9 @@ export function checkTackleCollisions(playState, gameLog) {
 
         const obstruction = segmentLengthSq > 0.01
             ? playState.activePlayers.find(other => {
-                // FIX: Teammates swarming the carrier do NOT obstruct each other; only opposing blockers do!
+                // Teammates don't obstruct tackles, nor do players who are pancaked or downed on the grass
                 if (other === p || other === carrier || other.isOffense === p.isOffense) return false;
+                if (other.balanceState === 'downed' || other.stunnedTicks > 15) return false;
 
                 const along = (
                     (other.x - p.x) * dxToCarrier +
@@ -780,11 +781,16 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
         if (ballCarrier) {
             const distToCarrier = getDistance(defender, ballCarrier);
-            // Defenders must anticipate and shed blocks when the carrier enters their pursuit vicinity (3.5y)
-            if (distToCarrier < 3.5) {
+            const carrierPastLOS = ballCarrier.y > playState.lineOfScrimmage + 1.0;
+            // Shed block if carrier is close (<=5.0y) OR if carrier has broken past LOS on an open run
+            const shouldAttemptShed = distToCarrier < 5.0 || (carrierPastLOS && distToCarrier < 14.0);
+
+            if (shouldAttemptShed) {
                 const reactionScore = (defender.playbookIQ || 50) + (defender.blockShedding || 50);
-                const shedBonus = (3.5 - distToCarrier) * 15;
-                if (reactionScore + shedBonus + getRandomInt(0, 50) > 115) {
+                const shedBonus = Math.max(0, (5.0 - distToCarrier) * 12);
+                const openFieldUrgency = carrierPastLOS ? 25 : 0;
+
+                if (reactionScore + shedBonus + openFieldUrgency + getRandomInt(0, 50) > 110) {
                     blocker.engagedWith = null; 
                     blocker.isEngaged = false;
                     blocker.reengageCooldown = 14;
@@ -1330,12 +1336,17 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         if (playState.type === 'punt' && p.isOffense && ball.z > 0.5) return false;
         //if ((ball.droppedById === p.id) || (ball.lastDroppedById === p.id)) return false; // FIX: Mislabeled property
 
+        // Ineligible receivers: Offensive linemen cannot catch forward passes unless tipped or loose
         if (p.isOffense && p.slot.startsWith('OL') && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
             return false;
         }
 
+        // On forward passes, any eligible receiver running a route or tracking the ball can attempt a catch,
+        // but non-intended receivers must be actively looking/tracking and close to the landing point.
         if (p.isOffense && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
-            if (p.id !== ball.targetPlayerId) {
+            const isIntendedTarget = p.id === ball.targetPlayerId;
+            const isTracking = p.action === 'tracking_ball' || p.action.includes('route');
+            if (!isIntendedTarget && !isTracking) {
                 return false;
             }
         }

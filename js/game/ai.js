@@ -85,18 +85,18 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         playState?.ballState?.throwInitiated
     );
 
-    const observedRunCarrier =
-        Boolean(observedCarrier && observedCarrier.role !== 'QB');
+    // A live runner is anyone advancing with the ball who is not in a passing posture (dropback/setup)
+    const qbIsPassingPosture = qb && (qb.action === 'qb_setup' || qb.action === 'dropback');
+    const qbIsRunning = qb && observedCarrier?.id === qb.id && !qbIsPassingPosture && (qb.action === 'run_path' || qb.y > (playState?.lineOfScrimmage || 0));
 
-    // A QB rollout behind the line of scrimmage is a passing threat, not a confirmed run!
-    const qbScramble =
-        (qb?.action === 'qb_scramble' && qb.y > (playState?.lineOfScrimmage || 0)) ||
-        Boolean(
-            qb &&
-            observedCarrier?.id === qb.id &&
-            Number.isFinite(playState?.lineOfScrimmage) &&
-            qb.y > playState.lineOfScrimmage + 0.5
-        );
+    const observedRunCarrier = Boolean(
+        observedCarrier && (observedCarrier.role !== 'QB' || qbIsRunning)
+    );
+
+    const qbScramble = Boolean(
+        qb && observedCarrier?.id === qb.id && 
+        (qb.action === 'run_path' || (Number.isFinite(playState?.lineOfScrimmage) && qb.y > playState.lineOfScrimmage + 0.5))
+    );
 
     if (isBallInAir) {
         pState._diagnosedGuess = 'pass';
@@ -169,12 +169,13 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         const lateralStep = lineman.x - initialX;
         const forwardStep = lineman.y - initialY;
 
-        // An OL holding pass pro might get shoved downfield; don't count that as a run block!
-        const isPassAssignment = lineman.action === 'pass_block' || lineman.assignment === 'pass_block';
+        // Physical key: Read the lineman's first step and pad-level momentum, not his internal playbook string
+        const isBackpedaling = forwardStep < -0.15 || (lineman.vy || 0) < -0.5;
+        const isDrivingDownhill = forwardStep > 0.22 && (lineman.vy || 0) >= -0.1;
 
-        if (isPassAssignment || forwardStep < -0.12 || (lineman.vy || 0) < -0.75) {
+        if (isBackpedaling) {
             passBlocks++;
-        } else if (forwardStep > 0.25 && !isPassAssignment) {
+        } else if (isDrivingDownhill) {
             runBlocks++;
         }
 
@@ -644,14 +645,19 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     const LOS = playState.lineOfScrimmage || 60;
     const isBehindLine = runner.y < LOS + 1.2;
 
-    // Backfield vision: RBs follow interior gaps, but scrambling QBs escaping
-    // the pocket need wide perimeter vision (8-12 yards) to reach open sideline grass!
+    // Vision width: Inside runs focus on tight interior gaps (3-5y), 
+    // while outside stretch/toss plays and scrambles naturally look wide toward the boundary (8-12y).
     if (isBehindLine) {
-        if (runner.role === 'QB') {
-            maxLateral = Math.min(maxLateral, 10.0 + (agility / 20));
+        const isOutsidePlay = playState.playKey?.includes('Stretch') || 
+                              playState.playKey?.includes('Toss') || 
+                              playState.playKey?.includes('Sweep');
+
+        if (runner.role === 'QB' || isOutsidePlay) {
+            maxLateral = Math.min(maxLateral, 9.0 + (agility / 25));
         } else {
-            const visionExpansion = Math.max(0, (iq - 50) / 12.5);
-            maxLateral = Math.min(maxLateral, 3.0 + visionExpansion);
+            // Interior runs (Dive, Zone) stay disciplined to the gap
+            const visionExpansion = Math.max(0, (iq - 50) / 15);
+            maxLateral = Math.min(maxLateral, 4.0 + visionExpansion);
         }
     }
 
@@ -1539,22 +1545,72 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         // First down and down/distance contextual scaling
         const targetAtOrBeyondFirstDown = distanceBeyondLOS >= yardsToGo;
-        if (targetAtOrBeyondFirstDown) {
+                if (targetAtOrBeyondFirstDown) {
             score += (down >= 3) ? 18 : 8;
         } else {
             const yardsShort = yardsToGo - distanceBeyondLOS;
-            if (down >= 3 && yardsShort > 3) score -= Math.min(20, yardsShort * 2.5);
-            else if (down <= 2) score += (distanceBeyondLOS >= 3) ? 6 : -3;
 
-            // Goal-to-go or short yardage: heavily penalize throwing backwards behind the line
-            if (distanceBeyondLOS < 0) {
-                const distanceToGoal = 110 - (playState.lineOfScrimmage || 60);
+            if (down >= 3 && yardsShort > 3) {
+                score -= Math.min(20, yardsShort * 2.5);
+            } else if (down <= 2) {
+                score += (distanceBeyondLOS >= 3) ? 6 : -3;
+            }
+
+            // Penalize throws behind the line, except intentional screens.
+            if (distanceBeyondLOS < 0 && !isScreenRoute) {
+                const distanceToGoal =
+                    110 - (playState.lineOfScrimmage || 60);
+
+                const yardsBehindLOS = Math.abs(distanceBeyondLOS);
+
+                const depthPenalty =
+                    25 + Math.min(35, yardsBehindLOS * 5);
+
+                const longYardagePenalty =
+                    yardsToGo >= 8 ? 10 : 0;
+
+                const negativePlayPenalty =
+                    depthPenalty + longYardagePenalty;
+
                 if (distanceToGoal <= 10) {
-                    score -= 45; // Do not throw checkdowns behind the LOS on goal-line stands
+                    score -= Math.max(45, negativePlayPenalty);
                 } else {
-                    score -= 20; // Routine penalty for dumping the ball behind LOS
+                    score -= negativePlayPenalty;
                 }
             }
+        }
+
+        // LATE-GAME COMEBACK URGENCY
+        // Apply this to every target, including receivers beyond the sticks.
+        const qbDecisionScoreDiff =
+            (Number(playState.offenseScore) || 0) -
+            (Number(playState.defenseScore) || 0);
+
+        const currentQuarter = Number(playState.quarter) || 1;
+        const timeRemaining = Number(playState.timeRemaining);
+
+        const isLateGame =
+            currentQuarter >= 4 &&
+            Number.isFinite(timeRemaining) &&
+            timeRemaining <= 120;
+
+        if (
+            isLateGame &&
+            qbDecisionScoreDiff < 0 &&
+            distanceBeyondLOS > 0
+        ) {
+            const deficitUrgency = Math.min(
+                1,
+                Math.abs(qbDecisionScoreDiff) / 14
+            );
+
+            const lateGainBonus = Math.min(
+                8,
+                distanceBeyondLOS * 0.35
+            );
+
+            score += lateGainBonus *
+                (0.75 + deficitUrgency * 0.25);
         }
 
         // Pressure adjustments
@@ -1635,12 +1691,62 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         // NOT WHICH PLAYER HE "LIKES"
         // ======================================================
 
-        const decisionRiskTolerance = 0.65 + (qbDecision / 100) * 0.35;
-        const personalityRiskTolerance = qbProfile?.riskTolerance ?? 1.0;
+                // QB STYLE: RISK VERSUS REWARD
+        // Risk tolerance is a multiplier centered around 1.0.
+        // It changes a QB's appetite for risk, not his throwing accuracy.
+        const rawRiskTolerance = Number(qbProfile?.riskTolerance);
 
-        // Decision-making controls evaluation quality; personality modestly
-        // influences willingness to accept risk.
-        score *= decisionRiskTolerance * personalityRiskTolerance;
+        const personalityRiskTolerance = Number.isFinite(rawRiskTolerance)
+            ? Math.max(0.70, Math.min(1.30, rawRiskTolerance))
+            : 1.0;
+
+        const riskPreference = personalityRiskTolerance - 1.0;
+
+        // Risk increases when the projected catch point is contested,
+        // multiple defenders are closing, or a defender can undercut the throw.
+        const tightWindowRisk = Math.max(
+            0,
+            Math.min(1, (2.5 - minProjectedSeparation) / 2.5)
+        );
+
+        const closingDefenderRisk = Math.max(
+            0,
+            Math.min(1, defendersClosingIn / 3)
+        );
+
+        const undercutRisk = Math.max(
+            0,
+            Math.min(1, undercutThreat / 2)
+        );
+
+        const targetRisk =
+            (tightWindowRisk * 0.45) +
+            (closingDefenderRisk * 0.30) +
+            (undercutRisk * 0.25);
+
+        // Explosive reward applies to downfield targets with meaningful
+        // projected separation. Deep and open is attractive; deep and
+        // covered does not receive the same reward.
+        const explosiveDepthPotential = Math.max(
+            0,
+            Math.min(1, (targetDepth - 8) / 18)
+        );
+
+        const openWindowPotential = Math.max(
+            0,
+            Math.min(1, (minProjectedSeparation - 1.0) / 3.5)
+        );
+
+        const explosiveReward =
+            explosiveDepthPotential * openWindowPotential;
+
+        // Personality modifies the trade-off:
+        // aggressive QBs accept more risk for bigger gains;
+        // conservative QBs discount riskier throws and explosive upside.
+        score += riskPreference * (
+            (targetRisk * 18) +
+            (explosiveReward * 12)
+        );
 
         return {
             score: score,

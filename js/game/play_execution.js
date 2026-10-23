@@ -904,11 +904,21 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
     const allThreats = defenseStates.filter(d => {
         if (d.isBlocked || d.isEngaged || d.stunnedTicks > 0) return false;
-        if (d.assignment?.includes('rush') || d.assignment?.includes('blitz')) return true;
-        if (d.role === 'DL') return true;
-        // FIX: Proximity check only applies on RUN plays. On pass plays, coverage LBs are NOT blocking targets!
-        if (playType === 'run' && d.y < LOS + 3.0 && Math.abs(d.x - CENTER_X) < 10) return true;
-        return false;
+
+        if (playType === 'pass' && !isPassCompleted) {
+            // PASS PROTECTION: Only rushers, blitzers, or defenders penetrating near the pocket
+            if (d.assignment?.includes('rush') || d.assignment?.includes('blitz') || d.action === 'pass_rush') return true;
+            if (d.role === 'DL') return true;
+            const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+            if (qb && getDistance(d, qb) < 5.5 && d.y < LOS + 2.0) return true;
+            return false;
+        }
+
+        // RUN PLAYS & RUN-AFTER-CATCH:
+        // Any free defender on the field is a tackling threat.
+        // Geometry, vision range (10y), and leverage in assignBlockerTarget determine
+        // who blocks whom (WRs block CBs, linemen block box defenders, pullers seal the edge).
+        return true;
     });
 
     const linemen = offenseStates.filter(
@@ -2324,16 +2334,17 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             if (assignment?.startsWith('man_cover_') && shouldPursue && !isRunReadAtMesh && !isDL) {
                 const targetSlot = assignment.replace('man_cover_', '');
                 const carrierSlot = ballCarrierState?.slot;
+                const assignedReceiver = offenseStates.find(o => o.slot === targetSlot);
 
-                // FIX: If the ball carrier has crossed the line of scrimmage OR is an immediate tackle threat (< 4.5y),
-                // break man coverage and rally to the ball carrier regardless of original assignment!
+                // If assigned receiver is run-blocking, pass coverage is dead — rally to the ball
+                const receiverIsBlocking = assignedReceiver && (assignedReceiver.action?.includes('block') || assignedReceiver.isEngaged);
+
                 const carrierPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
-                const carrierIsClose = ballCarrierState && getDistance(pState, ballCarrierState) < 4.5;
+                const carrierIsClose = ballCarrierState && getDistance(pState, ballCarrierState) < 6.0;
+                const isHandoffRun = playState.type === 'run' && playState.handoffOccurred;
+                const isConfidentRun = (isRunRead && diagConfidence >= 0.60) || isHandoffRun;
 
-                // DEEPER FIX: Do not abandon man coverage on low-confidence run reads (diagConfidence < 0.65)
-                const isConfidentRun = isRunRead && diagConfidence >= 0.65;
-
-                if (carrierSlot !== targetSlot && !isConfidentRun && !qbScrambling && !carrierPastLOS && !carrierIsClose) {
+                if (carrierSlot !== targetSlot && !isConfidentRun && !qbScrambling && !carrierPastLOS && !carrierIsClose && !receiverIsBlocking) {
                     shouldPursue = false;
                 }
             }
@@ -2378,26 +2389,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 );
 
             if (isEarlyLinebackerRunFit && runFitPerception > 0) {
-                // Infer the developing lane from visible position and movement,
-                // not the hidden endpoint of the offensive play design.
-                const laneX =
-                    runFitCarrier.x + ((runFitCarrier.vx || 0) * 0.35);
+                // Infer the developing lane from visible position and movement
+                const laneX = runFitCarrier.x + ((runFitCarrier.vx || 0) * 0.45);
 
-                // Fit toward the likely lane without abandoning the LB's alignment.
-                const lateralCorrection = Math.max(
-                    -1.25,
-                    Math.min(1.25, laneX - pState.initialX)
-                );
+                // Linebackers scrape laterally at second-level depth (LOS + 2.8y)
+                // to stay clean of the interior OL/DL collision pile until the lane opens
+                const scrapeDepth = Math.max(pState.y, LOS + 2.8);
+                const lateralCorrection = Math.max(-2.5, Math.min(2.5, (laneX - pState.x) * 0.5));
 
                 const fitX = Math.max(
-                    1,
-                    Math.min(
-                        FIELD_WIDTH - 1,
-                        pState.initialX + lateralCorrection
-                    )
+                    1.5,
+                    Math.min(FIELD_WIDTH - 1.5, pState.x + lateralCorrection)
                 );
 
-                setPointIntent(pState, fitX, LOS + 1.2, 0.6);
+                setPointIntent(pState, fitX, scrapeDepth, 0.55);
                 pState.action = 'pursuit';
                 return;
             }
@@ -2431,100 +2436,44 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         return;
                     }
 
-                    const chasePerception = isRunReadAtMesh
-                        ? runTargetPerception
-                        : carrierPerception;
+                    // Committed pursuit retains tracking awareness even if runner sprints beyond the 21y vision cone
+                    const effectivePerception = hasCommittedToLiveRunner
+                        ? Math.max(0.85, carrierPerception)
+                        : (isRunReadAtMesh ? runTargetPerception : carrierPerception);
 
-                    const TACKLE_CUTOFF_DISTANCE = 4.5;
+                    const blendFactor = Math.min(1.0, Math.max(0.3, (dist - 0.8) / 3.0)) * effectivePerception;
 
-                    const blendFactor =
-                        Math.min(1.0, Math.max(0.0, (dist - 1.5) / 3.0)) *
-                        chasePerception;
-
-                    const leadDistanceFactor = Math.max(
-                        0.0,
-                        Math.min(1.0, (dist - TACKLE_CUTOFF_DISTANCE) / 6.0)
-                    );
-
-                    const maxLeadTime = 0.35;
-                    const leadTime =
-                        Math.min(maxLeadTime, dist / (16 + (iq / 4))) *
-                        blendFactor *
-                        leadDistanceFactor;
+                    // Lead the runner based on distance and closing speed; maintain lead throughout the tackle approach
+                    const maxLeadTime = 0.45;
+                    const leadTime = Math.min(maxLeadTime, Math.max(0.08, dist / (14 + (iq / 5)))) * blendFactor;
 
                     let predX = chaseTarget.x + ((chaseTarget.vx || 0) * leadTime);
                     let predY = chaseTarget.y + ((chaseTarget.vy || 0) * leadTime);
 
-                    const isOutsideRun = Math.abs(chaseTarget.x - CENTER_X) > 12.0;
+                    const isOutsideRun = Math.abs(chaseTarget.x - CENTER_X) > 10.0;
                     const isWidestDefender = (chaseTarget.x > CENTER_X && pState.x >= chaseTarget.x) ||
                         (chaseTarget.x < CENTER_X && pState.x <= chaseTarget.x);
 
                     if (isOutsideRun && isWidestDefender && pState.role === 'DB' && iq > 55) {
-                        const boundaryBias = (chaseTarget.x > CENTER_X ? 2.5 : -2.5) * blendFactor;
+                        const boundaryBias = (chaseTarget.x > CENTER_X ? 2.0 : -2.0) * blendFactor;
                         predX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, chaseTarget.x + boundaryBias));
                         predY = Math.max(chaseTarget.y + 0.5, predY);
                     }
 
-                    // ANGLE OF PURSUIT FIX: Prevent defenders from trailing behind the runner's footsteps ("conga line").
-                    // Downfield defenders must cut off the runner's path towards the end zone.
-                    const isDownfield = pState.y > chaseTarget.y + 1.5;
+                    // Downfield cutoff angle: cut off the sideline and meet the runner downhill
+                    const isDownfield = pState.y > chaseTarget.y + 1.2;
                     if (isDownfield) {
-                        // Meet the runner at an intersecting downhill point rather than aiming at where he currently is
-                        const yardsAhead = Math.min(6.0, (pState.y - chaseTarget.y) * 0.55);
+                        const yardsAhead = Math.min(6.0, (pState.y - chaseTarget.y) * 0.45);
                         predY = Math.max(predY, chaseTarget.y + yardsAhead);
 
-                        const isNearBoundary = chaseTarget.x < 8.0 || chaseTarget.x > (FIELD_WIDTH - 8.0);
+                        const isNearBoundary = chaseTarget.x < 10.0 || chaseTarget.x > (FIELD_WIDTH - 10.0);
                         if (isNearBoundary) {
-                            const boundaryPinX = chaseTarget.x < CENTER_X ? 2.0 : (FIELD_WIDTH - 2.0);
-                            predX = (predX * 0.25) + (boundaryPinX * 0.75);
+                            const boundaryPinX = chaseTarget.x < CENTER_X ? 2.5 : (FIELD_WIDTH - 2.5);
+                            predX = (predX * 0.35) + (boundaryPinX * 0.65);
                         }
                     }
 
-                    // The live carrier's position and velocity already determine
-                    // the pursuit target above. Do not apply a cached play-direction
-                    // read that may point away from the carrier's current path.
-
-                    /*if (dirConfidence > 0.45 && !isRunReadAtMesh) {
-                        const cheatAmount =
-                            3.0 *
-                            dirConfidence *
-                            (iq / 100) *
-                            blendFactor *
-                            (defenderProfile?.riskTolerance ?? 1.0);
-                        if (diagDirection === 'right' && predX < FIELD_WIDTH - 5) predX += cheatAmount;
-                        else if (diagDirection === 'left' && predX > 5) predX -= cheatAmount;
-                    }*/
-
-                    // DEEPER FIX: Boids-like Obstacle Avoidance for blocked tackle paths
-                    const isObstructed = pState._lastTackleBlockedLogTick && 
-                                        (playState.tick - pState._lastTackleBlockedLogTick) < 5;
-
-                    if (isObstructed) {
-                        // Steer left or right of the carrier based on current leverage to navigate around the blocker
-                        const leverageDir = pState.x > chaseTarget.x ? 1.8 : -1.8;
-                        predX += leverageDir;
-                    }
-
-                    // SACK CLOSING FIX: When rushing a quarterback behind the line of scrimmage,
-                    // drive directly through the QB! Do NOT aim short and park 1.15 yards away.
-                    const isQBSackPursuit = chaseTarget.role === 'QB' && chaseTarget.y <= LOS + 0.5;
-
-                    if (dist <= TACKLE_CUTOFF_DISTANCE && !isQBSackPursuit) {
-                        const dxToCarrier = chaseTarget.x - pState.x;
-                        const dyToCarrier = chaseTarget.y - pState.y;
-                        const gap = Math.max(0.001, Math.hypot(dxToCarrier, dyToCarrier));
-
-                        // Only apply a breakdown cushion on open-field runners, and keep it tight (0.35y max)
-                        const approachGap = Math.min(0.35, Math.max(0, dist - 0.5));
-
-                        predX = chaseTarget.x - (dxToCarrier / gap) * approachGap;
-                        predY = chaseTarget.y - (dyToCarrier / gap) * approachGap;
-                    } else if (isQBSackPursuit) {
-                        // Drive straight through the quarterback's center
-                        predX = chaseTarget.x;
-                        predY = chaseTarget.y;
-                    }
-
+                    // Do NOT subtract approachGap. Drive through the ball carrier's center of mass to initiate contact.
                     const pursuitTargetY = getPursuitTargetY(
                         pState,
                         chaseTarget,

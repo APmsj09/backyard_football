@@ -98,16 +98,29 @@ export function getDecisionProfile(playerState, tick = null) {
         95
     );
 
-    // Ego/street cred make players somewhat more willing to take risks;
-    // dependability tempers that tendency. Personality is a bias, not destiny.
-    const riskTolerance = clamp(
-        1.0 +
-        ((ego - 50) * 0.0015) +
-        ((streetCred - 50) * 0.0007) +
-        ((50 - dependability) * 0.0008),
-        0.90,
-        1.10
-    );
+        // QB personality should meaningfully influence throwing risk.
+    // Other positions retain their existing risk-tolerance behavior.
+    const isQB =
+        playerState.role === 'QB' ||
+        String(playerState.slot || '').startsWith('QB');
+
+    const riskTolerance = isQB
+        ? clamp(
+            1.0 +
+            ((ego - 50) * 0.0030) +
+            ((streetCred - 50) * 0.0010) +
+            ((50 - dependability) * 0.0015),
+            0.72,
+            1.28
+        )
+        : clamp(
+            1.0 +
+            ((ego - 50) * 0.0015) +
+            ((streetCred - 50) * 0.0007) +
+            ((50 - dependability) * 0.0008),
+            0.90,
+            1.10
+        );
 
     profile.iq = iq;
     profile.consistency = consistency;
