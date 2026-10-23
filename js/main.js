@@ -2677,25 +2677,31 @@ window.app = {
                 `;
 
                 if (isInstant) {
-                    const signingResult = Game.playerSignFreeAgent(p.id, offer);
+                    const signResult = Game.playerSignFreeAgent(p.id, offer);
 
-                    if (signingResult?.success) {
+                    // Refresh from the authoritative game state after the transaction.
+                    gameState = Game.getGameState();
+
+                    if (signResult?.success) {
                         Game.saveGameState(activeSaveKey);
-                        UI.showModal("Contract Signed! 🤝", outcomeHtml, null, null, null, "Welcome to the Squad!");
+
+                        UI.showModal(
+                            "Contract Signed! 🤝",
+                            outcomeHtml,
+                            null,
+                            null,
+                            null,
+                            "Welcome to the Squad!"
+                        );
                     } else {
-                        const failureHtml = `
-                            <div class="space-y-2 text-left text-xs">
-                                <p class="font-bold text-rose-700">
-                                    The offer was accepted, but the signing could not be completed.
-                                </p>
-                                <p class="text-slate-600">
-                                    ${signingResult?.message || 'The roster move failed.'}
-                                </p>
-                                <p class="text-slate-500">
-                                    No contract was finalized by this attempt.
-                                </p>
-                            </div>`;
-                        UI.showModal("Signing Failed", failureHtml, null, null, null, "Close");
+                        UI.showModal(
+                            "Signing Failed",
+                            `<p class="text-sm text-rose-700">${signResult?.message || "The player was not added to your roster."}</p>`,
+                            null,
+                            null,
+                            null,
+                            "Close"
+                        );
                     }
                 } else if (evalResult.accepted) {
                     gameState.weeklyBids = gameState.weeklyBids || [];
