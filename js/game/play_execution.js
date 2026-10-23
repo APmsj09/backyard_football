@@ -707,75 +707,10 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                         coveredOffensiveSlots.add(targetSlot);
                     }
                 }
-                    let targetSlot = assignment.replace('man_cover_', '');
-                    const offMapping = offenseFormationData.mapping || {};
-
-                    if (offMapping[targetSlot]) {
-                        const mappedSlot = offMapping[targetSlot];
-                        targetSlot = Array.isArray(mappedSlot) ? mappedSlot[0] : mappedSlot;
-                        if (assignment !== 'def_read') assignment = `man_cover_${targetSlot}`;
-                    }
-
-                    const targetExists = initialOffenseStates.some(o => o.slot === targetSlot);
-                    if (!targetExists || assignment === 'def_read') {
-                        const offensiveThreatSlots = initialOffenseStates
-                            .map(o => o.slot)
-                            .filter(slot =>
-                                /^(WR|TE|RB)\d*$/.test(slot) ||
-                                slot === 'FB'
-                            );
-
-                        const getTargetPriority = targetSlot => {
-                            const targetPosition =
-                                targetSlot.replace(/\d+/g, '');
-
-                            if (slot.startsWith('DB')) {
-                                if (targetPosition === 'WR') return 0;
-                                if (targetPosition === 'TE') return 1;
-                                if (targetPosition === 'RB' || targetPosition === 'FB') return 2;
-                            } else if (slot.startsWith('LB')) {
-                                if (targetPosition === 'RB' || targetPosition === 'FB') return 0;
-                                if (targetPosition === 'TE') return 1;
-                                if (targetPosition === 'WR') return 2;
-                            } else {
-                                if (targetPosition === 'RB' || targetPosition === 'FB') return 0;
-                                if (targetPosition === 'TE') return 1;
-                                if (targetPosition === 'WR') return 2;
-                            }
-
-                            return 3;
-                        };
-
-                        const priorities = offensiveThreatSlots.sort((a, b) =>
-                            getTargetPriority(a) - getTargetPriority(b)
-                        );
-
-                        // Prefer an eligible target nobody is covering yet.
-                        // If all threats are covered, allow an additional defender
-                        // to help on an existing matchup rather than abandoning coverage.
-                        const bestTarget =
-                            priorities.find(t => !coveredOffensiveSlots.has(t)) ||
-                            priorities[0];
-
-                        if (bestTarget) {
-                            assignment = `man_cover_${bestTarget}`;
-                            targetSlot = bestTarget;
-                        } else {
-                            assignment = slot.startsWith('DB')
-                                ? 'zone_deep_middle'
-                                : 'zone_hook_curl_middle';
-                        }
-                    }
-
-                    if (assignment.startsWith('man_cover_')) {
-                        assignedPlayerSlot = targetSlot;
-                        coveredOffensiveSlots.add(targetSlot);
-                    }
-                }
 
                 action = assignment;
 
-                                if (assignment.startsWith('man_cover_')) {
+                if (assignment.startsWith('man_cover_')) {
                     const tSlot = assignment.split('_')[2];
                     const tState = initialOffenseStates.find(o => o.slot === tSlot);
 
