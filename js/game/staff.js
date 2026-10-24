@@ -34,6 +34,231 @@ export const personalityTraits = [
     { name: 'Analytical Savant', desc: 'Sharp in-game adjustments, but quiet on the sideline.' }
 ];
 
+const STAFF_SCHEDULES = [
+    {
+        type: 'weeknight_evenings',
+        label: 'Weeknight evenings',
+        availableDays: ['Tuesday', 'Thursday'],
+        timeWindow: 'evening'
+    },
+    {
+        type: 'weeknight_evenings',
+        label: 'Monday and Wednesday evenings',
+        availableDays: ['Monday', 'Wednesday'],
+        timeWindow: 'evening'
+    },
+    {
+        type: 'weekends',
+        label: 'Weekend availability',
+        availableDays: ['Saturday', 'Sunday'],
+        timeWindow: 'daytime'
+    },
+    {
+        type: 'mixed',
+        label: 'One weeknight and Saturday',
+        availableDays: ['Wednesday', 'Saturday'],
+        timeWindow: 'mixed'
+    },
+    {
+        type: 'flexible',
+        label: 'Flexible schedule',
+        availableDays: ['Flexible'],
+        timeWindow: 'flexible'
+    },
+    {
+        type: 'limited_weekends',
+        label: 'Occasional weekends',
+        availableDays: ['Saturday'],
+        timeWindow: 'daytime'
+    }
+];
+
+function createStaffAvailability(role = 'coach') {
+    const weeklyHourRanges = {
+        coach: [3, 12],
+        scout: [2, 8],
+        trainer: [2, 7],
+        gm: [1, 5]
+    };
+
+    const [minHours, maxHours] =
+        weeklyHourRanges[role] || weeklyHourRanges.coach;
+
+    const schedule = getRandom(STAFF_SCHEDULES);
+
+    return {
+        weeklyHours: getRandomInt(minHours, maxHours),
+        scheduleType: schedule.type,
+        scheduleLabel: schedule.label,
+        availableDays: [...schedule.availableDays],
+        timeWindow: schedule.timeWindow,
+        reliability: getRandomInt(55, 95)
+    };
+}
+
+/**
+ * Adds availability to older staff records without overwriting profiles
+ * already stored in a save.
+ */
+export function ensureStaffAvailability(staff) {
+    if (!staff) return null;
+
+    const existingHours = Number(staff.availability?.weeklyHours);
+
+    if (
+        staff.availability &&
+        Number.isFinite(existingHours) &&
+        existingHours >= 0
+    ) {
+        return staff.availability;
+    }
+
+    staff.availability = createStaffAvailability(staff.role);
+
+    return staff.availability;
+}
+
+/**
+ * Calculates the effective hours contributed by one staff assignment.
+ *
+ * Accounts for:
+ * - The staff member's weekly availability.
+ * - Preferred schedule constraints.
+ * - The combined workload across all their assignments.
+ * - The staff member's reliability.
+ *
+ * This is a deterministic expected-output calculation. It does not
+ * mutate the requested assignment hours or perform random attendance rolls.
+ */
+export function getEffectiveStaffWorkHours(team, assignment) {
+    if (!team || !assignment || assignment.coachId == null) {
+        return 0;
+    }
+
+    const plan = team.staffWorkPlan;
+
+    if (!plan || !Array.isArray(plan.assignments)) {
+        return 0;
+    }
+
+    const coaches = [
+        ...(Array.isArray(team.coaches) ? team.coaches : []),
+        ...Object.values(team.staff || {})
+    ];
+
+    const uniqueCoaches = new Map();
+
+    coaches.forEach(coach => {
+        if (!coach || coach.id == null) return;
+        uniqueCoaches.set(String(coach.id), coach);
+    });
+
+    const coach = uniqueCoaches.get(String(assignment.coachId));
+
+    if (!coach) return 0;
+
+    const availability = ensureStaffAvailability(coach);
+
+    if (!availability) return 0;
+
+    const requestedHours = Number(assignment.hours);
+
+    if (
+        !Number.isFinite(requestedHours) ||
+        requestedHours <= 0
+    ) {
+        return 0;
+    }
+
+    // Aggregate all assignments for this coach so splitting work into
+    // multiple assignments cannot bypass the personal weekly time limit.
+    const coachAssignments = plan.assignments.filter(item =>
+        item &&
+        String(item.coachId) === String(coach.id) &&
+        Number.isFinite(Number(item.hours)) &&
+        Number(item.hours) > 0
+    );
+
+    if (!coachAssignments.includes(assignment)) {
+        coachAssignments.push(assignment);
+    }
+
+    const totalRequestedHours = coachAssignments.reduce(
+        (sum, item) => sum + Math.max(0, Number(item.hours) || 0),
+        0
+    );
+
+    if (totalRequestedHours <= 0) return 0;
+
+    const rawAvailability = Number(availability.weeklyHours);
+
+    const availableHours = Math.max(
+        0,
+        Math.min(
+            40,
+            Number.isFinite(rawAvailability) ? rawAvailability : 8
+        )
+    );
+
+    // A flexible schedule does not impose a day-by-day restriction.
+    // For fixed schedules, cap hours per available day. The availability
+    // profile remains the primary weekly limit.
+    const availableDays = Array.isArray(availability.availableDays)
+        ? availability.availableDays.filter(
+            day => typeof day === 'string' && day.trim()
+        )
+        : [];
+
+    const isFlexibleSchedule =
+        availability.scheduleType === 'flexible' ||
+        availableDays.includes('Flexible');
+
+    const hoursPerDay =
+        availability.timeWindow === 'mixed' ? 6 : 4;
+
+    const scheduleCapacity =
+        !isFlexibleSchedule && availableDays.length > 0
+            ? availableDays.length * hoursPerDay
+            : availableHours;
+
+    const configuredPlanCap = Number(plan.weeklyHoursPerCoach);
+
+    const planCap =
+        Number.isFinite(configuredPlanCap) && configuredPlanCap >= 0
+            ? Math.min(40, configuredPlanCap)
+            : 40;
+
+    const weeklyCapacity = Math.min(
+        availableHours,
+        scheduleCapacity,
+        planCap
+    );
+
+    // Scale assignments proportionally if their combined hours exceed
+    // the coach's available capacity. Preserve requested hours in the plan.
+    const capacityFactor = Math.min(
+        1,
+        weeklyCapacity / totalRequestedHours
+    );
+
+    const rawReliability = Number(availability.reliability);
+
+    const reliability = Math.max(
+        0,
+        Math.min(
+            100,
+            Number.isFinite(rawReliability) ? rawReliability : 80
+        )
+    );
+
+    const effectiveHours =
+        requestedHours *
+        capacityFactor *
+        (reliability / 100);
+
+    return Math.max(0, effectiveHours);
+}
+
 export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, formerPlayer = null) {
     const firstName = formerPlayer ? formerPlayer.name.split(' ')[0] : getRandom(firstNames);
     const lastName = formerPlayer ? formerPlayer.name.split(' ').slice(1).join(' ') : getRandom(lastNames);
@@ -43,6 +268,7 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
 
     // Initial trait rolls to calculate market demands
     const personality = getRandom(personalityTraits);
+    const availability = createStaffAvailability(role);
     const tactical = getRandom(tacticalBiases);
     const scouting = getRandom(scoutingBiases);
 
@@ -64,6 +290,9 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
         stipendDemand: 0, // Calculated dynamically by reputation
         weeksUnemployed: 0,
         stubbornness,
+
+        // Personal commitment outside the community league
+        availability,
         ratings: {
             // Tactical Acumen & Gameplanning
             offSchemeMastery: formerPlayer?.pos === 'QB' ? getRandomInt(65, 85) : baseVal(),
@@ -84,9 +313,9 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
             authority: formerPlayer ? 45 : getRandomInt(50, 80)
         },
         biases: {
-            tactical: getRandom(tacticalBiases),
-            scouting: getRandom(scoutingBiases),
-            personality: getRandom(personalityTraits)
+            tactical,
+            scouting,
+            personality
         },
         experience: 0
     };
@@ -989,6 +1218,28 @@ export function ensureTeamCoachingStaff(team) {
  */
 export function ensureTeamStaffWorkPlan(team) {
     if (!team) return null;
+    // Migrate older saves and cover both legacy roles and the flexible
+    // coaching group. De-duplicate staff who appear in both structures.
+    const staffRecords = [
+        ...(Array.isArray(team.coaches) ? team.coaches : []),
+        ...Object.values(team.staff || {})
+    ];
+
+    const uniqueStaff = new Map();
+
+    staffRecords.forEach(staff => {
+        if (!staff) return;
+
+        const key = staff.id != null
+            ? String(staff.id)
+            : staff;
+
+        uniqueStaff.set(key, staff);
+    });
+
+    uniqueStaff.forEach(staff => {
+        ensureStaffAvailability(staff);
+    });
 
     const coaches = ensureTeamCoachingStaff(team);
     let plan = team.staffWorkPlan;
@@ -1840,6 +2091,82 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
     const allOffKeys = Object.keys(offensivePlaybook).filter(k => k !== 'Punt_Punt' && !['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'].includes(k));
     const allDefKeys = Object.keys(defensivePlaybook).filter(k => k !== 'PuntReturn_Classic' && !['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'].includes(k));
 
+    // Staff preparation improves the odds that targeted plays make the
+    // gameplan. Actual hours are reduced by staff availability/reliability.
+    const prepCoaches = Array.isArray(team.coaches)
+        ? team.coaches.filter(coach => coach?.id != null)
+        : [];
+
+    const getPreparationScoreBonus = (task, playKey) => {
+        const skillKeys = task === 'offensePrep'
+            ? [
+                'offSchemeMastery',
+                'gameplanInstinct',
+                'inGameAdjustments'
+            ]
+            : [
+                'defSchemeMastery',
+                'gameplanInstinct',
+                'inGameAdjustments'
+            ];
+
+        let totalBonus = 0;
+
+        for (const assignment of team.staffWorkPlan?.assignments || []) {
+            if (
+                assignment?.task !== task ||
+                assignment.coachId == null
+            ) {
+                continue;
+            }
+
+            const targetKeys = Array.isArray(assignment.playKeys)
+                ? assignment.playKeys
+                : (
+                    task === 'offensePrep'
+                        ? team.gameplan.installedOffense
+                        : team.gameplan.installedDefense
+                );
+
+            if (!Array.isArray(targetKeys) || !targetKeys.includes(playKey)) {
+                continue;
+            }
+
+            const effectiveHours = getEffectiveStaffWorkHours(
+                team,
+                assignment
+            );
+
+            if (!Number.isFinite(effectiveHours) || effectiveHours <= 0) {
+                continue;
+            }
+
+            const assignedCoach = prepCoaches.find(
+                coach =>
+                    String(coach.id) === String(assignment.coachId)
+            );
+
+            const ratings = assignedCoach?.ratings || {};
+
+            const skillScore = skillKeys.reduce((sum, key) => {
+                const value = Number(ratings[key]);
+
+                return sum + (
+                    Number.isFinite(value)
+                        ? Math.max(0, Math.min(100, value))
+                        : 50
+                );
+            }, 0) / skillKeys.length;
+
+            const hoursFactor = Math.min(1, effectiveHours / 8);
+            const skillFactor = 0.65 + (skillScore / 200);
+
+            totalBonus += 12 * hoursFactor * skillFactor;
+        }
+
+        return Math.min(18, totalBonus);
+    };
+
     // Score offensive plays based on Coach Bias + Roster Fit + GM Directive
     const scoredOff = allOffKeys.map(key => {
         const play = offensivePlaybook[key];
@@ -1856,6 +2183,8 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
             if (oppDef.includes('4-2-2') && play.type === 'pass') score += 20; // Pass against run-heavy fronts
             if (oppDef.includes('3-0-5') && play.type === 'run') score += 20;  // Run against dime looks
         }
+
+        score += getPreparationScoreBonus('offensePrep', key);
 
         return { key, score: score + Math.random() * 10 };
     }).sort((a, b) => b.score - a.score);
@@ -1874,11 +2203,251 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
             if (oppOff.includes('Power') && play.concept === 'Run') score += 25;
         }
 
+        score += getPreparationScoreBonus('defensePrep', key);
+
         return { key, score: score + Math.random() * 10 };
     }).sort((a, b) => b.score - a.score);
 
     team.gameplan.installedOffense = scoredOff.slice(0, 6).map(s => s.key);
     team.gameplan.installedDefense = scoredDef.slice(0, 4).map(s => s.key);
+}
+
+export function processWeeklyStaffPreparation(team, year, week) {
+    if (!team || !team.gameplan) return null;
+
+    const assignments = Array.isArray(team.staffWorkPlan?.assignments)
+        ? team.staffWorkPlan.assignments
+        : [];
+
+    const coaches = Array.isArray(team.coaches)
+        ? team.coaches.filter(coach => coach?.id != null)
+        : [];
+
+    const clampPoints = value =>
+        Math.round(Math.max(0, Math.min(12, value)) * 10) / 10;
+
+    const getAssignmentPoints = (assignment, task) => {
+        const effectiveHours = getEffectiveStaffWorkHours(
+            team,
+            assignment
+        );
+
+        if (
+            !Number.isFinite(effectiveHours) ||
+            effectiveHours <= 0
+        ) {
+            return 0;
+        }
+
+        const coach = coaches.find(
+            candidate =>
+                String(candidate.id) === String(assignment.coachId)
+        );
+
+        const ratings = coach?.ratings || {};
+
+        const skillKeys = task === 'offensePrep'
+            ? [
+                'offSchemeMastery',
+                'gameplanInstinct',
+                'inGameAdjustments'
+            ]
+            : [
+                'defSchemeMastery',
+                'gameplanInstinct',
+                'inGameAdjustments'
+            ];
+
+        const skillScore = skillKeys.reduce((sum, key) => {
+            const value = Number(ratings[key]);
+
+            return sum + (
+                Number.isFinite(value)
+                    ? Math.max(0, Math.min(100, value))
+                    : 50
+            );
+        }, 0) / skillKeys.length;
+
+        // Delivered hours determine the base output; stronger
+        // scheme and game-planning skills improve its value.
+        const skillFactor = 0.70 + (skillScore / 250);
+
+        return effectiveHours * skillFactor;
+    };
+
+    let offensePoints = 0;
+    let generalDefensePoints = 0;
+
+    const offensePointsByPlay = {};
+    const generalDefensePointsByPlay = {};
+
+    const specificDefensePoints = new Map();
+    const specificDefensePointsByOpponent = new Map();
+
+    const addPlayPoints = (target, playKey, points) => {
+        if (!playKey || !Number.isFinite(points) || points <= 0) {
+            return;
+        }
+
+        target[playKey] = (target[playKey] || 0) + points;
+    };
+
+    for (const assignment of assignments) {
+        if (
+            !assignment ||
+            !['offensePrep', 'defensePrep'].includes(assignment.task) ||
+            assignment.coachId == null
+        ) {
+            continue;
+        }
+
+        const points = getAssignmentPoints(
+            assignment,
+            assignment.task
+        );
+
+        if (points <= 0) continue;
+
+        const isOffense = assignment.task === 'offensePrep';
+
+        const foundationKeys = isOffense
+            ? [
+                'Uni_InsideZone',
+                'Uni_StretchRight',
+                'Uni_QuickSlants',
+                'Uni_FourVerts'
+            ]
+            : [
+                'Cover_2_Zone_Base',
+                'Cover_1_Robber',
+                'Man_Blitz_Base',
+                'GoalLine_RunStuff'
+            ];
+
+        const installedKeys = isOffense
+            ? (team.gameplan.installedOffense || [])
+            : (team.gameplan.installedDefense || []);
+
+        const allowedKeys = new Set([
+            ...foundationKeys,
+            ...installedKeys
+        ]);
+
+        const requestedKeys = Array.isArray(assignment.playKeys)
+            ? assignment.playKeys
+            : [...allowedKeys];
+
+        const targetedKeys = [
+            ...new Set(
+                requestedKeys.filter(key => allowedKeys.has(key))
+            )
+        ];
+
+        // Divide preparation effort across the plays actually targeted.
+        const pointsPerPlay = targetedKeys.length > 0
+            ? points / targetedKeys.length
+            : 0;
+
+        if (isOffense) {
+            offensePoints += points;
+
+            targetedKeys.forEach(key =>
+                addPlayPoints(
+                    offensePointsByPlay,
+                    key,
+                    pointsPerPlay
+                )
+            );
+
+            continue;
+        }
+
+        const opponentId = assignment.opponentTeamId == null
+            ? ''
+            : String(assignment.opponentTeamId).trim();
+
+        if (!opponentId) {
+            generalDefensePoints += points;
+
+            targetedKeys.forEach(key =>
+                addPlayPoints(
+                    generalDefensePointsByPlay,
+                    key,
+                    pointsPerPlay
+                )
+            );
+
+            continue;
+        }
+
+        specificDefensePoints.set(
+            opponentId,
+            (specificDefensePoints.get(opponentId) || 0) + points
+        );
+
+        if (!specificDefensePointsByOpponent.has(opponentId)) {
+            specificDefensePointsByOpponent.set(opponentId, {});
+        }
+
+        const opponentPlayPoints =
+            specificDefensePointsByOpponent.get(opponentId);
+
+        targetedKeys.forEach(key =>
+            addPlayPoints(
+                opponentPlayPoints,
+                key,
+                pointsPerPlay
+            )
+        );
+    }
+
+    const clampPlayPoints = playPoints =>
+        Object.fromEntries(
+            Object.entries(playPoints).map(([key, points]) => [
+                key,
+                clampPoints(points)
+            ])
+        );
+
+    const defenseByOpponent = {
+        '*': {
+            points: clampPoints(generalDefensePoints),
+            byPlay: clampPlayPoints(generalDefensePointsByPlay)
+        }
+    };
+
+    // Opponent-specific preparation supplements general preparation
+    // and adds its own play-level scores.
+    for (const [opponentId, points] of specificDefensePoints) {
+        const combinedByPlay = {
+            ...generalDefensePointsByPlay
+        };
+
+        const opponentPlayPoints =
+            specificDefensePointsByOpponent.get(opponentId) || {};
+
+        for (const [playKey, playPoints] of Object.entries(
+            opponentPlayPoints
+        )) {
+            combinedByPlay[playKey] =
+                (combinedByPlay[playKey] || 0) + playPoints;
+        }
+
+        defenseByOpponent[opponentId] = {
+            points: clampPoints(generalDefensePoints + points),
+            byPlay: clampPlayPoints(combinedByPlay)
+        };
+    }
+
+    team.gameplan.staffPreparation = {
+        preparedForYear: Number(year),
+        preparedForWeek: Number(week),
+        offensePoints: clampPoints(offensePoints),
+        offenseByPlay: clampPlayPoints(offensePointsByPlay),
+        defenseByOpponent
+    };
+
+    return team.gameplan.staffPreparation;
 }
 
 /**

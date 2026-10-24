@@ -38,13 +38,90 @@ export function markMessageAsRead(messageId) {
     if (message) { message.isRead = true; }
 }
 
-export function addMessage(subject, body, isRead = false, gameObj = null) {
+function inferMessageCategory(subject = '') {
+    const title = String(subject).toLowerCase();
+
+    if (/(staff|coach|stipend|hiring|hire|fired|workload|availability)/.test(title)) {
+        return 'staff';
+    }
+
+    if (/(fund|dues|snack|store|favor token|budget|payment|financial|fundrais)/.test(title)) {
+        return 'finances';
+    }
+
+    if (/(draft|scout|scouting|prospect|rookie)/.test(title)) {
+        return 'scouting';
+    }
+
+    if (/(practice|training|development|rep growth|growth spurt|gameplan|game plan|playbook|depth chart|opponent)/.test(title)) {
+        return 'preparation';
+    }
+
+    if (/(injur|recover|unavailable|roster|player joined|new player|signed|cut|retir|graduat|invite)/.test(title)) {
+        return 'roster';
+    }
+
+    if (/(season|offseason|promot|relegat|champion|week \d+)/.test(title)) {
+        return 'season';
+    }
+
+    if (/(friend|relationship|rival|happiness|morale|locker room|sideline legend)/.test(title)) {
+        return 'community';
+    }
+
+    return 'general';
+}
+
+export function addMessage(
+    subject,
+    body,
+    isRead = false,
+    gameObj = null,
+    options = {}
+) {
     const g = gameObj || game;
+
     if (!g || !g.messages) {
         console.error("Cannot add message: Game object or messages array not initialized.");
         return;
     }
-    g.messages.unshift({ id: crypto.randomUUID(), subject, body, isRead });
+
+    const meta = options && typeof options === 'object'
+        ? options
+        : {};
+
+    const priorityLevels = ['urgent', 'important', 'normal'];
+
+    const priority = priorityLevels.includes(meta.priority)
+        ? meta.priority
+        : (meta.actionRequired ? 'important' : 'normal');
+
+    const action = meta.action &&
+        typeof meta.action === 'object' &&
+        !Array.isArray(meta.action)
+        ? meta.action
+        : null;
+
+    g.messages.unshift({
+        id: crypto.randomUUID(),
+        subject: String(subject ?? '(No Subject)'),
+        body: String(body ?? ''),
+        isRead: Boolean(isRead),
+
+        // Inbox organization
+        category: meta.category || inferMessageCategory(subject),
+        priority,
+        actionRequired: Boolean(meta.actionRequired),
+        action,
+
+        // Timeline context
+        createdAt: meta.createdAt ?? Date.now(),
+        year: meta.year ?? g.year ?? null,
+        week: meta.week ?? g.currentWeek ?? null,
+
+        // Origin helps distinguish system notices from future staff/player messages.
+        source: meta.source || 'system'
+    });
 }
 
 export function getRelationshipLevel(p1Id, p2Id) {

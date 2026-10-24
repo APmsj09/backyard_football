@@ -32,7 +32,10 @@ import { getRandom, getRandomInt } from '../utils.js';
 import { updatePlayerPosition, getDistance } from './physics.js';
 import { TICK_DURATION_SECONDS } from './simulation_config.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
-import { recordCoachDevelopmentOutcome } from './staff.js';
+import {
+    recordCoachDevelopmentOutcome,
+    getEffectiveStaffWorkHours
+} from './staff.js';
 import {
     getOffensivePlayKnowledge,
     getDefensivePlayKnowledge,
@@ -873,7 +876,11 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
             continue;
         }
 
-        const hours = Number(assignment.hours);
+        const hours = getEffectiveStaffWorkHours(
+            offense,
+            assignment
+        );
+
         if (!Number.isFinite(hours) || hours <= 0) continue;
 
         const id = String(assignment.coachId);
@@ -1033,6 +1040,12 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
         )
     );
 
+    const offensivePrepByPlay = preparationIsCurrent &&
+        staffPreparation?.offenseByPlay &&
+        typeof staffPreparation.offenseByPlay === 'object'
+        ? staffPreparation.offenseByPlay
+        : {};
+
     let scoredPlays = candidateKeys.map(key => {
         const play = offensivePlaybook[key];
         const tags = play.tags || [];
@@ -1086,6 +1099,20 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
             )
         ) {
             score += offensivePrepPoints * 0.35;
+        }
+
+        // TARGETED STAFF PREPARATION:
+        // Give individually prepared plays a modest selection bonus.
+        // This bonus applies only to preparation from the current week.
+        const targetedPrepPoints = Number(
+            offensivePrepByPlay[key]
+        );
+
+        if (
+            Number.isFinite(targetedPrepPoints) &&
+            targetedPrepPoints > 0
+        ) {
+            score += Math.min(4, targetedPrepPoints) * 0.85;
         }
 
         // ======================================================
@@ -1647,6 +1674,11 @@ export function determineDefensivePlayCall(
         )
     );
 
+    const defensivePrepByPlay = opponentPreparation?.byPlay &&
+        typeof opponentPreparation.byPlay === 'object'
+        ? opponentPreparation.byPlay
+        : {};
+
     // ==========================================================
     // DEFENSIVE GAME-PLANNING (SCOUTING THE OPPONENT)
     // ==========================================================
@@ -1700,7 +1732,10 @@ export function determineDefensivePlayCall(
             continue;
         }
 
-        const hours = Number(assignment.hours);
+        const hours = getEffectiveStaffWorkHours(
+            defense,
+            assignment
+        );
 
         if (!Number.isFinite(hours) || hours <= 0) continue;
 
@@ -1856,6 +1891,22 @@ export function determineDefensivePlayCall(
             ) {
                 score += defensivePrepPoints * 0.6 * defensiveDecisionFactor;
             }
+        }
+
+        // TARGETED STAFF PREPARATION:
+        // Reward defensive calls specifically prepared for this opponent.
+        const targetedPrepPoints = Number(
+            defensivePrepByPlay[key]
+        );
+
+        if (
+            Number.isFinite(targetedPrepPoints) &&
+            targetedPrepPoints > 0
+        ) {
+            score +=
+                Math.min(4, targetedPrepPoints) *
+                0.85 *
+                defensiveDecisionFactor;
         }
 
         // FIELD POSITION SANITY CHECKS:
@@ -3418,6 +3469,117 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
 
     const { playResult, finalBallY } = result;
 
+    // Record normal offensive and defensive play outcomes for postgame
+    // coaching feedback. Exclude conversions and punts from this sample.
+    if (
+        !isLive &&
+        !gameInstance.isConversionAttempt &&
+        offPlayKey !== 'Punt_Punt' &&
+        defPlayKey !== 'PuntReturn_Classic'
+    ) {
+        const requiredYards = Math.max(
+            0,
+            Number(gameInstance.yardsToGo) || 0
+        );
+
+        const successThreshold = gameInstance.down === 1
+            ? requiredYards * 0.4
+            : gameInstance.down === 2
+                ? requiredYards * 0.6
+                : requiredYards;
+
+        const yards = Number(playResult.yards);
+        const safeYards = Number.isFinite(yards) ? yards : 0;
+
+        const offensiveTouchdown =
+            playResult.score === 'TD' && !playResult.defensiveTD;
+
+        const defensiveTouchdown =
+            playResult.score === 'TD' && Boolean(playResult.defensiveTD);
+
+        const offensiveTurnover = Boolean(
+            playResult.possessionChange ||
+            playResult.turnoverType ||
+            playResult.defensiveTD ||
+            playResult.safety
+        );
+
+        const offenseSucceeded = offensiveTouchdown || (
+            !offensiveTurnover &&
+            safeYards >= successThreshold
+        );
+
+        const defenseSucceeded = (
+            defensiveTouchdown ||
+            playResult.safety ||
+            playResult.possessionChange ||
+            Boolean(playResult.turnoverType) ||
+            safeYards < successThreshold
+        );
+
+        const recordPlayOutcome = (
+            team,
+            unit,
+            playKey,
+            succeeded,
+            touchdown,
+            turnover
+        ) => {
+            if (!team?.id || !playKey) return;
+
+            if (!gameInstance.playCallStats) {
+                gameInstance.playCallStats = {};
+            }
+
+            const teamKey = String(team.id);
+
+            if (!gameInstance.playCallStats[teamKey]) {
+                gameInstance.playCallStats[teamKey] = {
+                    offense: {},
+                    defense: {}
+                };
+            }
+
+            const teamStats = gameInstance.playCallStats[teamKey];
+
+            if (!teamStats[unit][playKey]) {
+                teamStats[unit][playKey] = {
+                    calls: 0,
+                    successes: 0,
+                    touchdowns: 0,
+                    turnovers: 0,
+                    yards: 0
+                };
+            }
+
+            const stat = teamStats[unit][playKey];
+
+            stat.calls++;
+            stat.successes += succeeded ? 1 : 0;
+            stat.touchdowns += touchdown ? 1 : 0;
+            stat.turnovers += turnover ? 1 : 0;
+            stat.yards += safeYards;
+        };
+
+        recordPlayOutcome(
+            offense,
+            'offense',
+            offPlayKey,
+            offenseSucceeded,
+            offensiveTouchdown,
+            offensiveTurnover
+        );
+
+        recordPlayOutcome(
+            defense,
+            'defense',
+            defPlayKey,
+            defenseSucceeded,
+            defensiveTouchdown,
+            offensiveTurnover
+        );
+    }
+
     if (gameInstance.isConversionAttempt) {
         if (playResult.score === 'TD') {
             let scoringTeam = offense;
@@ -3544,7 +3706,8 @@ export function recordTeamGamePlanningOutcome(
     pointsAgainst,
     task,
     year,
-    week
+    week,
+    playCallStats = null
 ) {
     const skillKeys = task === 'offensePrep'
         ? [
@@ -3568,7 +3731,10 @@ export function recordTeamGamePlanningOutcome(
             continue;
         }
 
-        const hours = Number(assignment.hours);
+        const hours = getEffectiveStaffWorkHours(
+            team,
+            assignment
+        );
 
         if (!Number.isFinite(hours) || hours <= 0) continue;
 
@@ -3694,7 +3860,68 @@ export function recordTeamGamePlanningOutcome(
         ? pointsFor - expectedPoints
         : expectedPoints - pointsAgainst;
 
-    const outcomeQuality = clamp(performanceDelta / 10);
+    let outcomeQuality = clamp(performanceDelta / 10);
+
+    // Blend prepared-play results into the team-level performance grade.
+    // Ignore stale preparation and require a minimum sample size.
+    const preparation = team.gameplan?.staffPreparation;
+
+    const preparationIsCurrent =
+        Number(preparation?.preparedForYear) === Number(year) &&
+        Number(preparation?.preparedForWeek) === Number(week);
+
+    const targetedPlayMap = !preparationIsCurrent
+        ? null
+        : task === 'offensePrep'
+            ? preparation.offenseByPlay
+            : (
+                preparation.defenseByOpponent?.[String(opponent?.id)] ||
+                preparation.defenseByOpponent?.['*']
+            )?.byPlay;
+
+    const teamPlayStats = playCallStats?.[String(team.id)];
+
+    const unitPlayStats = task === 'offensePrep'
+        ? teamPlayStats?.offense
+        : teamPlayStats?.defense;
+
+    let targetedCalls = 0;
+    let targetedSuccesses = 0;
+
+    for (const [playKey, prepPoints] of Object.entries(
+        targetedPlayMap || {}
+    )) {
+        if (!(Number(prepPoints) > 0)) continue;
+
+        const stat = unitPlayStats?.[playKey];
+        const calls = Number(stat?.calls) || 0;
+        const successes = Number(stat?.successes) || 0;
+
+        if (calls <= 0) continue;
+
+        targetedCalls += calls;
+        targetedSuccesses += Math.min(calls, successes);
+    }
+
+    if (targetedCalls >= 3) {
+        const targetedSuccessRate =
+            targetedSuccesses / targetedCalls;
+
+        const expectedSuccessRate = task === 'offensePrep'
+            ? 0.45
+            : 0.55;
+
+        const targetedQuality = clamp(
+            (targetedSuccessRate - expectedSuccessRate) / 0.25
+        );
+
+        // Team performance remains the primary signal.
+        // Prepared-play performance supplies a smaller secondary signal.
+        outcomeQuality = clamp(
+            outcomeQuality * 0.75 +
+            targetedQuality * 0.25
+        );
+    }
 
     // Preparation hours increase confidence in the feedback signal;
     // they do not directly grant a skill increase.
@@ -3730,6 +3957,7 @@ export function simulateMatchFast(homeTeam, awayTeam) {
         possession: Math.random() < 0.5 ? homeTeam : awayTeam,
         ballOn: 35, down: 1, yardsToGo: 10,
         gameLog: [],
+        playCallStats: {},
         quarter: 1,
         clock: 420,
         playsTotal: 0,
@@ -3766,7 +3994,8 @@ export function simulateMatchFast(homeTeam, awayTeam) {
             matchGame.awayScore,
             'offensePrep',
             year,
-            week
+            week,
+            matchGame.playCallStats
         );
 
         recordTeamGamePlanningOutcome(
@@ -3776,7 +4005,8 @@ export function simulateMatchFast(homeTeam, awayTeam) {
             matchGame.awayScore,
             'defensePrep',
             year,
-            week
+            week,
+            matchGame.playCallStats
         );
 
         recordTeamGamePlanningOutcome(
@@ -3786,7 +4016,8 @@ export function simulateMatchFast(homeTeam, awayTeam) {
             matchGame.homeScore,
             'offensePrep',
             year,
-            week
+            week,
+            matchGame.playCallStats
         );
 
         recordTeamGamePlanningOutcome(
@@ -3796,7 +4027,8 @@ export function simulateMatchFast(homeTeam, awayTeam) {
             matchGame.homeScore,
             'defensePrep',
             year,
-            week
+            week,
+            matchGame.playCallStats
         );
     }
 

@@ -848,7 +848,30 @@ function applyTrainingHours(
     return improved;
 }
 
-function getScoutingTargetIds(team, gameState, assignment) {
+function snapshotScoutingEvaluator(evaluator) {
+    const ratings = evaluator?.ratings || {};
+    const scoutingBias =
+        evaluator?.biases?.scouting?.name ||
+        evaluator?.scoutingBias ||
+        'Objective Scout';
+
+    return {
+        id: evaluator?.id || null,
+        name: evaluator?.name || 'Staff Scout',
+        isUserCoach: Boolean(evaluator?.isUserCoach),
+        ratings: {
+            evalPhysicals: Number(ratings.evalPhysicals ?? 50),
+            evalTechnique: Number(ratings.evalTechnique ?? 50),
+            evalCharacter: Number(ratings.evalCharacter ?? 50)
+        },
+        biases: {
+            scouting: {
+                name: scoutingBias
+            }
+        },
+        scoutingBias
+    };
+}
     if (Array.isArray(assignment.targetPlayerIds)) {
         return new Set(assignment.targetPlayerIds.map(String));
     }
@@ -1423,6 +1446,35 @@ export function processWeeklyScoutingAssignments(
 
         if (assignment.task !== 'scouting') continue;
 
+        // Always bank draft-focused scouting during weekly processing.
+        // A few undrafted prospects can remain on the previous draft board,
+        // so draftClass.length cannot reliably identify the incoming class.
+        if (assignment.focus === 'draft') {
+            if (!Array.isArray(team.pendingDraftScoutingWork)) {
+                team.pendingDraftScoutingWork = [];
+            }
+
+            const requestedTargetCount = Number(assignment.maxTargets);
+
+            const maxTargets =
+                Number.isInteger(requestedTargetCount) &&
+                requestedTargetCount > 0
+                    ? Math.min(12, requestedTargetCount)
+                    : Math.max(1, Math.floor(allocatedHours / 4));
+
+            team.pendingDraftScoutingWork.push({
+                coachId: coach.id || coachId,
+                evaluator: snapshotScoutingEvaluator(coach),
+                hours: allocatedHours,
+                maxTargets,
+                year,
+                week
+            });
+
+            hoursUsed += allocatedHours;
+            continue;
+        }
+
         const candidates = getScoutingCandidates(
             team,
             gameState,
@@ -1475,6 +1527,139 @@ export function processWeeklyScoutingAssignments(
         hoursUsed,
         playersTrained: trainedPlayerIds.size,
         attributesImproved
+    };
+}
+
+/**
+ * Applies draft-scouting hours saved while the incoming draft class
+ * was unavailable.
+ *
+ * Call once after the new draft class has been generated and before
+ * the user begins drafting.
+ */
+export function applyBankedDraftScoutingReports(
+    team,
+    gameState,
+    year = gameState?.year,
+    week = gameState?.currentWeek
+) {
+    if (
+        !team ||
+        !gameState ||
+        !Number.isInteger(year) ||
+        !Number.isInteger(week) ||
+        !Array.isArray(gameState.draftClass) ||
+        gameState.draftClass.length === 0
+    ) {
+        return {
+            playersUpdated: 0,
+            hoursUsed: 0,
+            workItemsApplied: 0
+        };
+    }
+
+    const pending = Array.isArray(team.pendingDraftScoutingWork)
+        ? team.pendingDraftScoutingWork
+        : [];
+
+    if (pending.length === 0) {
+        return {
+            playersUpdated: 0,
+            hoursUsed: 0,
+            workItemsApplied: 0
+        };
+    }
+
+    const staffById = getAvailableScoutingStaff(team);
+
+    let playersUpdated = 0;
+    let hoursUsed = 0;
+    let workItemsApplied = 0;
+
+    for (const work of pending) {
+        const hours = Number(work?.hours);
+
+        if (!Number.isFinite(hours) || hours <= 0) continue;
+
+        const coachId = String(
+            work.coachId ?? work.evaluator?.id ?? ''
+        );
+
+        // Use the saved profile so the report reflects the evaluator
+        // who was assigned the work, not an unrelated replacement.
+        const evaluator =
+            work.evaluator ||
+            staffById.get(coachId);
+
+        if (!evaluator) continue;
+
+        const evaluatedYear = Number.isInteger(work.year)
+            ? work.year
+            : year;
+
+        const evaluatedWeek = Number.isInteger(work.week)
+            ? work.week
+            : week;
+
+        const assignment = {
+            focus: 'draft',
+            maxTargets: work.maxTargets
+        };
+
+        // This now resolves against the newly generated draft class.
+        // Existing reports and unfinished scouting progress are retained.
+        const candidates = getScoutingCandidates(
+            team,
+            gameState,
+            assignment,
+            evaluatedYear,
+            evaluatedWeek
+        );
+
+        if (candidates.length === 0) continue;
+
+        const requestedTargetCount = Number(work.maxTargets);
+
+        const targetCount = Math.min(
+            candidates.length,
+            12,
+            Number.isInteger(requestedTargetCount) &&
+                requestedTargetCount > 0
+                ? requestedTargetCount
+                : Math.max(1, Math.floor(hours / 4))
+        );
+
+        const selected = candidates.slice(0, targetCount);
+
+        if (selected.length === 0) continue;
+
+        const hoursPerTarget = hours / selected.length;
+
+        for (const { player } of selected) {
+            if (advanceTeamScoutingReport(
+                team,
+                player,
+                evaluator,
+                hoursPerTarget,
+                evaluatedYear,
+                evaluatedWeek
+            )) {
+                playersUpdated++;
+            }
+        }
+
+        hoursUsed += hours;
+        workItemsApplied++;
+    }
+
+    // These assignments have now been processed against the incoming class.
+    // Clear the queue so re-entering the draft cannot spend the same hours twice.
+    team.pendingDraftScoutingWork = [];
+
+    return {
+        playersUpdated,
+        hoursUsed,
+        workItemsApplied
     };
 }
 

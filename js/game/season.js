@@ -19,7 +19,8 @@ import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach,
     aiManageTeamStaff, aiBuildGameplan, aiChooseWeeklyPractice,
     ensureAiStaffWorkPlan, getTeamCoachingSpecialist,
-    processWeeklyCoachDevelopment,ensureTeamStaffWorkPlan
+    processWeeklyCoachDevelopment, ensureTeamStaffWorkPlan,
+    getEffectiveStaffWorkHours, processWeeklyStaffPreparation
 } from './staff.js';
 import {
     evaluatePlayerRetention,
@@ -29,13 +30,18 @@ import {
     createPlayerPromise,
     evaluateAiRetentionPitch
 } from './negotiations.js';
-import { processWeeklyScoutingAssignments } from './scouting.js';
+import {
+    processWeeklyScoutingAssignments,
+    applyBankedDraftScoutingReports,
+    initializeInheritedScoutingReports
+} from './scouting.js';
 
 export const ROSTER_LIMIT = 18;
 export const REGULAR_SEASON_ROSTER_LIMIT = 18;
 export const SUMMER_ROSTER_LIMIT = 24;
 export const MIN_HEALTHY_PLAYERS = 8;
 export const TEMPORARY_HELP_THRESHOLD = 12;
+export const SEASON_DUES_PER_PLAYER = 9;
 
 const createEmptySeasonStats = () => ({
     passYards: 0,
@@ -982,10 +988,14 @@ export function processEndOfWeek() {
 
         const coach = team.staff?.coach || team.coach;
         const personality = coach?.biases?.personality?.name || 'Balanced Tactician';
-        const discipline = coach?.ratings?.practiceDiscipline || 50;
         const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
         const isUser = team.isPlayerControlled;
         const roster = getRosterObjects(team);
+
+        // Weekly community allowance only.
+        // Season dues are collected once by processSeasonStartDues().
+        const weeklyIncome = 5.00;
+        team.finances.balance += weeklyIncome;
 
         // --- 1. AI WAIVE DUES PHASE (Players' Coach is soft on unhappy kids) ---
         if (!isUser) {
@@ -1026,7 +1036,7 @@ export function processEndOfWeek() {
         team.finances.balance += (weeklyIncome + duesCollected);
 
         if (isUser && game.gameLog) {
-            game.gameLog.push(`💰 Snack Fund Update: Added $${(weeklyIncome + duesCollected).toFixed(2)} (Allowance: $${weeklyIncome.toFixed(2)}, Dues: $${duesCollected.toFixed(2)}).`);
+            game.gameLog.push(`💰 Weekly Community Allowance: +$${weeklyIncome.toFixed(2)}.`);
             
             // --- USER AUTO-SNACK SUBSCRIPTION ---
             const autoSnack = team.finances.autoSnack || 'none';
@@ -1175,6 +1185,18 @@ export function processEndOfWeek() {
             };
         }
 
+        // Establish each team's workload before the gameplan is rebuilt.
+        if (t.id === game.playerTeam?.id) {
+            ensureTeamStaffWorkPlan(t);
+        } else {
+            ensureAiStaffWorkPlan(
+                t,
+                game,
+                game.year,
+                game.currentWeek
+            );
+        }
+
         const isDelegated = t.isPlayerControlled &&
             (t.gameplan.delegatePractice || t.gameplan.delegateGameplan);
 
@@ -1190,9 +1212,66 @@ export function processEndOfWeek() {
             }
         }
 
-        ensureAiStaffWorkPlan(t, game, game.year, game.currentWeek);
+        // New staff-preparation mechanics begin when the user takes over.
+        if (Number(game.year) >= 5) {
+            processWeeklyStaffPreparation(
+                t,
+                game.year,
+                game.currentWeek
+            );
+        }
+
         processWeeklyPractice(t, game.gameLog);
-        processWeeklyScoutingAssignments(t, game, game.year, game.currentWeek);
+        // Apply effective staff capacity to scouting for this resolution
+        // without permanently changing the player's requested assignments.
+        const scoutingAssignments = (
+            t.staffWorkPlan?.assignments || []
+        ).filter(assignment =>
+            assignment &&
+            assignment.task === 'scouting' &&
+            assignment.coachId != null
+        );
+
+        // Calculate every assignment before modifying any requested hours.
+        const effectiveScoutingHours = scoutingAssignments.map(assignment => ({
+            assignment,
+            hours: getEffectiveStaffWorkHours(t, assignment)
+        }));
+
+        const originalScoutingHours = scoutingAssignments.map(assignment => ({
+            assignment,
+            hadHours: Object.prototype.hasOwnProperty.call(
+                assignment,
+                'hours'
+            ),
+            hours: assignment.hours
+        }));
+
+        try {
+            effectiveScoutingHours.forEach(({ assignment, hours }) => {
+                assignment.hours = hours;
+            });
+
+            processWeeklyScoutingAssignments(
+                t,
+                game,
+                game.year,
+                game.currentWeek
+            );
+        } finally {
+            // Restore the saved workload even if scouting throws an error.
+            originalScoutingHours.forEach(({
+                assignment,
+                hadHours,
+                hours
+            }) => {
+                if (hadHours) {
+                    assignment.hours = hours;
+                } else {
+                    delete assignment.hours;
+                }
+            });
+        }
 
         // Resolve coach skill development once for this team and week.
         processWeeklyCoachDevelopment(
@@ -1233,6 +1312,154 @@ export function processEndOfWeek() {
     }
 
     endOfWeekCleanup();
+}
+
+export function processSeasonStartDues(gameState = game) {
+    if (!gameState?.teams) {
+        return {
+            teamsCharged: 0,
+            totalCollected: 0,
+            playersCharged: 0,
+            playersWaived: 0,
+            playersMissed: 0
+        };
+    }
+
+    const year = Number(gameState.year);
+
+    if (!Number.isInteger(year)) {
+        return {
+            teamsCharged: 0,
+            totalCollected: 0,
+            playersCharged: 0,
+            playersWaived: 0,
+            playersMissed: 0
+        };
+    }
+
+    const summary = {
+        teamsCharged: 0,
+        totalCollected: 0,
+        playersCharged: 0,
+        playersWaived: 0,
+        playersMissed: 0
+    };
+
+    const mainTeams = gameState.teams.filter(
+        team => team?.leagueType === 'main'
+    );
+
+    mainTeams.forEach(team => {
+        if (!team.finances) {
+            team.finances = {
+                balance: 10.00,
+                waivedDues: [],
+                autoSnack: 'none'
+            };
+        }
+
+        if (!Array.isArray(team.finances.waivedDues)) {
+            team.finances.waivedDues = [];
+        }
+
+        // Prevent duplicate charges if the season-start flow runs twice.
+        if (team.finances.seasonDuesYear === year) return;
+
+        const roster = getRosterObjects(team).filter(player =>
+            player &&
+            !['temporary', 'retired', 'departed'].includes(
+                player.status?.type
+            )
+        );
+
+        const waivedIds = new Set(
+            team.finances.waivedDues.map(String)
+        );
+
+        const coach = team.staff?.coach || team.coach;
+        const personality =
+            coach?.biases?.personality?.name || 'Balanced Tactician';
+        const discipline = coach?.ratings?.practiceDiscipline ?? 50;
+        const isUserTeam =
+            team.isPlayerControlled ||
+            team.id === gameState.playerTeam?.id;
+
+        let collected = 0;
+        let paidPlayers = 0;
+        let waivedPlayers = 0;
+        let missedPayments = 0;
+
+        roster.forEach(player => {
+            const isAiWaiver =
+                !isUserTeam &&
+                personality === "Players' Coach" &&
+                (player.expectations?.happiness ?? 100) < 60;
+
+            if (waivedIds.has(String(player.id)) || isAiWaiver) {
+                if (player.expectations) {
+                    player.expectations.happiness = Math.min(
+                        100,
+                        (player.expectations.happiness ?? 50) + 10
+                    );
+                }
+
+                waivedPlayers++;
+                return;
+            }
+
+            // Preserve the existing "forgot his wallet" behavior,
+            // but resolve it once for the entire season's contribution.
+            const ego = player.personality?.ego ?? 50;
+            const forgetChance = ego > 75
+                ? Math.max(0, 0.50 - (discipline / 150))
+                : 0;
+
+            if (Math.random() < forgetChance) {
+                missedPayments++;
+                return;
+            }
+
+            collected += SEASON_DUES_PER_PLAYER;
+            paidPlayers++;
+        });
+
+        const currentBalance = Number(team.finances.balance);
+        team.finances.balance =
+            (Number.isFinite(currentBalance) ? currentBalance : 10.00) +
+            collected;
+
+        // Record the year even if no one paid, so the team is not
+        // charged repeatedly in the same season.
+        team.finances.seasonDuesYear = year;
+
+        // Waivers apply to this collection only.
+        team.finances.waivedDues = [];
+
+        summary.teamsCharged++;
+        summary.totalCollected += collected;
+        summary.playersCharged += paidPlayers;
+        summary.playersWaived += waivedPlayers;
+        summary.playersMissed += missedPayments;
+
+        if (isUserTeam) {
+            addMessage(
+                'Season Dues Collected',
+                `Season ${year} dues are settled. Your team collected $${collected.toFixed(2)} from ${paidPlayers} players at $${SEASON_DUES_PER_PLAYER.toFixed(2)} each. ${waivedPlayers} player(s) had dues waived, and ${missedPayments} player(s) missed payment.`,
+                false,
+                gameState
+            );
+
+            if (Array.isArray(gameState.gameLog)) {
+                gameState.gameLog.push(
+                    `💵 Season dues: +$${collected.toFixed(2)}. ` +
+                    `${paidPlayers} paid, ${waivedPlayers} waived, ` +
+                    `${missedPayments} missed.`
+                );
+            }
+        }
+    });
+
+    return summary;
 }
 
 export function getTeamNetworkRecruits(team) {
@@ -1930,7 +2157,10 @@ function getAssignedCoachForTask(team, task) {
             continue;
         }
 
-        const hours = Number(assignment.hours);
+        const hours = getEffectiveStaffWorkHours(
+            team,
+            assignment
+        );
 
         if (!Number.isFinite(hours) || hours <= 0) continue;
 
@@ -1956,6 +2186,41 @@ function getAssignedCoachForTask(team, task) {
     return assignedCoach ||
         getTeamCoachingSpecialist(team, task) ||
         null;
+}
+
+function getEffectiveTaskHours(team, task) {
+    return (team?.staffWorkPlan?.assignments || []).reduce(
+        (total, assignment) => {
+            if (assignment?.task !== task) return total;
+
+            return total + getEffectiveStaffWorkHours(
+                team,
+                assignment
+            );
+        },
+        0
+    );
+}
+
+function getStaffWorkOutputFactor(
+    effectiveHours,
+    minimumFactor = 0.25,
+    targetHours = 8
+) {
+    const hours = Number(effectiveHours);
+
+    const safeHours = Number.isFinite(hours)
+        ? Math.max(0, hours)
+        : 0;
+
+    return Math.max(
+        minimumFactor,
+        Math.min(
+            1,
+            minimumFactor +
+                (safeHours / targetHours) * (1 - minimumFactor)
+        )
+    );
 }
 
 export function developPlayer(player, team = null) {
@@ -1989,6 +2254,18 @@ export function developPlayer(player, team = null) {
     const developmentCoach = getAssignedCoachForTask(
         team,
         'training'
+    );
+
+    const effectiveTrainingHours = getEffectiveTaskHours(
+        team,
+        'training'
+    );
+
+    // Natural maturation remains intact; dedicated training hours
+    // influence the coached attribute-development component below.
+    const trainingOutputFactor = getStaffWorkOutputFactor(
+        effectiveTrainingHours,
+        0.35
     );
 
     const coachTeaching =
@@ -2177,7 +2454,9 @@ export function developPlayer(player, team = null) {
     else if (pos === 'LB') focusGroup = ['tackling', 'playbookIQ', 'speed', 'blockShedding'];
     else if (pos === 'DB') focusGroup = ['speed', 'coverage', 'agility', 'catchingHands', 'playbookIQ'];
 
-    let totalUpgradePoints = Math.round(basePoints * experienceMod) + mentorBoost + transitionBoost;
+    let totalUpgradePoints = Math.round(
+        basePoints * experienceMod * trainingOutputFactor
+    ) + mentorBoost + transitionBoost;
 
     // Slacker Stagnation / Regression: Low work-ethic teens (16-18) with high ego can regress
     if (ethic < 35 && ego > 70 && player.age >= 16 && Math.random() < 0.40) {
@@ -2296,7 +2575,10 @@ export function processWeeklyPractice(team, gameLog = null) {
             continue;
         }
 
-        const hours = Number(assignment.hours);
+        const hours = getEffectiveStaffWorkHours(
+            team,
+            assignment
+        );
 
         if (!Number.isFinite(hours) || hours <= 0) continue;
 
@@ -2338,6 +2620,15 @@ export function processWeeklyPractice(team, gameLog = null) {
     const coach = assignedTrainingCoach ||
         getTeamCoachingSpecialist(team, 'training');
 
+    const totalEffectiveTrainingHours = Array.from(
+        trainingHours.values()
+    ).reduce((sum, hours) => sum + hours, 0);
+
+    const trainingOutputFactor = getStaffWorkOutputFactor(
+        totalEffectiveTrainingHours,
+        0.25
+    );
+
     const discipline = coach?.ratings?.practiceDiscipline ?? 50;
     const teaching = coach?.ratings?.teaching ?? 50;
     const mastery = team.gameplan.mastery = team.gameplan.mastery || {};
@@ -2360,18 +2651,159 @@ export function processWeeklyPractice(team, gameLog = null) {
         }
     });
 
+    // 1B. STAFF GAMEPLAN PREPARATION
+    // Effective offensive/defensive prep hours build familiarity with
+    // the specific plays assigned to each staff member.
+    let totalPreparationMasteryGain = 0;
+
+    const preparationAssignments = (
+        team.staffWorkPlan?.assignments || []
+    ).filter(assignment =>
+        ['offensePrep', 'defensePrep'].includes(assignment?.task)
+    );
+
+    for (const assignment of preparationAssignments) {
+        const effectiveHours = getEffectiveStaffWorkHours(
+            team,
+            assignment
+        );
+
+        if (!Number.isFinite(effectiveHours) || effectiveHours <= 0) {
+            continue;
+        }
+
+        const isOffense = assignment.task === 'offensePrep';
+
+        const foundationKeys = isOffense
+            ? [
+                'Uni_InsideZone',
+                'Uni_StretchRight',
+                'Uni_QuickSlants',
+                'Uni_FourVerts'
+            ]
+            : [
+                'Cover_2_Zone_Base',
+                'Cover_1_Robber',
+                'Man_Blitz_Base',
+                'GoalLine_RunStuff'
+            ];
+
+        const installedKeys = isOffense
+            ? (team.gameplan.installedOffense || [])
+            : (team.gameplan.installedDefense || []);
+
+        const allowedKeys = new Set([
+            ...foundationKeys,
+            ...installedKeys
+        ]);
+
+        // An explicit empty selection means the assignment has no target
+        // plays. If no selection has been saved, use its available plays.
+        const requestedKeys = Array.isArray(assignment.playKeys)
+            ? assignment.playKeys
+            : [...allowedKeys];
+
+        const targetedKeys = [
+            ...new Set(requestedKeys.filter(key => allowedKeys.has(key)))
+        ];
+
+        if (targetedKeys.length === 0) continue;
+
+        const assignedCoach = coaches.find(
+            coach =>
+                String(coach.id) === String(assignment.coachId)
+        );
+
+        const skillKeys = isOffense
+            ? [
+                'offSchemeMastery',
+                'gameplanInstinct',
+                'inGameAdjustments'
+            ]
+            : [
+                'defSchemeMastery',
+                'gameplanInstinct',
+                'inGameAdjustments'
+            ];
+
+        const ratings = assignedCoach?.ratings || {};
+
+        const skillScore = skillKeys.reduce((sum, key) => {
+            const value = Number(ratings[key]);
+
+            return sum + (
+                Number.isFinite(value)
+                    ? Math.max(0, Math.min(100, value))
+                    : 50
+            );
+        }, 0) / skillKeys.length;
+
+        // Stronger preparation coaches get more value from the same hours.
+        const skillFactor = 0.70 + (skillScore / 250);
+        const effectiveHoursPerPlay =
+            effectiveHours / targetedKeys.length;
+
+        // Four effective hours per play is the full weekly prep target.
+        const hoursFactor = Math.min(
+            1,
+            effectiveHoursPerPlay / 4
+        );
+
+        const masteryGain = Math.round(
+            5 * hoursFactor * skillFactor
+        );
+
+        if (masteryGain <= 0) continue;
+
+        for (const playKey of targetedKeys) {
+            const previousMastery = Number(mastery[playKey]);
+
+            mastery[playKey] = Math.min(
+                100,
+                (Number.isFinite(previousMastery)
+                    ? previousMastery
+                    : 35) + masteryGain
+            );
+
+            totalPreparationMasteryGain += masteryGain;
+        }
+    }
+
+    if (
+        totalPreparationMasteryGain > 0 &&
+        team.id === game?.playerTeam?.id &&
+        gameLog
+    ) {
+        gameLog.push(
+            `📚 Staff Prep: Offensive and defensive preparation added ` +
+            `${totalPreparationMasteryGain} total playbook mastery points.`
+        );
+    }
+
     // 2. DRILL EXECUTION
     const disciplineBonus = Math.round((discipline - 50) / 10); // -2 to +4 bonus
 
     if (plan === 'chalk_talk') {
-        const installGains = Math.max(10, Math.round(12 + (teaching / 10) + disciplineBonus));
+        const rawInstallGains = Math.max(
+            10,
+            Math.round(12 + (teaching / 10) + disciplineBonus)
+        );
+
+        const installGains = Math.max(
+            3,
+            Math.round(rawInstallGains * trainingOutputFactor)
+        );
         activeInstalled.forEach(key => {
             mastery[key] = Math.min(100, (mastery[key] || 35) + installGains);
         });
 
         // Youth IQ mentorship
         roster.forEach(p => {
-            if (p.age <= 15 && Math.random() < 0.25 && (p.attributes?.mental?.playbookIQ || 50) < 95) {
+            if (
+                p.age <= 15 &&
+                Math.random() < 0.25 * trainingOutputFactor &&
+                (p.attributes?.mental?.playbookIQ || 50) < 95
+            ) {
                 p.attributes.mental.playbookIQ += 1;
             }
         });
@@ -2379,12 +2811,17 @@ export function processWeeklyPractice(team, gameLog = null) {
             gameLog.push(`📋 Chalk Talk: Kids studied napkin schemes (+${installGains}% mastery). IQ reps gained!`);
         }
     } else if (plan === 'conditioning') {
-        const condGainChance = 0.15 + (coach?.ratings?.conditioning || 50) / 300;
+        const condGainChance = (
+            0.15 + (coach?.ratings?.conditioning || 50) / 300
+        ) * trainingOutputFactor;
         roster.forEach(p => {
             if (Math.random() < condGainChance && (p.attributes?.physical?.stamina || 50) < 95) {
                 p.attributes.physical.stamina += 1;
             }
-            if (Math.random() < 0.12 && (p.attributes?.mental?.toughness || 50) < 95) {
+            if (
+                Math.random() < 0.12 * trainingOutputFactor &&
+                (p.attributes?.mental?.toughness || 50) < 95
+            ) {
                 p.attributes.mental.toughness += 1;
             }
         });
@@ -2393,11 +2830,22 @@ export function processWeeklyPractice(team, gameLog = null) {
         }
     } else if (plan === 'scrimmage') {
         roster.forEach(p => {
-            p.fatigue = Math.max(0, (p.fatigue || 0) - 25); // Refreshes kids
-            if (Math.random() < 0.18 && (p.attributes?.technical?.catchingHands || 50) < 95) {
+            p.fatigue = Math.max(
+                0,
+                (p.fatigue || 0) -
+                    Math.round(25 * trainingOutputFactor)
+            );
+
+            if (
+                Math.random() < 0.18 * trainingOutputFactor &&
+                (p.attributes?.technical?.catchingHands || 50) < 95
+            ) {
                 p.attributes.technical.catchingHands += 1;
             }
-            if (Math.random() < 0.18 && (p.attributes?.technical?.tackling || 50) < 95) {
+            if (
+                Math.random() < 0.18 * trainingOutputFactor &&
+                (p.attributes?.technical?.tackling || 50) < 95
+            ) {
                 p.attributes.technical.tackling += 1;
             }
         });
@@ -3092,7 +3540,9 @@ export function advanceToOffseason() {
     });
 
     // 💡 PEE-WEE GRADUATION → LOGICAL DRAFT DECLARATION
-    if (!game.draftClass) game.draftClass = [];
+    // Start with a clean class. Undrafted prospects from the previous board
+    // remain in game.players and must not carry over into the next draft.
+    game.draftClass = [];
     const youthTeams = game.teams.filter(t => t.leagueType === 'youth');
 
     youthTeams.forEach(yt => {
@@ -3168,6 +3618,46 @@ export function advanceToOffseason() {
         game.players.push(olderKid);
         playerMap.set(olderKid.id, olderKid);
         newOlderWalkons.push(olderKid);
+    }
+
+    // Initialize inherited scouting knowledge for the completed incoming class.
+    // Apply banked weekly scouting afterward so that work builds on that baseline.
+    mainTeams.forEach(team => {
+        initializeInheritedScoutingReports(
+            team,
+            game.draftClass,
+            game.year,
+            0
+        );
+    });
+
+    // Apply the previous regular season's banked scouting hours.
+    let userDraftScoutingResult = null;
+
+    mainTeams.forEach(team => {
+        const result = applyBankedDraftScoutingReports(
+            team,
+            game,
+            game.year,
+            0
+        );
+
+        if (team.id === game.playerTeam?.id) {
+            userDraftScoutingResult = result;
+        }
+    });
+
+    // Give the user a confirmation when banked scouting work was applied.
+    if (
+        userDraftScoutingResult &&
+        userDraftScoutingResult.workItemsApplied > 0
+    ) {
+        addMessage(
+            'Draft Scouting Completed',
+            `Your staff's banked scouting effort was applied to the Year ${game.year} draft class. ${userDraftScoutingResult.playersUpdated} report updates were processed using ${userDraftScoutingResult.hoursUsed} hours across ${userDraftScoutingResult.workItemsApplied} weekly assignments.`,
+            false,
+            game
+        );
     }
 
     // Connect new recruits into the social network

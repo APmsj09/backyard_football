@@ -3424,15 +3424,159 @@ document.getElementById('sim-speed-faster')
     // Inbox Messages
     document.getElementById('messages-list')?.addEventListener('click', (e) => {
         const messageItem = e.target.closest('.message-item');
-        if (messageItem?.dataset.messageId && gameState?.messages) {
-            const message = gameState.messages.find(m => m && m.id === messageItem.dataset.messageId);
-            if (message) {
-                UI.showModal(message.subject, `<p class="whitespace-pre-wrap">${message.body}</p>`);
-                Game.markMessageAsRead(message.id);
-                UI.renderMessagesTab(gameState);
-                UI.updateMessagesNotification(gameState.messages);
-            }
-        }
+
+        if (!messageItem?.dataset.messageId) return;
+
+        gameState = Game.getGameState();
+
+        if (!gameState?.messages) return;
+
+        const message = gameState.messages.find(
+            m => m && String(m.id) === messageItem.dataset.messageId
+        );
+
+        if (!message) return;
+
+        // Mark the message as read before refreshing the inbox.
+        Game.markMessageAsRead(message.id);
+
+        UI.renderMessagesTab(gameState);
+        UI.updateMessagesNotification(gameState.messages);
+        Game.saveGameState(activeSaveKey);
+
+        const escapeHtml = (value) => String(value ?? '')
+            .replace(/[&<>"']/g, char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[char]);
+
+        const categories = {
+            staff: 'Staff',
+            finances: 'Finances',
+            scouting: 'Scouting',
+            preparation: 'Preparation',
+            roster: 'Roster',
+            season: 'Season',
+            community: 'Community',
+            general: 'General'
+        };
+
+        const category = categories[message.category] || 'General';
+
+        const priorityLabels = {
+            urgent: 'Urgent',
+            important: 'Important',
+            normal: 'Normal'
+        };
+
+        const priority = priorityLabels[message.priority] || 'Normal';
+
+        // Message bodies may contain intentional HTML formatting used
+        // by existing system-generated messages.
+        const bodyHtml = `
+            <div class="space-y-4">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                        ${escapeHtml(category)}
+                    </span>
+                    <span class="rounded ${
+                        message.priority === 'urgent'
+                            ? 'bg-rose-100 text-rose-700'
+                            : message.priority === 'important' || message.actionRequired
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-slate-100 text-slate-600'
+                    } px-2 py-1 text-xs font-semibold">
+                        ${escapeHtml(message.actionRequired ? 'Action needed' : priority)}
+                    </span>
+                </div>
+
+                <div class="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                    ${message.body ?? ''}
+                </div>
+
+                ${message.actionRequired ? `
+                    <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        <strong>Follow-up needed</strong>
+                        <p class="mt-1">
+                            Review the relevant team area to decide what to do next.
+                        </p>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        // Only allow known navigation destinations. Never execute
+        // functions or arbitrary commands stored in a saved message.
+        const action = message.action;
+
+        const allowedTabs = new Set([
+            'my-team',
+            'depth-chart',
+            'free-agents',
+            'messages',
+            'front-office'
+        ]);
+
+        const allowedFrontOfficeTabs = new Set([
+            'staff',
+            'finances',
+            'social'
+        ]);
+
+        const canNavigate =
+            action?.type === 'open_tab' &&
+            allowedTabs.has(action.tab) &&
+            (
+                action.tab !== 'front-office' ||
+                !action.subTab ||
+                allowedFrontOfficeTabs.has(action.subTab)
+            );
+
+        const actionLabels = {
+            'my-team': 'Open Team',
+            'depth-chart': 'Open Depth Chart',
+            'free-agents': 'Open Free Agents',
+            'messages': 'Return to Inbox',
+            'front-office': 'Review Front Office'
+        };
+
+        const actionLabel = canNavigate
+            ? (
+                action.tab === 'front-office' && action.subTab === 'staff'
+                    ? 'Review Staff'
+                    : action.tab === 'front-office' && action.subTab === 'finances'
+                        ? 'Review Finances'
+                        : action.tab === 'front-office' && action.subTab === 'social'
+                            ? 'Review Social Network'
+                            : actionLabels[action.tab]
+            )
+            : 'Close';
+
+        UI.showModal(
+            message.subject || '(No Subject)',
+            bodyHtml,
+            canNavigate ? () => {
+                const latestState = Game.getGameState();
+
+                if (!latestState) return;
+
+                UI.switchTab(action.tab, latestState);
+
+                if (action.tab === 'front-office' && action.subTab) {
+                    const subTabButton = Array.from(
+                        document.querySelectorAll('.fo-tab')
+                    ).find(btn => btn.dataset.subTab === action.subTab);
+
+                    subTabButton?.click();
+                }
+            } : null,
+            actionLabel,
+            null,
+            'Close'
+        );
     });
 
     // Player row click delegation in dashboard

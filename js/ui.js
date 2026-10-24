@@ -2407,10 +2407,74 @@ export function renderStaffTab(gameState) {
             </div>
         </div>
 
+        <!-- Optional Automation -->
+        <section class="mb-5 rounded-lg border border-blue-200 bg-blue-50/60 p-4">
+            <div class="mb-3">
+                <div class="flex items-center gap-2">
+                    <h4 class="text-sm font-black uppercase tracking-wider text-slate-900">
+                        Optional Automation
+                    </h4>
+                    <span class="rounded bg-blue-100 px-2 py-0.5 text-[9px] font-bold uppercase text-blue-700">
+                        Your choice
+                    </span>
+                </div>
+                <p class="mt-1 text-xs leading-relaxed text-slate-600">
+                    Let your coaches handle routine weekly decisions, or keep
+                    control yourself. You can change these settings at any time.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                    <input
+                        type="checkbox"
+                        class="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+                        ${team.gameplan?.delegatePractice ? 'checked' : ''}
+                        onchange="app_setManagementAutomation('delegatePractice', this.checked)"
+                    >
+                    <span>
+                        <span class="block text-xs font-bold text-slate-800">
+                            Delegate weekly practice
+                        </span>
+                        <span class="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                            Coaches choose the weekly practice focus for you.
+                        </span>
+                    </span>
+                </label>
+
+                <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                    <input
+                        type="checkbox"
+                        class="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+                        ${team.gameplan?.delegateGameplan ? 'checked' : ''}
+                        onchange="app_setManagementAutomation('delegateGameplan', this.checked)"
+                    >
+                    <span>
+                        <span class="block text-xs font-bold text-slate-800">
+                            Delegate game planning
+                        </span>
+                        <span class="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                            Coaches manage the weekly offensive and defensive game plan.
+                        </span>
+                    </span>
+                </label>
+            </div>
+
+            <p class="mt-3 text-[10px] leading-relaxed text-slate-500">
+                Automation affects these decisions only. Your staff workload
+                assignments and other team-management responsibilities remain
+                under your control.
+            </p>
+        </section>
+
         <!-- 1. Current Coaching Group -->
     `;
 
     Game.ensureTeamCoachingStaff?.(team);
+
+    // Migrate older staff records before their cards render.
+    Game.ensureTeamStaffWorkPlan?.(team);
+
     const currentCoaches = Array.isArray(team.coaches)
         ? team.coaches.filter(Boolean)
         : [];
@@ -2657,6 +2721,58 @@ export function renderStaffTab(gameState) {
                 ${currentCoaches.map((coach, index) => {
                     const r = coach.ratings || {};
 
+                    const availability = coach.availability || {};
+
+                    const rawWeeklyHours = availability.weeklyHours;
+                    const parsedWeeklyHours = Number(rawWeeklyHours);
+
+                    const weeklyHours =
+                        rawWeeklyHours != null &&
+                        Number.isFinite(parsedWeeklyHours)
+                            ? Math.max(0, Math.min(40, Math.floor(parsedWeeklyHours)))
+                            : null;
+
+                    const availableDays = Array.isArray(availability.availableDays)
+                        ? availability.availableDays
+                            .filter(day => typeof day === 'string' && day.trim())
+                        : [];
+
+                    const daysLabel = availableDays.length
+                        ? availableDays.join(' · ')
+                        : 'Not specified';
+
+                    const timeWindowLabels = {
+                        evening: 'Evenings',
+                        daytime: 'Daytime',
+                        mixed: 'Mixed availability',
+                        flexible: 'Flexible hours'
+                    };
+
+                    const scheduleLabel =
+                        availability.scheduleLabel || 'Schedule not set';
+
+                    const timeWindowLabel =
+                        timeWindowLabels[availability.timeWindow] ||
+                        'Not specified';
+
+                    const rawReliability = availability.reliability;
+                    const parsedReliability = Number(rawReliability);
+
+                    const reliability =
+                        rawReliability != null &&
+                        Number.isFinite(parsedReliability)
+                            ? Math.max(0, Math.min(100, Math.round(parsedReliability)))
+                            : null;
+
+                    const escapeStaffCardText = value =>
+                        String(value ?? '').replace(/[&<>"']/g, char => ({
+                            '&': '&amp;',
+                            '<': '&lt;',
+                            '>': '&gt;',
+                            '"': '&quot;',
+                            "'": '&#39;'
+                        })[char]);
+
                     const skills = [
                         ['Offense Scheme', staffSkill(r.offSchemeMastery), 'bg-emerald-500'],
                         ['Defense Scheme', staffSkill(r.defSchemeMastery), 'bg-blue-500'],
@@ -2880,6 +2996,64 @@ export function renderStaffTab(gameState) {
                                         </p>
                                     </div>
                                 </div>
+
+                                <div class="border-t border-slate-200 pt-3 space-y-3">
+                                    <div class="flex items-start justify-between gap-2">
+                                        <div>
+                                            <span class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                                Weekly availability
+                                            </span>
+                                            <p class="mt-1 text-sm font-black text-slate-900">
+                                                ${weeklyHours === null ? 'Not set' : `${weeklyHours} hrs/week`}
+                                            </p>
+                                        </div>
+
+                                        <span class="shrink-0 rounded bg-blue-50 border border-blue-200 px-2 py-1 text-[10px] font-bold text-blue-700">
+                                            ${escapeStaffCardText(timeWindowLabel)}
+                                        </span>
+                                    </div>
+
+                                    <div>
+                                        <span class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                            Preferred schedule
+                                        </span>
+                                        <p class="mt-1 text-xs font-semibold text-slate-800">
+                                            ${escapeStaffCardText(scheduleLabel)}
+                                        </p>
+                                        <p class="mt-1 text-[11px] leading-relaxed text-slate-500">
+                                            ${escapeStaffCardText(daysLabel)}
+                                        </p>
+                                    </div>
+
+                                    <div>
+                                        <div class="flex items-center justify-between gap-2 mb-1">
+                                            <span class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                                Reliability
+                                            </span>
+                                            <span class="text-xs font-black text-slate-800">
+                                                ${reliability === null ? 'Not set' : `${reliability}%`}
+                                            </span>
+                                        </div>
+
+                                        <div
+                                            class="h-2 rounded-full bg-slate-200 overflow-hidden"
+                                            role="progressbar"
+                                            aria-label="Staff reliability"
+                                            aria-valuemin="0"
+                                            aria-valuemax="100"
+                                            aria-valuenow="${reliability ?? 0}"
+                                        >
+                                            <div
+                                                class="h-full rounded-full bg-emerald-500"
+                                                style="width: ${reliability ?? 0}%"
+                                            ></div>
+                                        </div>
+
+                                        <p class="mt-1 text-[10px] leading-relaxed text-slate-500">
+                                            Likelihood of following through on assigned commitments. Actual effects come in the next patch.
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
                         </article>
                     `;
@@ -3047,8 +3221,45 @@ export function renderStaffTab(gameState) {
         const workHours = assignment =>
             Math.max(0, Number(assignment.hours) || 0);
 
+        // Respect each coach's personal weekly time commitment.
+        // The 8-hour fallback is for staff profiles not yet migrated
+        // to the availability model.
+        const getCoachWeeklyCapacity = coach => {
+            const planCap = Math.min(
+                40,
+                Number(workPlan.weeklyHoursPerCoach) || 40
+            );
+
+            const statedAvailability =
+                coach?.availability?.weeklyHours ??
+                coach?.weeklyHoursAvailable ??
+                coach?.weeklyCommitmentHours;
+
+            const availableHours = statedAvailability == null
+                ? 8
+                : Number(statedAvailability);
+
+            return Math.max(
+                0,
+                Math.min(
+                    planCap,
+                    Math.floor(
+                        Number.isFinite(availableHours)
+                            ? availableHours
+                            : 8
+                    )
+                )
+            );
+        };
+
         const getCoachHours = coachId =>
             workPlan.assignments.reduce(
+                (sum, assignment) =>
+                    String(assignment.coachId) === String(coachId)
+                        ? sum + workHours(assignment)
+                        : sum,
+                0
+            );
                 (sum, assignment) =>
                     String(assignment.coachId) === String(coachId)
                         ? sum + workHours(assignment)
@@ -3065,6 +3276,237 @@ export function renderStaffTab(gameState) {
                 }>${label}</option>
             `).join('');
 
+        window.app_setManagementAutomation = (setting, enabled) => {
+            const gs = getGameState();
+            const currentTeam = gs?.playerTeam;
+
+            const allowedSettings = new Set([
+                'delegatePractice',
+                'delegateGameplan'
+            ]);
+
+            if (!currentTeam || !allowedSettings.has(setting)) return;
+
+            if (!currentTeam.gameplan) {
+                currentTeam.gameplan = {};
+            }
+
+            currentTeam.gameplan[setting] = Boolean(enabled);
+
+            saveGameState();
+            renderStaffTab(gs);
+        };                
+
+        window.app_autoAssignStaffWorkload = () => {
+            const gs = getGameState();
+            const currentTeam = gs?.playerTeam;
+            if (!currentTeam) return;
+
+            const plan = Game.ensureTeamStaffWorkPlan?.(currentTeam);
+            const coaches = Game.ensureTeamCoachingStaff?.(currentTeam) ||
+                currentTeam.coaches || [];
+
+            if (!plan || !Array.isArray(plan.assignments)) return;
+
+            const taskSkills = {
+                scouting: [
+                    'evalPhysicals',
+                    'evalTechnique',
+                    'evalCharacter'
+                ],
+                training: [
+                    'teaching',
+                    'practiceDiscipline',
+                    'conditioning'
+                ],
+                offensePrep: [
+                    'offSchemeMastery',
+                    'gameplanInstinct',
+                    'inGameAdjustments'
+                ],
+                defensePrep: [
+                    'defSchemeMastery',
+                    'gameplanInstinct',
+                    'inGameAdjustments'
+                ]
+            };
+
+            const tasks = Object.keys(taskSkills);
+            const week = Math.max(0, Number(gs.currentWeek) || 0);
+
+            // Prioritize scouting around the draft, and preparation
+            // during the regular season.
+            const taskNeeds = week === 0
+                ? {
+                    scouting: 1.45,
+                    training: 1.00,
+                    offensePrep: 0.85,
+                    defensePrep: 0.85
+                }
+                : week <= 9
+                    ? {
+                        scouting: 0.85,
+                        training: 1.10,
+                        offensePrep: 1.25,
+                        defensePrep: 1.25
+                    }
+                    : {
+                        scouting: 1.15,
+                        training: 1.10,
+                        offensePrep: 0.85,
+                        defensePrep: 0.85
+                    };
+
+            const getTaskSkill = (coach, task) => {
+                const ratings = coach?.ratings || {};
+                const skills = taskSkills[task];
+
+                const values = skills.map(key => {
+                    const value = Number(ratings[key]);
+
+                    return Number.isFinite(value)
+                        ? Math.max(0, Math.min(100, value))
+                        : 50;
+                });
+
+                return values.reduce((sum, value) => sum + value, 0) /
+                    values.length;
+            };
+
+            const buildAssignments = () => {
+                const assignments = [];
+
+                coaches
+                    .filter(coach => coach?.id != null)
+                    .forEach(coach => {
+                        const capacity = getCoachWeeklyCapacity(coach);
+
+                        if (capacity <= 0) return;
+
+                        // Stronger coaches lean toward their specialties,
+                        // while every task can still receive some coverage.
+                        const weights = tasks.map(task => {
+                            const skillScore = getTaskSkill(coach, task);
+
+                            return {
+                                task,
+                                weight: taskNeeds[task] *
+                                    (0.5 + skillScore / 100)
+                            };
+                        });
+
+                        const totalWeight = weights.reduce(
+                            (sum, item) => sum + item.weight,
+                            0
+                        );
+
+                        if (totalWeight <= 0) return;
+
+                        const allocations = weights.map(item => {
+                            const exactHours =
+                                capacity * item.weight / totalWeight;
+
+                            return {
+                                task: item.task,
+                                hours: Math.floor(exactHours),
+                                remainder: exactHours -
+                                    Math.floor(exactHours)
+                            };
+                        });
+
+                        let remaining = capacity - allocations.reduce(
+                            (sum, item) => sum + item.hours,
+                            0
+                        );
+
+                        allocations
+                            .slice()
+                            .sort((a, b) => b.remainder - a.remainder)
+                            .forEach(item => {
+                                if (remaining <= 0) return;
+
+                                const allocation = allocations.find(
+                                    candidate => candidate.task === item.task
+                                );
+
+                                allocation.hours++;
+                                remaining--;
+                            });
+
+                        allocations.forEach(allocation => {
+                            if (allocation.hours <= 0) return;
+
+                            const assignment = {
+                                coachId: String(coach.id),
+                                task: allocation.task,
+                                hours: allocation.hours,
+                                focus: 'all'
+                            };
+
+                            if (allocation.task === 'scouting') {
+                                assignment.focus = week === 0
+                                    ? 'draft'
+                                    : 'all';
+                                assignment.maxTargets = 2;
+                            }
+
+                            if (allocation.task === 'training') {
+                                assignment.maxTargets = 4;
+                            }
+
+                            assignments.push(assignment);
+                        });
+                    });
+
+                return assignments;
+            };
+
+            showModal(
+                'Auto-assign staff workload?',
+                `
+                    <div class="space-y-2 text-sm text-slate-700">
+                        <p>
+                            The assistant will distribute available hours
+                            across scouting, player development, and offensive
+                            and defensive preparation.
+                        </p>
+                        <p>
+                            Each coach's recorded weekly availability and
+                            skill ratings will guide the assignments.
+                        </p>
+                        <p class="font-semibold text-amber-800">
+                            Your existing workload assignments will be replaced.
+                            You can edit the new assignments afterward.
+                        </p>
+                    </div>
+                `,
+                () => {
+                    const latestState = getGameState();
+                    const latestTeam = latestState?.playerTeam;
+                    const latestPlan =
+                        Game.ensureTeamStaffWorkPlan?.(latestTeam);
+
+                    if (!latestTeam || !latestPlan ||
+                        !Array.isArray(latestPlan.assignments)) {
+                        return;
+                    }
+
+                    latestPlan.assignments = buildAssignments();
+
+                    latestPlan.autoAssignedFor = {
+                        year: latestState.year ?? null,
+                        week: latestState.currentWeek ?? null
+                    };
+
+                    saveGameState();
+                    renderStaffTab(latestState);
+                },
+                'Auto-assign',
+                null,
+                'Cancel'
+            );
+        };
+
         window.app_addStaffWorkAssignment = () => {
             const gs = getGameState();
             const currentTeam = gs?.playerTeam;
@@ -3078,14 +3520,14 @@ export function renderStaffTab(gameState) {
 
             const availableCoach = coaches.find(
                 coach => coach?.id &&
-                    getCoachHours(coach.id) < (plan.weeklyHoursPerCoach || 40)
+                    getCoachHours(coach.id) < getCoachWeeklyCapacity(coach)
             );
 
             if (!availableCoach) return;
 
             const remainingHours = Math.max(
                 0,
-                (plan.weeklyHoursPerCoach || 40) -
+                getCoachWeeklyCapacity(availableCoach) -
                     getCoachHours(availableCoach.id)
             );
 
@@ -3173,10 +3615,11 @@ export function renderStaffTab(gameState) {
                     0
                 );
 
-                const cap = Math.min(
-                    40,
-                    Number(plan.weeklyHoursPerCoach) || 40
+                const assignedCoach = workCoaches.find(
+                    coach => String(coach.id) === String(assignment.coachId)
                 );
+
+                const cap = getCoachWeeklyCapacity(assignedCoach);
 
                 assignment.hours = Math.max(
                     0,
@@ -3220,10 +3663,11 @@ export function renderStaffTab(gameState) {
             }
 
             // Enforce the shared 40-hour budget after coach reassignment too.
-            const cap = Math.min(
-                40,
-                Number(plan.weeklyHoursPerCoach) || 40
+            const assignedCoach = workCoaches.find(
+                coach => String(coach.id) === String(assignment.coachId)
             );
+
+            const cap = getCoachWeeklyCapacity(assignedCoach);
             const otherHours = plan.assignments.reduce(
                 (sum, other, otherIndex) =>
                     otherIndex !== index &&
@@ -3333,8 +3777,9 @@ export function renderStaffTab(gameState) {
                             Weekly Staff Workload
                         </h4>
                         <p class="text-[11px] text-slate-500 mt-1">
-                            Assign each coach up to 40 hours. Scouting, development,
-                            and preparation compete for the same time.
+                            Each coach has a personal weekly time budget.
+                            Scouting, development, and preparation compete
+                            for the same limited free time.
                         </p>
                     </div>
                     <div class="text-xs font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2">
@@ -3346,8 +3791,11 @@ export function renderStaffTab(gameState) {
                 <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 mb-4">
                     ${workCoaches.map(coach => {
                         const assigned = getCoachHours(coach.id);
-                        const percentage = Math.min(100, assigned / 40 * 100);
-                        const overBudget = assigned > 40;
+                        const capacity = getCoachWeeklyCapacity(coach);
+                        const percentage = capacity > 0
+                            ? Math.min(100, assigned / capacity * 100)
+                            : 0;
+                        const overBudget = assigned > capacity;
 
                         return `
                             <div class="rounded border ${
@@ -3361,7 +3809,7 @@ export function renderStaffTab(gameState) {
                                     </span>
                                     <span class="text-[10px] font-mono ${
                                         overBudget ? 'text-rose-700' : 'text-slate-500'
-                                    }">${assigned}/40 hrs</span>
+                                    }">${assigned}/${capacity} hrs</span>
                                 </div>
                                 <div class="mt-2 h-1.5 rounded bg-slate-200 overflow-hidden">
                                     <div class="h-full rounded ${
@@ -3396,9 +3844,19 @@ export function renderStaffTab(gameState) {
                                 : getDefaultPreparationPlayKeys(task)
                         );
 
+                        const assignedCoach = workCoaches.find(
+                            coach => String(coach.id) ===
+                                String(assignment.coachId)
+                        );
+
+                        const capacity = getCoachWeeklyCapacity(assignedCoach);
+                        const currentHours = workHours(assignment);
+
                         const hoursOptions = Array.from(
-                            { length: 21 },
-                            (_, i) => i * 2
+                            { length: Math.max(capacity, currentHours) + 1 },
+                            (_, i) => i
+                        ).filter(hours =>
+                            hours <= capacity || hours === currentHours
                         );
 
                         const coachOptions = workCoaches.map(coach => [
@@ -5364,17 +5822,262 @@ export function renderHistoryTab(gameState) {
     container.innerHTML = html;
 }
 
+/** Renders the 'Messages' tab content. */
 export function renderMessagesTab(gameState) {
     if (!elements.messagesList) return;
-    if (!gameState?.messages?.length) {
-        elements.messagesList.innerHTML = `<p class="text-gray-400 text-sm text-center py-12">No messages.</p>`;
+
+    const messages = Array.isArray(gameState?.messages)
+        ? gameState.messages.filter(Boolean)
+        : [];
+
+    if (messages.length === 0) {
+        elements.messagesList.innerHTML = `
+            <div class="rounded-lg border border-slate-200 bg-white p-8 text-center">
+                <div class="text-3xl mb-3">✉️</div>
+                <h3 class="font-bold text-slate-700">Your inbox is clear</h3>
+                <p class="text-sm text-slate-500 mt-1">
+                    Team updates, staff news, and important decisions will appear here.
+                </p>
+            </div>
+        `;
+        updateMessagesNotification(messages);
         return;
     }
-    elements.messagesList.innerHTML = gameState.messages.map(msg => `
-        <div class="message-item ${msg.isRead ? 'bg-white' : 'bg-blue-50 border-l-4 border-blue-500 font-semibold'} p-3 rounded shadow-sm cursor-pointer hover:bg-gray-50 transition mb-2" data-message-id="${msg.id}">
-            <span class="text-sm text-gray-800">${msg.subject}</span>
+
+    const escapeHtml = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const getCategory = (message) => {
+        if (message.category) return message.category;
+
+        // Fallback for messages created before category metadata existed.
+        const subject = String(message.subject || '').toLowerCase();
+
+        if (/(staff|coach|stipend|hiring|hire|fired|workload|availability)/.test(subject)) {
+            return 'staff';
+        }
+
+        if (/(fund|dues|snack|store|favor token|budget|payment|financial|fundrais)/.test(subject)) {
+            return 'finances';
+        }
+
+        if (/(draft|scout|scouting|prospect|rookie)/.test(subject)) {
+            return 'scouting';
+        }
+
+        if (/(practice|training|development|gameplan|game plan|playbook|depth chart|opponent)/.test(subject)) {
+            return 'preparation';
+        }
+
+        if (/(injur|recover|unavailable|roster|player joined|new player|signed|cut|retir|graduat|invite)/.test(subject)) {
+            return 'roster';
+        }
+
+        if (/(season|offseason|promot|relegat|champion|week \d+)/.test(subject)) {
+            return 'season';
+        }
+
+        if (/(friend|relationship|rival|happiness|morale|locker room)/.test(subject)) {
+            return 'community';
+        }
+
+        return 'general';
+    };
+
+    const categoryLabels = {
+        staff: 'Staff',
+        finances: 'Finances',
+        scouting: 'Scouting',
+        preparation: 'Preparation',
+        roster: 'Roster',
+        season: 'Season',
+        community: 'Community',
+        general: 'General'
+    };
+
+    const categoryClasses = {
+        staff: 'bg-violet-100 text-violet-700',
+        finances: 'bg-emerald-100 text-emerald-700',
+        scouting: 'bg-sky-100 text-sky-700',
+        preparation: 'bg-indigo-100 text-indigo-700',
+        roster: 'bg-amber-100 text-amber-800',
+        season: 'bg-slate-200 text-slate-700',
+        community: 'bg-pink-100 text-pink-700',
+        general: 'bg-slate-100 text-slate-600'
+    };
+
+    const getPriorityScore = (message) => {
+        if (message.priority === 'urgent') return 0;
+        if (message.actionRequired || message.priority === 'important') return 1;
+        if (!message.isRead) return 2;
+        return 3;
+    };
+
+    const getPreview = (body) => {
+        const plainText = String(body ?? '')
+            .replace(/<br\s*\/?>/gi, ' ')
+            .replace(/<\/p\s*>/gi, ' ')
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        const preview = plainText.length > 150
+            ? `${plainText.slice(0, 147)}...`
+            : plainText;
+
+        return escapeHtml(preview || 'Open this message to read the details.');
+    };
+
+    const orderedMessages = messages
+        .map((message, index) => ({ message, index }))
+        .sort((a, b) => {
+            const priorityDifference =
+                getPriorityScore(a.message) - getPriorityScore(b.message);
+
+            if (priorityDifference !== 0) return priorityDifference;
+
+            const timeA = Number(a.message.createdAt);
+            const timeB = Number(b.message.createdAt);
+
+            if (Number.isFinite(timeA) && Number.isFinite(timeB) &&
+                timeA > 0 && timeB > 0 && timeA !== timeB) {
+                return timeB - timeA;
+            }
+
+            // Preserve the existing newest-first order for older messages.
+            return a.index - b.index;
+        });
+
+    const unreadCount = messages.filter(message => !message.isRead).length;
+    const actionCount = messages.filter(message =>
+        message.actionRequired
+    ).length;
+
+    const messageCards = orderedMessages.map(({ message: msg }) => {
+        const category = getCategory(msg);
+        const categoryLabel = categoryLabels[category] || 'General';
+        const categoryClass = categoryClasses[category] || categoryClasses.general;
+        const isUnread = !msg.isRead;
+        const needsAction = Boolean(msg.actionRequired);
+        const isUrgent = msg.priority === 'urgent';
+
+        const statusLabel = needsAction
+            ? 'Action needed'
+            : isUrgent
+                ? 'Urgent'
+                : isUnread
+                    ? 'Unread'
+                    : '';
+
+        const statusClass = needsAction || isUrgent
+            ? 'bg-rose-100 text-rose-700'
+            : 'bg-blue-100 text-blue-700';
+
+        const weekLabel = msg.week != null
+            ? `Week ${escapeHtml(msg.week)}`
+            : '';
+
+        const yearLabel = msg.year != null
+            ? `Season ${escapeHtml(msg.year)}`
+            : '';
+
+        const timelineLabel = [yearLabel, weekLabel]
+            .filter(Boolean)
+            .join(' · ');
+
+        return `
+            <button
+                type="button"
+                class="message-item group w-full text-left rounded-lg border p-3 sm:p-4 transition-colors mb-2
+                    ${isUnread
+                        ? 'bg-blue-50/70 border-blue-200 hover:bg-blue-50'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'}
+                    ${needsAction ? 'ring-1 ring-rose-200' : ''}"
+                data-message-id="${escapeHtml(msg.id)}"
+            >
+                <div class="flex items-start gap-3">
+                    <div class="shrink-0 mt-1">
+                        <span class="block w-2.5 h-2.5 rounded-full
+                            ${isUnread ? 'bg-blue-600' : 'bg-transparent border border-slate-300'}"
+                            aria-hidden="true"></span>
+                    </div>
+
+                    <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-center gap-2 mb-1">
+                            <span class="inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${categoryClass}">
+                                ${escapeHtml(categoryLabel)}
+                            </span>
+
+                            ${statusLabel ? `
+                                <span class="inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${statusClass}">
+                                    ${escapeHtml(statusLabel)}
+                                </span>
+                            ` : ''}
+                        </div>
+
+                        <div class="flex items-start justify-between gap-3">
+                            <span class="min-w-0 break-words text-sm
+                                ${isUnread ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}">
+                                ${escapeHtml(msg.subject || '(No Subject)')}
+                            </span>
+
+                            <span class="shrink-0 text-[10px] text-slate-400">
+                                ${escapeHtml(timelineLabel)}
+                            </span>
+                        </div>
+
+                        <p class="mt-1 text-xs leading-relaxed text-slate-500 font-normal">
+                            ${getPreview(msg.body)}
+                        </p>
+
+                        <div class="mt-2 flex items-center justify-between gap-2">
+                            <span class="text-[10px] text-slate-400">
+                                ${isUnread ? 'New message' : 'Message'}
+                            </span>
+                            <span class="text-xs font-semibold text-slate-500 group-hover:text-slate-800">
+                                Open →
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </button>
+        `;
+    }).join('');
+
+    elements.messagesList.innerHTML = `
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+            <div>
+                <h3 class="text-base font-bold text-slate-800">Team Inbox</h3>
+                <p class="text-xs text-slate-500 mt-1">
+                    Updates and decisions from around your team.
+                </p>
+            </div>
+
+            <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                    ${messages.length} total
+                </span>
+                <span class="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
+                    ${unreadCount} unread
+                </span>
+                ${actionCount > 0 ? `
+                    <span class="rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700">
+                        ${actionCount} need${actionCount === 1 ? 's' : ''} attention
+                    </span>
+                ` : ''}
+            </div>
         </div>
-    `).join('');
+
+        <div class="space-y-1">
+            ${messageCards}
+        </div>
+    `;
+
+    updateMessagesNotification(messages);
 }
 
 export function updateMessagesNotification(messages) {
