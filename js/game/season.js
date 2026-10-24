@@ -1209,54 +1209,68 @@ export function processEndOfWeek() {
             }
         }
 
-        // Weekly community allowance only.
+        // Weekly community allowance.
+        // Player dues are collected only by processSeasonStartDues(),
+        // once per season. Do not collect them again here.
+        const weeklyAllowance = 5.00;
+        const currentBalance = Number(team.finances.balance);
+        const balanceBeforeAllowance = Number.isFinite(currentBalance)
+            ? currentBalance
+            : 10.00;
 
+        team.finances.balance = Math.round(
+            (balanceBeforeAllowance + weeklyAllowance) * 100
+        ) / 100;
 
-        /*// Weekly community allowance only.
-        // Season dues are collected once by processSeasonStartDues().
-        const weeklyIncome = 5.00;
-        team.finances.balance += weeklyIncome;*/
+        // Record the weekly allowance for the user's finance ledger.
+        const transactionYear = Number(game.year);
+        const transactionWeek = Number(game.currentWeek);
 
-        // --- 1. AI WAIVE DUES PHASE (Players' Coach is soft on unhappy kids) ---
-        if (!isUser) {
-            roster.forEach(p => {
-                const happiness = p.expectations?.happiness || 100;
-                if (personality === "Players' Coach" && happiness < 60) {
-                    team.finances.waivedDues.push(p.id);
-                }
-            });
-        }
-
-        // --- 2. INCOME & DUES COLLECTION ---
-        let weeklyIncome = 5.00; // Base Coach Allowance
-        let duesCollected = 0;
-
-        // Note: Hustle chore income is dynamically processed in processWeeklyPractice
-
-        roster.forEach(p => {
-            const isWaived = team.finances.waivedDues.includes(p.id);
-            const ego = p.personality?.ego || 50;
-
-            if (isWaived) {
-                // Waiving fees builds morale but looks soft
-                if (p.expectations) p.expectations.happiness = Math.min(100, (p.expectations.happiness || 50) + 10);
-            } else {
-                // High-ego divas try to "forget their wallet", but Strict Coaches enforce the rules
-                const fearFactor = discipline / 150; // High discipline limits shenanigans
-                const forgetChance = ego > 75 ? (0.50 - fearFactor) : 0; 
-
-                if (Math.random() < forgetChance) {
-                    if (isUser && game.gameLog) game.gameLog.push(`💸 ${p.name} claimed he forgot his wallet and skipped paying team dues this week.`);
-                } else {
-                    duesCollected += 1.00;
-                }
+        if (
+            team.id === game.playerTeam?.id &&
+            transactionYear >= 5 &&
+            Number.isInteger(transactionYear) &&
+            Number.isInteger(transactionWeek)
+        ) {
+            if (!Array.isArray(team.finances.ledger)) {
+                team.finances.ledger = [];
             }
-        });
 
-        const incomeOpeningBalance =
-            Number(team.finances.balance) || 0;
+            const category = 'allowance';
+            const key = `${transactionYear}:${transactionWeek}:${category}`;
 
-        team.finances.balance += (weeklyIncome + duesCollected);
+            const existingIndex = team.finances.ledger.findIndex(entry =>
+                entry?.key === key ||
+                (
+                    Number(entry?.year) === transactionYear &&
+                    Number(entry?.week) === transactionWeek &&
+                    entry?.category === category
+                )
+            );
+
+            const entry = {
+                key,
+                year: transactionYear,
+                week: transactionWeek,
+                category,
+                label: 'Weekly Community Allowance',
+                amount: weeklyAllowance,
+                balanceAfter: team.finances.balance
+            };
+
+            if (existingIndex >= 0) {
+                team.finances.ledger[existingIndex] = entry;
+            } else {
+                team.finances.ledger.push(entry);
+            }
+
+            if (team.finances.ledger.length > 80) {
+                team.finances.ledger.splice(
+                    0,
+                    team.finances.ledger.length - 80
+                );
+            }
+        }
 
         // Record recurring income for the user's financial dashboard.
         const financeYear = Number(game.year);
@@ -1746,9 +1760,12 @@ export function processSeasonStartDues(gameState = game) {
         });
 
         const currentBalance = Number(team.finances.balance);
-        team.finances.balance =
-            (Number.isFinite(currentBalance) ? currentBalance : 10.00) +
-            collected;
+        team.finances.balance = Math.round(
+            (
+                (Number.isFinite(currentBalance) ? currentBalance : 10.00) +
+                collected
+            ) * 100
+        ) / 100;
 
         recordFinanceLedgerEntry(
             team,
@@ -3225,6 +3242,60 @@ export function processWeeklyPractice(team, gameLog = null) {
         const cashEarned = Number((workersCount * (0.85 + Math.random() * 0.30)).toFixed(2));
         if (!team.finances) team.finances = { balance: 0, waivedDues: [] };
         team.finances.balance += cashEarned;
+
+        // Record user-team hustle income in the financial ledger.
+        // Reuse the season/week/category key so reprocessing the same
+        // week cannot create duplicate hustle transactions.
+        const transactionYear = Number(game?.year);
+        const transactionWeek = Number(game?.currentWeek);
+
+        if (
+            team.id === game?.playerTeam?.id &&
+            transactionYear >= 5 &&
+            Number.isInteger(transactionYear) &&
+            Number.isInteger(transactionWeek)
+        ) {
+            if (!Array.isArray(team.finances.ledger)) {
+                team.finances.ledger = [];
+            }
+
+            const category = 'hustle';
+            const key = `${transactionYear}:${transactionWeek}:${category}`;
+
+            const existingIndex = team.finances.ledger.findIndex(entry =>
+                entry?.key === key ||
+                (
+                    Number(entry?.year) === transactionYear &&
+                    Number(entry?.week) === transactionWeek &&
+                    entry?.category === category
+                )
+            );
+
+            const entry = {
+                key,
+                year: transactionYear,
+                week: transactionWeek,
+                category,
+                label: 'Neighborhood Hustle Income',
+                amount: Math.round(cashEarned * 100) / 100,
+                balanceAfter: Math.round(
+                    (Number(team.finances.balance) || 0) * 100
+                ) / 100
+            };
+
+            if (existingIndex >= 0) {
+                team.finances.ledger[existingIndex] = entry;
+            } else {
+                team.finances.ledger.push(entry);
+            }
+
+            if (team.finances.ledger.length > 80) {
+                team.finances.ledger.splice(
+                    0,
+                    team.finances.ledger.length - 80
+                );
+            }
+        }
 
         recordFinanceLedgerEntry(
             team,

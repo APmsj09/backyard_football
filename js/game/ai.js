@@ -1221,20 +1221,14 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     const hasQBCrossedLine = qbState.y > (playState.lineOfScrimmage + 0.5);
     if (hasQBCrossedLine) {
         if (!qbState.hasProcessedLineCrossing) {
-            const pressureDefender = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 4.5);
-            if (pressureDefender && getDistance(qbState, pressureDefender) < 2.0) {
-                if (gameLog) gameLog.push(`💥 ${qbState.name} tackled after crossing the line of scrimmage!`);
-                qbState.action = 'sacked';
-                qbState.hasProcessedLineCrossing = true;
-                return;
-            } else {
-                qbState.action = 'run_path';
-                playState.qbIntent = 'scramble';
-                playState.qbRunCommitted = true;
-                if (gameLog) gameLog.push(`🏃 ${qbState.name} scrambles after crossing the line!`);
-                qbState.hasProcessedLineCrossing = true;
-                return;
-            }
+            // Once the QB crosses the line of scrimmage, they are a runner.
+            // Any tackle from this point is statistically a rush attempt, not a sack.
+            qbState.action = 'run_path';
+            playState.qbIntent = 'scramble';
+            playState.qbRunCommitted = true;
+            if (gameLog) gameLog.push(`🏃 ${qbState.name} crosses the line of scrimmage and becomes a runner!`);
+            qbState.hasProcessedLineCrossing = true;
+            return;
         }
         return;
     } else {
@@ -2548,7 +2542,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
     }
 
     const finalDist = Math.hypot(aimX - startX, aimY - startY);
-    const t = Math.max(0.1, finalDist / ballSpeed);
+    let t = Math.max(0.1, finalDist / ballSpeed);
 
     const targetZ = 1.6;
     const startZ = 2.2;
@@ -2560,6 +2554,11 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
         const minVz = Math.sqrt(2 * 9.8 * Math.max(0.2, minApexZ - startZ));
         if (vz < minVz) {
             vz = minVz;
+            // Recalculate flight time (t) and horizontal velocities to ensure the ball still lands accurately
+            const discriminant = (vz * vz) - (4 * 4.9 * deltaZ);
+            if (discriminant >= 0) {
+                t = (vz + Math.sqrt(discriminant)) / 9.8;
+            }
         }
     }
 

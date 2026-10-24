@@ -753,15 +753,50 @@ function getTrainingCandidates(team, assignment, playersById, coach, year, week)
         const attribute = getTrainingAttribute(player, skill);
 
         if (attribute) {
+            const storedProgress = Number(
+                team.staffTrainingProgress?.[String(player.id)]?.[skill]
+            );
+
+            const trainingProgress = Number.isFinite(storedProgress)
+                ? Math.max(0, storedProgress)
+                : 0;
+
+            const rotationScore = stableNoise([
+                team.id,
+                player.id,
+                coach.id,
+                year,
+                week,
+                assignment.focus,
+                assignment.skill || '',
+                'training-rotation'
+            ].join('|'));
+
             candidates.push({
                 player,
                 skill,
-                category: attribute.category
+                category: attribute.category,
+                trainingProgress,
+                rotationScore
             });
         }
     }
 
-    return candidates;
+    // Finish the closest-to-improvement training progress first.
+    // Rotate equally progressed candidates by week instead of relying
+    // on the permanent order of IDs in the team's roster.
+    candidates.sort((a, b) =>
+        b.trainingProgress - a.trainingProgress ||
+        b.rotationScore - a.rotationScore ||
+        String(a.player.id).localeCompare(String(b.player.id))
+    );
+
+    // Keep the internal selection scores out of the returned candidates.
+    return candidates.map(({
+        trainingProgress,
+        rotationScore,
+        ...candidate
+    }) => candidate);
 }
 
 function applyTrainingHours(

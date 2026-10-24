@@ -709,6 +709,11 @@ export function checkFumbleRecovery(playState, gameLog, tackleRange) {
     const offenseTeamId = playState.activePlayers.find(p => p.isOffense)?.teamId;
     const possessionChange = bestPlayer.teamId !== offenseTeamId;
 
+    // Track where the defense takes possession so touchbacks evaluate correctly
+    if (possessionChange) {
+        playState.returnStartY = bestPlayer.y;
+    }
+
     return {
         playerState: bestPlayer,
         possessionChange,
@@ -782,13 +787,16 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         if (ballCarrier) {
             const distToCarrier = getDistance(defender, ballCarrier);
             const carrierPastLOS = ballCarrier.y > playState.lineOfScrimmage + 1.0;
+            const carrierIsPastDefender = ballCarrier.y > defender.y + 2.0;
+
             // Shed block if carrier is close (<=5.0y) OR if carrier has broken past LOS on an open run
-            const shouldAttemptShed = distToCarrier < 5.0 || (carrierPastLOS && distToCarrier < 14.0);
+            // Also shed immediately if the carrier has blown past the defender downfield.
+            const shouldAttemptShed = distToCarrier < 5.0 || (carrierPastLOS && distToCarrier < 20.0) || carrierIsPastDefender;
 
             if (shouldAttemptShed) {
                 const reactionScore = (defender.playbookIQ || 50) + (defender.blockShedding || 50);
                 const shedBonus = Math.max(0, (5.0 - distToCarrier) * 12);
-                const openFieldUrgency = carrierPastLOS ? 25 : 0;
+                const openFieldUrgency = carrierPastLOS || carrierIsPastDefender ? 35 : 0;
 
                 if (reactionScore + shedBonus + openFieldUrgency + getRandomInt(0, 50) > 110) {
                     blocker.engagedWith = null; 
@@ -1586,7 +1594,10 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     }
                 } else {
                     ball.isSwatted = true;
-                    ball.vz = -2;
+                    ball.vz = 0;
+                    ball.vx = 0;
+                    ball.vy = 0;
+                    ball.z = 0;
 
                     if (gameLog) {
                         pushGameLog(
@@ -1594,6 +1605,11 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                             `[Tick ${playState.tick}] 🚩 OUT OF BOUNDS! ${bestCandidate.name} caught it out of bounds.`,
                             playState
                         );
+                    }
+                    if (playState.playIsLive) {
+                        playState.playIsLive = false;
+                        playState.incomplete = true;
+                        playState.finalBallY = playState.lineOfScrimmage;
                     }
                 }
 
@@ -1658,7 +1674,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 }
             });
 
-                        if (wasLateral) {
+            if (wasLateral) {
                 // Do not leave lateral state behind to contaminate later throws.
                 ball.isLateral = false;
                 ball.lateralPurpose = null;
@@ -1672,6 +1688,8 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     playState.fumbleOccurred = true;
                     playState.possessionChanged = true;
                     playState.turnover = true;
+                    // Track where the defense takes possession so touchbacks evaluate correctly
+                    playState.returnStartY = bestCandidate.y;
 
                     if (lateralThrowerId) {
                         playState.statEvents.push({

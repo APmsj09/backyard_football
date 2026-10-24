@@ -3132,6 +3132,564 @@ window.app = {
         }
     },
 
+        renderFinancesTab: (gameState) => {
+        const team = gameState?.playerTeam;
+        if (!team) return;
+
+        if (!team.finances) {
+            team.finances = {
+                balance: 10.00,
+                waivedDues: [],
+                autoSnack: 'none'
+            };
+        }
+
+        const pane = document.getElementById('fo-pane-finances');
+        if (!pane) return;
+
+        const finances = team.finances;
+        const money = value =>
+            `$${(Number(value) || 0).toFixed(2)}`;
+
+        const escapeHtml = value => String(value ?? '').replace(
+            /[&<>"']/g,
+            char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[char]
+        );
+
+        const ledger = Array.isArray(finances.ledger)
+            ? [...finances.ledger]
+            : [];
+
+        ledger.sort((a, b) =>
+            (Number(b.year) || 0) - (Number(a.year) || 0) ||
+            (Number(b.week) || 0) - (Number(a.week) || 0)
+        );
+
+        const normalizeLedgerCategory = value => {
+            const category = String(value || 'other');
+            const storeMatch = category.match(
+                /^store_(token|orange|caprisun|pizza|trainingEquipment|scoutingToolkit)_/
+            );
+
+            return storeMatch
+                ? `store_${storeMatch[1]}`
+                : category;
+        };
+
+        const ledgerCategoryLabels = {
+            allowance: 'Community Allowance',
+            playerDues: 'Player Dues',
+            autoSnack: 'Weekly Snack Plan',
+            hustle: 'Hustle Income',
+            store_token: 'Favor Token',
+            store_orange: 'Orange Slices',
+            store_caprisun: 'Capri Sun',
+            store_pizza: 'Pizza Party',
+            store_trainingEquipment: 'Training Equipment Upgrade',
+            store_scoutingToolkit: 'Scouting Toolkit Upgrade'
+        };
+
+        const getLedgerCategoryLabel = category =>
+            ledgerCategoryLabels[category] ||
+            String(category)
+                .replace(/[_-]+/g, ' ')
+                .replace(/\b[a-z]/g, letter => letter.toUpperCase());
+
+        const ledgerCategoryOptions = [
+            ...new Set(ledger.map(entry =>
+                normalizeLedgerCategory(entry.category)
+            ))
+        ]
+            .sort((a, b) =>
+                getLedgerCategoryLabel(a).localeCompare(
+                    getLedgerCategoryLabel(b)
+                )
+            )
+            .map(category => `
+                <option value="${category}">
+                    ${escapeHtml(getLedgerCategoryLabel(category))}
+                </option>
+            `)
+            .join('');
+
+        const recordedIncome = ledger.reduce((sum, entry) => {
+            const amount = Number(entry.amount) || 0;
+            return sum + (amount > 0 ? amount : 0);
+        }, 0);
+
+        const recordedExpenses = ledger.reduce((sum, entry) => {
+            const amount = Number(entry.amount) || 0;
+            return sum + (amount < 0 ? Math.abs(amount) : 0);
+        }, 0);
+
+        const recordedNet = ledger.reduce(
+            (sum, entry) => sum + (Number(entry.amount) || 0),
+            0
+        );
+
+        const weeklyTotals = new Map();
+
+        ledger.forEach(entry => {
+            const year = Number(entry.year) || 0;
+            const week = Number(entry.week) || 0;
+            const key = `${year}:${week}`;
+
+            if (!weeklyTotals.has(key)) {
+                weeklyTotals.set(key, {
+                    year,
+                    week,
+                    net: 0
+                });
+            }
+
+            weeklyTotals.get(key).net += Number(entry.amount) || 0;
+        });
+
+        const chartWeeks = [...weeklyTotals.values()]
+            .sort((a, b) =>
+                a.year - b.year || a.week - b.week
+            )
+            .slice(-8);
+
+        const chartScale = Math.max(
+            1,
+            ...chartWeeks.map(entry => Math.abs(entry.net))
+        );
+
+        const chartHtml = chartWeeks.length
+            ? chartWeeks.map(entry => {
+                const width = Math.max(
+                    entry.net === 0 ? 0 : 3,
+                    Math.abs(entry.net) / chartScale * 100
+                );
+
+                const barColor = entry.net < 0
+                    ? 'bg-rose-500'
+                    : 'bg-emerald-500';
+
+                return `
+                    <div class="grid grid-cols-[76px_minmax(0,1fr)_90px] gap-3 items-center text-xs">
+                        <span class="text-slate-500 font-semibold">
+                            Y${entry.year} W${entry.week}
+                        </span>
+                        <div class="h-5 bg-slate-100 rounded overflow-hidden">
+                            <div
+                                class="h-full ${barColor} rounded"
+                                style="width:${width.toFixed(1)}%"
+                            ></div>
+                        </div>
+                        <span class="text-right font-mono font-bold ${
+                            entry.net < 0 ? 'text-rose-600' : 'text-emerald-700'
+                        }">
+                            ${entry.net > 0 ? '+' : ''}${money(entry.net)}
+                        </span>
+                    </div>
+                `;
+            }).join('')
+            : `
+                <p class="text-sm text-slate-500 py-5 text-center">
+                    Weekly trends will appear as transactions are recorded.
+                </p>
+            `;
+
+        const ledgerRows = ledger.length
+            ? ledger.map(entry => {
+                const amount = Number(entry.amount) || 0;
+                const rawCategory = String(entry.category || 'other');
+                const categoryKey = normalizeLedgerCategory(rawCategory);
+                const category = escapeHtml(
+                    getLedgerCategoryLabel(categoryKey)
+                );
+
+                const rawDescription = String(
+                    entry.label || entry.description || entry.category || 'Transaction'
+                );
+                const description = escapeHtml(rawDescription);
+
+                const searchText = [
+                    entry.year,
+                    entry.week,
+                    rawCategory,
+                    getLedgerCategoryLabel(categoryKey),
+                    rawDescription,
+                    amount
+                ].join(' ').toLowerCase();
+
+                const balanceAfter = Number.isFinite(
+                    Number(entry.balanceAfter)
+                ) && entry.balanceAfter !== null &&
+                    entry.balanceAfter !== ''
+                    ? money(entry.balanceAfter)
+                    : '—';
+
+                return `
+                    <tr
+                        data-finance-ledger-row
+                        data-ledger-search="${escapeHtml(searchText)}"
+                        data-ledger-category="${escapeHtml(categoryKey)}"
+                        data-ledger-category-label="${escapeHtml(getLedgerCategoryLabel(categoryKey).toLowerCase())}"
+                        data-ledger-description="${escapeHtml(rawDescription.toLowerCase())}"
+                        data-ledger-date="${((Number(entry.year) || 0) * 100) + (Number(entry.week) || 0)}"
+                        data-ledger-amount="${amount}"
+                        data-ledger-balance="${
+                            Number.isFinite(Number(entry.balanceAfter)) &&
+                            entry.balanceAfter !== null &&
+                            entry.balanceAfter !== ''
+                                ? Number(entry.balanceAfter)
+                                : ''
+                        }"
+                        class="border-b border-slate-100 hover:bg-slate-50"
+                    >
+                        <td class="px-4 py-3 whitespace-nowrap text-slate-600">
+                            Y${Number(entry.year) || '—'} /
+                            W${Number(entry.week) || '—'}
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <span class="inline-block rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                                ${category}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 min-w-56 text-slate-800">
+                            ${description}
+                        </td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap font-mono font-bold ${
+                            amount < 0 ? 'text-rose-600' : 'text-emerald-700'
+                        }">
+                            ${amount > 0 ? '+' : ''}${money(amount)}
+                        </td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap font-mono text-slate-700">
+                            ${balanceAfter}
+                        </td>
+                    </tr>
+                `;
+            }).join('')
+            : `
+                <tr>
+                    <td colspan="5" class="px-4 py-10 text-center text-slate-500">
+                        No transactions have been recorded yet.
+                    </td>
+                </tr>
+            `;
+
+        pane.innerHTML = `
+            <div class="min-h-full bg-slate-100 p-4 md:p-6 space-y-5">
+                <div class="flex flex-wrap justify-between items-start gap-3">
+                    <div>
+                        <h3 class="text-2xl font-black uppercase tracking-wide text-slate-800">
+                            Team Finances
+                        </h3>
+                        <p class="text-sm text-slate-500 mt-1">
+                            Manage the fund and review where your money goes.
+                        </p>
+                    </div>
+                    <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Financial Records
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                    <div class="bg-slate-900 text-white rounded-lg p-4 shadow-sm">
+                        <p class="text-xs uppercase tracking-wider text-slate-300 font-bold">
+                            Current Balance
+                        </p>
+                        <p class="text-2xl font-black font-mono mt-2">
+                            ${money(finances.balance)}
+                        </p>
+                    </div>
+
+                    <div class="bg-white rounded-lg border border-slate-200 p-4">
+                        <p class="text-xs uppercase tracking-wider text-slate-500 font-bold">
+                            Recorded Income
+                        </p>
+                        <p class="text-xl font-black font-mono text-emerald-700 mt-2">
+                            +${money(recordedIncome)}
+                        </p>
+                    </div>
+
+                    <div class="bg-white rounded-lg border border-slate-200 p-4">
+                        <p class="text-xs uppercase tracking-wider text-slate-500 font-bold">
+                            Recorded Expenses
+                        </p>
+                        <p class="text-xl font-black font-mono text-rose-600 mt-2">
+                            ${money(recordedExpenses)}
+                        </p>
+                    </div>
+
+                    <div class="bg-white rounded-lg border border-slate-200 p-4">
+                        <p class="text-xs uppercase tracking-wider text-slate-500 font-bold">
+                            Recorded Net Change
+                        </p>
+                        <p class="text-xl font-black font-mono mt-2 ${
+                            recordedNet < 0 ? 'text-rose-600' : 'text-emerald-700'
+                        }">
+                            ${recordedNet > 0 ? '+' : ''}${money(recordedNet)}
+                        </p>
+                    </div>
+                </div>
+
+                <section class="bg-white rounded-lg border border-slate-200 shadow-sm p-4">
+                    <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
+                        <div>
+                            <h4 class="font-black text-slate-800">
+                                Weekly Cash Flow
+                            </h4>
+                            <p class="text-xs text-slate-500 mt-1">
+                                Net change by week, based on recorded ledger entries.
+                            </p>
+                        </div>
+                        <span class="text-xs text-slate-400">
+                            Most recent 8 weeks
+                        </span>
+                    </div>
+                    <div class="space-y-3">
+                        ${chartHtml}
+                    </div>
+                </section>
+
+                <section class="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2">
+                        <div>
+                            <h4 class="font-black text-slate-800">
+                                Transaction Ledger
+                            </h4>
+                            <p class="text-xs text-slate-500 mt-1">
+                                Individual transactions, newest weeks first.
+                            </p>
+                        </div>
+                        <span
+                            id="finance-ledger-count"
+                            class="text-xs font-semibold text-slate-500"
+                        >
+                            ${ledger.length} recorded entries
+                        </span>
+                    </div>
+
+                    <div class="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row gap-3">
+                        <label class="flex-1">
+                            <span class="block text-xs font-bold text-slate-600 mb-1">
+                                Search transactions
+                            </span>
+                            <input
+                                id="finance-ledger-search"
+                                type="search"
+                                placeholder="Description, category, week, amount..."
+                                class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500"
+                            >
+                        </label>
+
+                        <label class="sm:w-64">
+                            <span class="block text-xs font-bold text-slate-600 mb-1">
+                                Category
+                            </span>
+                            <select
+                                id="finance-ledger-category"
+                                class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500"
+                            >
+                                <option value="all">All categories</option>
+                                ${ledgerCategoryOptions}
+                            </select>
+                        </label>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="min-w-[760px] w-full text-sm">
+                            <thead class="bg-slate-800 text-white">
+                                <tr>
+                                    <th class="px-4 py-3 text-left whitespace-nowrap">
+                                        <button type="button" data-finance-sort="date" data-sort-label="Season / Week" class="inline-flex items-center gap-2 hover:text-amber-300">
+                                            Season / Week <span data-sort-indicator>↓</span>
+                                        </button>
+                                    </th>
+                                    <th class="px-4 py-3 text-left">
+                                        <button type="button" data-finance-sort="category" data-sort-label="Category" class="inline-flex items-center gap-2 hover:text-amber-300">
+                                            Category <span data-sort-indicator>↕</span>
+                                        </button>
+                                    </th>
+                                    <th class="px-4 py-3 text-left">
+                                        <button type="button" data-finance-sort="description" data-sort-label="Description" class="inline-flex items-center gap-2 hover:text-amber-300">
+                                            Description <span data-sort-indicator>↕</span>
+                                        </button>
+                                    </th>
+                                    <th class="px-4 py-3 text-right whitespace-nowrap">
+                                        <button type="button" data-finance-sort="amount" data-sort-label="Amount" class="inline-flex items-center justify-end gap-2 hover:text-amber-300">
+                                            Amount <span data-sort-indicator>↕</span>
+                                        </button>
+                                    </th>
+                                    <th class="px-4 py-3 text-right whitespace-nowrap">
+                                        <button type="button" data-finance-sort="balance" data-sort-label="Balance After" class="inline-flex items-center justify-end gap-2 hover:text-amber-300">
+                                            Balance After <span data-sort-indicator>↕</span>
+                                        </button>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="finance-ledger-body">
+                                ${ledgerRows}
+                                <tr id="finance-ledger-no-matches" class="hidden">
+                                    <td colspan="5" class="px-4 py-8 text-center text-slate-500">
+                                        No transactions match your search and category filters.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        `;
+
+        const searchInput = pane.querySelector('#finance-ledger-search');
+        const categorySelect = pane.querySelector('#finance-ledger-category');
+        const ledgerCount = pane.querySelector('#finance-ledger-count');
+        const noMatchesRow = pane.querySelector('#finance-ledger-no-matches');
+
+        const transactionRows = Array.from(
+            pane.querySelectorAll('[data-finance-ledger-row]')
+        );
+
+        const ledgerBody = pane.querySelector('#finance-ledger-body');
+        const sortButtons = Array.from(
+            pane.querySelectorAll('[data-finance-sort]')
+        );
+
+        let sortField = 'date';
+        let sortDirection = 'desc';
+
+        const sortLedgerRows = () => {
+            const getSortValue = row => {
+                switch (sortField) {
+                    case 'category':
+                        return row.dataset.ledgerCategoryLabel || '';
+
+                    case 'description':
+                        return row.dataset.ledgerDescription || '';
+
+                    case 'amount':
+                        return Number(row.dataset.ledgerAmount) || 0;
+
+                    case 'balance':
+                        return row.dataset.ledgerBalance === ''
+                            ? Number.NEGATIVE_INFINITY
+                            : Number(row.dataset.ledgerBalance);
+
+                    case 'date':
+                    default:
+                        return Number(row.dataset.ledgerDate) || 0;
+                }
+            };
+
+            transactionRows.sort((a, b) => {
+                const valueA = getSortValue(a);
+                const valueB = getSortValue(b);
+
+                const comparison =
+                    typeof valueA === 'string' && typeof valueB === 'string'
+                        ? valueA.localeCompare(valueB)
+                        : valueA - valueB;
+
+                return sortDirection === 'asc'
+                    ? comparison
+                    : -comparison;
+            });
+
+            // Reorder the existing rows without rebuilding them.
+            transactionRows.forEach(row => {
+                ledgerBody?.appendChild(row);
+            });
+
+            // Keep the no-results message at the bottom.
+            if (ledgerBody && noMatchesRow) {
+                ledgerBody.appendChild(noMatchesRow);
+            }
+
+            sortButtons.forEach(button => {
+                const isActive = button.dataset.financeSort === sortField;
+                const indicator = button.querySelector('[data-sort-indicator]');
+
+                if (indicator) {
+                    indicator.textContent = isActive
+                        ? (sortDirection === 'asc' ? '↑' : '↓')
+                        : '↕';
+                }
+
+                button.title = isActive
+                    ? `Sorted ${sortDirection === 'asc' ? 'ascending' : 'descending'}`
+                    : 'Click to sort';
+            });
+        };
+
+        sortButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const nextField = button.dataset.financeSort;
+
+                if (sortField === nextField) {
+                    sortDirection = sortDirection === 'asc'
+                        ? 'desc'
+                        : 'asc';
+                } else {
+                    sortField = nextField;
+                    sortDirection = [
+                        'category',
+                        'description'
+                    ].includes(nextField)
+                        ? 'asc'
+                        : 'desc';
+                }
+
+                sortLedgerRows();
+                applyLedgerFilters();
+            });
+        });
+
+        const applyLedgerFilters = () => {
+            const query = (searchInput?.value || '')
+                .trim()
+                .toLowerCase();
+
+            const selectedCategory = categorySelect?.value || 'all';
+            let visibleCount = 0;
+
+            transactionRows.forEach(row => {
+                const matchesSearch =
+                    !query ||
+                    (row.dataset.ledgerSearch || '').includes(query);
+
+                const matchesCategory =
+                    selectedCategory === 'all' ||
+                    row.dataset.ledgerCategory === selectedCategory;
+
+                const isVisible = matchesSearch && matchesCategory;
+
+                row.classList.toggle('hidden', !isVisible);
+
+                if (isVisible) visibleCount++;
+            });
+
+            if (ledgerCount) {
+                ledgerCount.textContent = visibleCount === ledger.length
+                    ? `${ledger.length} recorded entries`
+                    : `${visibleCount} of ${ledger.length} entries`;
+            }
+
+            if (noMatchesRow) {
+                noMatchesRow.classList.toggle(
+                    'hidden',
+                    ledger.length === 0 || visibleCount > 0
+                );
+            }
+        };
+
+        searchInput?.addEventListener('input', applyLedgerFilters);
+        categorySelect?.addEventListener('change', applyLedgerFilters);
+
+        sortLedgerRows();
+        applyLedgerFilters();
+    },
+
     renderStoreTab: (gameState) => {
         const team = gameState?.playerTeam;
         if (!team) return;
@@ -3167,7 +3725,7 @@ window.app = {
         const nextScoutingToolkitPrice =
             scoutingToolkitPrices[scoutingToolkitLevel] ?? null;
 
-        const pane = document.getElementById('fo-pane-finances');
+        const pane = document.getElementById('fo-pane-store');
         if (!pane) return;
 
         const escapeFinanceText = value =>
@@ -3178,238 +3736,6 @@ window.app = {
                 '"': '&quot;',
                 "'": '&#39;'
             })[char]);
-
-        const formatFinanceMoney = value => {
-            const amount = Number(value);
-            return Number.isFinite(amount)
-                ? `$${amount.toFixed(2)}`
-                : '—';
-        };
-
-        const ledgerEntries = (
-            Array.isArray(team.finances.ledger)
-                ? team.finances.ledger
-                : []
-        )
-            .filter(entry =>
-                entry &&
-                Number.isFinite(Number(entry.year)) &&
-                Number.isFinite(Number(entry.week)) &&
-                Number.isFinite(Number(entry.amount))
-            )
-            .slice()
-            .sort((a, b) =>
-                Number(a.year) - Number(b.year) ||
-                Number(a.week) - Number(b.week)
-            )
-            .slice(-8)
-            .reverse();
-
-        const ledgerRowsHtml = ledgerEntries.length > 0
-            ? ledgerEntries.map(entry => {
-                const amount = Number(entry.amount);
-                const amountClass = amount >= 0
-                    ? 'text-emerald-700'
-                    : 'text-rose-700';
-
-                return `
-                    <tr class="border-t border-slate-100">
-                        <td class="py-2 pr-2 text-slate-500 whitespace-nowrap">
-                            Y${entry.year} · W${entry.week}
-                        </td>
-                        <td class="py-2 pr-2">
-                            <span class="font-semibold text-slate-800">
-                                ${escapeFinanceText(entry.label || entry.category)}
-                            </span>
-                            <span class="block text-[10px] text-slate-400">
-                                ${escapeFinanceText(entry.category || 'other')}
-                            </span>
-                        </td>
-                        <td class="py-2 text-right font-mono font-bold ${amountClass} whitespace-nowrap">
-                            ${amount >= 0 ? '+' : '-'}${formatFinanceMoney(Math.abs(amount))}
-                        </td>
-                    </tr>
-                `;
-            }).join('')
-            : `
-                <tr>
-                    <td colspan="3" class="py-5 text-center text-xs text-slate-400">
-                        No recorded transactions yet. Ledger entries begin in Year 5.
-                    </td>
-                </tr>
-            `;
-
-        const weeklyHistory = (
-            Array.isArray(team.finances.weeklyHistory)
-                ? team.finances.weeklyHistory
-                : []
-        )
-            .filter(item =>
-                item &&
-                Number.isFinite(Number(item.year)) &&
-                Number.isFinite(Number(item.week)) &&
-                Number.isFinite(Number(item.closingBalance)) &&
-                Number.isFinite(Number(item.netChange))
-            )
-            .slice()
-            .sort((a, b) =>
-                Number(a.year) - Number(b.year) ||
-                Number(a.week) - Number(b.week)
-            );
-
-        const recentWeeks = weeklyHistory.slice(-4).reverse();
-
-        const weeklyRowsHtml = recentWeeks.length > 0
-            ? recentWeeks.map(item => {
-                const net = Number(item.netChange);
-                const netClass = net >= 0
-                    ? 'text-emerald-700'
-                    : 'text-rose-700';
-
-                return `
-                    <tr class="border-t border-slate-100">
-                        <td class="py-2 pr-2 text-slate-500 whitespace-nowrap">
-                            Y${item.year} · W${item.week}
-                        </td>
-                        <td class="py-2 text-right font-mono ${netClass}">
-                            ${net >= 0 ? '+' : '-'}${formatFinanceMoney(Math.abs(net))}
-                        </td>
-                        <td class="py-2 text-right font-mono font-bold text-slate-800">
-                            ${formatFinanceMoney(item.closingBalance)}
-                        </td>
-                    </tr>
-                `;
-            }).join('')
-            : `
-                <tr>
-                    <td colspan="3" class="py-5 text-center text-xs text-slate-400">
-                        Weekly snapshots will appear after the first processed week.
-                    </td>
-                </tr>
-            `;
-
-        const recentNetChanges = weeklyHistory
-            .slice(-4)
-            .map(item => Number(item.netChange))
-            .filter(Number.isFinite);
-
-        const averageWeeklyNet = recentNetChanges.length >= 2
-            ? recentNetChanges.reduce((sum, value) => sum + value, 0) /
-                recentNetChanges.length
-            : null;
-
-        const currentBalance = Number(team.finances.balance);
-        const hasValidBalance = Number.isFinite(currentBalance);
-
-        const projectedBalance =
-            hasValidBalance && averageWeeklyNet !== null
-                ? currentBalance + averageWeeklyNet
-                : null;
-
-        const financeDashboardHtml = `
-            <section class="px-4 pt-4 space-y-4">
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div class="rounded border border-slate-200 bg-white p-3">
-                        <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                            Current balance
-                        </p>
-                        <p class="mt-1 text-xl font-black font-mono text-slate-800">
-                            ${formatFinanceMoney(team.finances.balance)}
-                        </p>
-                    </div>
-
-                    <div class="rounded border border-slate-200 bg-white p-3">
-                        <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                            Recent weekly average
-                        </p>
-                        <p class="mt-1 text-xl font-black font-mono ${
-                            averageWeeklyNet === null
-                                ? 'text-slate-400'
-                                : averageWeeklyNet >= 0
-                                    ? 'text-emerald-700'
-                                    : 'text-rose-700'
-                        }">
-                            ${averageWeeklyNet === null
-                                ? 'Not available'
-                                : `${averageWeeklyNet >= 0 ? '+' : '-'}${formatFinanceMoney(Math.abs(averageWeeklyNet))}`
-                            }
-                        </p>
-                    </div>
-
-                    <div class="rounded border border-slate-200 bg-white p-3">
-                        <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                            Rough next-week estimate
-                        </p>
-                        <p class="mt-1 text-xl font-black font-mono text-slate-800">
-                            ${projectedBalance === null
-                                ? 'Need 2+ snapshots'
-                                : formatFinanceMoney(projectedBalance)
-                            }
-                        </p>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    <div class="rounded border border-slate-200 bg-white p-4">
-                        <div class="flex items-center justify-between gap-2 mb-2">
-                            <h4 class="text-sm font-black uppercase text-slate-800">
-                                Recent transactions
-                            </h4>
-                            <span class="text-[10px] text-slate-400">
-                                Latest 8
-                            </span>
-                        </div>
-
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-xs">
-                                <thead>
-                                    <tr class="text-left text-[10px] uppercase text-slate-400">
-                                        <th class="py-2 pr-2">Week</th>
-                                        <th class="py-2 pr-2">Transaction</th>
-                                        <th class="py-2 text-right">Amount</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${ledgerRowsHtml}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="rounded border border-slate-200 bg-white p-4">
-                        <div class="flex items-center justify-between gap-2 mb-2">
-                            <h4 class="text-sm font-black uppercase text-slate-800">
-                                Weekly balance history
-                            </h4>
-                            <span class="text-[10px] text-slate-400">
-                                Latest 4
-                            </span>
-                        </div>
-
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-xs">
-                                <thead>
-                                    <tr class="text-left text-[10px] uppercase text-slate-400">
-                                        <th class="py-2 pr-2">Week</th>
-                                        <th class="py-2 text-right">Tracked change</th>
-                                        <th class="py-2 text-right">Closing balance</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${weeklyRowsHtml}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <p class="mt-3 text-[10px] leading-relaxed text-slate-500">
-                            The estimate uses the average of recent recorded weekly changes.
-                            Off-cycle spending and income may not be included yet, so treat it
-                            as a guide rather than a guaranteed balance.
-                        </p>
-                    </div>
-                </div>
-            </section>
-        `;
 
         pane.innerHTML = `
             <div class="p-4 border-b bg-white shrink-0 sticky top-0 z-10 shadow-sm flex justify-between items-center">
@@ -3422,7 +3748,6 @@ window.app = {
                     <span class="text-2xl font-black font-mono">$${team.finances.balance.toFixed(2)}</span>
                 </div>
             </div>
-            ${financeDashboardHtml}
             ${team.finances.lastStoreNotice ? `
                 <div class="mx-4 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-sm">
                     <div class="text-xs font-black uppercase tracking-wider text-emerald-800">
@@ -3874,6 +4199,10 @@ function main() {
                 }
 
                 if (btn.dataset.subTab === 'finances') {
+                    window.app.renderFinancesTab(gameState);
+                }
+
+                if (btn.dataset.subTab === 'store') {
                     window.app.renderStoreTab(gameState);
                 }
 

@@ -1016,20 +1016,30 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             if (pState.id === ballCarrierState.id) {
                 let targetX = pState.x;
-                const nearestOff = offenseStates.find(o => getDistance(pState, o) < 8);
-                if (nearestOff) {
-                    const dx = pState.x - nearestOff.x;
-                    targetX += (dx > 0 ? 3 : -3);
-                    targetX = Math.max(1, Math.min(52, targetX));
-                } else {
-                    if (pState.x < 20) targetX += 0.5;
-                    else if (pState.x > 33) targetX -= 0.5;
+                
+                // Find the safest lane for the returner
+                let leftThreats = 0, rightThreats = 0, centerThreats = 0;
+                offenseStates.forEach(o => {
+                    if (o.isBlocked || o.stunnedTicks > 0 || o.y < pState.y - 15 || o.y > pState.y + 2) return;
+                    const dx = o.x - pState.x;
+                    if (Math.abs(dx) < 3.5) centerThreats++;
+                    else if (dx > 0) rightThreats++;
+                    else leftThreats++;
+                });
+                
+                if (centerThreats > 0) {
+                    targetX += (leftThreats < rightThreats) ? -4.5 : 4.5;
+                    targetX = Math.max(2, Math.min(51.3, targetX));
                 }
+                
                 pState.targetX = targetX;
-                pState.targetY = 10;
+                // Target the 0-yard line (defense's scoring end zone)
+                pState.targetY = -5; 
                 pState.action = 'run_path';
-                pState.contactReduction = nearestOff ? 0.9 : 1.0;
-                setPointIntent(pState, pState.targetX, pState.targetY, 0.6); // FIX: Returner needed movement intent
+                pState.contactReduction = centerThreats === 0 ? 1.0 : 0.9;
+                
+                // Use lane intent so they weave through traffic instead of running straight into a block
+                setLaneIntent(pState, pState.targetX, pState.targetY, 8);
             } else if (!pState.isOffense) {
                 const nearestOff = offenseStates
                     .filter(o =>
@@ -1046,14 +1056,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     pState.action = 'run_block';
                 } else {
                     pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -3 : 3);
-                    pState.targetY = ballCarrierState.y - 3;
-                    pState.action = 'run_block'; // FIX: Was mislabeled as 'run_path' for blockers
+                    pState.targetY = ballCarrierState.y - 4; // Stay slightly ahead to lead block
+                    pState.action = 'run_block';
                 }
                 setPointIntent(pState, pState.targetX, pState.targetY, 0.45);
 
-                // Convert a close escort assignment into a real blocking
-                // engagement instead of letting the two players run through
-                // the same space without establishing a block battle.
                 if (
                     nearestOff &&
                     !nearestOff.isEngaged &&
@@ -1085,16 +1092,32 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
             } else if (pState.isOffense) {
                 const dist = getDistance(pState, ballCarrierState);
-                const leadTime = dist / 15;
                 const carrierVx = ballCarrierState.vx || 0;
                 const carrierVy = ballCarrierState.vy || 0;
-                pState.targetX = ballCarrierState.x + (carrierVx * leadTime);
-                pState.targetY = ballCarrierState.y + (carrierVy * leadTime);
-                pState.action = 'pursuit'; // FIX: Was mislabeled as 'run_path'
-                setPointIntent(pState, pState.targetX, pState.targetY, 0.5); // FIX: Offensive tacklers needed movement intent
+                
+                // Smart quadratic lead time estimate for offensive tacklers
+                const pursuerSpeed = getPlayerBaseSpeedYPS(pState) * (pState.fatigueModifier || 1.0);
+                const leadTime = Math.min(2.5, Math.max(0.1, dist / Math.max(1, pursuerSpeed)));
+                
+                let predX = ballCarrierState.x + (carrierVx * leadTime);
+                let predY = ballCarrierState.y + (carrierVy * leadTime);
+                
+                // Cut off the sideline
+                if (ballCarrierState.x < 10) predX = Math.max(2, predX - 1.5);
+                else if (ballCarrierState.x > 43.3) predX = Math.min(51.3, predX + 1.5);
+                
+                // Stay ahead of the runner (downhill from offense perspective means lower Y)
+                if (pState.y < ballCarrierState.y) {
+                    predY = Math.min(predY, ballCarrierState.y - Math.min(5, dist * 0.3));
+                }
+                
+                pState.targetX = predX;
+                pState.targetY = predY;
+                pState.action = 'pursuit';
+                setPointIntent(pState, pState.targetX, pState.targetY, 0.5);
             }
             pState.targetX = Math.max(1, Math.min(52.3, pState.targetX));
-            pState.targetY = Math.max(1, Math.min(119.0, pState.targetY));
+            pState.targetY = Math.max(-10, Math.min(119.0, pState.targetY)); // Allow targetY to reach 0 for scoring
 
             if (!pState.isEngaged && !pState.isBlocked) {
                 resolveMovementIntent(pState);
@@ -2686,8 +2709,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             let shouldPursue = false;
 
-            // FIX: Once a defender begins pursuing a live runner, remember it for at least 15 ticks (0.6s)
-            // so they do not abandon pursuit just because the runner momentarily cut behind them.
             const isPersistingPursuit = pState._pursuitLockTicks && pState._pursuitLockTicks > 0;
             if (isPersistingPursuit) {
                 pState._pursuitLockTicks--;
@@ -2699,8 +2720,26 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 !isBallInAir;
 
             if (ballCarrierState && !isBallInAir) {
-                if (isRunReadAtMesh) {
+                const isConfidentRun = isRunRead && diagConfidence >= 0.55;
+
+                // FIX: If a defender confidently reads a run (e.g. from lineman keys), 
+                // they must aggressively pursue the play even if their zone drop 
+                // briefly turned their vision cone away from the backfield.
+                if (isRunReadAtMesh || isConfidentRun) {
                     shouldPursue = true;
+                    
+                    if (
+                        ballCarrierState.isOffense &&
+                        (
+                            ballCarrierState.role !== 'QB' ||
+                            qbScrambling ||
+                            isBallPastLOS
+                        )
+                    ) {
+                        pState._hasCommittedToLiveRunner = true;
+                    }
+                    
+                    pState._pursuitLockTicks = 25;
                 } else if (
                     carrierPerception > 0 ||
                     isPersistingPursuit ||
@@ -3475,7 +3514,12 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             }
             pState.zoneDriftTick = playState.tick;
         } else {
-            if (!pState.zoneDriftTick || playState.tick > pState.zoneDriftTick + 25) {
+            let needsNewDrift = false;
+            if (!pState.zoneDriftTick || playState.tick > pState.zoneDriftTick + 25 || pState.dynamicTargetX === undefined) {
+                needsNewDrift = true;
+            }
+
+            if (needsNewDrift) {
                 pState.zoneDriftTick = playState.tick;
                 let driftX = zoneCenter.x;
                 const qb = offenseStates.find(p => p.slot.startsWith('QB'));
@@ -3485,36 +3529,41 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                     driftX += (qb.x < CENTER_X ? -2.5 : 2.5);
                 }
                 
-                // If there are no threats in the zone, don't drop blindly to maximum depth.
-                // Maintain a reasonable baseline depth.
-                let baselineDepth = isDeep ? LOS + 12.0 : zoneCenter.y;
-                
-                // READ STEPS (IQ & Instinct Scaled): 
-                // High IQ defenders stay patient to read the play.
-                // Low IQ defenders often bail early, BUT we add a random "instinct" roll 
-                // so they aren't rigidly robotic and can occasionally read it perfectly.
-                const instinctRoll = Math.floor(Math.random() * 15);
-                const readWindowTicks = 12 + Math.floor(iq / 3) + instinctRoll; // ~20 to 60 ticks depending on IQ and variance
-                
-                if (isDeep && playState.tick < readWindowTicks) {
-                    // Backpedal speed considers IQ, but also ensures lower IQ players don't just warp backwards
-                    const backpedalSpeed = 0.22 - (iq * 0.0012) + (Math.random() * 0.05); 
-                    baselineDepth = pState.initialY + (playState.tick * Math.max(0.07, backpedalSpeed));
-                }
-
                 pState.dynamicTargetX = driftX;
-                pState.dynamicTargetY = Math.min(zoneCenter.y, baselineDepth);
             }
-            pState.targetX = pState.dynamicTargetX || zoneCenter.x;
-            pState.targetY = pState.dynamicTargetY || zoneCenter.y;
+
+            let baselineDepth = isDeep ? LOS + 12.0 : zoneCenter.y;
+            
+            // Re-evaluate read steps more continuously while in the read window
+            if (pState._readWindowTicks === undefined) {
+                const instinctRoll = Math.floor(Math.random() * 15);
+                pState._readWindowTicks = 12 + Math.floor(iq / 3) + instinctRoll; // ~20 to 60 ticks depending on IQ and variance
+            }
+            
+            if (isDeep && playState.tick < pState._readWindowTicks) {
+                if (pState._backpedalSpeed === undefined) {
+                    pState._backpedalSpeed = 0.22 - (iq * 0.0012) + (Math.random() * 0.05); 
+                }
+                // Backpedal smoothly from initial alignment
+                baselineDepth = pState.initialY + (playState.tick * Math.max(0.07, pState._backpedalSpeed));
+            } else if (!isDeep && playState.tick < pState._readWindowTicks * 0.5) {
+                // Short zones also hold/read before bailing
+                baselineDepth = pState.initialY + (playState.tick * 0.05);
+            }
+
+            pState.dynamicTargetY = Math.min(zoneCenter.y, baselineDepth);
+
+            pState.targetX = pState.dynamicTargetX;
+            pState.targetY = pState.dynamicTargetY;
         }
 
         // Sync whichever zone-coverage target was selected.
+        // We use a slightly smaller arrival radius for zone drops so they don't stutter as much
         setPointIntent(
             pState,
             pState.targetX,
             pState.targetY,
-            0.5
+            0.4
         );
 
     } else if (assignment === 'spy_QB') {

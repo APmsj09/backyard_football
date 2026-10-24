@@ -565,8 +565,8 @@ function initiateLateralToss(playState, thrower, receiver, purpose) {
 
     // Bound the flight duration to avoid excessively long exchanges.
     const flightTicks = Math.max(
-        5,
-        Math.min(20, Math.ceil(initialDistance / 0.55))
+        10, // Increased minimum hangtime to 0.4s for a realistic soft toss
+        Math.min(30, Math.ceil(initialDistance / 0.32)) // Slower pitch velocity (~8 yds/sec)
     );
 
     const flightTime = flightTicks * TICK_DURATION_SECONDS;
@@ -1999,10 +1999,10 @@ function shouldReleaseFleaFlickerPitch(rb, playState, tick) {
     const ticksSinceHandoff = tick - rb._handoffTick;
 
     // Give the RB a brief fake-run window before pitching back.
-    if (ticksSinceHandoff < 5) return false;
+    if (ticksSinceHandoff < 15) return false; // Increased to 0.6 seconds so the RB actually hits the hole
 
     // Never let the fake run drag on until the RB is tackled.
-    if (ticksSinceHandoff >= 7) return true;
+    if (ticksSinceHandoff >= 22) return true;
 
     // If a free defender is closing, release the pitch early.
     return playState.activePlayers.some(defender => {
@@ -2542,12 +2542,15 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     const qbDepth = playState.lineOfScrimmage - qb1.initialY;
                     const dist = getDistance(qb1, rb1);
                     const isTossPlay = rb1.assignment?.includes('toss');
-                    const handoffDistThreshold = isTossPlay ? 3.8 : 1.8;
+                    const handoffDistThreshold = isTossPlay ? 4.5 : 1.8;
                     const handoffTickThreshold = isTossPlay
-                        ? 12
+                        ? 24 // Delay forced toss to ~0.96s so the play develops
                         : (qbDepth < 4.0 ? 16 : 22);
+                        
+                    // Require at least tick 14 (0.56s) for tosses to give QB time to turn, tick 8 for normal handoffs
+                    const minExchangeTick = isTossPlay ? 14 : 8;
 
-                    if ((dist < handoffDistThreshold && playState.tick > 5) || (playState.tick >= handoffTickThreshold)) {
+                    if ((dist < handoffDistThreshold && playState.tick >= minExchangeTick) || (playState.tick >= handoffTickThreshold)) {
                         if (isTossPlay) {
                             // Ordinary toss plays use the airborne lateral.
                             if (initiateLateralToss(
