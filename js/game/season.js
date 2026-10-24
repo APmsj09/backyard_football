@@ -1052,7 +1052,10 @@ function recordFinanceLedgerEntry(
         week,
         category,
         label,
-        amount: Math.round(value * 100) / 100
+        amount: Math.round(value * 100) / 100,
+        balanceAfter: Math.round(
+            (Number(team.finances.balance) || 0) * 100
+        ) / 100
     };
 
     const existingIndex = team.finances.ledger.findIndex(
@@ -1250,23 +1253,83 @@ export function processEndOfWeek() {
             }
         });
 
+        const incomeOpeningBalance =
+            Number(team.finances.balance) || 0;
+
         team.finances.balance += (weeklyIncome + duesCollected);
 
-        recordFinanceLedgerEntry(
-            team,
-            game,
-            'allowance',
-            'Weekly community allowance',
-            weeklyIncome
-        );
+        // Record recurring income for the user's financial dashboard.
+        const financeYear = Number(game.year);
+        const financeWeek = Number(game.currentWeek);
 
-        recordFinanceLedgerEntry(
-            team,
-            game,
-            'playerDues',
-            'Weekly player dues',
-            duesCollected
-        );
+        if (
+            isUser &&
+            financeYear >= 5 &&
+            Number.isInteger(financeYear) &&
+            Number.isInteger(financeWeek)
+        ) {
+            if (!Array.isArray(team.finances.ledger)) {
+                team.finances.ledger = [];
+            }
+
+            const recordWeeklyIncome = (
+                category,
+                label,
+                amount,
+                balanceAfter
+            ) => {
+                if (!(amount > 0)) return;
+
+                const key =
+                    `${financeYear}:${financeWeek}:${category}`;
+
+                const entry = {
+                    key,
+                    year: financeYear,
+                    week: financeWeek,
+                    category,
+                    label,
+                    amount,
+                    balanceAfter
+                };
+
+                // Replace an existing entry for this category and week
+                // rather than creating duplicate ledger rows.
+                const existingIndex = team.finances.ledger.findIndex(
+                    item => item?.key === key
+                );
+
+                if (existingIndex >= 0) {
+                    team.finances.ledger[existingIndex] = entry;
+                } else {
+                    team.finances.ledger.push(entry);
+                }
+            };
+
+            recordWeeklyIncome(
+                'weeklyAllowance',
+                'Weekly Community Allowance',
+                weeklyIncome,
+                incomeOpeningBalance + weeklyIncome
+            );
+
+            recordWeeklyIncome(
+                'playerDues',
+                'Player Dues Collected',
+                duesCollected,
+                incomeOpeningBalance + weeklyIncome + duesCollected
+            );
+
+            if (team.finances.ledger.length > 80) {
+                team.finances.ledger.splice(
+                    0,
+                    team.finances.ledger.length - 80
+                );
+            }
+        }
+
+        // Weekly allowance and player dues are already recorded above,
+        // with separate entries and their respective ending balances.
 
         if (isUser && game.gameLog) {
             game.gameLog.push(`💰 Weekly Community Allowance: +$${weeklyIncome.toFixed(2)}.`);
@@ -1366,8 +1429,8 @@ export function processEndOfWeek() {
         }
 
         // Record payroll if Patch 20 processed it for this exact week.
-        const payrollKey =
-            `${Number(game.year)}:${Number(game.currentWeek)}`;
+        //const payrollKey =
+        //    `${Number(game.year)}:${Number(game.currentWeek)}`;
 
         if (team.finances.staffPayrollKey === payrollKey) {
             const payroll = Number(team.finances.lastStaffPayroll);

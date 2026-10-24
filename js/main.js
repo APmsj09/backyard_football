@@ -3059,6 +3059,43 @@ window.app = {
             Math.round((balance - price) * 100) / 100
         );
 
+        // Record each one-time purchase in the finance dashboard.
+        // Use a unique category per purchase so buying multiple items
+        // in the same week does not overwrite an earlier transaction.
+        const transactionYear = Number(gs.year);
+        const transactionWeek = Number(gs.currentWeek);
+
+        if (
+            Number.isInteger(transactionYear) &&
+            transactionYear >= 5 &&
+            Number.isInteger(transactionWeek)
+        ) {
+            if (!Array.isArray(team.finances.ledger)) {
+                team.finances.ledger = [];
+            }
+
+            const transactionCategory =
+                `store_${item}_${Date.now()}_${team.finances.ledger.length}`;
+
+            team.finances.ledger.push({
+                key: `${transactionYear}:${transactionWeek}:${transactionCategory}`,
+                year: transactionYear,
+                week: transactionWeek,
+                category: transactionCategory,
+                label: product.title,
+                amount: -price,
+                balanceAfter: team.finances.balance
+            });
+
+            // Keep the saved transaction history bounded.
+            if (team.finances.ledger.length > 80) {
+                team.finances.ledger.splice(
+                    0,
+                    team.finances.ledger.length - 80
+                );
+            }
+        }
+
         // Display a purchase confirmation inside the store.
         team.finances.lastStoreNotice = {
             title: `${product.title} purchased`,
@@ -3112,7 +3149,7 @@ window.app = {
             )
         );
 
-        const trainingEquipmentPrices = [25.00, 45.00, 70.00];
+        const trainingEquipmentPrices = [15.00, 25.00, 40.00];
         const nextTrainingEquipmentPrice =
             trainingEquipmentPrices[trainingEquipmentLevel] ?? null;
 
@@ -3126,7 +3163,7 @@ window.app = {
             )
         );
 
-        const scoutingToolkitPrices = [20.00, 40.00, 60.00];
+        const scoutingToolkitPrices = [12.00, 22.00, 35.00];
         const nextScoutingToolkitPrice =
             scoutingToolkitPrices[scoutingToolkitLevel] ?? null;
 

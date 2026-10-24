@@ -2237,7 +2237,50 @@ export function renderStaffTab(gameState) {
                     team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - tokensOffered);
                 }
                 if (cashOffered > 0 && team.finances) {
-                    team.finances.balance = Math.max(0, team.finances.balance - cashOffered);
+                    const balanceBeforeOffer = Math.max(
+                        0,
+                        Number(team.finances.balance) || 0
+                    );
+                    const cashActuallyPaid = Math.min(
+                        balanceBeforeOffer,
+                        cashOffered
+                    );
+
+                    team.finances.balance = balanceBeforeOffer - cashActuallyPaid;
+
+                    const transactionYear = Number(gameState.year);
+                    const transactionWeek = Number(gameState.currentWeek);
+
+                    if (
+                        cashActuallyPaid > 0 &&
+                        Number.isInteger(transactionYear) &&
+                        transactionYear >= 5 &&
+                        Number.isInteger(transactionWeek)
+                    ) {
+                        if (!Array.isArray(team.finances.ledger)) {
+                            team.finances.ledger = [];
+                        }
+
+                        const transactionCategory =
+                            `staff_hire_${staff.id}_${Date.now()}_${team.finances.ledger.length}`;
+
+                        team.finances.ledger.push({
+                            key: `${transactionYear}:${transactionWeek}:${transactionCategory}`,
+                            year: transactionYear,
+                            week: transactionWeek,
+                            category: transactionCategory,
+                            label: `Staff offer: ${staff.name}`,
+                            amount: -cashActuallyPaid,
+                            balanceAfter: team.finances.balance
+                        });
+
+                        if (team.finances.ledger.length > 80) {
+                            team.finances.ledger.splice(
+                                0,
+                                team.finances.ledger.length - 80
+                            );
+                        }
+                    }
                 }
 
 
