@@ -2884,22 +2884,196 @@ window.app = {
         window.app.renderStoreTab(gs);
     },
 
-    buyStoreItem: (item, cost) => {
+        buyStoreItem: (item, cost) => {
         const gs = Game.getGameState();
         const team = gs?.playerTeam;
         if (!team) return;
-        if (!team.finances) team.finances = { balance: 10.00, waivedDues: [], autoSnack: 'none' };
 
-        if (team.finances.balance < cost) {
-            alert(`You don't have enough money in the Snack Fund! (Need $${cost.toFixed(2)})`);
+        if (!team.finances) {
+            team.finances = {
+                balance: 10.00,
+                waivedDues: [],
+                autoSnack: 'none'
+            };
+        }
+
+        const trainingEquipmentLevel = Math.max(
+            0,
+            Math.min(
+                3,
+                Math.floor(
+                    Number(team.storeUpgrades?.trainingEquipmentLevel) || 0
+                )
+            )
+        );
+
+        const trainingEquipmentPrices = [25.00, 45.00, 70.00];
+
+        const scoutingToolkitLevel = Math.max(
+            0,
+            Math.min(
+                3,
+                Math.floor(
+                    Number(team.storeUpgrades?.scoutingToolkitLevel) || 0
+                )
+            )
+        );
+
+        const scoutingToolkitPrices = [20.00, 40.00, 60.00];
+
+        const catalog = {
+            token: {
+                price: 3.00,
+                title: 'Recruiting Favor Token',
+                message: 'Added 1 Favor Token to your recruiting budget.'
+            },
+            orange: {
+                price: 2.00,
+                title: 'Orange Slices',
+                message: 'Every rostered player recovered up to 10 fatigue.'
+            },
+            caprisun: {
+                price: 6.00,
+                title: 'Capri Sun Crate',
+                message: 'Every rostered player recovered up to 30 fatigue.'
+            },
+            pizza: {
+                price: 25.00,
+                title: 'Team Pizza Party',
+                message: 'Team happiness was restored and locker-room rivalries were cleared.'
+            },
+            trainingEquipment: {
+                price: trainingEquipmentPrices[trainingEquipmentLevel],
+                title: 'Training Equipment Upgrade',
+                message:
+                    `Training Equipment is now Level ${trainingEquipmentLevel + 1}. ` +
+                    `Staff-training progress is boosted by ${(trainingEquipmentLevel + 1) * 10}%.`
+            },
+            scoutingToolkit: {
+                price: scoutingToolkitPrices[scoutingToolkitLevel],
+                title: 'Scouting Toolkit Upgrade',
+                message:
+                    `Scouting Toolkit is now Level ${scoutingToolkitLevel + 1}. ` +
+                    `Scouting-report progress is boosted by ${(scoutingToolkitLevel + 1) * 10}%.`
+            }
+        };
+
+        const product = catalog[item];
+
+        if (!product) {
+            alert('That item is not available in the Corner Store.');
             return;
         }
 
+        if (
+            (item === 'trainingEquipment' && trainingEquipmentLevel >= 3) ||
+            (item === 'scoutingToolkit' && scoutingToolkitLevel >= 3)
+        ) {
+            alert(
+                item === 'trainingEquipment'
+                    ? 'Training Equipment is already at its maximum level.'
+                    : 'Scouting Toolkit is already at its maximum level.'
+            );
+            return;
+        }
+
+        const price = product.price;
+
+        if (!Number.isFinite(price)) {
+            alert('This item is currently unavailable.');
+            return;
+        }
+        const balance = Number(team.finances.balance) || 0;
+
+        if (balance < price) {
+            alert(
+                `Not enough money in the Team Fund. ` +
+                `You need $${price.toFixed(2)} and have $${balance.toFixed(2)}.`
+            );
+            return;
+        }
+
+        const roster = Game.getUIRosterObjects(team) || [];
+
+        if (
+            ['orange', 'caprisun', 'pizza'].includes(item) &&
+            roster.length === 0
+        ) {
+            alert('Your roster is empty, so this item would have no effect.');
+            return;
+        }
+
+        // Apply the purchase's effect.
         if (item === 'token') {
-            team.finances.balance -= cost;
-            team.socialProfile.favorTokens = (team.socialProfile.favorTokens || 0) + 1;
-            alert("🎟️ Bought 1 Favor Token for recruiting!");
-        } 
+            if (!team.socialProfile) {
+                team.socialProfile = {
+                    favorTokens: 0,
+                    streetCred: 50
+                };
+            }
+
+            team.socialProfile.favorTokens =
+                (Number(team.socialProfile.favorTokens) || 0) + 1;
+
+        } else if (item === 'orange') {
+            roster.forEach(player => {
+                player.fatigue = Math.max(0, (Number(player.fatigue) || 0) - 10);
+            });
+
+        } else if (item === 'caprisun') {
+            roster.forEach(player => {
+                player.fatigue = Math.max(0, (Number(player.fatigue) || 0) - 30);
+            });
+
+        } else if (item === 'pizza') {
+            roster.forEach(player => {
+                if (player.expectations) {
+                    player.expectations.happiness = 100;
+                }
+
+                if (player.social) {
+                    player.social.rivalIds = [];
+                }
+            });
+
+        } else if (item === 'trainingEquipment') {
+            if (!team.storeUpgrades || typeof team.storeUpgrades !== 'object') {
+                team.storeUpgrades = {};
+            }
+
+            team.storeUpgrades.trainingEquipmentLevel =
+                trainingEquipmentLevel + 1;
+
+        } else if (item === 'scoutingToolkit') {
+            if (!team.storeUpgrades || typeof team.storeUpgrades !== 'object') {
+                team.storeUpgrades = {};
+            }
+
+            team.storeUpgrades.scoutingToolkitLevel =
+                scoutingToolkitLevel + 1;
+        }
+
+        // Deduct the verified catalog price.
+        team.finances.balance = Math.max(
+            0,
+            Math.round((balance - price) * 100) / 100
+        );
+
+        // Display a purchase confirmation inside the store.
+        team.finances.lastStoreNotice = {
+            title: `${product.title} purchased`,
+            message: product.message
+        };
+
+        // Keep a visible record in the game log.
+        if (!Array.isArray(gs.gameLog)) {
+            gs.gameLog = [];
+        }
+
+        gs.gameLog.push(
+            `🛒 Corner Store: ${product.title} (-$${price.toFixed(2)}). ` +
+            product.message
+        );
 
         Game.saveGameState(activeSaveKey);
         window.app.renderStoreTab(gs);
@@ -2927,8 +3101,278 @@ window.app = {
         if (!team.finances) team.finances = { balance: 10.00, waivedDues: [], autoSnack: 'none' };
         
         const autoSnack = team.finances.autoSnack || 'none';
+
+        const trainingEquipmentLevel = Math.max(
+            0,
+            Math.min(
+                3,
+                Math.floor(
+                    Number(team.storeUpgrades?.trainingEquipmentLevel) || 0
+                )
+            )
+        );
+
+        const trainingEquipmentPrices = [25.00, 45.00, 70.00];
+        const nextTrainingEquipmentPrice =
+            trainingEquipmentPrices[trainingEquipmentLevel] ?? null;
+
+        const scoutingToolkitLevel = Math.max(
+            0,
+            Math.min(
+                3,
+                Math.floor(
+                    Number(team.storeUpgrades?.scoutingToolkitLevel) || 0
+                )
+            )
+        );
+
+        const scoutingToolkitPrices = [20.00, 40.00, 60.00];
+        const nextScoutingToolkitPrice =
+            scoutingToolkitPrices[scoutingToolkitLevel] ?? null;
+
         const pane = document.getElementById('fo-pane-finances');
         if (!pane) return;
+
+        const escapeFinanceText = value =>
+            String(value ?? '').replace(/[&<>"']/g, char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[char]);
+
+        const formatFinanceMoney = value => {
+            const amount = Number(value);
+            return Number.isFinite(amount)
+                ? `$${amount.toFixed(2)}`
+                : '—';
+        };
+
+        const ledgerEntries = (
+            Array.isArray(team.finances.ledger)
+                ? team.finances.ledger
+                : []
+        )
+            .filter(entry =>
+                entry &&
+                Number.isFinite(Number(entry.year)) &&
+                Number.isFinite(Number(entry.week)) &&
+                Number.isFinite(Number(entry.amount))
+            )
+            .slice()
+            .sort((a, b) =>
+                Number(a.year) - Number(b.year) ||
+                Number(a.week) - Number(b.week)
+            )
+            .slice(-8)
+            .reverse();
+
+        const ledgerRowsHtml = ledgerEntries.length > 0
+            ? ledgerEntries.map(entry => {
+                const amount = Number(entry.amount);
+                const amountClass = amount >= 0
+                    ? 'text-emerald-700'
+                    : 'text-rose-700';
+
+                return `
+                    <tr class="border-t border-slate-100">
+                        <td class="py-2 pr-2 text-slate-500 whitespace-nowrap">
+                            Y${entry.year} · W${entry.week}
+                        </td>
+                        <td class="py-2 pr-2">
+                            <span class="font-semibold text-slate-800">
+                                ${escapeFinanceText(entry.label || entry.category)}
+                            </span>
+                            <span class="block text-[10px] text-slate-400">
+                                ${escapeFinanceText(entry.category || 'other')}
+                            </span>
+                        </td>
+                        <td class="py-2 text-right font-mono font-bold ${amountClass} whitespace-nowrap">
+                            ${amount >= 0 ? '+' : '-'}${formatFinanceMoney(Math.abs(amount))}
+                        </td>
+                    </tr>
+                `;
+            }).join('')
+            : `
+                <tr>
+                    <td colspan="3" class="py-5 text-center text-xs text-slate-400">
+                        No recorded transactions yet. Ledger entries begin in Year 5.
+                    </td>
+                </tr>
+            `;
+
+        const weeklyHistory = (
+            Array.isArray(team.finances.weeklyHistory)
+                ? team.finances.weeklyHistory
+                : []
+        )
+            .filter(item =>
+                item &&
+                Number.isFinite(Number(item.year)) &&
+                Number.isFinite(Number(item.week)) &&
+                Number.isFinite(Number(item.closingBalance)) &&
+                Number.isFinite(Number(item.netChange))
+            )
+            .slice()
+            .sort((a, b) =>
+                Number(a.year) - Number(b.year) ||
+                Number(a.week) - Number(b.week)
+            );
+
+        const recentWeeks = weeklyHistory.slice(-4).reverse();
+
+        const weeklyRowsHtml = recentWeeks.length > 0
+            ? recentWeeks.map(item => {
+                const net = Number(item.netChange);
+                const netClass = net >= 0
+                    ? 'text-emerald-700'
+                    : 'text-rose-700';
+
+                return `
+                    <tr class="border-t border-slate-100">
+                        <td class="py-2 pr-2 text-slate-500 whitespace-nowrap">
+                            Y${item.year} · W${item.week}
+                        </td>
+                        <td class="py-2 text-right font-mono ${netClass}">
+                            ${net >= 0 ? '+' : '-'}${formatFinanceMoney(Math.abs(net))}
+                        </td>
+                        <td class="py-2 text-right font-mono font-bold text-slate-800">
+                            ${formatFinanceMoney(item.closingBalance)}
+                        </td>
+                    </tr>
+                `;
+            }).join('')
+            : `
+                <tr>
+                    <td colspan="3" class="py-5 text-center text-xs text-slate-400">
+                        Weekly snapshots will appear after the first processed week.
+                    </td>
+                </tr>
+            `;
+
+        const recentNetChanges = weeklyHistory
+            .slice(-4)
+            .map(item => Number(item.netChange))
+            .filter(Number.isFinite);
+
+        const averageWeeklyNet = recentNetChanges.length >= 2
+            ? recentNetChanges.reduce((sum, value) => sum + value, 0) /
+                recentNetChanges.length
+            : null;
+
+        const currentBalance = Number(team.finances.balance);
+        const hasValidBalance = Number.isFinite(currentBalance);
+
+        const projectedBalance =
+            hasValidBalance && averageWeeklyNet !== null
+                ? currentBalance + averageWeeklyNet
+                : null;
+
+        const financeDashboardHtml = `
+            <section class="px-4 pt-4 space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="rounded border border-slate-200 bg-white p-3">
+                        <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                            Current balance
+                        </p>
+                        <p class="mt-1 text-xl font-black font-mono text-slate-800">
+                            ${formatFinanceMoney(team.finances.balance)}
+                        </p>
+                    </div>
+
+                    <div class="rounded border border-slate-200 bg-white p-3">
+                        <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                            Recent weekly average
+                        </p>
+                        <p class="mt-1 text-xl font-black font-mono ${
+                            averageWeeklyNet === null
+                                ? 'text-slate-400'
+                                : averageWeeklyNet >= 0
+                                    ? 'text-emerald-700'
+                                    : 'text-rose-700'
+                        }">
+                            ${averageWeeklyNet === null
+                                ? 'Not available'
+                                : `${averageWeeklyNet >= 0 ? '+' : '-'}${formatFinanceMoney(Math.abs(averageWeeklyNet))}`
+                            }
+                        </p>
+                    </div>
+
+                    <div class="rounded border border-slate-200 bg-white p-3">
+                        <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                            Rough next-week estimate
+                        </p>
+                        <p class="mt-1 text-xl font-black font-mono text-slate-800">
+                            ${projectedBalance === null
+                                ? 'Need 2+ snapshots'
+                                : formatFinanceMoney(projectedBalance)
+                            }
+                        </p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <div class="rounded border border-slate-200 bg-white p-4">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <h4 class="text-sm font-black uppercase text-slate-800">
+                                Recent transactions
+                            </h4>
+                            <span class="text-[10px] text-slate-400">
+                                Latest 8
+                            </span>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-xs">
+                                <thead>
+                                    <tr class="text-left text-[10px] uppercase text-slate-400">
+                                        <th class="py-2 pr-2">Week</th>
+                                        <th class="py-2 pr-2">Transaction</th>
+                                        <th class="py-2 text-right">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${ledgerRowsHtml}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="rounded border border-slate-200 bg-white p-4">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <h4 class="text-sm font-black uppercase text-slate-800">
+                                Weekly balance history
+                            </h4>
+                            <span class="text-[10px] text-slate-400">
+                                Latest 4
+                            </span>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-xs">
+                                <thead>
+                                    <tr class="text-left text-[10px] uppercase text-slate-400">
+                                        <th class="py-2 pr-2">Week</th>
+                                        <th class="py-2 text-right">Tracked change</th>
+                                        <th class="py-2 text-right">Closing balance</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${weeklyRowsHtml}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <p class="mt-3 text-[10px] leading-relaxed text-slate-500">
+                            The estimate uses the average of recent recorded weekly changes.
+                            Off-cycle spending and income may not be included yet, so treat it
+                            as a guide rather than a guaranteed balance.
+                        </p>
+                    </div>
+                </div>
+            </section>
+        `;
 
         pane.innerHTML = `
             <div class="p-4 border-b bg-white shrink-0 sticky top-0 z-10 shadow-sm flex justify-between items-center">
@@ -2941,18 +3385,215 @@ window.app = {
                     <span class="text-2xl font-black font-mono">$${team.finances.balance.toFixed(2)}</span>
                 </div>
             </div>
+            ${financeDashboardHtml}
+            ${team.finances.lastStoreNotice ? `
+                <div class="mx-4 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-sm">
+                    <div class="text-xs font-black uppercase tracking-wider text-emerald-800">
+                        ${escapeFinanceText(team.finances.lastStoreNotice.title || 'Purchase complete')}
+                    </div>
+                    <p class="mt-1 text-sm text-emerald-900">
+                        ${escapeFinanceText(team.finances.lastStoreNotice.message || '')}
+                    </p>
+                </div>
+            ` : ''}
             <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                
+
                 <!-- PURCHASABLE UPGRADES & PLANS -->
                 <div class="bg-white rounded-sm border border-slate-300 shadow-sm p-4 flex flex-col">
-                    <div class="mb-4">
-                        <h4 class="font-black text-sm uppercase text-slate-800 mb-2 border-b pb-1">One-Time Purchases</h4>
-                        <div class="flex justify-between items-center bg-slate-50 p-2 border border-slate-200 rounded">
+                                        <div class="mb-5">
+                        <div class="flex flex-wrap justify-between items-end gap-2 mb-3 border-b border-slate-200 pb-2">
                             <div>
-                                <span class="font-bold text-sm">🎟️ Buy Favor Token</span>
-                                <p class="text-[10px] text-slate-500">Add 1 Favor Token to your recruiting budget.</p>
+                                <h4 class="font-black text-sm uppercase tracking-wider text-slate-800">
+                                    Quick Purchases
+                                </h4>
+                                <p class="text-[10px] text-slate-500 mt-1">
+                                    One-time purchases. Effects apply immediately.
+                                </p>
                             </div>
-                            <button class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded text-xs hover:bg-emerald-700 shadow" onclick="app.buyStoreItem('token', 3.00)">$3.00</button>
+                            <span class="text-[9px] font-black uppercase tracking-wider text-slate-500">
+                                Shop Inventory
+                            </span>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+                            <!-- Recruiting -->
+                            <div class="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3 flex flex-col">
+                                <div class="flex items-start justify-between gap-2">
+                                    <span class="text-2xl">🎟️</span>
+                                    <span class="text-[9px] font-black uppercase tracking-wider text-violet-700 bg-violet-100 rounded-full px-2 py-1">
+                                        Recruiting
+                                    </span>
+                                </div>
+                                <h5 class="font-black text-sm text-slate-900 mt-2">
+                                    Favor Token
+                                </h5>
+                                <p class="text-[11px] text-slate-600 mt-1 flex-grow">
+                                    Adds one token to your recruiting budget for free-agency negotiations.
+                                </p>
+                                <button
+                                    class="mt-3 w-full rounded-lg bg-violet-700 hover:bg-violet-800 text-white font-black text-xs py-2 transition shadow-sm"
+                                    onclick="app.buyStoreItem('token', 3.00)">
+                                    Buy · $3.00
+                                </button>
+                            </div>
+
+                            <!-- Light recovery -->
+                            <div class="rounded-xl border border-orange-200 bg-gradient-to-br from-orange-50 to-white p-3 flex flex-col">
+                                <div class="flex items-start justify-between gap-2">
+                                    <span class="text-2xl">🍊</span>
+                                    <span class="text-[9px] font-black uppercase tracking-wider text-orange-700 bg-orange-100 rounded-full px-2 py-1">
+                                        Recovery
+                                    </span>
+                                </div>
+                                <h5 class="font-black text-sm text-slate-900 mt-2">
+                                    Orange Slices
+                                </h5>
+                                <p class="text-[11px] text-slate-600 mt-1 flex-grow">
+                                    Reduce fatigue by 10 for every rostered player. A cheap top-up before a tough week.
+                                </p>
+                                <button
+                                    class="mt-3 w-full rounded-lg bg-orange-600 hover:bg-orange-700 text-white font-black text-xs py-2 transition shadow-sm"
+                                    onclick="app.buyStoreItem('orange', 2.00)">
+                                    Buy · $2.00
+                                </button>
+                            </div>
+
+                            <!-- Strong recovery -->
+                            <div class="rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3 flex flex-col">
+                                <div class="flex items-start justify-between gap-2">
+                                    <span class="text-2xl">🧃</span>
+                                    <span class="text-[9px] font-black uppercase tracking-wider text-sky-700 bg-sky-100 rounded-full px-2 py-1">
+                                        Recovery
+                                    </span>
+                                </div>
+                                <h5 class="font-black text-sm text-slate-900 mt-2">
+                                    Capri Sun Crate
+                                </h5>
+                                <p class="text-[11px] text-slate-600 mt-1 flex-grow">
+                                    Reduce fatigue by 30 for every rostered player when the team needs a bigger recovery boost.
+                                </p>
+                                <button
+                                    class="mt-3 w-full rounded-lg bg-sky-700 hover:bg-sky-800 text-white font-black text-xs py-2 transition shadow-sm"
+                                    onclick="app.buyStoreItem('caprisun', 6.00)">
+                                    Buy · $6.00
+                                </button>
+                            </div>
+
+                            <!-- Morale -->
+                            <div class="rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white p-3 flex flex-col">
+                                <div class="flex items-start justify-between gap-2">
+                                    <span class="text-2xl">🍕</span>
+                                    <span class="text-[9px] font-black uppercase tracking-wider text-rose-700 bg-rose-100 rounded-full px-2 py-1">
+                                        Team Morale
+                                    </span>
+                                </div>
+                                <h5 class="font-black text-sm text-slate-900 mt-2">
+                                    Pizza Party
+                                </h5>
+                                <p class="text-[11px] text-slate-600 mt-1 flex-grow">
+                                    Restore team happiness and clear locker-room rivalries. Expensive, but useful when the team is falling apart.
+                                </p>
+                                <button
+                                    class="mt-3 w-full rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-black text-xs py-2 transition shadow-sm"
+                                    onclick="app.buyStoreItem('pizza', 25.00)">
+                                    Buy · $25.00
+                                </button>
+                            </div>
+
+                            <!-- Permanent Training Upgrade -->
+                            <div class="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3 flex flex-col">
+                                <div class="flex items-start justify-between gap-2">
+                                    <span class="text-2xl">🏋️</span>
+                                    <span class="text-[9px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-100 rounded-full px-2 py-1">
+                                        Permanent Upgrade
+                                    </span>
+                                </div>
+
+                                <h5 class="font-black text-sm text-slate-900 mt-2">
+                                    Training Equipment
+                                </h5>
+
+                                <div class="mt-1 flex items-center justify-between gap-2">
+                                    <span class="text-xs font-bold text-emerald-800">
+                                        Level ${trainingEquipmentLevel}/3
+                                    </span>
+                                    <span class="text-xs font-black text-emerald-700">
+                                        +${trainingEquipmentLevel * 10}%
+                                    </span>
+                                </div>
+
+                                <div class="w-full h-2 mt-2 rounded-full bg-emerald-100 overflow-hidden">
+                                    <div
+                                        class="h-full rounded-full bg-emerald-600 transition-all"
+                                        style="width: ${(trainingEquipmentLevel / 3) * 100}%">
+                                    </div>
+                                </div>
+
+                                <p class="text-[11px] text-slate-600 mt-2 flex-grow">
+                                    Improve progress earned from staff-assigned player training.
+                                    Each level adds 10%. This investment persists between weeks.
+                                </p>
+
+                                ${trainingEquipmentLevel >= 3 ? `
+                                    <div class="mt-3 w-full rounded-lg bg-slate-100 text-slate-500 font-black text-xs py-2 text-center border border-slate-200">
+                                        MAX LEVEL REACHED
+                                    </div>
+                                ` : `
+                                    <button
+                                        class="mt-3 w-full rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 transition shadow-sm"
+                                        onclick="app.buyStoreItem('trainingEquipment', ${nextTrainingEquipmentPrice.toFixed(2)})">
+                                        Upgrade to Level ${trainingEquipmentLevel + 1} · $${nextTrainingEquipmentPrice.toFixed(2)}
+                                    </button>
+                                `}
+                            </div>
+
+                            <!-- Permanent Scouting Upgrade -->
+                            <div class="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-3 flex flex-col">
+                                <div class="flex items-start justify-between gap-2">
+                                    <span class="text-2xl">🔭</span>
+                                    <span class="text-[9px] font-black uppercase tracking-wider text-indigo-700 bg-indigo-100 rounded-full px-2 py-1">
+                                        Permanent Upgrade
+                                    </span>
+                                </div>
+
+                                <h5 class="font-black text-sm text-slate-900 mt-2">
+                                    Scouting Toolkit
+                                </h5>
+
+                                <div class="mt-1 flex items-center justify-between gap-2">
+                                    <span class="text-xs font-bold text-indigo-800">
+                                        Level ${scoutingToolkitLevel}/3
+                                    </span>
+                                    <span class="text-xs font-black text-indigo-700">
+                                        +${scoutingToolkitLevel * 10}%
+                                    </span>
+                                </div>
+
+                                <div class="w-full h-2 mt-2 rounded-full bg-indigo-100 overflow-hidden">
+                                    <div
+                                        class="h-full rounded-full bg-indigo-600 transition-all"
+                                        style="width: ${(scoutingToolkitLevel / 3) * 100}%">
+                                    </div>
+                                </div>
+
+                                <p class="text-[11px] text-slate-600 mt-2 flex-grow">
+                                    Improve progress toward scouting reports for external prospects.
+                                    Better scouting productivity does not automatically reveal hidden ratings.
+                                </p>
+
+                                ${scoutingToolkitLevel >= 3 ? `
+                                    <div class="mt-3 w-full rounded-lg bg-slate-100 text-slate-500 font-black text-xs py-2 text-center border border-slate-200">
+                                        MAX LEVEL REACHED
+                                    </div>
+                                ` : `
+                                    <button
+                                        class="mt-3 w-full rounded-lg bg-indigo-700 hover:bg-indigo-800 text-white font-black text-xs py-2 transition shadow-sm"
+                                        onclick="app.buyStoreItem('scoutingToolkit', ${nextScoutingToolkitPrice.toFixed(2)})">
+                                        Upgrade to Level ${scoutingToolkitLevel + 1} · $${nextScoutingToolkitPrice.toFixed(2)}
+                                    </button>
+                                `}
+                            </div>
                         </div>
                     </div>
 

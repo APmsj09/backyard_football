@@ -331,7 +331,26 @@ export function advanceTeamScoutingReport(
 
     const previous = getTeamScoutingReport(team, player.id);
     const profile = getEvaluatorProfile(evaluator, team, player);
-    const productivity = 0.75 + profile.overall / 200;
+
+    // Permanent Corner Store investment: Scouting Toolkit.
+    // Each level improves scouting progress by 10%, up to 30%.
+    // Older saves safely default to level 0.
+    const scoutingToolkitLevel = Math.max(
+        0,
+        Math.min(
+            3,
+            Math.floor(
+                Number(team.storeUpgrades?.scoutingToolkitLevel) || 0
+            )
+        )
+    );
+
+    const scoutingToolkitMultiplier =
+        1 + scoutingToolkitLevel * 0.10;
+
+    const productivity =
+        (0.75 + profile.overall / 200) *
+        scoutingToolkitMultiplier;
 
     const previousProgress = Number.isFinite(Number(previous?.progressPoints))
         ? Math.max(0, Number(previous.progressPoints))
@@ -783,9 +802,30 @@ function applyTrainingHours(
     const coachFactor = 0.55 + teaching / 150 + discipline / 400;
     const ethicFactor = 0.8 + workEthic / 250;
 
+    // Permanent Corner Store investment: training equipment.
+    // Each purchased level improves progress earned from assigned
+    // staff training by 10%, up to a maximum of 30%.
+    // Older saves safely default to level 0.
+    const trainingEquipmentLevel = Math.max(
+        0,
+        Math.min(
+            3,
+            Math.floor(
+                Number(team.storeUpgrades?.trainingEquipmentLevel) || 0
+            )
+        )
+    );
+
+    const trainingEquipmentMultiplier =
+        1 + trainingEquipmentLevel * 0.10;
+
     const earnedPoints = Math.max(
         0,
-        hours * coachFactor * ethicFactor * ageFactor
+        hours *
+            coachFactor *
+            ethicFactor *
+            ageFactor *
+            trainingEquipmentMultiplier
     );
 
     if (!team.staffTrainingProgress ||

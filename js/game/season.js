@@ -971,6 +971,173 @@ export function processWeeklyPlayerGrowth() {
     });
 }
 
+function getOrInitializeStaffWeeklyWage(staffMember) {
+    if (!staffMember || typeof staffMember !== 'object') {
+        return 0;
+    }
+
+    // Preserve an existing wage, including wages from older saves or contracts.
+    const existingWage = Number(staffMember.weeklyWage);
+
+    if (
+        staffMember.weeklyWage !== undefined &&
+        staffMember.weeklyWage !== null &&
+        Number.isFinite(existingWage) &&
+        existingWage >= 0
+    ) {
+        return Math.round(existingWage * 100) / 100;
+    }
+
+    const ratings = Object.values(staffMember.ratings || {})
+        .map(Number)
+        .filter(value =>
+            Number.isFinite(value) &&
+            value >= 0 &&
+            value <= 100
+        );
+
+    const averageSkill = ratings.length > 0
+        ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length
+        : 50;
+
+    const rawExperience = Number(staffMember.experience);
+    const experience = Number.isFinite(rawExperience)
+        ? Math.max(0, Math.min(10, rawExperience))
+        : 0;
+
+    // Base wage + skill premium + capped experience premium.
+    const weeklyWage = Math.round(
+        (0.75 + averageSkill * 0.018 + experience * 0.03) * 100
+    ) / 100;
+
+    // Store the wage so it does not fluctuate with future rating changes.
+    staffMember.weeklyWage = weeklyWage;
+
+    return weeklyWage;
+}
+
+
+function recordFinanceLedgerEntry(
+    team,
+    gameState,
+    category,
+    label,
+    amount
+) {
+    if (!team?.finances || !gameState) return;
+    if (Number(gameState.year) < 5) return;
+
+    const year = Number(gameState.year);
+    const week = Number(gameState.currentWeek);
+    const value = Number(amount);
+
+    if (
+        !Number.isInteger(year) ||
+        !Number.isInteger(week) ||
+        !Number.isFinite(value) ||
+        Math.abs(value) < 0.005
+    ) {
+        return;
+    }
+
+    if (!Array.isArray(team.finances.ledger)) {
+        team.finances.ledger = [];
+    }
+
+    const key = `${year}:${week}:${category}`;
+
+    const entry = {
+        key,
+        year,
+        week,
+        category,
+        label,
+        amount: Math.round(value * 100) / 100
+    };
+
+    const existingIndex = team.finances.ledger.findIndex(
+        item => item?.key === key
+    );
+
+    if (existingIndex >= 0) {
+        team.finances.ledger[existingIndex] = entry;
+    } else {
+        team.finances.ledger.push(entry);
+    }
+
+    team.finances.ledger.sort(
+        (a, b) => a.year - b.year || a.week - b.week
+    );
+
+    if (team.finances.ledger.length > 80) {
+        team.finances.ledger.splice(
+            0,
+            team.finances.ledger.length - 80
+        );
+    }
+}
+
+function recordFinanceWeeklySummary(
+    team,
+    gameState,
+    openingBalance,
+    closingBalance
+) {
+    if (!team?.finances || !gameState) return;
+    if (Number(gameState.year) < 5) return;
+
+    const year = Number(gameState.year);
+    const week = Number(gameState.currentWeek);
+    const opening = Number(openingBalance);
+    const closing = Number(closingBalance);
+
+    if (
+        !Number.isInteger(year) ||
+        !Number.isInteger(week) ||
+        !Number.isFinite(opening) ||
+        !Number.isFinite(closing)
+    ) {
+        return;
+    }
+
+    if (!Array.isArray(team.finances.weeklyHistory)) {
+        team.finances.weeklyHistory = [];
+    }
+
+    const key = `${year}:${week}`;
+
+    const snapshot = {
+        key,
+        year,
+        week,
+        openingBalance: Math.round(opening * 100) / 100,
+        closingBalance: Math.round(closing * 100) / 100,
+        netChange: Math.round((closing - opening) * 100) / 100
+    };
+
+    const existingIndex = team.finances.weeklyHistory.findIndex(
+        item => item?.key === key
+    );
+
+    if (existingIndex >= 0) {
+        team.finances.weeklyHistory[existingIndex] = snapshot;
+    } else {
+        team.finances.weeklyHistory.push(snapshot);
+    }
+
+    team.finances.weeklyHistory.sort(
+        (a, b) => a.year - b.year || a.week - b.week
+    );
+
+    if (team.finances.weeklyHistory.length > 12) {
+        team.finances.weeklyHistory.splice(
+            0,
+            team.finances.weeklyHistory.length - 12
+        );
+    }
+}
+
+
 export function processEndOfWeek() {
     if (!game) return;
 
@@ -986,11 +1153,61 @@ export function processEndOfWeek() {
             team.finances.waivedDues = [];
         }
 
+        const openingBalance = Number(team.finances.balance);
+
         const coach = team.staff?.coach || team.coach;
         const personality = coach?.biases?.personality?.name || 'Balanced Tactician';
+        const rawDiscipline = Number(coach?.ratings?.practiceDiscipline);
+        const discipline = Number.isFinite(rawDiscipline)
+            ? rawDiscipline
+            : 50;
         const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
-        const isUser = team.isPlayerControlled;
+                const isUser = team.isPlayerControlled;
         const roster = getRosterObjects(team);
+
+        // Staff payroll begins when the user takes over in Year 5.
+        // Keep only the latest payroll marker; do not build an unbounded ledger.
+        const payrollKey = `${Number(game.year)}:${Number(game.currentWeek)}`;
+
+        if (
+            Number(game.year) >= 5 &&
+            team.finances.staffPayrollKey !== payrollKey
+        ) {
+            // The work-plan system uses team.coaches as the active staff roster.
+            // Deduplicate by ID to avoid charging the same person twice.
+            const activeStaff = new Map();
+
+            for (const staffMember of (
+                Array.isArray(team.coaches) ? team.coaches : []
+            )) {
+                if (staffMember?.id == null) continue;
+
+                activeStaff.set(String(staffMember.id), staffMember);
+            }
+
+            const weeklyPayroll = [...activeStaff.values()].reduce(
+                (total, staffMember) =>
+                    total + getOrInitializeStaffWeeklyWage(staffMember),
+                0
+            );
+
+            const balance = Number(team.finances.balance);
+            team.finances.balance = Math.round(
+                ((Number.isFinite(balance) ? balance : 0) - weeklyPayroll) * 100
+            ) / 100;
+
+            team.finances.staffPayrollKey = payrollKey;
+            team.finances.lastStaffPayroll = Math.round(weeklyPayroll * 100) / 100;
+
+            if (isUser && game.gameLog && weeklyPayroll > 0) {
+                game.gameLog.push(
+                    `👥 Staff Payroll: -$${weeklyPayroll.toFixed(2)} for ${activeStaff.size} staff members.`
+                );
+            }
+        }
+
+        // Weekly community allowance only.
+
 
         /*// Weekly community allowance only.
         // Season dues are collected once by processSeasonStartDues().
@@ -1035,6 +1252,22 @@ export function processEndOfWeek() {
 
         team.finances.balance += (weeklyIncome + duesCollected);
 
+        recordFinanceLedgerEntry(
+            team,
+            game,
+            'allowance',
+            'Weekly community allowance',
+            weeklyIncome
+        );
+
+        recordFinanceLedgerEntry(
+            team,
+            game,
+            'playerDues',
+            'Weekly player dues',
+            duesCollected
+        );
+
         if (isUser && game.gameLog) {
             game.gameLog.push(`💰 Weekly Community Allowance: +$${weeklyIncome.toFixed(2)}.`);
             
@@ -1046,6 +1279,14 @@ export function processEndOfWeek() {
             if (autoSnack !== 'none') {
                 if (team.finances.balance >= cost) {
                     team.finances.balance -= cost;
+
+                    recordFinanceLedgerEntry(
+                        team,
+                        game,
+                        'autoSnack',
+                        `Auto-snack plan: ${autoSnack}`,
+                        -cost
+                    );
                     if (autoSnack === 'orange') {
                         roster.forEach(p => p.fatigue = Math.max(0, (p.fatigue || 0) - 10));
                         game.gameLog.push(`🍊 Weekly Snacks: Auto-purchased Orange Slices (-$2.00). Team recovered +10 Energy.`);
@@ -1078,6 +1319,15 @@ export function processEndOfWeek() {
             // Players' Coach buys it instantly if morale dips; Disciplinarians refuse to coddle kids.
             if (team.finances.balance >= 25.00 && (avgHappiness < 65 || hasLockerRoomBeef) && personality !== 'Old-School Disciplinarian') {
                 team.finances.balance -= 25.00;
+
+                recordFinanceLedgerEntry(
+                    team,
+                    game,
+                    'aiMorale',
+                    'AI pizza party',
+                    -25.00
+                );
+
                 roster.forEach(p => {
                     if (p.expectations) p.expectations.happiness = 100;
                     if (p.social) p.social.rivalIds = []; // Pizza squashes all beefs
@@ -1101,10 +1351,45 @@ export function processEndOfWeek() {
             // If team has leftover cash and needs tokens, buy them!
             if (team.finances.balance >= 3.00 && (team.socialProfile?.favorTokens || 0) < tokenHoardTarget) {
                 team.finances.balance -= 3.00;
+
+                recordFinanceLedgerEntry(
+                    team,
+                    game,
+                    'aiToken',
+                    'AI favor-token purchase',
+                    -3.00
+                );
+
                 if (!team.socialProfile) team.socialProfile = { favorTokens: 0, streetCred: 50 };
                 team.socialProfile.favorTokens += 1;
             }
         }
+
+        // Record payroll if Patch 20 processed it for this exact week.
+        const payrollKey =
+            `${Number(game.year)}:${Number(game.currentWeek)}`;
+
+        if (team.finances.staffPayrollKey === payrollKey) {
+            const payroll = Number(team.finances.lastStaffPayroll);
+
+            if (Number.isFinite(payroll) && payroll > 0) {
+                recordFinanceLedgerEntry(
+                    team,
+                    game,
+                    'staffPayroll',
+                    'Staff payroll',
+                    -payroll
+                );
+            }
+        }
+
+        // Save a weekly balance snapshot for budget forecasting.
+        recordFinanceWeeklySummary(
+            team,
+            game,
+            openingBalance,
+            team.finances.balance
+        );
 
         // Cleanup waivers for the next week
         team.finances.waivedDues = [];
@@ -1273,43 +1558,17 @@ export function processEndOfWeek() {
             });
         }
 
-        // Resolve coach skill development once for this team and week.
-        processWeeklyCoachDevelopment(
-            t,
-            game.year,
-            game.currentWeek
-        );
+        // Coaching development begins when the user takes over in Year 5.
+        if (Number(game.year) >= 5) {
+            processWeeklyCoachDevelopment(
+                t,
+                game.year,
+                game.currentWeek
+            );
+        }
     });
 
     processWeeklyPlayerGrowth();
-
-    const developmentYear = Number(game.year);
-    const developmentWeek = Number(game.currentWeek) + 1;
-
-    // Coaching development begins when the user takes over in Year 5.
-    // Historical season simulation must not run the new staff system.
-    if (developmentYear >= 5) {
-        game.teams.forEach(team => {
-            if (!team) return;
-
-            if (team.id === game.playerTeam?.id) {
-            ensureTeamStaffWorkPlan(team);
-        } else {
-            ensureAiStaffWorkPlan(
-                team,
-                game,
-                developmentYear,
-                developmentWeek
-            );
-        }
-
-        processWeeklyCoachDevelopment(
-            team,
-            developmentYear,
-            developmentWeek
-        );
-        });
-    }
 
     endOfWeekCleanup();
 }
@@ -1427,6 +1686,14 @@ export function processSeasonStartDues(gameState = game) {
         team.finances.balance =
             (Number.isFinite(currentBalance) ? currentBalance : 10.00) +
             collected;
+
+        recordFinanceLedgerEntry(
+            team,
+            gameState,
+            'seasonDues',
+            'Season-start player dues',
+            collected
+        );
 
         // Record the year even if no one paid, so the team is not
         // charged repeatedly in the same season.
@@ -2895,6 +3162,14 @@ export function processWeeklyPractice(team, gameLog = null) {
         const cashEarned = Number((workersCount * (0.85 + Math.random() * 0.30)).toFixed(2));
         if (!team.finances) team.finances = { balance: 0, waivedDues: [] };
         team.finances.balance += cashEarned;
+
+        recordFinanceLedgerEntry(
+            team,
+            game,
+            'hustle',
+            'Hustle practice earnings',
+            cashEarned
+        );
 
         // Scheme rust penalty: No football was practiced this week (-4% familiarity)
         Object.keys(mastery).forEach(key => {
