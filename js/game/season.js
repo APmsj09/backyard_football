@@ -992,10 +992,10 @@ export function processEndOfWeek() {
         const isUser = team.isPlayerControlled;
         const roster = getRosterObjects(team);
 
-        // Weekly community allowance only.
+        /*// Weekly community allowance only.
         // Season dues are collected once by processSeasonStartDues().
         const weeklyIncome = 5.00;
-        team.finances.balance += weeklyIncome;
+        team.finances.balance += weeklyIncome;*/
 
         // --- 1. AI WAIVE DUES PHASE (Players' Coach is soft on unhappy kids) ---
         if (!isUser) {

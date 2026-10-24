@@ -872,9 +872,12 @@ function snapshotScoutingEvaluator(evaluator) {
         scoutingBias
     };
 }
+
+function getScoutingTargetIds(team, gameState, assignment) {
     if (Array.isArray(assignment.targetPlayerIds)) {
         return new Set(assignment.targetPlayerIds.map(String));
     }
+
 
     if (assignment.focus === 'watchlist') {
         return new Set(

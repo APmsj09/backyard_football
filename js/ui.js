@@ -3260,12 +3260,7 @@ export function renderStaffTab(gameState) {
                         : sum,
                 0
             );
-                (sum, assignment) =>
-                    String(assignment.coachId) === String(coachId)
-                        ? sum + workHours(assignment)
-                        : sum,
-                0
-            );
+
 
         const renderOptions = (options, selectedValue) =>
             options.map(([value, label]) => `
