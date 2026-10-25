@@ -1961,12 +1961,56 @@ export function processEndOfWeek() {
         if (!t.isPlayerControlled || isDelegated) {
             const directive = t.gameplan?.gmDirective || 'COACH_AUTONOMY';
 
+            // Weekly practice runs after the current game has resolved.
+            // Find the next scheduled matchup, rather than preparing for
+            // an opponent the team has already played.
+            const nextPracticeWeekIndex =
+                Number(game.currentWeek) + 1;
+
+            const gamesPerWeek = Math.max(
+                1,
+                Math.floor(game.teams.length / 2)
+            );
+
+            const hasNextPracticeWeek =
+                Number.isInteger(nextPracticeWeekIndex) &&
+                nextPracticeWeekIndex >= 0 &&
+                nextPracticeWeekIndex < 9;
+
+            const upcomingWeekGames =
+                hasNextPracticeWeek &&
+                Array.isArray(game.schedule)
+                    ? game.schedule.slice(
+                        nextPracticeWeekIndex * gamesPerWeek,
+                        (nextPracticeWeekIndex + 1) * gamesPerWeek
+                    )
+                    : [];
+
+            const upcomingMatch = upcomingWeekGames.find(match =>
+                match?.home?.id != null &&
+                match?.away?.id != null &&
+                (
+                    String(match.home.id) === String(t.id) ||
+                    String(match.away.id) === String(t.id)
+                )
+            );
+
+            const upcomingOpponent = !upcomingMatch
+                ? null
+                : String(upcomingMatch.home.id) === String(t.id)
+                    ? upcomingMatch.away
+                    : upcomingMatch.home;
+
             if (!t.isPlayerControlled || t.gameplan?.delegateGameplan) {
-                aiBuildGameplan(t, null, directive);
+                aiBuildGameplan(t, upcomingOpponent, directive);
             }
 
             if (!t.isPlayerControlled || t.gameplan?.delegatePractice) {
-                t.gameplan.weeklyPractice = aiChooseWeeklyPractice(t, null, directive);
+                t.gameplan.weeklyPractice = aiChooseWeeklyPractice(
+                    t,
+                    upcomingOpponent,
+                    directive
+                );
             }
         }
 

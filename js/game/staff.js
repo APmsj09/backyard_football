@@ -2451,32 +2451,164 @@ export function processWeeklyStaffPreparation(team, year, week) {
 }
 
 /**
- * AI Coach chooses weekly practice focus based on staff traits and GM Directives.
+ * AI Coach chooses weekly practice focus based on staff traits,
+ * roster fatigue, finances, GM directives, and the upcoming opponent.
  */
-export function aiChooseWeeklyPractice(team, opponent = null, gmDirective = 'COACH_AUTONOMY') {
+export function aiChooseWeeklyPractice(
+    team,
+    opponent = null,
+    gmDirective = 'COACH_AUTONOMY'
+) {
     if (!team || !team.gameplan) return 'chalk_talk';
 
     const coach = getTeamCoachingSpecialist(team, 'training');
     const personality = coach?.biases?.personality?.name;
-    const balance = team.finances?.balance || 0;
-    const tokens = team.socialProfile?.favorTokens || 0;
+    const balance = Number(team.finances?.balance) || 0;
+    const tokens = Number(team.socialProfile?.favorTokens) || 0;
 
-    // Financial Awareness: If team is completely broke (< $3) and out of tokens,
-    // pragmatic coaches sacrifice practice to run chores/mow lawns for cash
-    if (balance < 3.00 && tokens === 0 && Math.random() < 0.45) {
+    const hasUpcomingOpponent =
+        opponent?.id != null &&
+        String(opponent.id) !== String(team.id);
+
+    const availableRoster = getRosterObjects(team).filter(
+        player =>
+            player &&
+            !(Number(player.status?.duration) > 0)
+    );
+
+    const averageFatigue = availableRoster.length > 0
+        ? availableRoster.reduce((total, player) => {
+            const fatigue = Number(player.fatigue) || 0;
+
+            return total + Math.max(0, Math.min(100, fatigue));
+        }, 0) / availableRoster.length
+        : 0;
+
+    // Estimate whether scrimmage will actually reduce fatigue under the
+    // team's configured schedule. A very long schedule can erase its
+    // recovery benefit, so do not recommend it blindly.
+    const schedule = team.gameplan.practiceSchedule || {};
+    const fieldAccess = team.gameplan.practiceFieldAccess;
+
+    const maxSessions = ['school', 'dedicated'].includes(fieldAccess)
+        ? 3
+        : 2;
+
+    const requestedSessions = Number(schedule.sessionsPerWeek);
+    const sessionsPerWeek = Number.isFinite(requestedSessions)
+        ? Math.max(1, Math.min(maxSessions, Math.round(requestedSessions)))
+        : 2;
+
+    const requestedMinutes = Number(schedule.minutesPerSession);
+    const minutesPerSession = [60, 90, 120].includes(requestedMinutes)
+        ? requestedMinutes
+        : 90;
+
+    const weeklyPracticeMinutes =
+        sessionsPerWeek * minutesPerSession;
+
+    const practiceOutputFactor = Math.min(
+        1.15,
+        0.25 + (weeklyPracticeMinutes / 180) * 0.75
+    );
+
+    const practiceFatigueCost = Math.min(
+        12,
+        Math.max(
+            0,
+            Math.round((weeklyPracticeMinutes / 180) * 6)
+        )
+    );
+
+    const expectedScrimmageFatigueChange =
+        practiceFatigueCost -
+        Math.round(8 * practiceOutputFactor);
+
+    const scrimmageCanRecover =
+        expectedScrimmageFatigueChange <= 0;
+
+    const lowerIntensityFocus = () =>
+        hasUpcomingOpponent ? 'scouting' : 'chalk_talk';
+
+    // Protect a tired roster from additional physical workload.
+    // Only choose scrimmage as the recovery option when its expected
+    // net fatigue change is neutral or negative.
+    if (averageFatigue >= 45) {
+        return scrimmageCanRecover
+            ? 'scrimmage'
+            : lowerIntensityFocus();
+    }
+
+    // Financial Awareness: cash-strapped teams sometimes sacrifice
+    // normal practice to raise money through neighborhood chores.
+    if (
+        balance < 3.00 &&
+        tokens === 0 &&
+        Math.random() < 0.45
+    ) {
         return 'hustle';
     }
 
-    if (gmDirective === 'DEVELOP_YOUTH') return 'chalk_talk';
-    if (gmDirective === 'HARD_CONDITIONING') return 'conditioning';
-    if (gmDirective === 'WIN_NOW') return balance >= 2.00 ? 'scouting' : 'hustle';
+    // GM directives define the program's strategic priorities.
+    if (gmDirective === 'DEVELOP_YOUTH') {
+        return 'chalk_talk';
+    }
 
-    // Coach Autonomy
-    if (personality === 'Old-School Disciplinarian') return 'conditioning';
-    if (personality === 'Analytical Savant') return balance < 6.00 ? 'hustle' : 'chalk_talk';
-    if (personality === "Players' Coach") return 'scrimmage';
+    if (gmDirective === 'HARD_CONDITIONING') {
+        return 'conditioning';
+    }
 
-    return Math.random() < 0.5 ? 'chalk_talk' : 'scouting';
+    if (gmDirective === 'WIN_NOW') {
+        if (balance < 2.00) return 'hustle';
+
+        return hasUpcomingOpponent
+            ? 'scouting'
+            : 'chalk_talk';
+    }
+
+    // Coach Autonomy: personality influences the preferred approach,
+    // but should not cause avoidable physical overload.
+    if (personality === 'Old-School Disciplinarian') {
+        if (averageFatigue >= 35) {
+            return scrimmageCanRecover
+                ? 'scrimmage'
+                : lowerIntensityFocus();
+        }
+
+        return 'conditioning';
+    }
+
+    if (personality === 'Analytical Savant') {
+        if (balance < 6.00) return 'hustle';
+
+        return hasUpcomingOpponent
+            ? 'scouting'
+            : 'chalk_talk';
+    }
+
+    if (personality === "Players' Coach") {
+        return 'scrimmage';
+    }
+
+    if (personality === "Peaked in '94") {
+        if (averageFatigue >= 35) {
+            return scrimmageCanRecover
+                ? 'scrimmage'
+                : lowerIntensityFocus();
+        }
+
+        return 'conditioning';
+    }
+
+    // Balanced coaches favor opponent preparation when a matchup is
+    // scheduled. Without an upcoming opponent, use general playbook work.
+    if (!hasUpcomingOpponent) {
+        return 'chalk_talk';
+    }
+
+    return Math.random() < 0.65
+        ? 'scouting'
+        : 'chalk_talk';
 }
 
 /**
