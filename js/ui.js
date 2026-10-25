@@ -2932,7 +2932,16 @@ export function renderStaffTab(gameState) {
                                     </div>
                                 `).join('')}
 
-                                <div class="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-3">
+                                <details class="mt-3 rounded-lg border border-slate-200 bg-slate-50">
+                                    <summary class="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-bold text-slate-700">
+                                        <span>More coach details</span>
+                                        <span class="text-[10px] font-semibold text-slate-500">
+                                            Development · History · Availability
+                                        </span>
+                                    </summary>
+
+                                    <div class="px-3 pb-3 space-y-3">
+                                <div class="rounded-lg border border-sky-200 bg-sky-50 p-3">
                                     <div class="flex justify-between items-start gap-2">
                                         <div>
                                             <h6 class="text-[10px] font-black uppercase tracking-wide text-sky-900">
@@ -3097,6 +3106,8 @@ export function renderStaffTab(gameState) {
                                         </p>
                                     </div>
                                 </div>
+                                    </div>
+                                </details>
                             </div>
                         </article>
                     `;
@@ -3538,6 +3549,15 @@ export function renderStaffTab(gameState) {
 
                     saveGameState();
                     renderStaffTab(latestState);
+
+                    const workloadSection = document.getElementById(
+                        'staff-workload-assignments'
+                    );
+
+                    workloadSection?.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
                 },
                 'Auto-assign',
                 null,
@@ -3808,7 +3828,7 @@ export function renderStaffTab(gameState) {
         );
 
         html += `
-            <section class="mt-6 mb-6 bg-white rounded border border-slate-300 p-4 shadow-sm">
+            <section id="staff-workload-assignments" class="mt-6 mb-6 bg-white rounded border border-slate-300 p-4 shadow-sm">
                 <div class="flex flex-col md:flex-row justify-between gap-3 mb-4">
                     <div>
                         <h4 class="font-black text-sm uppercase tracking-wider text-slate-900">
