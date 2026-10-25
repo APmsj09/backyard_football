@@ -1272,7 +1272,8 @@ export function processEndOfWeek() {
             }
         }
 
-        // Record recurring income for the user's financial dashboard.
+        // Record the weekly allowance for the user's financial dashboard.
+        // Player dues are seasonal and are recorded by processSeasonStartDues().
         const financeYear = Number(game.year);
         const financeWeek = Number(game.currentWeek);
 
@@ -1282,71 +1283,17 @@ export function processEndOfWeek() {
             Number.isInteger(financeYear) &&
             Number.isInteger(financeWeek)
         ) {
-            if (!Array.isArray(team.finances.ledger)) {
-                team.finances.ledger = [];
-            }
-
-            const recordWeeklyIncome = (
-                category,
-                label,
-                amount,
-                balanceAfter
-            ) => {
-                if (!(amount > 0)) return;
-
-                const key =
-                    `${financeYear}:${financeWeek}:${category}`;
-
-                const entry = {
-                    key,
-                    year: financeYear,
-                    week: financeWeek,
-                    category,
-                    label,
-                    amount,
-                    balanceAfter
-                };
-
-                // Replace an existing entry for this category and week
-                // rather than creating duplicate ledger rows.
-                const existingIndex = team.finances.ledger.findIndex(
-                    item => item?.key === key
-                );
-
-                if (existingIndex >= 0) {
-                    team.finances.ledger[existingIndex] = entry;
-                } else {
-                    team.finances.ledger.push(entry);
-                }
-            };
-
-            recordWeeklyIncome(
+            recordFinanceLedgerEntry(
+                team,
+                game,
                 'weeklyAllowance',
                 'Weekly Community Allowance',
-                weeklyIncome,
-                incomeOpeningBalance + weeklyIncome
+                weeklyAllowance
             );
-
-            recordWeeklyIncome(
-                'playerDues',
-                'Player Dues Collected',
-                duesCollected,
-                incomeOpeningBalance + weeklyIncome + duesCollected
-            );
-
-            if (team.finances.ledger.length > 80) {
-                team.finances.ledger.splice(
-                    0,
-                    team.finances.ledger.length - 80
-                );
-            }
         }
 
-        // Weekly allowance and player dues are already recorded above,
-        // with separate entries and their respective ending balances.
-
         if (isUser && game.gameLog) {
-            game.gameLog.push(`💰 Weekly Community Allowance: +$${weeklyIncome.toFixed(2)}.`);
+            game.gameLog.push(`💰 Weekly Community Allowance: +$${weeklyAllowance.toFixed(2)}.`);
             
             // --- USER AUTO-SNACK SUBSCRIPTION ---
             const autoSnack = team.finances.autoSnack || 'none';
@@ -1442,7 +1389,7 @@ export function processEndOfWeek() {
             }
         }
 
-        // Record payroll if Patch 20 processed it for this exact week.
+        // Record payroll if it was processed for this exact week.
         //const payrollKey =
         //    `${Number(game.year)}:${Number(game.currentWeek)}`;
 
