@@ -581,8 +581,20 @@ export function checkTackleCollisions(playState, gameLog) {
             const caughtInEndzone = playState.returnStartY !== null && ((carrier.isOffense && playState.returnStartY <= 10.0) || (!carrier.isOffense && playState.returnStartY >= 110.0));
 
             if (inOwnEndzone) {
-                if (caughtInEndzone) { playState.touchback = true; playState.finalBallY = carrier.isOffense ? 20 : 100; }
-                else { playState.safety = true; playState.finalBallY = carrier.isOffense ? 0 : 120; }
+                if (caughtInEndzone) { 
+                    playState.touchback = true; 
+                    // Offense scores at 110. Defense scores at 10.
+                    // If defense gets a touchback, they take over going the other way.
+                    // 110 - 90 = 20-yard line. 
+                    // If offense gets a touchback, they resume going towards 110.
+                    // y = 30 represents their own 20-yard line.
+                    playState.finalBallY = carrier.isOffense ? 30 : 90; 
+                    playState.yards = playState.finalBallY - playState.lineOfScrimmage; // Fix relative yardage
+                }
+                else { 
+                    playState.safety = true; 
+                    playState.finalBallY = carrier.isOffense ? 0 : 120; 
+                }
             } else if (carrier.role === 'QB' && (playState.qbIntent === 'scramble' || playState.type === 'run')) {
                 playState.statEvents.push({ 
                     type: 'rush_attempt', 

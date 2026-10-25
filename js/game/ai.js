@@ -2559,7 +2559,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
     let vz = (deltaZ + (4.9 * t * t)) / t;
 
     if ((passType === 'touch' || passType === 'lob') && aimY > playState.lineOfScrimmage) {
-        const minApexZ = passType === 'lob' ? 3.5 : 2.7;
+        const minApexZ = passType === 'lob' ? 4.5 : 3.0; // Increased apex for beautiful, high-arcing deep balls
         const minVz = Math.sqrt(2 * 9.8 * Math.max(0.2, minApexZ - startZ));
         if (vz < minVz) {
             vz = minVz;

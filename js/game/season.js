@@ -1503,7 +1503,12 @@ function recordFinanceLedgerEntry(
     };
 
     const existingIndex = team.finances.ledger.findIndex(
-        item => item?.key === key
+        item => item?.key === key ||
+            (
+                Number(item?.year) === year &&
+                Number(item?.week) === week &&
+                item?.category === category
+            )
     );
 
     if (existingIndex >= 0) {
@@ -1716,26 +1721,10 @@ export function processEndOfWeek() {
             }
         }
 
-        // Record the weekly allowance for the user's financial dashboard.
-        // Player dues are seasonal and are recorded by processSeasonStartDues().
-        const financeYear = Number(game.year);
-        const financeWeek = Number(game.currentWeek);
+        // The weekly allowance is recorded above.
+        // Player dues are seasonal and recorded by processSeasonStartDues().
 
-        if (
-            isUser &&
-            financeYear >= 5 &&
-            Number.isInteger(financeYear) &&
-            Number.isInteger(financeWeek)
-        ) {
-            recordFinanceLedgerEntry(
-                team,
-                game,
-                'weeklyAllowance',
-                'Weekly Community Allowance',
-                weeklyAllowance
-            );
-        }
-
+        if (isUser && game.gameLog) {
         if (isUser && game.gameLog) {
             game.gameLog.push(`💰 Weekly Community Allowance: +$${weeklyAllowance.toFixed(2)}.`);
             
@@ -1858,9 +1847,6 @@ export function processEndOfWeek() {
             openingBalance,
             team.finances.balance
         );
-
-        // Cleanup waivers for the next week
-        team.finances.waivedDues = [];
     });
 
     // Resolve In-Season Weekly Bids
@@ -4063,65 +4049,12 @@ export function processWeeklyPractice(team, gameLog = null) {
         if (!team.finances) team.finances = { balance: 0, waivedDues: [] };
         team.finances.balance += cashEarned;
 
-        // Record user-team hustle income in the financial ledger.
-        // Reuse the season/week/category key so reprocessing the same
-        // week cannot create duplicate hustle transactions.
-        const transactionYear = Number(game?.year);
-        const transactionWeek = Number(game?.currentWeek);
-
-        if (
-            team.id === game?.playerTeam?.id &&
-            transactionYear >= 5 &&
-            Number.isInteger(transactionYear) &&
-            Number.isInteger(transactionWeek)
-        ) {
-            if (!Array.isArray(team.finances.ledger)) {
-                team.finances.ledger = [];
-            }
-
-            const category = 'hustle';
-            const key = `${transactionYear}:${transactionWeek}:${category}`;
-
-            const existingIndex = team.finances.ledger.findIndex(entry =>
-                entry?.key === key ||
-                (
-                    Number(entry?.year) === transactionYear &&
-                    Number(entry?.week) === transactionWeek &&
-                    entry?.category === category
-                )
-            );
-
-            const entry = {
-                key,
-                year: transactionYear,
-                week: transactionWeek,
-                category,
-                label: 'Neighborhood Hustle Income',
-                amount: Math.round(cashEarned * 100) / 100,
-                balanceAfter: Math.round(
-                    (Number(team.finances.balance) || 0) * 100
-                ) / 100
-            };
-
-            if (existingIndex >= 0) {
-                team.finances.ledger[existingIndex] = entry;
-            } else {
-                team.finances.ledger.push(entry);
-            }
-
-            if (team.finances.ledger.length > 80) {
-                team.finances.ledger.splice(
-                    0,
-                    team.finances.ledger.length - 80
-                );
-            }
-        }
 
         recordFinanceLedgerEntry(
             team,
             game,
             'hustle',
-            'Hustle practice earnings',
+            'Neighborhood Hustle Income',
             cashEarned
         );
 
