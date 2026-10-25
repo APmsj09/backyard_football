@@ -3994,8 +3994,6 @@ export function renderStaffTab(gameState) {
 
                                 ${task === 'training' ? `
                                     <label class="block min-w-0">
-                                ${task === 'training' ? `
-                                    <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Skill</span>
                                         <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
                                             aria-label="Training skill"
