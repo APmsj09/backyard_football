@@ -1725,7 +1725,6 @@ export function processEndOfWeek() {
         // Player dues are seasonal and recorded by processSeasonStartDues().
 
         if (isUser && game.gameLog) {
-        if (isUser && game.gameLog) {
             game.gameLog.push(`💰 Weekly Community Allowance: +$${weeklyAllowance.toFixed(2)}.`);
             
             // --- USER AUTO-SNACK SUBSCRIPTION ---
