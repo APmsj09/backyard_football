@@ -6787,6 +6787,10 @@ export function renderPracticeManager(gameState) {
     if (!team.gameplan) {
         team.gameplan = {
             weeklyPractice: 'chalk_talk',
+            practiceSchedule: {
+                sessionsPerWeek: 2,
+                minutesPerSession: 90
+            },
             installedOffense: [],
             installedDefense: [],
             mastery: {},
@@ -6801,9 +6805,190 @@ export function renderPracticeManager(gameState) {
     const directive = team.gameplan.gmDirective || 'COACH_AUTONOMY';
     const currentPlan = team.gameplan.weeklyPractice || 'chalk_talk';
 
+        // Read the configured practice schedule without requiring the user
+    const practiceFieldOptions = {
+        community: {
+            label: 'Community field',
+            weeklyCost: 0,
+            maxSessions: 2
+        },
+        school: {
+            label: 'School partnership',
+            weeklyCost: 3,
+            maxSessions: 3
+        },
+        dedicated: {
+            label: 'Dedicated field',
+            weeklyCost: 8,
+            maxSessions: 3
+        }
+    };
+
+    const practiceSchedule = team.gameplan.practiceSchedule || {};
+
+    const requestedFieldAccess = team.gameplan.practiceFieldAccess;
+
+    const practiceFieldAccess = Object.prototype.hasOwnProperty.call(
+        practiceFieldOptions,
+        requestedFieldAccess
+    )
+        ? requestedFieldAccess
+        : 'community';
+
+    const selectedField = practiceFieldOptions[practiceFieldAccess];
+
+    const requestedSessions = Number(practiceSchedule.sessionsPerWeek);
+    const sessionsPerWeek = Number.isFinite(requestedSessions)
+        ? Math.max(
+            1,
+            Math.min(
+                selectedField.maxSessions,
+                Math.round(requestedSessions)
+            )
+        )
+        : 2;
+
+    const requestedMinutes = Number(practiceSchedule.minutesPerSession);
+    const minutesPerSession = [60, 90, 120].includes(requestedMinutes)
+        ? requestedMinutes
+        : 90;
+
+    const weeklyPracticeMinutes =
+        sessionsPerWeek * minutesPerSession;
+
+    const fieldBookingCost = selectedField.weeklyCost;
+    const currentBalance = Number(team.finances?.balance);
+
+    const canAffordPracticeField = fieldBookingCost === 0 ||
+        (
+            Number.isFinite(currentBalance) &&
+            currentBalance >= fieldBookingCost
+        );
+
+    // The selected field is the requested arrangement. The effective
+    // access below records what the weekly resolver last secured.
+    const completedWeeks = Number(gameState.currentWeek);
+    const currentYear = Number(gameState.year);
+
+    const hasRecentFieldResolution =
+        Number.isInteger(currentYear) &&
+        Number.isInteger(completedWeeks) &&
+        completedWeeks >= 1 &&
+        completedWeeks <= 9 &&
+        team.gameplan.practiceFieldResolutionKey ===
+            `${currentYear}:${completedWeeks}`;
+
+    const lastEffectiveFieldAccess = hasRecentFieldResolution
+        ? team.gameplan.practiceFieldEffectiveAccess
+        : null;
+
+    const lastEffectiveFieldLabel =
+        hasRecentFieldResolution &&
+        Object.prototype.hasOwnProperty.call(
+            practiceFieldOptions,
+            lastEffectiveFieldAccess
+        )
+            ? practiceFieldOptions[lastEffectiveFieldAccess].label
+            : null;
+
+    const practiceRoster = getRosterObjects(team).filter(Boolean);
+
+    // Match the availability rule used by the weekly practice resolver.
+    const availablePracticeCount = practiceRoster.filter(
+        player => !(Number(player.status?.duration) > 0)
+    ).length;
+
+    const averageRosterFatigue = practiceRoster.length > 0
+        ? Math.round(
+            practiceRoster.reduce(
+                (total, player) =>
+                    total + Math.max(
+                        0,
+                        Math.min(100, Number(player.fatigue) || 0)
+                    ),
+                0
+            ) / practiceRoster.length
+        )
+        : null;
+
+    const practiceWorkloadLabel = weeklyPracticeMinutes <= 120
+        ? 'Light'
+        : weeklyPracticeMinutes <= 180
+            ? 'Standard'
+            : weeklyPracticeMinutes <= 270
+                ? 'High'
+                : 'Heavy';
+
+    const recoveryStatus = averageRosterFatigue === null
+        ? 'Not enough roster data'
+        : averageRosterFatigue >= 45
+            ? 'Elevated — consider reducing workload'
+            : averageRosterFatigue >= 25
+                ? 'Moderate — monitor recovery'
+                : 'Low — normal workload looks reasonable';
+
     window.app_setPracticePlan = (plan) => {
         if (team.gameplan.delegatePractice) return;
         team.gameplan.weeklyPractice = plan;
+        saveGameState();
+        renderPracticeManager(gameState);
+    };
+
+    window.app_setPracticeFieldAccess = (access) => {
+        const options = {
+            community: 2,
+            school: 3,
+            dedicated: 3
+        };
+
+        if (!Object.prototype.hasOwnProperty.call(options, access)) {
+            return;
+        }
+
+        team.gameplan.practiceFieldAccess = access;
+
+        const currentSchedule = team.gameplan.practiceSchedule || {};
+        const requestedSessions = Number(currentSchedule.sessionsPerWeek);
+
+        team.gameplan.practiceSchedule = {
+            sessionsPerWeek: Number.isFinite(requestedSessions)
+                ? Math.max(
+                    1,
+                    Math.min(options[access], Math.round(requestedSessions))
+                )
+                : 2,
+            minutesPerSession: [60, 90, 120].includes(
+                Number(currentSchedule.minutesPerSession)
+            )
+                ? Number(currentSchedule.minutesPerSession)
+                : 90
+        };
+
+        saveGameState();
+        renderPracticeManager(gameState);
+    };
+
+    window.app_setPracticeSchedule = (sessions, minutes) => {
+        const access = team.gameplan.practiceFieldAccess || 'community';
+        const sessionLimit = access === 'community' ? 2 : 3;
+
+        const sessionCount = Number(sessions);
+        const sessionLength = Number(minutes);
+
+        if (
+            !Number.isInteger(sessionCount) ||
+            sessionCount < 1 ||
+            sessionCount > sessionLimit ||
+            ![60, 90, 120].includes(sessionLength)
+        ) {
+            return;
+        }
+
+        team.gameplan.practiceSchedule = {
+            sessionsPerWeek: sessionCount,
+            minutesPerSession: sessionLength
+        };
+
         saveGameState();
         renderPracticeManager(gameState);
     };
@@ -6857,6 +7042,181 @@ export function renderPracticeManager(gameState) {
                         <span>Delegate to Head Coach</span>
                     </label>
                 </div>
+            </div>
+
+            <!-- Weekly Practice Summary -->
+            <div class="bg-white border border-slate-200 rounded-lg p-3.5 shadow-sm">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                        <h5 class="font-black text-xs uppercase tracking-wider text-slate-800">
+                            Weekly Practice Overview
+                        </h5>
+                        <p class="text-[11px] text-slate-500 mt-1">
+                            Your schedule and current roster availability at a glance.
+                        </p>
+                    </div>
+                    <span class="self-start rounded bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-700">
+                        ${practiceWorkloadLabel} workload
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                    <div class="rounded border border-slate-100 bg-slate-50 p-2.5">
+                        <p class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                            Scheduled practice
+                        </p>
+                        <p class="text-sm font-black text-slate-900 mt-1">
+                            ${sessionsPerWeek} × ${minutesPerSession} min
+                        </p>
+                        <p class="text-[10px] text-slate-500 mt-0.5">
+                            ${(weeklyPracticeMinutes / 60).toFixed(1).replace(/\.0$/, '')} hours per week
+                        </p>
+                    </div>
+
+                    <div class="rounded border border-slate-100 bg-slate-50 p-2.5">
+                        <p class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                            Available players
+                        </p>
+                        <p class="text-sm font-black text-slate-900 mt-1">
+                            ${availablePracticeCount}/${practiceRoster.length}
+                        </p>
+                        <p class="text-[10px] text-slate-500 mt-0.5">
+                            Based on current player statuses
+                        </p>
+                    </div>
+
+                    <div class="rounded border border-slate-100 bg-slate-50 p-2.5">
+                        <p class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                            Average roster fatigue
+                        </p>
+                        <p class="text-sm font-black text-slate-900 mt-1">
+                            ${averageRosterFatigue === null
+                                ? 'N/A'
+                                : `${averageRosterFatigue}/100`}
+                        </p>
+                        <p class="text-[10px] ${
+                            averageRosterFatigue !== null &&
+                            averageRosterFatigue >= 45
+                                ? 'text-amber-700 font-semibold'
+                                : 'text-slate-500'
+                        } mt-0.5">
+                            ${recoveryStatus}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Practice Time & Field Access -->
+            <div class="bg-white border border-slate-200 rounded-lg p-3.5 shadow-sm space-y-3">
+                <div>
+                    <h5 class="font-black text-xs uppercase tracking-wider text-slate-800">
+                        Practice Time & Field Access
+                    </h5>
+                    <p class="text-[11px] text-slate-500 mt-1">
+                        Set a manageable weekly schedule. Booking costs are charged when the week resolves during the regular season.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] font-black uppercase tracking-wide text-slate-600 mb-1">
+                            Field arrangement
+                        </label>
+                        <select
+                            class="w-full p-2 border border-slate-300 rounded text-xs font-bold text-slate-800 bg-white"
+                            value="${practiceFieldAccess}"
+                            onchange="app_setPracticeFieldAccess(this.value)"
+                        >
+                            <option value="community" ${practiceFieldAccess === 'community' ? 'selected' : ''}>
+                                Community field — Free, up to 2 sessions
+                            </option>
+                            <option value="school" ${practiceFieldAccess === 'school' ? 'selected' : ''}>
+                                School partnership — $3/week, up to 3
+                            </option>
+                            <option value="dedicated" ${practiceFieldAccess === 'dedicated' ? 'selected' : ''}>
+                                Dedicated field — $8/week, up to 3
+                            </option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-black uppercase tracking-wide text-slate-600 mb-1">
+                            Sessions per week
+                        </label>
+                        <select
+                            class="w-full p-2 border border-slate-300 rounded text-xs font-bold text-slate-800 bg-white"
+                            onchange="app_setPracticeSchedule(this.value, ${minutesPerSession})"
+                        >
+                            ${Array.from(
+                                { length: selectedField.maxSessions },
+                                (_, index) => index + 1
+                            ).map(count => `
+                                <option value="${count}" ${sessionsPerWeek === count ? 'selected' : ''}>
+                                    ${count} session${count === 1 ? '' : 's'} per week
+                                </option>
+                            `).join('')}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-black uppercase tracking-wide text-slate-600 mb-1">
+                            Session length
+                        </label>
+                        <select
+                            class="w-full p-2 border border-slate-300 rounded text-xs font-bold text-slate-800 bg-white"
+                            onchange="app_setPracticeSchedule(${sessionsPerWeek}, this.value)"
+                        >
+                            ${[60, 90, 120].map(minutes => `
+                                <option value="${minutes}" ${minutesPerSession === minutes ? 'selected' : ''}>
+                                    ${minutes} minutes
+                                </option>
+                            `).join('')}
+                        </select>
+                    </div>
+
+                    <div class="rounded border border-slate-100 bg-slate-50 p-2">
+                        <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                            Estimated weekly booking
+                        </p>
+                        <p class="text-sm font-black text-slate-900 mt-1">
+                            ${fieldBookingCost === 0 ? 'Free' : `$${fieldBookingCost.toFixed(2)}`}
+                        </p>
+                        <p class="text-[10px] mt-1 ${
+                            !canAffordPracticeField
+                                ? 'text-amber-700 font-semibold'
+                                : 'text-slate-500'
+                        }">
+                            ${!canAffordPracticeField
+                                ? 'Current balance is below the booking fee. The weekly resolver will fall back to community access.'
+                                : `${selectedField.maxSessions} session${selectedField.maxSessions === 1 ? '' : 's'} maximum with this arrangement.`}
+                        </p>
+                    </div>
+                </div>
+
+                            <div class="mt-3 rounded border border-slate-200 bg-slate-50 p-2.5">
+                    <p class="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                        Last Completed Field Booking
+                    </p>
+
+                    ${hasRecentFieldResolution
+                        ? `
+                            <p class="text-xs font-bold text-slate-800 mt-1">
+                                ${lastEffectiveFieldLabel || 'Access not recorded'}
+                            </p>
+                            <p class="text-[10px] text-slate-500 mt-0.5">
+                                Result from Week ${completedWeeks}. Your current selection applies at the next weekly resolution.
+                            </p>
+                        `
+                        : `
+                            <p class="text-xs font-semibold text-slate-700 mt-1">
+                                No completed booking recorded for this season yet.
+                            </p>
+                            <p class="text-[10px] text-slate-500 mt-0.5">
+                                The selected field is a preference until weekly access is resolved.
+                            </p>
+                        `
+                    }
+                </div>                    
             </div>
 
             <!-- GM Directives Policy Card -->

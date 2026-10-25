@@ -613,6 +613,7 @@ const TRAINABLE_SKILLS = new Set([
 ]);
 
 const TRAINING_POINTS_PER_ATTRIBUTE = 24;
+const MAX_WEEKLY_TRAINING_HOURS_PER_PLAYER_SKILL = 8;
 
 function getTrainingAttribute(player, skill) {
     for (const [category, attributes] of Object.entries(player?.attributes || {})) {
@@ -758,7 +759,11 @@ function getTrainingCandidates(team, assignment, playersById, coach, year, week)
             );
 
             const trainingProgress = Number.isFinite(storedProgress)
-                ? Math.max(0, storedProgress)
+                ? clamp(
+                    storedProgress,
+                    0,
+                    TRAINING_POINTS_PER_ATTRIBUTE - 0.001
+                )
                 : 0;
 
             const rotationScore = stableNoise([
@@ -772,28 +777,68 @@ function getTrainingCandidates(team, assignment, playersById, coach, year, week)
                 'training-rotation'
             ].join('|'));
 
+            const age = Number.isFinite(player.age)
+                ? player.age
+                : 16;
+
+            const rawWorkEthic = Number(
+                player.personality?.workEthic ?? 50
+            );
+
+            const workEthic = Number.isFinite(rawWorkEthic)
+                ? clamp(rawWorkEthic, 0, 100)
+                : 50;
+
+            const potentialBonus = {
+                A: 1.0,
+                B: 0.6,
+                C: 0.25,
+                D: 0,
+                F: -0.25
+            }[player.potential] ?? 0.25;
+
+            // These are small selection preferences, not guarantees of growth.
+            const ageBonus = clamp((18 - age) * 0.18, 0, 1.1);
+
+            const skillGapBonus = clamp(
+                (85 - attribute.value) / 15,
+                0,
+                3
+            );
+
+            const workEthicBonus = (workEthic - 50) * 0.01;
+
+            const developmentPriority =
+                skillGapBonus * 1.25 +
+                ageBonus +
+                potentialBonus +
+                workEthicBonus +
+                rotationScore * 1.25;
+
             candidates.push({
                 player,
                 skill,
                 category: attribute.category,
                 trainingProgress,
+                developmentPriority,
                 rotationScore
             });
         }
     }
 
-    // Finish the closest-to-improvement training progress first.
-    // Rotate equally progressed candidates by week instead of relying
-    // on the permanent order of IDs in the team's roster.
+    // First preserve work already invested; then favor players with
+    // greater development need, using deterministic rotation to break ties.
     candidates.sort((a, b) =>
         b.trainingProgress - a.trainingProgress ||
+        b.developmentPriority - a.developmentPriority ||
         b.rotationScore - a.rotationScore ||
         String(a.player.id).localeCompare(String(b.player.id))
     );
 
-    // Keep the internal selection scores out of the returned candidates.
+    // Keep internal selection scores out of the returned candidates.
     return candidates.map(({
         trainingProgress,
+        developmentPriority,
         rotationScore,
         ...candidate
     }) => candidate);
@@ -1400,6 +1445,7 @@ export function processWeeklyScoutingAssignments(
     );
     const trainedThisWeek = new Set();
     const trainedPlayerIds = new Set();
+    const trainingHoursByPlayerSkill = new Map();
 
     let playersUpdated = 0;
     let attributesImproved = 0;
@@ -1445,9 +1491,20 @@ export function processWeeklyScoutingAssignments(
 
             if (candidates.length === 0) continue;
 
+            const eligibleCandidates = candidates.filter(({ player, skill }) => {
+                const trainingKey = `${String(player.id)}:${skill}`;
+                const previouslyAllocated =
+                    trainingHoursByPlayerSkill.get(trainingKey) || 0;
+
+                return previouslyAllocated <
+                    MAX_WEEKLY_TRAINING_HOURS_PER_PLAYER_SKILL;
+            });
+
+            if (eligibleCandidates.length === 0) continue;
+
             const requestedTargetCount = Number(assignment.maxTargets);
             const targetCount = Math.min(
-                candidates.length,
+                eligibleCandidates.length,
                 18,
                 Number.isInteger(requestedTargetCount) &&
                     requestedTargetCount > 0
@@ -1455,10 +1512,32 @@ export function processWeeklyScoutingAssignments(
                     : 4
             );
 
-            const selected = candidates.slice(0, targetCount);
+            const selected = eligibleCandidates.slice(0, targetCount);
             const hoursPerPlayer = allocatedHours / selected.length;
 
             for (const { player, skill, category } of selected) {
+                const trainingKey = `${String(player.id)}:${skill}`;
+                const previouslyAllocated =
+                    trainingHoursByPlayerSkill.get(trainingKey) || 0;
+
+                const remainingTrainingHours = Math.max(
+                    0,
+                    MAX_WEEKLY_TRAINING_HOURS_PER_PLAYER_SKILL -
+                        previouslyAllocated
+                );
+
+                const effectivePlayerHours = Math.min(
+                    hoursPerPlayer,
+                    remainingTrainingHours
+                );
+
+                if (effectivePlayerHours <= 0) continue;
+
+                trainingHoursByPlayerSkill.set(
+                    trainingKey,
+                    previouslyAllocated + effectivePlayerHours
+                );
+
                 trainedPlayerIds.add(String(player.id));
 
                 if (applyTrainingHours(
@@ -1467,7 +1546,7 @@ export function processWeeklyScoutingAssignments(
                     coach,
                     skill,
                     category,
-                    hoursPerPlayer,
+                    effectivePlayerHours,
                     trainedThisWeek
                 )) {
                     attributesImproved++;

@@ -807,9 +807,15 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         const centerThreatDetected = isBehindLine && centerThreat > 6.0;
 
         // SCRAMBLE DIRECTION FIX: A scrambling QB escaping the pocket behind the line
-        // should avoid diving into the congested interior A/B gaps (offset < 2.5y)
-        // and strongly favor breaking outside the tackle box toward daylight.
-        if (isBehindLine && runner.role === 'QB') {
+        // should avoid diving into the interior A/B gaps (offset < 2.5y), UNLESS it is
+        // a designed QB run/draw intended to attack the interior gaps.
+        const isDesignedQBRun = runner.role === 'QB' && (
+            playState.type === 'run' ||
+            playState.playKey?.includes('Draw') ||
+            playState.playKey?.includes('qb')
+        );
+
+        if (isBehindLine && runner.role === 'QB' && !isDesignedQBRun) {
             if (Math.abs(offset) < 2.5) {
                 score -= 65; // Heavily penalize running into the interior trench pile
             } else {
@@ -1943,16 +1949,19 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (!isPressured) maxDecisionTimeTicks += 75;
 
     const pocketTimeExpired = playState.tick >= maxDecisionTimeTicks;
+    const isRPOThrow = playState.isRPO && playState.rpoPhase === 'pass';
     const canThrowStandard =
         (
             playState.tick >= MIN_DROPBACK_TICKS ||
             isHotReadSituation ||
-            pocketTimeExpired
+            pocketTimeExpired ||
+            isRPOThrow
         ) &&
         (
             qbState.hasCompletedDropback ||
             isPressured ||
-            pocketTimeExpired
+            pocketTimeExpired ||
+            isRPOThrow
         );
 
     let decisionMade = false;

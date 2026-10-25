@@ -1234,7 +1234,7 @@ export function resolvePlayerCollisions(playState) {
             if (p1.engagedWith === p2) continue;
 
             const isHandoffPair = (p1.role === 'QB' && p2.role === 'RB') || (p1.role === 'RB' && p2.role === 'QB');
-            if (isHandoffPair && playState.handoffRequired && !playState.handoffOccurred) {
+            if (isHandoffPair && (playState.handoffRequired || playState.isRPO) && !playState.handoffOccurred) {
                 continue;
             }
 

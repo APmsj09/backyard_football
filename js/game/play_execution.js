@@ -914,31 +914,44 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
         playState.ballState.z = 1.0;
 
         const isFleaFlicker = offensivePlayKey === 'Trick_Flea_Flicker';
+        const isRPO = play.tags?.includes('rpo') || offensivePlayKey?.startsWith('RPO_');
+        const isDesignedQBRun = (play.type === 'run' && (snapTaker.assignment?.startsWith('run_') || play.tags?.includes('qb')));
 
-        if (play.type === 'run' || isFleaFlicker) {
+        if ((play.type === 'run' || isFleaFlicker || isRPO) && !isDesignedQBRun) {
             const runner = playState.activePlayers.find(p =>
                 p.isOffense &&
                 p.id !== snapTaker.id &&
                 (
-                    p.role === 'RB' ||
-                    (p.assignment?.startsWith('run_') &&
+                    p.assignment?.startsWith('run_') &&
                     !p.assignment.includes('block') &&
-                    !p.assignment.includes('gap'))
+                    !p.assignment.includes('gap')
                 )
+            ) || playState.activePlayers.find(p =>
+                p.isOffense &&
+                p.id !== snapTaker.id &&
+                p.role === 'RB' &&
+                !p.assignment?.includes('block')
             );
 
             if (runner) {
-                playState.handoffRequired = true;
+                playState.handoffRequired = !isRPO;
                 playState.handoffTargetSlot = runner.slot;
 
                 if (isFleaFlicker) {
                     playState.fleaFlickerPhase = 'qb_mesh';
+                } else if (isRPO) {
+                    playState.isRPO = true;
+                    playState.rpoPhase = 'mesh';
+                    snapTaker.action = 'qb_rpo_read';
                 }
             } else {
-                // If it's a designed QB run or empty backfield run, QB is the runner
                 snapTaker.isBallCarrier = true;
                 snapTaker.action = 'run_path';
             }
+        } else if (isDesignedQBRun) {
+            snapTaker.isBallCarrier = true;
+            snapTaker.action = 'run_path';
+            snapTaker.routePath = calculateRoutePath(snapTaker.assignment || 'run_dive', snapTaker.x, snapTaker.y);
         }
     }
 }
@@ -1902,12 +1915,22 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     )
                 );
 
+                const isDesignedQBRun = pState.role === 'QB' && (
+                    playType === 'run' ||
+                    playState.playKey?.includes('Draw') ||
+                    playState.playKey?.includes('qb')
+                );
+                const isPerimeterRun = pState.role === 'WR' || (
+                    playState.playKey?.includes('Sweep') ||
+                    playState.playKey?.includes('Reverse')
+                );
+
                 const isRunHolePhase = playType === 'run' &&
-                    pState.role === 'RB' &&
+                    (pState.role === 'RB' || isDesignedQBRun || isPerimeterRun) &&
                     pt !== null &&
                     pState.y < LOS + 0.8 &&
                     !holeClogged &&
-                    playState.tick < (pState._handoffTick || 16) + 24 && // Gives full window to hit LOS
+                    playState.tick < (pState._handoffTick || 16) + 24 &&
                     pState.action !== 'trucking';
 
                 if (isRunHolePhase) {
@@ -2038,6 +2061,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             switch (pState.action) {
                 case 'handoff_setup':
                 case 'handoff_receive':
+                case 'qb_rpo_read':
                     setPointIntent(pState, pState.targetX, pState.targetY, 0.35);
                     break;
 

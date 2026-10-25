@@ -160,6 +160,8 @@ export const routeTree = {
     'run_counter_l': { path: [{ x: 1.5, y: 0.5 }, { x: -1.5, y: 2 }, { x: -5, y: 5 }], mirror: false },
     'run_toss_r': { path: [{ x: 6, y: 0.5 }, { x: 12, y: 4 }], mirror: false },
     'run_toss_l': { path: [{ x: -6, y: 0.5 }, { x: -12, y: 4 }], mirror: false },
+    'run_jet_r': { path: [{ x: 6.5, y: -0.6 }, { x: 13.5, y: -0.2 }, { x: 18.0, y: 3.5 }], mirror: false },
+    'run_jet_l': { path: [{ x: -6.5, y: -0.6 }, { x: -13.5, y: -0.2 }, { x: -18.0, y: 3.5 }], mirror: false },
     'run_fb_dive': { path: [{ x: 0, y: 1.5 }, { x: 0, y: 4.0 }] },
     'run_fb_trap': { path: [{ x: 0.8, y: 1.0 }, { x: 1.2, y: 4.5 }], mirror: false },
     'run_wham': { path: [{ x: 0.4, y: 1.0 }, { x: 0.4, y: 4.5 }], mirror: false },
@@ -981,6 +983,49 @@ export const offensivePlaybook = {
     // ==========================================================
     // 7. TRICK, RPO & SPECIAL TEAMS
     // ==========================================================
+    'Spread_Jet_Sweep_Right': {
+        name: 'Spread Jet Sweep Right',
+        type: 'run', tags: ['run', 'outside', 'sweep', 'misdirection', 'jet'],
+        compatibleFormations: ['Spread'],
+        assignments: {
+            'QB': 'qb_setup',
+            'H': 'run_jet_r',
+            'Y': 'lead_right_wide',
+            'X': 'run_block',
+            'Z': 'run_block',
+            'OL': 'run_block'
+        }
+    },
+    'Balanced_Dagger_Seam': {
+        name: 'Balanced Dagger (Clearout & Dig)',
+        type: 'pass', tags: ['pass', 'medium', 'deep', 'dagger'],
+        compatibleFormations: ['Balanced', 'Spread', 'Pistol'],
+        readProgression: ['Z', 'Y', 'X', 'RB'],
+        assignments: {
+            'QB': 'qb_setup',
+            'X': 'Post',
+            'Z': 'Dig',
+            'Y': 'Drag',
+            'RB': 'CheckRelease',
+            'OL': 'pass_block'
+        }
+    },
+    'Balanced_TE_Delay_Screen': {
+        name: 'Balanced TE Delay Slip Screen',
+        type: 'pass', tags: ['pass', 'screen', 'short'],
+        compatibleFormations: ['Balanced', 'Power', 'Pistol'],
+        readProgression: ['Y', 'RB', 'X'],
+        assignments: {
+            'QB': 'qb_setup',
+            'Y': 'Screen_Wait',
+            'X': 'Fly',
+            'Z': 'Fly',
+            'RB': 'pass_block',
+            'OL1': 'screen_block',
+            'OL2': 'screen_block',
+            'OL3': 'pass_block'
+        }
+    },
     'PA_Bootleg_Right': {
         name: 'Naked Bootleg Right',
         type: 'pass', tags: ['pass', 'pa', 'rollout'],
@@ -1006,6 +1051,29 @@ export const offensivePlaybook = {
         assignments: {
             'QB': 'qb_rpo_read', 'RB': 'run_dive', 'X': 'Slant',
             'Z': 'Fly', 'H': 'Slant', 'Y': 'run_block', 'OL': 'run_block'
+        }
+    },
+    'Trips_RPO_Bubble': {
+        name: 'Trips RPO Bubble Read',
+        type: 'pass', tags: ['rpo', 'quick', 'trips', 'screen'],
+        compatibleFormations: ['Trips', 'TripsLeft'],
+        readProgression: ['X', 'RB'],
+        assignments: {
+            'QB': 'qb_rpo_read', 'RB': 'run_dive',
+            'X': 'Bubble', 'H': 'WR_Screen_Lead', 'Y': 'WR_Screen_Lead',
+            'OL': 'run_block'
+        }
+    },
+    'Power_QB_Power_Lead': {
+        name: 'Power QB Power Lead',
+        type: 'run', tags: ['run', 'power', 'lead', 'qb'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        assignments: {
+            'QB': 'run_power_o_r',
+            'RB1': 'lead_right_wide',
+            'RB2': 'lead_right',
+            'OL1': 'pull_right', 'OL2': 'run_block', 'OL3': 'run_block',
+            'Y': 'run_block', 'X': 'run_block'
         }
     },
     'Punt_Punt': {

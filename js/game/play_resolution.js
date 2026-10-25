@@ -2537,17 +2537,19 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             const currentBall = playState.ballState;
 
             if (playState.handoffRequired && !playState.handoffOccurred) {
-                if (qb1 && rb1) {
+                const handoffTarget = playState.activePlayers.find(p => p.slot === playState.handoffTargetSlot) || rb1;
+                if (qb1 && handoffTarget) {
                     const qbDepth = playState.lineOfScrimmage - qb1.initialY;
-                    const dist = getDistance(qb1, rb1);
-                    const isTossPlay = rb1.assignment?.includes('toss');
-                    const handoffDistThreshold = isTossPlay ? 4.5 : 1.8;
+                    const dist = getDistance(qb1, handoffTarget);
+                    const isTossPlay = handoffTarget.assignment?.includes('toss');
+                    const isJetSweep = playState.playKey?.includes('Jet') || handoffTarget.slot?.startsWith('WR');
+
+                    const handoffDistThreshold = isTossPlay ? 4.5 : (isJetSweep ? 3.0 : 1.8);
                     const handoffTickThreshold = isTossPlay
-                        ? 24 // Delay forced toss to ~0.96s so the play develops
-                        : (qbDepth < 4.0 ? 16 : 22);
-                        
-                    // Require at least tick 14 (0.56s) for tosses to give QB time to turn, tick 8 for normal handoffs
-                    const minExchangeTick = isTossPlay ? 14 : 8;
+                        ? 24
+                        : (isJetSweep ? 18 : (qbDepth < 4.0 ? 16 : 22));
+
+                    const minExchangeTick = isTossPlay ? 14 : (isJetSweep ? 10 : 8);
 
                     if ((dist < handoffDistThreshold && playState.tick >= minExchangeTick) || (playState.tick >= handoffTickThreshold)) {
                         if (isTossPlay) {
@@ -2555,27 +2557,25 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                             if (initiateLateralToss(
                                 playState,
                                 qb1,
-                                rb1,
+                                handoffTarget,
                                 'run_toss'
                             )) {
                                 qb1.ghostTicks = 10;
                             }
                         } else {
-                            // Preserve the existing instant exchange for
-                            // ordinary handoffs and the flea-flicker's mesh.
                             qb1.hasBall = false;
                             qb1.isBallCarrier = false;
 
-                            rb1.hasBall = true;
-                            rb1.isBallCarrier = true;
+                            handoffTarget.hasBall = true;
+                            handoffTarget.isBallCarrier = true;
 
                             playState.handoffOccurred = true;
                             playState.handoffRequired = false;
-                            rb1._handoffTick = playState.tick;
+                            handoffTarget._handoffTick = playState.tick;
 
                             qb1.ghostTicks = 30;
-                            rb1.ghostTicks = 30;
-                            rb1.action = 'run_path';
+                            handoffTarget.ghostTicks = 30;
+                            handoffTarget.action = 'run_path';
                             qb1.action = 'idle';
 
                             if (playState.playKey === 'Trick_Flea_Flicker') {
@@ -2584,21 +2584,94 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         }
                     } else {
                         // QB steps to mesh point
-                        qb1.targetX = qb1.initialX + (rb1.initialX > qb1.initialX ? 0.8 : -0.8);
-                        qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.2) : (qb1.initialY + 0.8);
+                        if (isJetSweep) {
+                            // On Jet Sweeps, QB steps up toward LOS to hand off/pop as the receiver crosses
+                            qb1.targetX = qb1.initialX;
+                            qb1.targetY = playState.lineOfScrimmage - 3.2;
 
-                        if (isTossPlay) {
-                            // On tosses, RB tracks their designed perimeter route rather than running into the QB
-                            const pt = rb1.routePath?.[rb1.currentPathIndex] || { x: rb1.x + (rb1.assignment.includes('r') ? 5 : -5), y: rb1.y + 0.5 };
-                            rb1.targetX = pt.x;
-                            rb1.targetY = pt.y;
-                            rb1.action = 'run_path';
+                            // Runner maintains their full-speed sweep trajectory across the formation
+                            const pt = handoffTarget.routePath?.[handoffTarget.currentPathIndex] || { x: handoffTarget.x + 5, y: handoffTarget.y };
+                            handoffTarget.targetX = pt.x;
+                            handoffTarget.targetY = pt.y;
+                            handoffTarget.action = 'run_path';
+                        } else if (isTossPlay) {
+                            qb1.targetX = qb1.initialX + (handoffTarget.initialX > qb1.initialX ? 0.8 : -0.8);
+                            qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.2) : (qb1.initialY + 0.8);
+
+                            const pt = handoffTarget.routePath?.[handoffTarget.currentPathIndex] || { x: handoffTarget.x + (handoffTarget.assignment.includes('r') ? 5 : -5), y: handoffTarget.y + 0.5 };
+                            handoffTarget.targetX = pt.x;
+                            handoffTarget.targetY = pt.y;
+                            handoffTarget.action = 'run_path';
                         } else {
+                            qb1.targetX = qb1.initialX + (handoffTarget.initialX > qb1.initialX ? 0.8 : -0.8);
+                            qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.2) : (qb1.initialY + 0.8);
+
                             // On inside handoffs, RB approaches mesh point smoothly without snapping
-                            rb1.action = 'handoff_receive';
-                            rb1.targetX = qb1.targetX + (rb1.initialX > qb1.initialX ? 0.6 : -0.6);
-                            rb1.targetY = qb1.targetY;
+                            handoffTarget.action = 'handoff_receive';
+                            handoffTarget.targetX = qb1.targetX + (handoffTarget.initialX > qb1.initialX ? 0.6 : -0.6);
+                            handoffTarget.targetY = qb1.targetY;
                         }
+                    }
+                }
+            } else if (playState.isRPO && playState.rpoPhase === 'mesh' && qb1 && rb1) {
+                const qbDepth = playState.lineOfScrimmage - qb1.initialY;
+                qb1.targetX = qb1.initialX + (rb1.initialX > qb1.initialX ? 0.8 : -0.8);
+                qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.2) : (qb1.initialY + 0.8);
+
+                rb1.action = 'handoff_receive';
+                rb1.targetX = qb1.targetX + (rb1.initialX > qb1.initialX ? 0.6 : -0.6);
+                rb1.targetY = qb1.targetY;
+
+                // Mesh read window: read conflict defender between ticks 12 and 16
+                if (playState.tick >= 14) {
+                    const readSlot = playState.readProgression?.[0] || 'X';
+                    const readReceiver = activeOffense.find(o => o.slot === readSlot || o.role === readSlot);
+                    const conflictSideX = readReceiver ? readReceiver.initialX : qb1.x;
+
+                    const conflictDefender = activeDefense
+                        .filter(d => !d.isBlocked && d.role !== 'DL' && d.y > playState.lineOfScrimmage)
+                        .sort((a, b) => Math.abs(a.x - conflictSideX) - Math.abs(b.x - conflictSideX))[0];
+
+                    const defenderActuallyBites = conflictDefender && (
+                        conflictDefender._diagnosedGuess === 'run' ||
+                        (conflictDefender.vy || 0) < -0.2 ||
+                        conflictDefender.y < playState.lineOfScrimmage + 2.5
+                    );
+
+                    // QB IQ & Instinct: High-IQ QBs read the defender true; low-IQ QBs can misread the crash
+                    const qbIQ = qb1.playbookIQ || qb1.iq || 50;
+                    const misreadChance = Math.max(0.04, 0.45 - (qbIQ * 0.005)); // 40 IQ = 25% misread; 85+ IQ = 4% misread
+                    const qbPerceivesBite = Math.random() < misreadChance 
+                        ? !defenderActuallyBites 
+                        : defenderActuallyBites;
+
+                    if (qbPerceivesBite) {
+                        playState.rpoPhase = 'pass';
+                        qb1.action = 'qb_setup';
+                        qb1.hasCompletedDropback = true;
+                        rb1.action = 'run_fake';
+                        playState.handoffOccurred = true;
+
+                        const readLog = !defenderActuallyBites ? " (misread!)" : "";
+                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ⚡ RPO: ${qb1.name} reads the defender${readLog}, pulls the ball, and looks to throw!`, playState);
+                        logPlayDebug('RPO_DECISION', `${qb1.name} pulled the ball on RPO`, { read: 'pull_pass', defender: conflictDefender?.name, wasCorrect: defenderActuallyBites });
+                    } else {
+                        playState.rpoPhase = 'give';
+                        playState.type = 'run';
+                        qb1.hasBall = false;
+                        qb1.isBallCarrier = false;
+                        qb1.action = 'idle';
+                        qb1.ghostTicks = 20;
+
+                        rb1.hasBall = true;
+                        rb1.isBallCarrier = true;
+                        rb1.action = 'run_path';
+                        rb1._handoffTick = playState.tick;
+                        playState.handoffOccurred = true;
+
+                        const readLog = defenderActuallyBites ? " (misread!)" : "";
+                        if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 RPO: ${qb1.name} hands off inside to ${rb1.name}${readLog}!`, playState);
+                        logPlayDebug('RPO_DECISION', `${qb1.name} gave to RB on RPO`, { read: 'give_run', defender: conflictDefender?.name, wasCorrect: !defenderActuallyBites });
                     }
                 }
             }

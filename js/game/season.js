@@ -225,6 +225,11 @@ export async function initializeLeague(onProgress) {
             },
             gameplan: {
                 weeklyPractice: 'chalk_talk',
+                practiceSchedule: {
+                    sessionsPerWeek: 2,
+                    minutesPerSession: 90
+                },
+                practiceFieldAccess: 'community',
                 delegatePractice: false,
                 delegateGameplan: false,
                 delegateDepthChart: false,
@@ -1923,6 +1928,11 @@ export function processEndOfWeek() {
         if (!t.gameplan) {
             t.gameplan = {
                 weeklyPractice: 'chalk_talk',
+                practiceSchedule: {
+                    sessionsPerWeek: 2,
+                    minutesPerSession: 90
+                },
+                practiceFieldAccess: 'community',
                 delegatePractice: false,
                 delegateGameplan: false,
                 delegateDepthChart: false,
@@ -3068,6 +3078,161 @@ function getStaffWorkOutputFactor(
     );
 }
 
+const PRACTICE_FIELD_SESSION_LIMITS = {
+    community: 2,
+    school: 3,
+    dedicated: 3
+};
+
+const PRACTICE_FIELD_WEEKLY_COSTS = {
+    community: 0,
+    school: 3,
+    dedicated: 8
+};
+
+function resolvePracticeFieldAccessForWeek(team, gameLog = null) {
+    const gameplan = team?.gameplan;
+
+    if (!gameplan) return 'community';
+
+    const requestedAccess = Object.prototype.hasOwnProperty.call(
+        PRACTICE_FIELD_SESSION_LIMITS,
+        gameplan.practiceFieldAccess
+    )
+        ? gameplan.practiceFieldAccess
+        : 'community';
+
+    const year = Number(game?.year);
+    const weekIndex = Number(game?.currentWeek);
+
+    // currentWeek is zero-based: regular-season weeks are indices 0–8.
+    // No field booking fee applies outside those nine game weeks.
+    if (
+        !Number.isInteger(year) ||
+        !Number.isInteger(weekIndex) ||
+        weekIndex < 0 ||
+        weekIndex >= 9
+    ) {
+        gameplan.practiceFieldEffectiveAccess = requestedAccess;
+        return requestedAccess;
+    }
+
+    const seasonWeek = weekIndex + 1;
+    const resolutionKey = `${year}:${seasonWeek}`;
+
+    // A repeated weekly resolution must not charge the same booking twice.
+    if (gameplan.practiceFieldResolutionKey === resolutionKey) {
+        return gameplan.practiceFieldEffectiveAccess || 'community';
+    }
+
+    const cost = PRACTICE_FIELD_WEEKLY_COSTS[requestedAccess] ?? 0;
+    const balance = Number(team.finances?.balance);
+
+    let effectiveAccess = requestedAccess;
+
+    if (cost > 0) {
+        if (
+            Number.isFinite(balance) &&
+            balance >= cost
+        ) {
+            team.finances.balance = balance - cost;
+
+            if (
+                team.id === game?.playerTeam?.id &&
+                Array.isArray(gameLog)
+            ) {
+                gameLog.push(
+                    `🏟️ Field booking: ${requestedAccess} access reserved for $${cost.toFixed(2)} this week.`
+                );
+            }
+        } else {
+            effectiveAccess = 'community';
+
+            if (
+                team.id === game?.playerTeam?.id &&
+                Array.isArray(gameLog)
+            ) {
+                gameLog.push(
+                    `⚠️ Field booking unavailable: insufficient funds for ${requestedAccess} access ($${cost.toFixed(2)}). Using community-field access this week.`
+                );
+            }
+        }
+    }
+
+    gameplan.practiceFieldResolutionKey = resolutionKey;
+    gameplan.practiceFieldEffectiveAccess = effectiveAccess;
+
+    return effectiveAccess;
+}
+
+function getPracticeScheduleSettings(team) {
+    const schedule = team?.gameplan?.practiceSchedule || {};
+
+    const requestedAccess =
+        team?.gameplan?.practiceFieldEffectiveAccess ??
+        team?.gameplan?.practiceFieldAccess;
+
+    const fieldAccess = Object.prototype.hasOwnProperty.call(
+        PRACTICE_FIELD_SESSION_LIMITS,
+        requestedAccess
+    )
+        ? requestedAccess
+        : 'community';
+
+    const maxSessions =
+        PRACTICE_FIELD_SESSION_LIMITS[fieldAccess];
+
+    const requestedSessions = Number(schedule.sessionsPerWeek);
+    const sessionsPerWeek = Number.isFinite(requestedSessions)
+        ? Math.max(
+            1,
+            Math.min(maxSessions, Math.round(requestedSessions))
+        )
+        : 2;
+
+    const requestedMinutes = Number(schedule.minutesPerSession);
+    const minutesPerSession = [60, 90, 120].includes(requestedMinutes)
+        ? requestedMinutes
+        : 90;
+
+    return {
+        fieldAccess,
+        sessionsPerWeek,
+        minutesPerSession,
+        weeklyPracticeMinutes: sessionsPerWeek * minutesPerSession
+    };
+}
+
+function getPracticeScheduleMinutes(team) {
+    return getPracticeScheduleSettings(team).weeklyPracticeMinutes;
+}
+
+function getPracticeScheduleOutputFactor(team) {
+    const weeklyPracticeMinutes = getPracticeScheduleMinutes(team);
+
+    // Two 90-minute sessions are the standard workload.
+    // Additional practice has diminishing returns.
+    return Math.min(
+        1.15,
+        0.25 + (weeklyPracticeMinutes / 180) * 0.75
+    );
+}
+
+function getPracticeScheduleFatigueCost(team) {
+    const weeklyPracticeMinutes = getPracticeScheduleMinutes(team);
+
+    // A standard two-session week adds 6 fatigue points during
+    // physical practice. Additional volume increases the workload,
+    // capped at 12 points for the largest supported schedule.
+    return Math.min(
+        12,
+        Math.max(
+            0,
+            Math.round((weeklyPracticeMinutes / 180) * 6)
+        )
+    );
+}
+
 export function developPlayer(player, team = null) {
     if (!player || !player.attributes) return { player, improvements: [] };
     const developmentReport = { player, improvements: [] };
@@ -3471,6 +3636,10 @@ export function developPlayer(player, team = null) {
 export function processWeeklyPractice(team, gameLog = null) {
     if (!team || !team.gameplan) return;
 
+    // Resolve field access before calculating the week's practice volume.
+    // This also prevents duplicate field charges for the same week.
+    resolvePracticeFieldAccessForWeek(team, gameLog);
+
     const coaches = Array.isArray(team.coaches)
         ? team.coaches.filter(coach => coach?.id != null)
         : [];
@@ -3530,20 +3699,50 @@ export function processWeeklyPractice(team, gameLog = null) {
     const coach = assignedTrainingCoach ||
         getTeamCoachingSpecialist(team, 'training');
 
-    const totalEffectiveTrainingHours = Array.from(
-        trainingHours.values()
-    ).reduce((sum, hours) => sum + hours, 0);
-
-    const trainingOutputFactor = getStaffWorkOutputFactor(
-        totalEffectiveTrainingHours,
-        0.25
-    );
+    // Team practice output comes from scheduled practice time.
+    // Staff assignment hours still determine which coach leads this focus
+    // and continue to govern individual training in the staff resolver.
+    const trainingOutputFactor = getPracticeScheduleOutputFactor(team);
 
     const discipline = coach?.ratings?.practiceDiscipline ?? 50;
     const teaching = coach?.ratings?.teaching ?? 50;
     const mastery = team.gameplan.mastery = team.gameplan.mastery || {};
     const plan = team.gameplan.weeklyPractice || 'chalk_talk';
     const roster = getRosterObjects(team);
+
+    // Players already marked unavailable this week cannot take part
+    // in player-specific practice drills.
+    const availablePracticeRoster = roster.filter(
+        player => !(Number(player.status?.duration) > 0)
+    );
+
+    // Calculate physical workload once so conditioning and scrimmage
+    // use the same schedule assumptions.
+    const practiceFatigueCost = getPracticeScheduleFatigueCost(team);
+
+    // Chalk talks and opponent scouting are less physically demanding
+    // than conditioning. They still carry a small workload cost as
+    // sessions get longer, so extra scheduled time is never entirely free.
+    if (plan === 'chalk_talk' || plan === 'scouting') {
+        const focusFatigueMultiplier = plan === 'chalk_talk'
+            ? 0.25
+            : 0.15;
+
+        const lightPracticeFatigueCost = Math.max(
+            1,
+            Math.round(
+                practiceFatigueCost * focusFatigueMultiplier
+            )
+        );
+
+        availablePracticeRoster.forEach(player => {
+            player.fatigue = Math.min(
+                100,
+                Math.max(0, Number(player.fatigue) || 0) +
+                    lightPracticeFatigueCost
+            );
+        });
+    }
 
     // 1. FAMILIARITY DECAY: Uninstalled plays fade from memory (-4% per week down to 25% floor)
     const activeInstalled = new Set([
@@ -3708,7 +3907,7 @@ export function processWeeklyPractice(team, gameLog = null) {
         });
 
         // Youth IQ mentorship
-        roster.forEach(p => {
+        availablePracticeRoster.forEach(p => {
             if (
                 p.age <= 15 &&
                 Math.random() < 0.25 * trainingOutputFactor &&
@@ -3724,7 +3923,14 @@ export function processWeeklyPractice(team, gameLog = null) {
         const condGainChance = (
             0.15 + (coach?.ratings?.conditioning || 50) / 300
         ) * trainingOutputFactor;
-        roster.forEach(p => {
+        availablePracticeRoster.forEach(p => {
+            // Conditioning improves fitness, but it also tires players.
+            p.fatigue = Math.min(
+                100,
+                Math.max(0, Number(p.fatigue) || 0) +
+                    practiceFatigueCost
+            );
+
             if (Math.random() < condGainChance && (p.attributes?.physical?.stamina || 50) < 95) {
                 p.attributes.physical.stamina += 1;
             }
@@ -3739,11 +3945,18 @@ export function processWeeklyPractice(team, gameLog = null) {
             gameLog.push("🏃 Tire Drills: Sprints in full sun toughened up fourth-quarter stamina!");
         }
     } else if (plan === 'scrimmage') {
-        roster.forEach(p => {
-            p.fatigue = Math.max(
-                0,
-                (p.fatigue || 0) -
-                    Math.round(25 * trainingOutputFactor)
+        availablePracticeRoster.forEach(p => {
+            // A standard scrimmage includes breaks and cooldown.
+            // Longer schedules consume more energy and can erase
+            // that recovery benefit.
+            p.fatigue = Math.min(
+                100,
+                Math.max(
+                    0,
+                    (Number(p.fatigue) || 0) +
+                        practiceFatigueCost -
+                        Math.round(8 * trainingOutputFactor)
+                )
             );
 
             if (
