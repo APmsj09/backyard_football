@@ -1188,14 +1188,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     const otherBlockers = offenseStates.filter(
         p => !p.isEngaged &&
              !p.slot.startsWith('OL') &&
-             (
-                 p.assignment?.includes('block') ||
-                 (playType === 'run' && p.assignment?.startsWith('lead_')) ||
-                 (isScreenPlay && p.assignment?.includes('Wall')) ||
-                 isReadyScreenLeadBlocker(p)
-             ) &&
+             p.id !== ballCarrierState?.id &&
              (
                  p.action?.includes('block') ||
+                 (playType === 'run' && p.assignment?.startsWith('lead_')) ||
                  (isScreenPlay && p.assignment?.includes('Wall')) ||
                  isReadyScreenLeadBlocker(p)
              )
@@ -1788,6 +1784,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         pState.action = 'run_block';
                     }
 
+                    setPointIntent(pState, pState.targetX, pState.targetY, 0.45);
                     return;
                 }
 
@@ -1820,6 +1817,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
         if (pState.isOffense) {
             const isRunner = pState.isBallCarrier || (pState.slot === 'QB1' && pState.action === 'qb_scramble');
+
+            // Transition to run block if the pass is caught by someone else, making them a downfield escort
+            if (isPassCompleted && ballCarrierState && ballCarrierState.id !== pState.id && !pState.slot.startsWith('OL')) {
+                pState.action = 'run_block';
+            }
 
             if (isRunner) {
                 pState.isBallCarrier = true;
@@ -1920,11 +1922,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     setRouteIntent(pState, targetX, targetY, 0.6);
                 } else if (pState.role === 'QB' && pState.action === 'qb_scramble' && pState.y < LOS) {
                     // 2. QB Scramble behind LOS: Angle wide to escape the pocket.
-                    // The designed bootleg rolls right to a fixed launch point.
-                    if (playState.playKey === 'PA_Bootleg_Right') {
+                    const isDesignedBootleg = /boot|rollout/i.test(playState.playKey || '');
+                    if (isDesignedBootleg) {
+                        const rollDir = /left|_l/i.test(playState.playKey) ? -1 : 1;
                         const rolloutTargetX = Math.max(
                             3,
-                            Math.min(FIELD_WIDTH - 3, pState.initialX + 5.5)
+                            Math.min(FIELD_WIDTH - 3, pState.initialX + (rollDir * 5.5))
                         );
 
                         const rolloutTargetY = Math.min(
@@ -2005,7 +2008,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                 if (flightTime > reactionDelay) {
                     const distToLanding = Math.hypot(pState.x - playState.ballState.targetX, pState.y - playState.ballState.targetY);
-                    if (isIntendedTarget || distToLanding < 8.0) {
+                    if (isIntendedTarget || (!pState.slot.startsWith('OL') && distToLanding < 8.0)) {
                         setPointIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.4);
                         pState.action = 'tracking_ball';
                         pState.contactReduction = 1.1 + ((pState.agility || 50) / 250);
@@ -2493,17 +2496,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 case 'route_complete': {
-                    // FIX: If a pass is caught by another teammate, turn into a downfield escort blocker
-                                        if (isPassCompleted && ballCarrierState && ballCarrierState.id !== pState.id) {
-                        pState.action = 'run_block';
-                        pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -2.5 : 2.5);
-                        // If the receiver is already ahead of the carrier, keep pushing downfield to clear the way
-                        const escortDepth = ballCarrierState.y + 4.0;
-                        pState.targetY = Math.max(pState.y + 2.0, escortDepth);
-                        setPointIntent(pState, pState.targetX, pState.targetY, 0.5);
-                        break;
-                    }
-
                     // On designed runs, a lead route is only the approach to the block.
                     // Once the landmark is reached, let the blocker select a defender.
                     if (playType === 'run' && pState.assignment?.startsWith('lead_')) {
@@ -2690,9 +2682,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 carrierIsPasser &&
                 (isBallPastLOS || ballCarrierState.action === 'qb_scramble');
 
-            // FIX: Only consider the play "at the mesh" if the ball is still behind or right at the line of scrimmage!
-            // Once the runner has crossed the line of scrimmage, defenders pursue the runner directly.
-            const isNearMeshPoint = ballCarrierState && ballCarrierState.y <= (LOS + 1.2);
+            // FIX: Only consider the play "at the mesh" during the initial fake window (< 28 ticks / ~1.1s)
+            // and while behind the line of scrimmage. Avoids indefinite biting on bootlegs/scrambles.
+            const isNearMeshPoint = playState.tick < 28 && ballCarrierState && ballCarrierState.y <= (LOS + 1.2);
 
             const isRunReadAtMesh =
                 isRunRead &&
@@ -2823,11 +2815,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             
             const isEarlyLinebackerRunFit =
                 Boolean(
+                    playState.tick < 25 &&
                     !isBallInAir &&
                     pState.role === 'LB' &&
                     isRunRead &&
                     runFitCarrier &&
                     runFitCarrier.y < LOS + 1.5 &&
+                    getDistance(pState, runFitCarrier) > 5.0 &&
                     !assignment?.includes('blitz')
                 );
 
@@ -3592,6 +3586,18 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 pState.targetX,
                 pState.targetY,
                 0.5
+            );
+        } else if (isBallInAir) {
+            // FIX: The ball is gone! Stop rushing the empty-handed QB and turn to pursue the pass
+            pState.targetX = playState.ballState.targetX || playState.ballState.x;
+            pState.targetY = playState.ballState.targetY || playState.ballState.y;
+            pState.action = 'pursuit';
+            
+            setPointIntent(
+                pState,
+                pState.targetX,
+                pState.targetY,
+                0.4
             );
         } else {
             const qb = offenseStates.find(p => p.slot.startsWith('QB'));

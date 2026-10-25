@@ -190,6 +190,7 @@ export function checkBlockCollisions(playState, gameLog = null) {
                 );
 
                 target.action = 'pursuit';
+                blocker.reengageCooldown = 20; // FIX: Prevent the blocker from instantly vacuuming the rusher back in on the very next tick
 
                 logPlayDebug('TRENCH_EDGE_BURN', `${target.name} beat ${blocker.name} with pure edge speed`, {
                     rusherSpeed: targetSpd,

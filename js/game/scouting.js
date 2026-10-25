@@ -1452,7 +1452,7 @@ export function processWeeklyScoutingAssignments(
                 Number.isInteger(requestedTargetCount) &&
                     requestedTargetCount > 0
                     ? requestedTargetCount
-                    : candidates.length
+                    : 4
             );
 
             const selected = candidates.slice(0, targetCount);

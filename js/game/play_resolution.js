@@ -2499,13 +2499,12 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         playState.playKey?.startsWith('PA_') ||
                         playState.playKey?.includes('_PA_');
 
-                    const isBootleg =
-                        playState.playKey === 'PA_Bootleg_Right';
+                    const isBootleg = /boot|rollout/i.test(playState.playKey || '');
 
                     const playActionReady = !isPlayAction
                         ? true
                         : isBootleg
-                            ? qb1?._bootlegRolloutReady === true
+                            ? (qb1?._bootlegRolloutReady === true || playState.tick >= 25)
                             : qb1?.hasCompletedDropback === true;
 
                     const mayProcessQBDecision =
@@ -3629,7 +3628,7 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
             gameInstance.possession.formations.offense = gameInstance.possession.coach?.preferredOffense || 'Balanced';
         }
         gameInstance.possession.recentPlayHistory = [];
-        gameInstance.ballOn = 110 - finalBallY;
+        gameInstance.ballOn = Number((110 - finalBallY).toFixed(1));
         if (gameInstance.ballOn <= 0 || gameInstance.ballOn >= 100) {
             gameInstance.ballOn = 20;
         }

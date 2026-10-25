@@ -932,8 +932,429 @@ export function processRelationshipEvents() {
 export function processWeeklyPlayerGrowth() {
     if (!game || !game.teams) return;
 
+    const offensivePositions = new Set([
+        'QB', 'RB', 'WR', 'TE', 'OL'
+    ]);
+
+    const defensivePositions = new Set([
+        'DL', 'LB', 'DB'
+    ]);
+
+    const automaticSkillsByPosition = {
+        QB: [
+            'throwingAccuracy', 'throwPower', 'decisionMaking',
+            'playbookIQ', 'consistency', 'clutch'
+        ],
+        RB: [
+            'speed', 'agility', 'explosiveness', 'carrying',
+            'catchingHands', 'stamina', 'toughness'
+        ],
+        WR: [
+            'speed', 'agility', 'explosiveness', 'jumping',
+            'catchingHands', 'playbookIQ', 'consistency', 'clutch'
+        ],
+        TE: [
+            'strength', 'speed', 'agility', 'jumping',
+            'catchingHands', 'blocking', 'playbookIQ', 'toughness'
+        ],
+        OL: [
+            'strength', 'blocking', 'toughness',
+            'stamina', 'playbookIQ', 'consistency'
+        ],
+        DL: [
+            'strength', 'blockShedding', 'tackling',
+            'toughness', 'stamina', 'playbookIQ'
+        ],
+        LB: [
+            'tackling', 'speed', 'blockShedding',
+            'coverage', 'playbookIQ', 'toughness', 'agility'
+        ],
+        DB: [
+            'speed', 'agility', 'coverage', 'catchingHands',
+            'playbookIQ', 'decisionMaking', 'clutch'
+        ]
+    };
+
+    const getTrainingPosition = player => {
+        const estimatedPosition = String(
+            estimateBestPosition(player) ||
+            player.favoriteOffensivePosition ||
+            player.position ||
+            ''
+        ).toUpperCase();
+
+        if (['OT', 'OG', 'C', 'G', 'T'].includes(estimatedPosition)) {
+            return 'OL';
+        }
+
+        if (['DE', 'DT', 'NT'].includes(estimatedPosition)) {
+            return 'DL';
+        }
+
+        if (['CB', 'S', 'FS', 'SS'].includes(estimatedPosition)) {
+            return 'DB';
+        }
+
+        return estimatedPosition;
+    };
+
+    const getTrainingSkillValue = (player, skill) => {
+        if (!player?.attributes || !skill) return null;
+
+        for (const category of Object.values(player.attributes)) {
+            const value = category?.[skill];
+
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                return value;
+            }
+        }
+
+        return null;
+    };
+
+    const increaseTrainingSkill = (player, skill) => {
+        if (!player?.attributes || !skill) return false;
+
+        for (const category of Object.values(player.attributes)) {
+            const value = category?.[skill];
+
+            if (
+                typeof value === 'number' &&
+                Number.isFinite(value) &&
+                value < 95
+            ) {
+                category[skill] = value + 1;
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    const getAutomaticTrainingSkill = player => {
+        const position = getTrainingPosition(player);
+
+        const positionSkills =
+            automaticSkillsByPosition[position] ||
+            [
+                'speed', 'agility', 'strength',
+                'playbookIQ', 'consistency', 'toughness'
+            ];
+
+        // General football fundamentals remain useful across positions.
+        const skillPool = [
+            ...new Set([
+                ...positionSkills,
+                'playbookIQ',
+                'consistency',
+                'toughness'
+            ])
+        ];
+
+        return skillPool
+            .map(skill => ({
+                skill,
+                value: getTrainingSkillValue(player, skill)
+            }))
+            .filter(item =>
+                item.value !== null &&
+                item.value < 95
+            )
+            .sort((a, b) => a.value - b.value)[0]?.skill || null;
+    };
+
+    const matchesTrainingFocus = (player, focus) => {
+        const position = getTrainingPosition(player);
+        const normalizedFocus = String(focus || 'all').trim();
+
+        if (normalizedFocus === 'all') return true;
+
+        if (normalizedFocus === 'offense') {
+            return offensivePositions.has(position);
+        }
+
+        if (normalizedFocus === 'defense') {
+            return defensivePositions.has(position);
+        }
+
+        return position === normalizedFocus.toUpperCase();
+    };
+
+    const getCoachTrainingQuality = coach => {
+        const ratings = coach?.ratings || {};
+
+        const values = [
+            ratings.teaching,
+            ratings.practiceDiscipline,
+            ratings.conditioning
+        ].map(value => {
+            const rating = Number(value);
+
+            return Number.isFinite(rating)
+                ? Math.max(0, Math.min(100, rating))
+                : 50;
+        });
+
+        return values.reduce((sum, value) => sum + value, 0) /
+            values.length;
+    };
+
     game.teams.forEach(team => {
         const roster = getRosterObjects(team);
+
+        // ---------------------------------------------------------------
+        // 1. FOCUSED STAFF TRAINING
+        // ---------------------------------------------------------------
+
+        const coaches = Array.isArray(team.coaches)
+            ? team.coaches.filter(coach => coach?.id != null)
+            : [];
+
+        const focusedTrainingPlayers = new Set();
+
+        const trainingAssignments = (
+            team.staffWorkPlan?.assignments || []
+        ).map((assignment, index) => {
+            if (
+                assignment?.task !== 'training' ||
+                assignment.coachId == null
+            ) {
+                return null;
+            }
+
+            const coach = coaches.find(
+                candidate =>
+                    String(candidate.id) === String(assignment.coachId)
+            );
+
+            if (!coach) return null;
+
+            const hours = getEffectiveStaffWorkHours(
+                team,
+                assignment
+            );
+
+            if (!Number.isFinite(hours) || hours <= 0) {
+                return null;
+            }
+
+            return {
+                assignment,
+                coach,
+                hours,
+                index
+            };
+        }).filter(Boolean);
+
+        // Give assignments with more effective hours and stronger coaches
+        // first opportunity to select targets. This also makes overlapping
+        // assignments resolve consistently rather than stacking their odds.
+        trainingAssignments.sort((a, b) => {
+            const scoreA =
+                a.hours * (0.5 + getCoachTrainingQuality(a.coach) / 100);
+
+            const scoreB =
+                b.hours * (0.5 + getCoachTrainingQuality(b.coach) / 100);
+
+            return scoreB - scoreA || a.index - b.index;
+        });
+
+        trainingAssignments.forEach(item => {
+            const { assignment, coach, hours, index } = item;
+
+            const requestedTargets = Number(assignment.maxTargets);
+
+            const maxTargets = Math.max(
+                1,
+                Math.min(
+                    12,
+                    Math.floor(
+                        Number.isFinite(requestedTargets) &&
+                        requestedTargets > 0
+                            ? requestedTargets
+                            : 4
+                    )
+                )
+            );
+
+            const requestedSkill = String(
+                assignment.skill || ''
+            ).trim();
+
+            const candidates = roster
+                .filter(player =>
+                    player &&
+                    player.attributes &&
+                    !focusedTrainingPlayers.has(player) &&
+                    matchesTrainingFocus(
+                        player,
+                        assignment.focus
+                    )
+                )
+                .map(player => {
+                    const skill = requestedSkill ||
+                        getAutomaticTrainingSkill(player);
+
+                    const skillValue = skill
+                        ? getTrainingSkillValue(player, skill)
+                        : null;
+
+                    // A chosen skill at its cap does not silently turn into
+                    // another skill. The user chose what to train.
+                    if (
+                        !skill ||
+                        skillValue === null ||
+                        skillValue >= 95
+                    ) {
+                        return null;
+                    }
+
+                    const ageValue = Number(player.age);
+                    const age = Number.isFinite(ageValue)
+                        ? ageValue
+                        : 14;
+
+                    const ethicValue = Number(
+                        player.personality?.workEthic
+                    );
+
+                    const workEthic = Number.isFinite(ethicValue)
+                        ? Math.max(0, Math.min(100, ethicValue))
+                        : 50;
+
+                    const potentialFactor = {
+                        A: 2.0,
+                        B: 1.5,
+                        C: 1.0,
+                        D: 0.5,
+                        F: 0
+                    }[player.potential] ?? 1.0;
+
+                    // Favor players with room to improve and developmental
+                    // runway, without making low work ethic irrelevant.
+                    const priority =
+                        (95 - skillValue) * 0.45 +
+                        Math.max(0, 18 - age) * 1.1 +
+                        (workEthic - 50) * 0.035 +
+                        potentialFactor;
+
+                    return {
+                        player,
+                        skill,
+                        skillValue,
+                        priority
+                    };
+                })
+                .filter(Boolean)
+                .sort((a, b) => b.priority - a.priority);
+
+            if (candidates.length === 0) return;
+
+            // Consider a pool twice the target count, then rotate within it.
+            // This helps prevent the same few players from monopolizing
+            // training every single week.
+            const candidatePool = candidates.slice(
+                0,
+                Math.min(candidates.length, maxTargets * 2)
+            );
+
+            const rotationSeed = Math.abs(
+                (Number(game.year) || 0) * 11 +
+                (Number(game.currentWeek) || 0) * 5 +
+                index * 3
+            );
+
+            const rotationOffset =
+                rotationSeed % candidatePool.length;
+
+            const rotatedPool = [
+                ...candidatePool.slice(rotationOffset),
+                ...candidatePool.slice(0, rotationOffset)
+            ];
+
+            const targets = rotatedPool.slice(0, maxTargets);
+
+            targets.forEach(({ player, skill }) => {
+                // A player only receives one focused-training attempt per
+                // week, even if several assignments cover the same player.
+                focusedTrainingPlayers.add(player);
+
+                const hoursFactor = Math.min(1, hours / 8);
+                const coachQuality = getCoachTrainingQuality(coach);
+
+                const coachFactor = 0.75 + coachQuality / 200;
+
+                const ethicValue = Number(
+                    player.personality?.workEthic
+                );
+
+                const workEthic = Number.isFinite(ethicValue)
+                    ? Math.max(0, Math.min(100, ethicValue))
+                    : 50;
+
+                const ethicFactor = 0.70 + workEthic / 200;
+
+                const ageValue = Number(player.age);
+                const age = Number.isFinite(ageValue)
+                    ? ageValue
+                    : 14;
+
+                const ageFactor = age <= 15
+                    ? 1.12
+                    : age <= 16
+                        ? 1.0
+                        : age <= 17
+                            ? 0.90
+                            : 0.80;
+
+                const potentialFactor = {
+                    A: 1.12,
+                    B: 1.07,
+                    C: 1.0,
+                    D: 0.93,
+                    F: 0.86
+                }[player.potential] ?? 1.0;
+
+                // Focused training is a modest weekly advantage, not a
+                // guaranteed point or a replacement for natural growth.
+                // Group instruction reaches more players, but each player's
+                // individual development chance decreases as the group grows.
+                // Square-root dilution rewards group efficiency without
+                // letting expected gains increase linearly with target count.
+                const targetDistributionFactor =
+                    1 / Math.sqrt(Math.max(1, targets.length));
+
+                const growthChance = Math.min(
+                    0.18,
+                    (0.025 + 0.075 * hoursFactor) *
+                        coachFactor *
+                        ethicFactor *
+                        ageFactor *
+                        potentialFactor *
+                        targetDistributionFactor
+                );
+
+                if (
+                    Math.random() < growthChance &&
+                    increaseTrainingSkill(player, skill)
+                ) {
+                    if (
+                        team.id === game?.playerTeam?.id &&
+                        Math.random() < 0.15
+                    ) {
+                        addMessage(
+                            'Focused Staff Training',
+                            `📈 <b>${player.name}</b> improved ${skill} through focused staff training this week!`
+                        );
+                    }
+                }
+            });
+        });
+
+        // ---------------------------------------------------------------
+        // 2. EXISTING GAME-REP GROWTH
+        // ---------------------------------------------------------------
+
         roster.forEach(player => {
             if (!player || !player.attributes) return;
 
@@ -948,15 +1369,33 @@ export function processWeeklyPlayerGrowth() {
                 const canLearn = Math.random() < (ethic / 100);
 
                 if (canLearn) {
-                    const learnable = ['playbookIQ', 'consistency', 'catchingHands', 'tackling', 'throwingAccuracy'];
+                    const learnable = [
+                        'playbookIQ',
+                        'consistency',
+                        'catchingHands',
+                        'tackling',
+                        'throwingAccuracy'
+                    ];
+
                     const chosen = getRandom(learnable);
 
                     for (const cat in player.attributes) {
-                        if (player.attributes[cat]?.[chosen] !== undefined && player.attributes[cat][chosen] < 95) {
+                        if (
+                            player.attributes[cat]?.[chosen] !== undefined &&
+                            player.attributes[cat][chosen] < 95
+                        ) {
                             player.attributes[cat][chosen] += 1;
-                            if (team.id === game?.playerTeam?.id && Math.random() < 0.25) {
-                                addMessage("Weekly Rep Growth", `💡 <b>${player.name}</b> showed great progress in practice and game reps this week (+1 ${chosen})!`);
+
+                            if (
+                                team.id === game?.playerTeam?.id &&
+                                Math.random() < 0.25
+                            ) {
+                                addMessage(
+                                    'Weekly Rep Growth',
+                                    `💡 <b>${player.name}</b> showed great progress in practice and game reps this week (+1 ${chosen})!`
+                                );
                             }
+
                             break;
                         }
                     }
@@ -2496,6 +2935,118 @@ function getEffectiveTaskHours(team, task) {
     );
 }
 
+const TRAINING_OFFENSE_POSITIONS = new Set([
+    'QB', 'RB', 'WR', 'TE', 'OL'
+]);
+
+const TRAINING_DEFENSE_POSITIONS = new Set([
+    'DL', 'LB', 'DB'
+]);
+
+const TRAINING_VALID_POSITIONS = new Set([
+    ...TRAINING_OFFENSE_POSITIONS,
+    ...TRAINING_DEFENSE_POSITIONS
+]);
+
+function getTrainingPlayerPosition(player) {
+    const rawPosition = player?.pos || estimateBestPosition(player);
+
+    const positionAliases = {
+        OT: 'OL',
+        OG: 'OL',
+        C: 'OL',
+        DE: 'DL',
+        DT: 'DL',
+        NT: 'DL',
+        CB: 'DB',
+        S: 'DB',
+        FS: 'DB',
+        SS: 'DB'
+    };
+
+    const position = positionAliases[rawPosition] || rawPosition;
+
+    return TRAINING_VALID_POSITIONS.has(position)
+        ? position
+        : null;
+}
+
+function getTrainingAttributeScore(player, skill) {
+    const values = Object.values(player?.attributes || {})
+        .map(category => category?.[skill])
+        .filter(value =>
+            typeof value === 'number' &&
+            Number.isFinite(value)
+        );
+
+    return values.length > 0
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : 101;
+}
+
+function getTrainingAssignmentTargetIds(team, assignment) {
+    if (
+        !team ||
+        assignment?.task !== 'training'
+    ) {
+        return new Set();
+    }
+
+    const roster = getRosterObjects(team).filter(player =>
+        player?.id != null &&
+        player.attributes
+    );
+
+    const focus = String(assignment.focus || 'all');
+
+    const candidates = roster.filter(player => {
+        const position = getTrainingPlayerPosition(player);
+
+        if (focus === 'all') return true;
+
+        if (focus === 'offense') {
+            return TRAINING_OFFENSE_POSITIONS.has(position);
+        }
+
+        if (focus === 'defense') {
+            return TRAINING_DEFENSE_POSITIONS.has(position);
+        }
+
+        return position === focus;
+    });
+
+    const rawMaxTargets = Number(assignment.maxTargets);
+
+    const maxTargets =
+        Number.isFinite(rawMaxTargets) && rawMaxTargets > 0
+            ? Math.floor(rawMaxTargets)
+            : 1;
+
+    const skill = String(assignment.skill || '').trim();
+
+    candidates.sort((a, b) => {
+        const positionA = getTrainingPlayerPosition(a) || 'WR';
+        const positionB = getTrainingPlayerPosition(b) || 'WR';
+
+        const scoreA = skill
+            ? getTrainingAttributeScore(a, skill)
+            : calculateOverall(a, positionA);
+
+        const scoreB = skill
+            ? getTrainingAttributeScore(b, skill)
+            : calculateOverall(b, positionB);
+
+        return scoreA - scoreB ||
+            String(a.id).localeCompare(String(b.id));
+    });
+
+    return new Set(
+        candidates
+            .slice(0, maxTargets)
+            .map(player => String(player.id))
+    );
+}
+
 function getStaffWorkOutputFactor(
     effectiveHours,
     minimumFactor = 0.25,
@@ -2545,18 +3096,62 @@ export function developPlayer(player, team = null) {
     else if (snaps >= 100) experienceMod = 1.20; // Active rotational contributor
     else if (snaps < 25) experienceMod = 0.65;   // Bench rot penalty
 
-    const developmentCoach = getAssignedCoachForTask(
-        team,
-        'training'
+    const playerTrainingAssignments = [];
+
+    if (team && player.id != null) {
+        for (const assignment of team.staffWorkPlan?.assignments || []) {
+            if (
+                assignment?.task !== 'training' ||
+                assignment.coachId == null
+            ) {
+                continue;
+            }
+
+            const hours = getEffectiveStaffWorkHours(
+                team,
+                assignment
+            );
+
+            if (!Number.isFinite(hours) || hours <= 0) {
+                continue;
+            }
+
+            const targetedPlayerIds = getTrainingAssignmentTargetIds(
+                team,
+                assignment
+            );
+
+            if (!targetedPlayerIds.has(String(player.id))) {
+                continue;
+            }
+
+            playerTrainingAssignments.push({
+                assignment,
+                hours
+            });
+        }
+    }
+
+    const effectiveTrainingHours = playerTrainingAssignments.reduce(
+        (total, item) => total + item.hours,
+        0
     );
 
-    const effectiveTrainingHours = getEffectiveTaskHours(
-        team,
-        'training'
-    );
+    const assignedTrainingCoach = playerTrainingAssignments
+        .map(item => ({
+            coach: coaches.find(coach =>
+                String(coach.id) === String(item.assignment.coachId)
+            ),
+            hours: item.hours
+        }))
+        .filter(item => item.coach)
+        .sort((a, b) => b.hours - a.hours)[0]?.coach;
 
-    // Natural maturation remains intact; dedicated training hours
-    // influence the coached attribute-development component below.
+    const developmentCoach = assignedTrainingCoach ||
+        getTeamCoachingSpecialist(team, 'training');
+
+    // Assigned training hours affect coached attribute development,
+    // not natural maturation.
     const trainingOutputFactor = getStaffWorkOutputFactor(
         effectiveTrainingHours,
         0.35
@@ -2748,6 +3343,25 @@ export function developPlayer(player, team = null) {
     else if (pos === 'LB') focusGroup = ['tackling', 'playbookIQ', 'speed', 'blockShedding'];
     else if (pos === 'DB') focusGroup = ['speed', 'coverage', 'agility', 'catchingHands', 'playbookIQ'];
 
+        const assignedTrainingSkills = [
+        ...new Set(
+            playerTrainingAssignments
+                .map(item => String(item.assignment.skill || '').trim())
+                .filter(skill =>
+                    skill &&
+                    Object.values(player.attributes || {}).some(
+                        category =>
+                            typeof category?.[skill] === 'number' &&
+                            Number.isFinite(category[skill])
+                    )
+                )
+        )
+    ];
+
+    const trainingFocusGroup = assignedTrainingSkills.length > 0
+        ? assignedTrainingSkills
+        : focusGroup;
+
     let totalUpgradePoints = Math.round(
         basePoints * experienceMod * trainingOutputFactor
     ) + mentorBoost + transitionBoost;
@@ -2766,7 +3380,9 @@ export function developPlayer(player, team = null) {
     }
 
     for (let i = 0; i < totalUpgradePoints; i++) {
-        const pool = focusGroup.length > 0 ? focusGroup : ['speed', 'strength', 'agility'];
+        const pool = trainingFocusGroup.length > 0
+            ? trainingFocusGroup
+            : ['speed', 'strength', 'agility'];
         const attrToBoost = getRandom(pool);
 
         for (const category in player.attributes) {

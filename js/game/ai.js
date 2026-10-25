@@ -471,9 +471,9 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             const anyDeepThreat = offenseStates.some(o => o.action?.includes('route') && (o.y - LOS) > 12.0);
             
             if (!anyDeepThreat) {
-                // Base awareness plus a random "instinct" roll (-5 to +25)
-                const effectiveAwareness = safetyIQ + (Math.random() * 30 - 5); 
-                
+                // Evaluate awareness deterministically to avoid 25Hz threshold flickering
+                const effectiveAwareness = safetyIQ; 
+                    
                 if (effectiveAwareness > 60) {
                     // Smoothly scale the bite depth. 90+ = 4.5 yards, 65 = 7.0 yards.
                     minMatchDepth = Math.max(4.5, 8.0 - ((effectiveAwareness - 50) / 12)); 

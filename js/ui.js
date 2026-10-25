@@ -3994,6 +3994,8 @@ export function renderStaffTab(gameState) {
 
                                 ${task === 'training' ? `
                                     <label class="block min-w-0">
+                                ${task === 'training' ? `
+                                    <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Skill</span>
                                         <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
                                             aria-label="Training skill"
@@ -4004,7 +4006,9 @@ export function renderStaffTab(gameState) {
                                             )}
                                         </select>
                                     </label>
-                                ` : showTargets ? `
+                                ` : '<div></div>'}
+
+                                ${showTargets ? `
                                     <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Max targets</span>
                                         <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
@@ -4012,7 +4016,7 @@ export function renderStaffTab(gameState) {
                                             onchange="app_updateStaffWorkAssignment(${index}, 'maxTargets', this.value)">
                                             ${renderOptions(
                                                 [[1, '1 player'], [2, '2 players'], [3, '3 players'], [4, '4 players'], [6, '6 players'], [8, '8 players'], [12, '12 players']],
-                                                assignment.maxTargets || 1
+                                                assignment.maxTargets || (task === 'training' ? 4 : 1)
                                             )}
                                         </select>
                                     </label>
