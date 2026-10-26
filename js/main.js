@@ -8,7 +8,11 @@ import { isDebugMode, setDebugMode, debugCollector } from './game.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
 import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
-import { getCurrentRosterLimit, TEMPORARY_HELP_THRESHOLD } from './game/season.js';
+import {
+    getCurrentRosterLimit,
+    TEMPORARY_HELP_THRESHOLD,
+    processSeasonStartDues
+} from './game/season.js';
 import {
     initializeInheritedScoutingReports,
     recordScoutingReportOutcome
@@ -996,11 +1000,25 @@ async function runAIDraftPicks() {
 
     try {
         while (true) {
-            const pickLimitReached = gameState.currentPick >= gameState.draftOrder.length;
-            const noPlayersLeft = gameState.players.filter(p => p && !p.teamId).length === 0;
-            const allTeamsFull = gameState.teams.every(t => !t || !t.roster || t.roster.length >= rosterLimit);
+            const pickLimitReached =
+                gameState.currentPick >= gameState.draftOrder.length;
 
-            if (pickLimitReached || noPlayersLeft || allTeamsFull) {
+            // Only eligible rookies can be selected during the draft.
+            // Unrelated free agents must not keep an exhausted draft running.
+            const noDraftProspectsLeft = !Array.isArray(gameState.draftClass) ||
+                !gameState.draftClass.some(player =>
+                    player &&
+                    !player.teamId &&
+                    !['retired', 'departed', 'temporary'].includes(
+                        player.status?.type
+                    )
+                );
+
+            const allTeamsFull = gameState.teams.every(
+                t => !t || !t.roster || t.roster.length >= rosterLimit
+            );
+
+            if (pickLimitReached || noDraftProspectsLeft || allTeamsFull) {
                 await handleDraftEnd();
                 break;
             }
@@ -1855,6 +1873,13 @@ async function handleAdvanceWeek() {
         }
 
         return;
+    }
+
+    // Collect seasonal player dues when the new season is ready to begin.
+    // The roster-limit guard above ensures the user's roster cuts are complete.
+    if (gameState.currentWeek === 0 && gameState.draftCompleted) {
+        processSeasonStartDues(gameState);
+        Game.saveGameState(activeSaveKey);
     }
 
     // 3. Regular Season game handling
@@ -3116,20 +3141,69 @@ window.app = {
         window.app.renderStoreTab(gs);
     },
 
-    waivePlayerDues: (playerId) => {
+        waivePlayerDues: (playerId) => {
         const gs = Game.getGameState();
         const team = gs?.playerTeam;
-        if (!team || !team.finances) return;
-        
-        if (!team.finances.waivedDues.includes(playerId)) {
-            team.finances.waivedDues.push(playerId);
-            // Waiving fees loses you street cred!
-            if (team.socialProfile) {
-                team.socialProfile.streetCred = Math.max(0, (team.socialProfile.streetCred || 50) - 2);
-            }
-            Game.saveGameState(activeSaveKey);
-            window.app.renderStoreTab(gs);
+        if (!team) return;
+
+        if (!team.finances) {
+            team.finances = {
+                balance: 10.00,
+                waivedDues: [],
+                autoSnack: 'none'
+            };
         }
+
+        if (!Array.isArray(team.finances.waivedDues)) {
+            team.finances.waivedDues = [];
+        }
+
+        const currentYear = Number(gs.year);
+
+        // Waivers can only be changed before this season's collection.
+        if (
+            !Number.isInteger(currentYear) ||
+            Number(team.finances.seasonDuesYear) === currentYear
+        ) {
+            window.app.renderStoreTab(gs);
+            return;
+        }
+
+        // Only allow waivers for players currently on this roster.
+        if (!(team.roster || []).some(
+            id => String(id) === String(playerId)
+        )) {
+            return;
+        }
+
+        const existingIndex = team.finances.waivedDues.findIndex(
+            id => String(id) === String(playerId)
+        );
+
+        if (existingIndex >= 0) {
+            // Cancel a queued waiver and restore its Street Cred cost.
+            team.finances.waivedDues.splice(existingIndex, 1);
+
+            if (team.socialProfile) {
+                team.socialProfile.streetCred = Math.min(
+                    100,
+                    (team.socialProfile.streetCred ?? 50) + 2
+                );
+            }
+        } else {
+            // Queue a waiver for the upcoming seasonal dues collection.
+            team.finances.waivedDues.push(playerId);
+
+            if (team.socialProfile) {
+                team.socialProfile.streetCred = Math.max(
+                    0,
+                    (team.socialProfile.streetCred ?? 50) - 2
+                );
+            }
+        }
+
+        Game.saveGameState(activeSaveKey);
+        window.app.renderStoreTab(gs);
     },
 
         renderFinancesTab: (gameState) => {
@@ -3184,7 +3258,14 @@ window.app = {
 
         const ledgerCategoryLabels = {
             allowance: 'Community Allowance',
-            playerDues: 'Player Dues',
+            weeklyAllowance: 'Community Allowance (Legacy)',
+            playerDues: 'Player Dues (Legacy)',
+            seasonDues: 'Season-start Player Dues',
+            staffPayroll: 'Staff Payroll',
+            aiMorale: 'AI Morale Spending',
+            aiToken: 'AI Favor Token Purchase',
+            aiCapriSun: 'AI Capri Sun Recovery Snacks',
+            aiOrangeSlices: 'AI Orange Slice Recovery Snacks',
             autoSnack: 'Weekly Snack Plan',
             hustle: 'Hustle Income',
             store_token: 'Favor Token',
@@ -3233,29 +3314,61 @@ window.app = {
             0
         );
 
-        const weeklyTotals = new Map();
+        // Prefer actual weekly balance snapshots for cash-flow trends.
+        // The transaction ledger is capped at 80 entries, so rebuilding
+        // every week's net change from it can omit older transactions.
+        const storedWeeklyHistory = Array.isArray(finances.weeklyHistory)
+            ? finances.weeklyHistory
+            : [];
 
-        ledger.forEach(entry => {
-            const year = Number(entry.year) || 0;
-            const week = Number(entry.week) || 0;
-            const key = `${year}:${week}`;
+        let chartWeeks = storedWeeklyHistory
+            .filter(entry => {
+                const year = Number(entry?.year);
+                const week = Number(entry?.week);
+                const netChange = Number(entry?.netChange);
 
-            if (!weeklyTotals.has(key)) {
-                weeklyTotals.set(key, {
-                    year,
-                    week,
-                    net: 0
-                });
-            }
-
-            weeklyTotals.get(key).net += Number(entry.amount) || 0;
-        });
-
-        const chartWeeks = [...weeklyTotals.values()]
+                return (
+                    Number.isInteger(year) &&
+                    Number.isInteger(week) &&
+                    Number.isFinite(netChange)
+                );
+            })
+            .map(entry => ({
+                year: Number(entry.year),
+                week: Number(entry.week),
+                net: Number(entry.netChange)
+            }))
             .sort((a, b) =>
                 a.year - b.year || a.week - b.week
             )
             .slice(-8);
+
+        // Backward-compatible fallback for saves without weekly snapshots.
+        if (chartWeeks.length === 0) {
+            const weeklyTotals = new Map();
+
+            ledger.forEach(entry => {
+                const year = Number(entry.year) || 0;
+                const week = Number(entry.week) || 0;
+                const key = `${year}:${week}`;
+
+                if (!weeklyTotals.has(key)) {
+                    weeklyTotals.set(key, {
+                        year,
+                        week,
+                        net: 0
+                    });
+                }
+
+                weeklyTotals.get(key).net += Number(entry.amount) || 0;
+            });
+
+            chartWeeks = [...weeklyTotals.values()]
+                .sort((a, b) =>
+                    a.year - b.year || a.week - b.week
+                )
+                .slice(-8);
+        }
 
         const chartScale = Math.max(
             1,
@@ -3276,7 +3389,7 @@ window.app = {
                 return `
                     <div class="grid grid-cols-[76px_minmax(0,1fr)_90px] gap-3 items-center text-xs">
                         <span class="text-slate-500 font-semibold">
-                            Y${entry.year} W${entry.week}
+                            Y${entry.year} W${entry.week + 1}
                         </span>
                         <div class="h-5 bg-slate-100 rounded overflow-hidden">
                             <div
@@ -3348,7 +3461,13 @@ window.app = {
                     >
                         <td class="px-4 py-3 whitespace-nowrap text-slate-600">
                             Y${Number(entry.year) || '—'} /
-                            W${Number(entry.week) || '—'}
+                            W${
+                                Number.isInteger(Number(entry.week)) &&
+                                entry.week !== null &&
+                                entry.week !== ''
+                                    ? Number(entry.week) + 1
+                                    : '—'
+                            }
                         </td>
                         <td class="px-4 py-3 whitespace-nowrap">
                             <span class="inline-block rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
@@ -3405,7 +3524,7 @@ window.app = {
 
                     <div class="bg-white rounded-lg border border-slate-200 p-4">
                         <p class="text-xs uppercase tracking-wider text-slate-500 font-bold">
-                            Recorded Income
+                            Retained Ledger Income
                         </p>
                         <p class="text-xl font-black font-mono text-emerald-700 mt-2">
                             +${money(recordedIncome)}
@@ -3414,7 +3533,7 @@ window.app = {
 
                     <div class="bg-white rounded-lg border border-slate-200 p-4">
                         <p class="text-xs uppercase tracking-wider text-slate-500 font-bold">
-                            Recorded Expenses
+                            Retained Ledger Expenses
                         </p>
                         <p class="text-xl font-black font-mono text-rose-600 mt-2">
                             ${money(recordedExpenses)}
@@ -3423,7 +3542,7 @@ window.app = {
 
                     <div class="bg-white rounded-lg border border-slate-200 p-4">
                         <p class="text-xs uppercase tracking-wider text-slate-500 font-bold">
-                            Recorded Net Change
+                            Retained Ledger Net Change
                         </p>
                         <p class="text-xl font-black font-mono mt-2 ${
                             recordedNet < 0 ? 'text-rose-600' : 'text-emerald-700'
@@ -3440,7 +3559,7 @@ window.app = {
                                 Weekly Cash Flow
                             </h4>
                             <p class="text-xs text-slate-500 mt-1">
-                                Net change by week, based on recorded ledger entries.
+                                Uses saved weekly balance snapshots when available; older saves may fall back to ledger transactions.
                             </p>
                         </div>
                         <span class="text-xs text-slate-400">
@@ -3694,7 +3813,20 @@ window.app = {
         const team = gameState?.playerTeam;
         if (!team) return;
         if (!team.finances) team.finances = { balance: 10.00, waivedDues: [], autoSnack: 'none' };
-        
+
+        if (!Array.isArray(team.finances.waivedDues)) {
+            team.finances.waivedDues = [];
+        }
+
+        const currentYear = Number(gameState.year);
+        const seasonDuesSettled =
+            Number.isInteger(currentYear) &&
+            Number(team.finances.seasonDuesYear) === currentYear;
+
+        const waivedDuesIds = new Set(
+            team.finances.waivedDues.map(String)
+        );
+
         const autoSnack = team.finances.autoSnack || 'none';
 
         const trainingEquipmentLevel = Math.max(
@@ -3707,7 +3839,7 @@ window.app = {
             )
         );
 
-        const trainingEquipmentPrices = [15.00, 25.00, 40.00];
+        const trainingEquipmentPrices = [25.00, 45.00, 70.00];
         const nextTrainingEquipmentPrice =
             trainingEquipmentPrices[trainingEquipmentLevel] ?? null;
 
@@ -3721,7 +3853,7 @@ window.app = {
             )
         );
 
-        const scoutingToolkitPrices = [12.00, 22.00, 35.00];
+        const scoutingToolkitPrices = [20.00, 40.00, 60.00];
         const nextScoutingToolkitPrice =
             scoutingToolkitPrices[scoutingToolkitLevel] ?? null;
 
@@ -3992,23 +4124,66 @@ window.app = {
                     </div>
                 </div>
 
-                <!-- WAIVE DUES MANAGEMENT -->
+                                <!-- SEASONAL DUES MANAGEMENT -->
                 <div class="bg-white rounded-sm border border-slate-300 shadow-sm p-4 flex flex-col h-[450px]">
-                    <div class="mb-2 border-b pb-2">
-                        <h4 class="font-black text-sm uppercase text-slate-800">Weekly Dues Management</h4>
-                        <p class="text-[10px] text-slate-500 mt-1">Players pay $1.00/wk. Waiving fees boosts loyalty and happiness but costs you -2 Street Cred (looks soft).</p>
+                    <div class="mb-3 border-b pb-3">
+                        <h4 class="font-black text-sm uppercase text-slate-800">
+                            Season Dues Management
+                        </h4>
+
+                        <p class="text-[10px] text-slate-500 mt-1">
+                            Players contribute $9.00 once per season.
+                            Waivers must be queued before collection.
+                            Each queued waiver costs 2 Street Cred;
+                            waived players gain +10 happiness when dues are collected.
+                        </p>
+
+                        <div class="mt-3 rounded border px-3 py-2 ${
+                            seasonDuesSettled
+                                ? 'bg-emerald-50 border-emerald-200'
+                                : 'bg-amber-50 border-amber-200'
+                        }">
+                            <p class="text-xs font-bold ${
+                                seasonDuesSettled
+                                    ? 'text-emerald-800'
+                                    : 'text-amber-800'
+                            }">
+                                ${
+                                    seasonDuesSettled
+                                        ? `Season ${currentYear} dues settled`
+                                        : `Season ${currentYear} dues not yet collected`
+                                }
+                            </p>
+
+                            <p class="text-[10px] mt-1 text-slate-600">
+                                ${
+                                    seasonDuesSettled
+                                        ? 'Waivers are locked until next season.'
+                                        : `${waivedDuesIds.size} waiver${waivedDuesIds.size === 1 ? '' : 's'} queued. You can change them before collection.`
+                                }
+                            </p>
+                        </div>
                     </div>
+
                     <div class="overflow-y-auto flex-grow space-y-1">
                         ${Game.getUIRosterObjects(team).map(p => {
-                            const isWaived = (team.finances.waivedDues || []).includes(p.id);
+                            const isWaived = waivedDuesIds.has(String(p.id));
+
                             return `
-                            <div class="flex justify-between items-center bg-slate-50 p-1.5 rounded border border-slate-200">
-                                <span class="font-bold text-xs truncate max-w-[120px]">${p.name}</span>
-                                ${isWaived 
-                                    ? `<span class="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded">Dues Waived</span>`
-                                    : `<button class="text-[9px] bg-slate-900 text-white font-bold px-2 py-1 rounded hover:bg-slate-700 transition" onclick="app.waivePlayerDues('${p.id}')">Waive $1.00</button>`
-                                }
-                            </div>`;
+                                <div class="flex justify-between items-center gap-2 bg-slate-50 p-2 rounded border border-slate-200">
+                                    <span class="font-bold text-xs truncate">
+                                        ${p.name}
+                                    </span>
+
+                                    ${
+                                        seasonDuesSettled
+                                            ? `<span class="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded whitespace-nowrap">Settled</span>`
+                                            : isWaived
+                                                ? `<button class="text-[9px] bg-amber-100 text-amber-900 font-bold px-2 py-1 rounded hover:bg-amber-200 transition whitespace-nowrap" onclick="app.waivePlayerDues('${p.id}')">Undo Waiver</button>`
+                                                : `<button class="text-[9px] bg-slate-900 text-white font-bold px-2 py-1 rounded hover:bg-slate-700 transition whitespace-nowrap" onclick="app.waivePlayerDues('${p.id}')">Waive $9.00</button>`
+                                    }
+                                </div>
+                            `;
                         }).join('')}
                     </div>
                 </div>

@@ -198,7 +198,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         runScore += Math.min(30, runBlocks * 8);
     }
 
-    rbs.forEach(rb => {
+     rbs.forEach(rb => {
         if (rb.isBallCarrier) runScore += 60;
         else if (rb.action === 'run_path' && rb.y > (qb?.y || 0)) runScore += 20;
         else if (rb.action === 'pass_block') passScore += 20;
@@ -206,6 +206,24 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         if (rb.vx > 2.0) rightScore += 40;
         else if (rb.vx < -2.0) leftScore += 40;
         else if (rb.vy > 1.5) centerScore += 30;
+    });
+
+    // MISDIRECTION / JET SWEEP READ:
+    // Fast-moving WRs crossing the backfield trick defenders into flowing horizontally.
+    const jetSweepers = offenseStates.filter(p => 
+        p.role === 'WR' && 
+        p.y < (playState?.lineOfScrimmage || 60) + 1.0 && 
+        Math.abs(p.vx || 0) > 3.5
+    );
+
+    jetSweepers.forEach(wr => {
+        // Only trick the defense early in the play before the true runner crosses the LOS
+        if (tick < 45 && !observedRunCarrier) {
+            runScore += 15; // Looks like a run
+            // Pull the defensive direction scores heavily toward the motion
+            if (wr.vx > 0) rightScore += 55;
+            else if (wr.vx < 0) leftScore += 55;
+        }
     });
 
     /*const isPlayAction = offensivePlayKey && offensivePlayKey.includes('PA_');

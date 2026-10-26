@@ -2275,6 +2275,8 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         visualizationFrames: isLive ? [] : null,
         maxTicks: 1000,
         type: play.type,
+        isRPO: play.tags?.includes('rpo') || false,
+        rpoPhase: play.tags?.includes('rpo') ? 'mesh' : null,
         assignments: JSON.parse(JSON.stringify(play.assignments || {})),
         yards: 0, touchdown: false, turnover: false, incomplete: false,
         sack: false, safety: false, touchback: false,
@@ -2461,7 +2463,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         const activeOffense = playState.activePlayers.filter(p => p.isOffense);
         const activeDefense = playState.activePlayers.filter(p => !p.isOffense);
         const qb1 = playState.activePlayers.find(p => p.slot === 'QB1');
-        const rb1 = playState.activePlayers.find(p => p.slot === 'RB1');
+        const defaultRb = playState.activePlayers.find(p => p.slot === 'RB1');
 
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             playState.tick++;
@@ -2590,10 +2592,19 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                             qb1.targetY = playState.lineOfScrimmage - 3.2;
 
                             // Runner maintains their full-speed sweep trajectory across the formation
-                            const pt = handoffTarget.routePath?.[handoffTarget.currentPathIndex] || { x: handoffTarget.x + 5, y: handoffTarget.y };
-                            handoffTarget.targetX = pt.x;
-                            handoffTarget.targetY = pt.y;
-                            handoffTarget.action = 'run_path';
+                            const pt = handoffTarget.routePath?.[handoffTarget.currentPathIndex];
+                            
+                            if (pt) {
+                                handoffTarget.targetX = pt.x;
+                                handoffTarget.targetY = pt.y;
+                            } else {
+                                // Dynamically sweep away from their starting side
+                                const sweepDir = handoffTarget.initialX > qb1.initialX ? -1 : 1;
+                                handoffTarget.targetX = handoffTarget.x + (sweepDir * 5);
+                                handoffTarget.targetY = handoffTarget.y;
+                            }
+                            
+                        handoffTarget.action = 'run_path';
                         } else if (isTossPlay) {
                             qb1.targetX = qb1.initialX + (handoffTarget.initialX > qb1.initialX ? 0.8 : -0.8);
                             qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.2) : (qb1.initialY + 0.8);

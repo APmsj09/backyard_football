@@ -98,7 +98,8 @@ export const routeTree = {
 
     'Whip': { path: [{ x: 0, y: 4 }, { x: -2, y: 4 }, { x: 4, y: 4 }] },
     'Bubble': { path: [{ x: 4, y: -1 }, { x: 8, y: 0 }] },
-    'Jet_Motion': { path: [{ x: 12, y: -1 }] },
+    'Jet_Motion_Right': { path: [{ x: 26, y: -1.5 }], mirror: false },
+    'Jet_Motion_Left': { path: [{ x: -26, y: -1.5 }], mirror: false },
 
     // --- Medium Routes (8-15 yards) ---
     'Out': { path: [{ x: 0, y: 10 }, { x: 8, y: 10 }] },
@@ -160,8 +161,10 @@ export const routeTree = {
     'run_counter_l': { path: [{ x: 1.5, y: 0.5 }, { x: -1.5, y: 2 }, { x: -5, y: 5 }], mirror: false },
     'run_toss_r': { path: [{ x: 6, y: 0.5 }, { x: 12, y: 4 }], mirror: false },
     'run_toss_l': { path: [{ x: -6, y: 0.5 }, { x: -12, y: 4 }], mirror: false },
-    'run_jet_r': { path: [{ x: 6.5, y: -0.6 }, { x: 13.5, y: -0.2 }, { x: 18.0, y: 3.5 }], mirror: false },
-    'run_jet_l': { path: [{ x: -6.5, y: -0.6 }, { x: -13.5, y: -0.2 }, { x: -18.0, y: 3.5 }], mirror: false },
+    'run_jet_r': { path: [{ x: 15, y: -1.5 }, { x: 24, y: 0.5 }, { x: 26, y: 15 }], mirror: false },
+    'run_jet_l': { path: [{ x: -15, y: -1.5 }, { x: -24, y: 0.5 }, { x: -26, y: 15 }], mirror: false },
+    'run_jet_slot_r': { path: [{ x: 7, y: -1.5 }, { x: 15, y: 0.5 }, { x: 17, y: 15 }], mirror: false },
+    'run_jet_slot_l': { path: [{ x: -7, y: -1.5 }, { x: -15, y: 0.5 }, { x: -17, y: 15 }], mirror: false },
     'run_fb_dive': { path: [{ x: 0, y: 1.5 }, { x: 0, y: 4.0 }] },
     'run_fb_trap': { path: [{ x: 0.8, y: 1.0 }, { x: 1.2, y: 4.5 }], mirror: false },
     'run_wham': { path: [{ x: 0.4, y: 1.0 }, { x: 0.4, y: 4.5 }], mirror: false },
@@ -785,6 +788,20 @@ export const offensivePlaybook = {
             'OL': 'pass_block'
         }
     },
+    'Spread_Pump_And_Go': {
+        name: 'Spread Pump & Go (Double Move)',
+        type: 'pass', tags: ['pass', 'deep', 'double-move', 'spread'],
+        compatibleFormations: ['Spread', 'Empty'],
+        readProgression: ['X', 'Z', 'H', 'Y'],
+        assignments: {
+            'QB': 'qb_setup',
+            'X': 'Hitch_And_Go', // Primary read: fakes the hitch, burns deep
+            'Z': 'Hitch',        // Decoy to make the concept look like double hitches
+            'H': 'Seam',         // Clears out the middle safety
+            'Y': 'Out',          // Safe checkdown
+            'OL': 'pass_block'
+        }
+    },
     'Spread_FourVerts_Switch': {
         name: 'Spread 4-Verts Seam Switch',
         type: 'pass', tags: ['pass', 'deep', 'vertical', 'spread'],
@@ -996,6 +1013,36 @@ export const offensivePlaybook = {
             'OL': 'run_block'
         }
     },
+    'Trips_FakeJet_InsideZone': {
+        name: 'Trips Fake Jet Inside Zone',
+        type: 'run', tags: ['run', 'inside', 'misdirection'],
+        compatibleFormations: ['Trips', 'TripsLeft'], // Swapped Spread for Trips
+        assignments: {
+            'QB': 'qb_setup',
+            'RB': 'run_dive',           // The actual ball carrier
+            'H': 'Jet_Motion_Right',    // Sprints across as a decoy!
+            'X': 'run_block',
+            'Z': 'run_block',
+            'Y': 'run_block',
+            'OL': 'run_block'
+        }
+    },
+    'Wildcat_Direct_Power': {
+        name: 'Wildcat Direct Power O',
+        type: 'run', tags: ['run', 'power', 'wildcat', 'inside'],
+        compatibleFormations: ['Wildcat'],
+        assignments: {
+            // RB1 is acting as the QB in the Wildcat mapping and takes the snap
+            'RB1': 'run_power_o_r', 
+            'QB1': 'run_block', // Real QB stands out wide and blocks (or watches)
+            'WR1': 'run_block',
+            'WR2': 'run_block',
+            'TE1': 'run_block',
+            'OL1': 'run_block', 
+            'OL2': 'run_block', 
+            'OL3': 'pull_right'
+        }
+    },
     'Balanced_Dagger_Seam': {
         name: 'Balanced Dagger (Clearout & Dig)',
         type: 'pass', tags: ['pass', 'medium', 'deep', 'dagger'],
@@ -1035,6 +1082,20 @@ export const offensivePlaybook = {
             'Z': 'Corner', 'Y': 'Drag_Right', 'X': 'Dig', 'H': 'Flat', 'OL': 'pass_block'
         }
     },
+    'Power_PA_TE_Leak': {
+        name: 'Power PA TE Backside Leak',
+        type: 'pass', tags: ['pass', 'pa', 'deep', 'leak', 'misdirection'],
+        compatibleFormations: ['Power', 'Jumbo'],
+        readProgression: ['Y', 'X', 'RB2'],
+        assignments: {
+            'QB': 'qb_scramble', // Rolls out slightly to sell the fake
+            'RB': 'run_stretch_r', // Sells the stretch run right
+            'RB2': 'lead_right_wide', // Sells the lead block right
+            'Y': 'FB_Leak', // TE (Y) fakes block, leaks LEFT behind the defense
+            'X': 'Dig',
+            'OL': 'pass_block' // OL pass protects while RB sells the run
+        }
+    },
     'Trick_Flea_Flicker': {
         name: 'Flea Flicker',
         type: 'pass', tags: ['trick', 'deep'],
@@ -1051,6 +1112,20 @@ export const offensivePlaybook = {
         assignments: {
             'QB': 'qb_rpo_read', 'RB': 'run_dive', 'X': 'Slant',
             'Z': 'Fly', 'H': 'Slant', 'Y': 'run_block', 'OL': 'run_block'
+        }
+    },
+    'Pistol_RPO_Glance': {
+        name: 'Pistol RPO Glance',
+        type: 'pass', tags: ['rpo', 'medium', 'pistol'],
+        compatibleFormations: ['Pistol'],
+        readProgression: ['X', 'RB'], // Reads the X receiver's post/glance
+        assignments: {
+            'QB': 'qb_rpo_read', 
+            'RB': 'run_stretch_l', // RB threatens the outside edge
+            'X': 'Post',           // WR runs into the space vacated by the crashing LB
+            'Z': 'run_block', 
+            'Y': 'run_block',
+            'OL': 'run_block'
         }
     },
     'Trips_RPO_Bubble': {

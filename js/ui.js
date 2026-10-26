@@ -3133,6 +3133,7 @@ export function renderStaffTab(gameState) {
             scouting: [
                 ['all', 'General scouting'],
                 ['watchlist', 'Watchlist targets'],
+                ['youth', 'Pee Wee prospects'],
                 ['draft', 'Draft prospects'],
                 ['freeAgents', 'Free agents'],
                 ['opponents', 'Players on other teams']
@@ -3383,9 +3384,14 @@ export function renderStaffTab(gameState) {
             const tasks = Object.keys(taskSkills);
             const week = Math.max(0, Number(gs.currentWeek) || 0);
 
+            // Week 0 can also be the first regular-season week.
+            // Use lifecycle flags to identify the actual offseason.
+            const isOffseason =
+                !gs.draftCompleted || !gs.offseasonFACompleted;
+
             // Prioritize scouting around the draft, and preparation
             // during the regular season.
-            const taskNeeds = week === 0
+            const taskNeeds = isOffseason
                 ? {
                     scouting: 1.45,
                     training: 1.00,
@@ -3493,9 +3499,9 @@ export function renderStaffTab(gameState) {
                             };
 
                             if (allocation.task === 'scouting') {
-                                assignment.focus = week === 0
+                                assignment.focus = isOffseason
                                     ? 'draft'
-                                    : 'all';
+                                    : 'youth';
                                 assignment.maxTargets = 2;
                             }
 

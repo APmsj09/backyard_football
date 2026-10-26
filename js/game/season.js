@@ -161,7 +161,9 @@ export async function initializeLeague(onProgress) {
 
     addMessage("Welcome!", "Generating the league and players...");
 
-    const totalPlayers = 480; // Increased to ensure deep initial rosters
+    // Generate enough players for the 20 initial main-team rosters
+    // plus a small free-agent pool. Future rookie classes come from Pee Wee.
+    const totalPlayers = 300;
     const initialClassModifiers = generateDraftClassModifiers();
 
     for (let i = 0; i < totalPlayers; i++) {
@@ -262,8 +264,34 @@ export async function initializeLeague(onProgress) {
         if (i % 4 === 0) await yieldToMain();
     }
 
-    const youthMascots = ["Lil' Tykes", "Mini Monsters", "Sandlot Pups", "Junior Jets", "Tots", "Wildcats"];
-    for (let i = 0; i < 6; i++) {
+    const youthMascots = [
+        "Lil' Tykes",
+        "Mini Monsters",
+        "Sandlot Pups",
+        "Junior Jets",
+        "Tots",
+        "Wildcats",
+        "Tiny Titans",
+        "Pocket Panthers",
+        "Rocket Raccoons",
+        "Mighty Mites",
+        "Junior Giants",
+        "Little Lightning",
+        "Mini Mavericks",
+        "Young Yetis",
+        "Small Sharks",
+        "Little Lumberjacks",
+        "Kiddy Cobras",
+        "Pocket Rockets",
+        "Young Wolves",
+        "Junior Knights",
+        "Little Comets",
+        "Mini Meteors",
+        "Rookie Rhinos",
+        "Tiny Tornadoes"
+    ];
+
+    for (let i = 0; i < youthMascots.length; i++) {
         const yTeam = {
             id: crypto.randomUUID(), name: `The ${youthMascots[i]}`, roster: [],
             coach: getRandom(coachPersonalities), wins: 0, losses: 0, ties: 0,
@@ -280,6 +308,11 @@ export async function initializeLeague(onProgress) {
             const kid = generatePlayer(8, 11, initialClassModifiers);
             kid.teamId = yTeam.id;
             kid.lifecycle = 'youth';
+
+            // Track eligibility based on the player's original Pee Wee entry.
+            kid.youthEntryAge = Number(kid.age) || 8;
+            kid.youthSeasonsPlayed = 0;
+
             yTeam.roster.push(kid.id);
             game.players.push(kid);
             playerMap.set(kid.id, kid);
@@ -1595,6 +1628,7 @@ export function processEndOfWeek() {
 
     // === PROCESS FINANCES & SNACK FUND (UNIVERSAL AI & PLAYER) ===
     const mainTeams = game.teams.filter(t => t.leagueType === 'main');
+    const financeOpeningBalances = new Map();
 
     mainTeams.forEach(team => {
         if (!team.finances) {
@@ -1606,6 +1640,7 @@ export function processEndOfWeek() {
         }
 
         const openingBalance = Number(team.finances.balance);
+        financeOpeningBalances.set(String(team.id), openingBalance);
 
         const coach = team.staff?.coach || team.coach;
         const personality = coach?.biases?.personality?.name || 'Balanced Tactician';
@@ -1792,11 +1827,37 @@ export function processEndOfWeek() {
             // B. CAPRI SUNS ($6) & ORANGES ($2) - Energy
             // Disciplinarians buy these so they can run harder practices.
             else if (avgFatigue > 45 && team.finances.balance >= 6.00) {
-                team.finances.balance -= 6.00;
-                roster.forEach(p => p.fatigue = Math.max(0, (p.fatigue || 0) - 30));
+                team.finances.balance = Math.round(
+                    (team.finances.balance - 6.00) * 100
+                ) / 100;
+
+                recordFinanceLedgerEntry(
+                    team,
+                    game,
+                    'aiCapriSun',
+                    'AI recovery snacks: Capri Suns',
+                    -6.00
+                );
+
+                roster.forEach(p => {
+                    p.fatigue = Math.max(0, (p.fatigue || 0) - 30);
+                });
             } else if (avgFatigue > 25 && team.finances.balance >= 2.00) {
-                team.finances.balance -= 2.00;
-                roster.forEach(p => p.fatigue = Math.max(0, (p.fatigue || 0) - 10));
+                team.finances.balance = Math.round(
+                    (team.finances.balance - 2.00) * 100
+                ) / 100;
+
+                recordFinanceLedgerEntry(
+                    team,
+                    game,
+                    'aiOrangeSlices',
+                    'AI recovery snacks: Orange Slices',
+                    -2.00
+                );
+
+                roster.forEach(p => {
+                    p.fatigue = Math.max(0, (p.fatigue || 0) - 10);
+                });
             }
 
             // C. BUYING FAVOR TOKENS ($3) - Recruiting
@@ -1838,14 +1899,6 @@ export function processEndOfWeek() {
                 );
             }
         }
-
-        // Save a weekly balance snapshot for budget forecasting.
-        recordFinanceWeeklySummary(
-            team,
-            game,
-            openingBalance,
-            team.finances.balance
-        );
     });
 
     // Resolve In-Season Weekly Bids
@@ -2068,6 +2121,21 @@ export function processEndOfWeek() {
                 game.currentWeek
             );
         }
+    });
+
+    // Record closing balances after weekly practice and scouting work.
+    // Neighborhood Hustle can earn money during practice.
+    mainTeams.forEach(team => {
+        const openingBalance = financeOpeningBalances.get(
+            String(team.id)
+        );
+
+        recordFinanceWeeklySummary(
+            team,
+            game,
+            openingBalance,
+            team.finances?.balance
+        );
     });
 
     processWeeklyPlayerGrowth();
@@ -4711,41 +4779,97 @@ export function advanceToOffseason() {
             const kid = getPlayer(id);
             if (!kid) return false;
 
+            // Migrate older saves that do not yet have Pee Wee tracking.
+            const currentYouthAge = Number(kid.age) || 8;
+
+            if (!Number.isInteger(kid.youthEntryAge)) {
+                kid.youthEntryAge = Math.max(
+                    8,
+                    Math.min(11, currentYouthAge)
+                );
+            }
+
+            if (
+                !Number.isInteger(kid.youthSeasonsPlayed) ||
+                kid.youthSeasonsPlayed < 0
+            ) {
+                kid.youthSeasonsPlayed = 0;
+            }
+
+            // Complete this Pee Wee season before checking draft eligibility.
             developPlayer(kid, yt);
+            kid.youthSeasonsPlayed += 1;
             kid.age++;
-            kid.careerStats.seasonsPlayed = (kid.careerStats.seasonsPlayed || 0) + 1;
+
+            kid.careerStats.seasonsPlayed =
+                (kid.careerStats.seasonsPlayed || 0) + 1;
 
             // Reset season stats for all returning youth players
             kid.seasonStats = createEmptySeasonStats();
 
-            // Pee-Wee graduates at age 12 into the Rookie Draft
+            // Players leave Pee Wee at age 12.
+            // Draft eligibility depends on their age when they first joined
+            // and the number of Pee Wee seasons they actually completed.
             if (kid.age >= 12) {
                 kid.teamId = null;
                 kid.careerStats.snapsThisSeason = 0;
 
-                // LOGIC: Does the 12-year-old declare for the draft or wait as a street walk-on?
-                const ego = kid.personality?.ego || 50;
-                const loyalty = kid.personality?.loyalty || 60;
-                const bestFriend = kid.social?.bestFriendId ? getPlayer(kid.social.bestFriendId) : null;
-                const friendOnMainTeam = bestFriend && bestFriend.teamId;
+                const requiredYouthSeasons = Math.max(
+                    1,
+                    12 - kid.youthEntryAge
+                );
 
-                let entersDraft = true;
-                if (friendOnMainTeam && Math.random() < 0.50) {
-                    entersDraft = false; // Bypasses draft to be recruited by buddy's team!
-                } else if (ego >= 80 && loyalty < 40 && Math.random() < 0.40) {
-                    entersDraft = false; // Diva skips draft to pick landing spot later
+                const completedRequiredYouthSeasons =
+                    kid.youthSeasonsPlayed >= requiredYouthSeasons;
+
+                // Only qualified graduates can declare for the rookie draft.
+                // Players who did not complete the requirement become free agents.
+                let entersDraft = completedRequiredYouthSeasons;
+
+                if (entersDraft) {
+                    // Preserve the existing personality/social decision
+                    // for qualified graduates who may choose free agency.
+                    const ego = kid.personality?.ego || 50;
+                    const loyalty = kid.personality?.loyalty || 60;
+                    const bestFriend = kid.social?.bestFriendId
+                        ? getPlayer(kid.social.bestFriendId)
+                        : null;
+                    const friendOnMainTeam =
+                        bestFriend && bestFriend.teamId;
+
+                    if (
+                        friendOnMainTeam &&
+                        Math.random() < 0.50
+                    ) {
+                        entersDraft = false;
+                    } else if (
+                        ego >= 80 &&
+                        loyalty < 40 &&
+                        Math.random() < 0.40
+                    ) {
+                        entersDraft = false;
+                    }
                 }
 
                 if (entersDraft) {
                     kid.lifecycle = 'draft_eligible';
-                    if (!kid.personality) kid.personality = {};
+
+                    if (!kid.personality) {
+                        kid.personality = {};
+                    }
+
                     kid.personality.entersDraft = true;
                     game.draftClass.push(kid);
                 } else {
                     kid.lifecycle = 'active';
-                    if (!kid.personality) kid.personality = {};
+
+                    if (!kid.personality) {
+                        kid.personality = {};
+                    }
+
                     kid.personality.entersDraft = false;
                 }
+
                 return false;
             }
             return true;
@@ -4753,21 +4877,10 @@ export function advanceToOffseason() {
         yt.wins = 0; yt.losses = 0; yt.ties = 0;
     });
 
-    // 💡 TOP OFF DRAFT CLASS WITH STRICTLY AGE 12 ROOKIES (Guarantee 65 prospects for 60 picks)
+    // Generate a modifier set for the small free-agent arrival pool
+    // and new Pee Wee entrants. Rookie draft prospects must come from
+    // the actual Pee Wee graduation process above.
     const thisYearsClassModifiers = generateDraftClassModifiers();
-    const neededDraftRookies = Math.max(0, 65 - game.draftClass.length);
-    const newAge12Rookies = [];
-
-    for (let i = 0; i < neededDraftRookies; i++) {
-        const rookie = generatePlayer(12, 12, thisYearsClassModifiers); // STRICTLY AGE 12
-        rookie.lifecycle = 'draft_eligible';
-        if (!rookie.personality) rookie.personality = {};
-        rookie.personality.entersDraft = true;
-        game.players.push(rookie);
-        playerMap.set(rookie.id, rookie);
-        game.draftClass.push(rookie);
-        newAge12Rookies.push(rookie);
-    }
 
     // 💡 GENERATE OLDER MOVE-INS (Ages 13-17) DIRECTLY INTO STREET FREE AGENCY
     const newOlderWalkons = [];
@@ -4821,22 +4934,76 @@ export function advanceToOffseason() {
         );
     }
 
-    // Connect new recruits into the social network
+    // Connect new free-agent arrivals into the social network
     const livingActivePlayers = game.players.filter(p => p.status?.type !== 'retired' && p.status?.type !== 'departed');
-    buildSocialNetworks([...newAge12Rookies, ...newOlderWalkons], livingActivePlayers);
+    buildSocialNetworks(newOlderWalkons, livingActivePlayers);
 
     addMessage("Offseason Summary", `Offseason complete. ${totalVacancies} roster spots opened.\n\n${proRelMsg}\n\nPreparing for the draft.`, false, game);
 
-    // 💡 BACKFILL PEE-WEE LEAGUE WITH NEW 8-YEAR-OLDS
+    // PEE WEE TURNOVER: A small number of returning players leave.
+    // Graduates have already been removed by the youth lifecycle pass above.
     youthTeams.forEach(yt => {
+        yt.roster = yt.roster.filter(id => {
+            const kid = getPlayer(id);
+            if (!kid) return false;
+
+            // Apply minimal turnover to returning 9–11-year-olds.
+            if (
+                kid.age >= 9 &&
+                kid.age <= 11 &&
+                Math.random() < 0.02
+            ) {
+                kid.teamId = null;
+                kid.lifecycle = 'active';
+                kid.status = {
+                    type: 'departed',
+                    description: 'Left Pee Wee football',
+                    duration: 0
+                };
+
+                return false;
+            }
+
+            return true;
+        });
+
+        // Occasionally, a newcomer joins at age 9–11 instead of age 8.
+        // They must complete the required seasons from their entry age.
+        if (yt.roster.length < 14 && Math.random() < 0.20) {
+            const lateArrival = generatePlayer(
+                9,
+                11,
+                thisYearsClassModifiers
+            );
+
+            lateArrival.teamId = yt.id;
+            lateArrival.lifecycle = 'youth';
+            lateArrival.youthEntryAge = Number(lateArrival.age) || 9;
+            lateArrival.youthSeasonsPlayed = 0;
+
+            yt.roster.push(lateArrival.id);
+            game.players.push(lateArrival);
+            playerMap.set(lateArrival.id, lateArrival);
+        }
+
+        // Fill remaining openings with fresh 8-year-olds.
         while (yt.roster.length < 14) {
-            const freshKid = generatePlayer(8, 8, thisYearsClassModifiers);
+            const freshKid = generatePlayer(
+                8,
+                8,
+                thisYearsClassModifiers
+            );
+
             freshKid.teamId = yt.id;
             freshKid.lifecycle = 'youth';
+            freshKid.youthEntryAge = 8;
+            freshKid.youthSeasonsPlayed = 0;
+
             yt.roster.push(freshKid.id);
             game.players.push(freshKid);
             playerMap.set(freshKid.id, freshKid);
         }
+
         aiSetDepthChart(yt);
     });
 

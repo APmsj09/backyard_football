@@ -568,6 +568,7 @@ const SCOUTING_WORK_FOCI = new Set([
     'draft',
     'freeAgents',
     'opponents',
+    'youth',
     'all'
 ]);
 
@@ -1050,8 +1051,19 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
 
     if (!SCOUTING_WORK_FOCI.has(focus)) return [];
 
-    const minAge = Number.isFinite(team.ageMin) ? team.ageMin : 12;
-    const maxAge = Number.isFinite(team.ageMax) ? team.ageMax : 18;
+    // Youth scouting targets Pee Wee players aged 8–11.
+    // Other scouting focuses retain the team's normal age range.
+    const minAge = focus === 'youth'
+        ? 8
+        : Number.isFinite(team.ageMin)
+            ? team.ageMin
+            : 12;
+
+    const maxAge = focus === 'youth'
+        ? 11
+        : Number.isFinite(team.ageMax)
+            ? team.ageMax
+            : 18;
 
     const candidates = [];
 
@@ -1086,6 +1098,10 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
             if (!isFreeAgent) continue;
         } else if (focus === 'opponents') {
             if (!otherTeam || otherTeam.leagueType !== 'main') continue;
+        } else if (focus === 'youth') {
+            // Scout players who are currently rostered in Pee Wee,
+            // not unrelated young free agents.
+            if (!otherTeam || otherTeam.leagueType !== 'youth') continue;
         } else if (focus === 'watchlist') {
             if (!targetIds?.has(String(player.id))) continue;
         }

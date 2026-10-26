@@ -5,7 +5,6 @@ import {
     getPlayer,
     getRosterObjects,
     addMessage,
-    playerMap,
     getTeamScoutingReport
 } from './state.js';
 import {
@@ -491,7 +490,7 @@ export function calculateDraftValue(player, team) {
  * Year 1: Inaugural draft (fill rosters).
  * Year 2+: 3-round fixed Rookie Draft (60 picks).
  */
-import { generatePlayer, generateDraftClassModifiers } from './player.js';
+//import { generatePlayer, generateDraftClassModifiers } from './player.js';
 
 export function setupDraft() {
     if (!game || !game.teams) return;
@@ -529,23 +528,63 @@ export function setupDraft() {
             game.draftOrder.push(...(r % 2 === 0 ? sortedTeams : [...sortedTeams].reverse()));
         }
 
-        // 2. Ensure at least 65 draft-eligible prospects exist so picks don't run out
-        if (!game.draftClass) game.draftClass = [];
-        game.draftClass = game.draftClass.filter(p => !p.teamId);
+        // Only admit prospects with a documented, completed Pee Wee history.
+        // Do not manufacture extra rookies to fill the draft board.
+        const incomingDraftClass = Array.isArray(game.draftClass)
+            ? game.draftClass
+            : [];
 
-        const needed = Math.max(0, 65 - game.draftClass.length);
-        if (needed > 0) {
-            const classMods = generateDraftClassModifiers();
-            for (let i = 0; i < needed; i++) {
-                const rookie = generatePlayer(12, 12, classMods); // STRICTLY AGE 12
-                rookie.lifecycle = 'draft_eligible';
-                if (!rookie.personality) rookie.personality = {};
-                rookie.personality.entersDraft = true;
-                game.players.push(rookie);
-                playerMap.set(rookie.id, rookie);
-                game.draftClass.push(rookie);
+        game.draftClass = incomingDraftClass.filter(prospect => {
+            if (
+                !prospect ||
+                prospect.teamId ||
+                prospect.lifecycle !== 'draft_eligible' ||
+                Number(prospect.age) < 12 ||
+                prospect.personality?.entersDraft === false ||
+                ['retired', 'departed', 'temporary'].includes(
+                    prospect.status?.type
+                )
+            ) {
+                return false;
             }
-        }
+
+            const entryAge = Number(prospect.youthEntryAge);
+            const seasonsPlayed = Number(prospect.youthSeasonsPlayed);
+
+            if (
+                !Number.isInteger(entryAge) ||
+                entryAge < 8 ||
+                entryAge > 11 ||
+                !Number.isInteger(seasonsPlayed)
+            ) {
+                return false;
+            }
+
+            const requiredSeasons = 12 - entryAge;
+
+            return seasonsPlayed >= requiredSeasons;
+        });
+
+        // Unqualified legacy or filler prospects remain in the player pool
+        // as free agents rather than being silently admitted to the draft.
+        incomingDraftClass.forEach(prospect => {
+            if (
+                !prospect ||
+                prospect.teamId ||
+                game.draftClass.includes(prospect) ||
+                prospect.lifecycle !== 'draft_eligible'
+            ) {
+                return;
+            }
+
+            prospect.lifecycle = 'active';
+
+            if (!prospect.personality) {
+                prospect.personality = {};
+            }
+
+            prospect.personality.entersDraft = false;
+        });
     }
 }
 
@@ -555,10 +594,10 @@ export function setupDraft() {
 export function simulateAIPick(team) {
     if (!team || !game || (team.roster?.length || 0) >= getCurrentRosterLimit(game)) return null;
 
-    let availableProspects = (game.draftClass || []).filter(p => !p.teamId);
-    if (availableProspects.length === 0) {
-        availableProspects = (game.players || []).filter(p => !p.teamId && p.age < 17 && p.personality?.entersDraft !== false);
-    }
+    const availableProspects = (game.draftClass || []).filter(
+        prospect => prospect && !prospect.teamId
+    );
+
     if (availableProspects.length === 0) return null;
 
     let bestProspect = null;
@@ -585,7 +624,12 @@ export function simulateHistoricalDraft(yearNum) {
     setupDraft();
     const draftResults = [];
 
-    while (game.currentPick < game.draftOrder.length) {
+    while (
+        game.currentPick < game.draftOrder.length &&
+        (game.draftClass || []).some(
+            prospect => prospect && !prospect.teamId
+        )
+    ) {
         const team = game.draftOrder[game.currentPick];
         const pickedPlayer = simulateAIPick(team);
         if (pickedPlayer) {

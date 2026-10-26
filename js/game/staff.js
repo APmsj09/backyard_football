@@ -1541,13 +1541,12 @@ export function ensureAiStaffWorkPlan(
         Array.isArray(gameState?.draftClass) &&
         gameState.draftClass.length > 0;
 
-    const hasWatchlist =
-        Array.isArray(team.scoutingWatchlist) &&
-        team.scoutingWatchlist.length > 0;
-
+    // During the regular season, AI scouts track Pee Wee prospects.
+    // Offseason scouting continues to focus on the incoming draft class,
+    // or free agents when there is no eligible draft class.
     const scoutingFocus = isOffseason
         ? (hasDraftClass ? 'draft' : 'freeAgents')
-        : (hasWatchlist ? 'watchlist' : 'opponents');
+        : 'youth';
 
     const specialties = [
         {
