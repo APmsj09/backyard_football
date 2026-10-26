@@ -926,6 +926,86 @@ function handleDraftPlayer() {
         const team = gameState.playerTeam;
         const rosterLimit = getDraftRosterLimit();
 
+        if (!player || !team || !Array.isArray(team.roster)) {
+            UI.showModal(
+                "Player Unavailable",
+                "<p>The selected player or your team could not be found.</p>"
+            );
+            return;
+        }
+
+        // Recheck turn ownership instead of trusting the disabled UI button.
+        const currentPickingTeam =
+            gameState.draftOrder?.[gameState.currentPick];
+
+        if (currentPickingTeam?.id !== team.id) {
+            UI.showModal(
+                "Not Your Pick",
+                "<p>It's not your turn to draft.</p>"
+            );
+            return;
+        }
+
+        // Every selection must belong to the current draft pool and remain
+        // unassigned. Year 1 uses its separate inaugural-draft eligibility.
+        const isOnDraftBoard =
+            Array.isArray(gameState.draftClass) &&
+            gameState.draftClass.some(
+                prospect => prospect?.id === player.id && !prospect.teamId
+            );
+
+        if (!isOnDraftBoard || player.teamId) {
+            UI.showModal(
+                "Player Unavailable",
+                "<p>This player is no longer available on the draft board.</p>"
+            );
+            return;
+        }
+
+        // From Year 2 onward, verify actual Pee Wee eligibility again.
+        if (gameState.year > 1) {
+            const entryAge = Number(player.youthEntryAge);
+            const seasonsPlayed = Number(player.youthSeasonsPlayed);
+
+            const youthHistory = Array.isArray(player.youthSeasonHistory)
+                ? player.youthSeasonHistory
+                : [];
+
+            const documentedSeasonYears = new Set(
+                youthHistory
+                    .filter(season =>
+                        season?.year != null &&
+                        Number.isInteger(Number(season.year))
+                    )
+                    .map(season => Number(season.year))
+            ).size;
+
+            const requiredSeasons = 12 - entryAge;
+
+            const isEligible =
+                player.lifecycle === 'draft_eligible' &&
+                Number.isInteger(Number(player.age)) &&
+                Number(player.age) >= 12 &&
+                Number.isInteger(entryAge) &&
+                entryAge >= 8 &&
+                entryAge <= 11 &&
+                Number.isInteger(seasonsPlayed) &&
+                seasonsPlayed >= requiredSeasons &&
+                documentedSeasonYears >= requiredSeasons &&
+                player.personality?.entersDraft !== false &&
+                !['retired', 'departed', 'temporary'].includes(
+                    player.status?.type
+                );
+
+            if (!isEligible) {
+                UI.showModal(
+                    "Ineligible Prospect",
+                    "<p>This player does not meet the rookie-draft eligibility requirements.</p>"
+                );
+                return;
+            }
+        }
+
         if (team.roster.length >= rosterLimit) {
             UI.showModal("Roster Full", `<p>Your roster is full (${rosterLimit} players).</p>`);
             return;
@@ -999,19 +1079,16 @@ async function runAIDraftPicks() {
     const rosterLimit = getDraftRosterLimit();
 
     try {
-        while (true) {
+                while (true) {
             const pickLimitReached =
                 gameState.currentPick >= gameState.draftOrder.length;
 
-            // Only eligible rookies can be selected during the draft.
-            // Unrelated free agents must not keep an exhausted draft running.
-            const noDraftProspectsLeft = !Array.isArray(gameState.draftClass) ||
-                !gameState.draftClass.some(player =>
-                    player &&
-                    !player.teamId &&
-                    !['retired', 'departed', 'temporary'].includes(
-                        player.status?.type
-                    )
+            // Only the actual draft pool determines whether the draft can continue.
+            // Unrelated free agents must not keep an exhausted rookie draft running.
+            const noDraftProspectsLeft =
+                !Array.isArray(gameState.draftClass) ||
+                !gameState.draftClass.some(
+                    prospect => prospect && !prospect.teamId
                 );
 
             const allTeamsFull = gameState.teams.every(
@@ -4533,7 +4610,7 @@ document.getElementById('sim-speed-faster')
         UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
     });*/
 
-    // Draft Sub-View Tabs (Overview, Physicals, Skills, Watchlist)
+    // Draft Sub-View Tabs (Overview, Physicals, Skills, Watchlist, Pee Wee Stats)
     document.querySelectorAll('.draft-view-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const view = btn.dataset.view;
@@ -4542,7 +4619,8 @@ document.getElementById('sim-speed-faster')
                 overview: 'potential',
                 physicals: 'speed',
                 skills: 'playbookIQ',
-                watchlist: 'potential'
+                watchlist: 'potential',
+                youthStats: 'youthTouchdowns'
             };
 
             UI.setDraftView(view);

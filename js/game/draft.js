@@ -535,11 +535,14 @@ export function setupDraft() {
             : [];
 
         game.draftClass = incomingDraftClass.filter(prospect => {
+            const prospectAge = Number(prospect?.age);
+
             if (
                 !prospect ||
                 prospect.teamId ||
                 prospect.lifecycle !== 'draft_eligible' ||
-                Number(prospect.age) < 12 ||
+                !Number.isInteger(prospectAge) ||
+                prospectAge < 12 ||
                 prospect.personality?.entersDraft === false ||
                 ['retired', 'departed', 'temporary'].includes(
                     prospect.status?.type
@@ -550,19 +553,35 @@ export function setupDraft() {
 
             const entryAge = Number(prospect.youthEntryAge);
             const seasonsPlayed = Number(prospect.youthSeasonsPlayed);
+            const youthHistory = Array.isArray(prospect.youthSeasonHistory)
+                ? prospect.youthSeasonHistory
+                : [];
 
             if (
                 !Number.isInteger(entryAge) ||
                 entryAge < 8 ||
                 entryAge > 11 ||
-                !Number.isInteger(seasonsPlayed)
+                !Number.isInteger(seasonsPlayed) ||
+                seasonsPlayed < 0
             ) {
                 return false;
             }
 
             const requiredSeasons = 12 - entryAge;
 
-            return seasonsPlayed >= requiredSeasons;
+            const documentedSeasonYears = new Set(
+                youthHistory
+                    .filter(season =>
+                        season?.year != null &&
+                        Number.isInteger(Number(season.year))
+                    )
+                    .map(season => Number(season.year))
+            ).size;
+
+            return (
+                seasonsPlayed >= requiredSeasons &&
+                documentedSeasonYears >= requiredSeasons
+            );
         });
 
         // Unqualified legacy or filler prospects remain in the player pool
@@ -612,9 +631,17 @@ export function simulateAIPick(team) {
     });
 
     if (bestProspect) {
-        addPlayerToTeam(bestProspect, team);
+        // Do not consume a draft prospect unless the roster addition succeeds.
+        const added = addPlayerToTeam(bestProspect, team);
+
+        if (!added) {
+            return null;
+        }
+
         bestProspect.lifecycle = 'active';
-        game.draftClass = (game.draftClass || []).filter(p => p.id !== bestProspect.id);
+        game.draftClass = (game.draftClass || []).filter(
+            p => p.id !== bestProspect.id
+        );
     }
     return bestProspect;
 }

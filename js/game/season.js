@@ -271,24 +271,24 @@ export async function initializeLeague(onProgress) {
         "Junior Jets",
         "Tots",
         "Wildcats",
+        "Little Legends",
+        "Rookie Rockets",
+        "Backyard Bandits",
         "Tiny Titans",
-        "Pocket Panthers",
-        "Rocket Raccoons",
-        "Mighty Mites",
-        "Junior Giants",
+        "Playground Panthers",
+        "Grassroots Giants",
+        "Sidewalk Sharks",
+        "Rookie Raccoons",
         "Little Lightning",
+        "Sandlot Spartans",
         "Mini Mavericks",
-        "Young Yetis",
-        "Small Sharks",
-        "Little Lumberjacks",
-        "Kiddy Cobras",
-        "Pocket Rockets",
-        "Young Wolves",
-        "Junior Knights",
+        "Junior Jaguars",
+        "Backyard Bears",
+        "Playground Pros",
+        "Rookie Rebels",
         "Little Comets",
-        "Mini Meteors",
-        "Rookie Rhinos",
-        "Tiny Tornadoes"
+        "Kickoff Cubs",
+        "Endzone Eagles"
     ];
 
     for (let i = 0; i < youthMascots.length; i++) {
@@ -309,9 +309,11 @@ export async function initializeLeague(onProgress) {
             kid.teamId = yTeam.id;
             kid.lifecycle = 'youth';
 
-            // Track eligibility based on the player's original Pee Wee entry.
+            // Track original Pee Wee entry age and completed seasons.
             kid.youthEntryAge = Number(kid.age) || 8;
             kid.youthSeasonsPlayed = 0;
+            kid.youthSeasonHistory = [];
+            kid.youthCareerStats = createEmptySeasonStats();
 
             yTeam.roster.push(kid.id);
             game.players.push(kid);
@@ -4148,6 +4150,37 @@ export function advanceToOffseason() {
         };
     }
 
+    // Prevent an immediately repeated call from processing the same completed
+    // offseason again. A new season must show activity before this can run again.
+    const lastCompletedOffseasonYear = Number(game._offseasonCompletedYear);
+
+    const seasonHasActivity =
+        (Number(game.currentWeek) || 0) > 0 ||
+        (Array.isArray(game.gameResults) && game.gameResults.length > 0) ||
+        game.teams.some(team =>
+            (Number(team.wins) || 0) > 0 ||
+            (Number(team.losses) || 0) > 0 ||
+            (Number(team.ties) || 0) > 0
+        );
+
+    if (
+        Number.isFinite(lastCompletedOffseasonYear) &&
+        lastCompletedOffseasonYear === Number(game.year) - 1 &&
+        !seasonHasActivity
+    ) {
+        console.warn(
+            `[Offseason] Ignored duplicate processing for completed Year ${lastCompletedOffseasonYear}.`
+        );
+
+        return {
+            retiredPlayers: [],
+            hofInductees: [],
+            developmentResults: [],
+            leavingPlayers: [],
+            pendingRetentions: []
+        };
+    }
+
     // Initialize tracking arrays at the top so any offseason phase can safely push to them
     const retiredPlayers = [];
     const hofInductees = [];
@@ -4284,6 +4317,8 @@ export function advanceToOffseason() {
         });
     }
 
+    // Preserve the season being completed before advancing to the next year.
+    const completedSeasonYear = game.year;
     game.year++;
 
     const teammateImproveChance = 0.15;
@@ -4779,28 +4814,62 @@ export function advanceToOffseason() {
             const kid = getPlayer(id);
             if (!kid) return false;
 
-            // Migrate older saves that do not yet have Pee Wee tracking.
-            const currentYouthAge = Number(kid.age) || 8;
-
-            if (!Number.isInteger(kid.youthEntryAge)) {
+            // Preserve the original entry age; never derive it from later ages.
+            if (!Number.isFinite(Number(kid.youthEntryAge))) {
                 kid.youthEntryAge = Math.max(
                     8,
-                    Math.min(11, currentYouthAge)
+                    Math.min(11, Number(kid.age) || 8)
                 );
             }
 
-            if (
-                !Number.isInteger(kid.youthSeasonsPlayed) ||
-                kid.youthSeasonsPlayed < 0
-            ) {
-                kid.youthSeasonsPlayed = 0;
+            if (!Array.isArray(kid.youthSeasonHistory)) {
+                kid.youthSeasonHistory = [];
             }
 
-            // Complete this Pee Wee season before checking draft eligibility.
-            developPlayer(kid, yt);
-            kid.youthSeasonsPlayed += 1;
-            kid.age++;
+            if (!Number.isFinite(Number(kid.youthSeasonsPlayed))) {
+                kid.youthSeasonsPlayed = kid.youthSeasonHistory.length;
+            }
 
+            // Preserve the completed Pee Wee season before resetting its stats.
+            const completedYouthStats = {
+                ...createEmptySeasonStats(),
+                ...(kid.seasonStats || {})
+            };
+
+            // Check against the season just completed, not the newly advanced year.
+            const alreadyRecorded = kid.youthSeasonHistory.some(
+                season => Number(season.year) === Number(completedSeasonYear)
+            );
+
+            if (!alreadyRecorded) {
+                kid.youthSeasonHistory.push({
+                    year: completedSeasonYear,
+                    age: kid.age,
+                    teamId: yt.id,
+                    teamName: yt.name || 'Pee Wee',
+                    stats: completedYouthStats
+                });
+
+                if (
+                    !kid.youthCareerStats ||
+                    typeof kid.youthCareerStats !== 'object'
+                ) {
+                    kid.youthCareerStats = createEmptySeasonStats();
+                }
+
+                for (const [stat, value] of Object.entries(completedYouthStats)) {
+                    kid.youthCareerStats[stat] =
+                        (Number(kid.youthCareerStats[stat]) || 0) +
+                        (Number(value) || 0);
+                }
+
+                // Count only seasons that were newly recorded.
+                kid.youthSeasonsPlayed =
+                    (Number(kid.youthSeasonsPlayed) || 0) + 1;
+            }
+
+            developPlayer(kid, yt);
+            kid.age++;
             kid.careerStats.seasonsPlayed =
                 (kid.careerStats.seasonsPlayed || 0) + 1;
 
@@ -4810,63 +4879,60 @@ export function advanceToOffseason() {
             // Players leave Pee Wee at age 12.
             // Draft eligibility depends on their age when they first joined
             // and the number of Pee Wee seasons they actually completed.
+                        // Pee Wee players graduate at age 12, but only players
+            // with enough completed seasons may enter the rookie draft.
             if (kid.age >= 12) {
                 kid.teamId = null;
                 kid.careerStats.snapsThisSeason = 0;
 
-                const requiredYouthSeasons = Math.max(
-                    1,
-                    12 - kid.youthEntryAge
+                const entryAge = Math.max(
+                    8,
+                    Math.min(11, Number(kid.youthEntryAge) || 8)
                 );
+                const requiredYouthSeasons = Math.max(1, 12 - entryAge);
+                const completedYouthSeasons =
+                    Math.max(0, Number(kid.youthSeasonsPlayed) || 0);
 
-                const completedRequiredYouthSeasons =
-                    kid.youthSeasonsPlayed >= requiredYouthSeasons;
+                const meetsYouthRequirement =
+                    completedYouthSeasons >= requiredYouthSeasons;
 
-                // Only qualified graduates can declare for the rookie draft.
-                // Players who did not complete the requirement become free agents.
-                let entersDraft = completedRequiredYouthSeasons;
+                if (!meetsYouthRequirement) {
+                    // Graduates who missed the requirement enter free agency.
+                    kid.lifecycle = 'active';
+                    if (!kid.personality) kid.personality = {};
+                    kid.personality.entersDraft = false;
+                    return false;
+                }
 
-                if (entersDraft) {
-                    // Preserve the existing personality/social decision
-                    // for qualified graduates who may choose free agency.
-                    const ego = kid.personality?.ego || 50;
-                    const loyalty = kid.personality?.loyalty || 60;
-                    const bestFriend = kid.social?.bestFriendId
-                        ? getPlayer(kid.social.bestFriendId)
-                        : null;
-                    const friendOnMainTeam =
-                        bestFriend && bestFriend.teamId;
+                // Eligible graduates may still choose free agency
+                // because of their relationships or personality.
+                const ego = kid.personality?.ego || 50;
+                const loyalty = kid.personality?.loyalty || 60;
+                const bestFriend = kid.social?.bestFriendId
+                    ? getPlayer(kid.social.bestFriendId)
+                    : null;
+                const friendOnMainTeam = bestFriend && bestFriend.teamId;
 
-                    if (
-                        friendOnMainTeam &&
-                        Math.random() < 0.50
-                    ) {
-                        entersDraft = false;
-                    } else if (
-                        ego >= 80 &&
-                        loyalty < 40 &&
-                        Math.random() < 0.40
-                    ) {
-                        entersDraft = false;
-                    }
+                let entersDraft = true;
+
+                if (friendOnMainTeam && Math.random() < 0.50) {
+                    entersDraft = false;
+                } else if (
+                    ego >= 80 &&
+                    loyalty < 40 &&
+                    Math.random() < 0.40
+                ) {
+                    entersDraft = false;
                 }
 
                 if (entersDraft) {
                     kid.lifecycle = 'draft_eligible';
-
-                    if (!kid.personality) {
-                        kid.personality = {};
-                    }
-
+                    if (!kid.personality) kid.personality = {};
                     kid.personality.entersDraft = true;
                     game.draftClass.push(kid);
                 } else {
                     kid.lifecycle = 'active';
-
-                    if (!kid.personality) {
-                        kid.personality = {};
-                    }
-
+                    if (!kid.personality) kid.personality = {};
                     kid.personality.entersDraft = false;
                 }
 
@@ -4980,6 +5046,8 @@ export function advanceToOffseason() {
             lateArrival.lifecycle = 'youth';
             lateArrival.youthEntryAge = Number(lateArrival.age) || 9;
             lateArrival.youthSeasonsPlayed = 0;
+            lateArrival.youthSeasonHistory = [];
+            lateArrival.youthCareerStats = createEmptySeasonStats();
 
             yt.roster.push(lateArrival.id);
             game.players.push(lateArrival);
@@ -4988,16 +5056,14 @@ export function advanceToOffseason() {
 
         // Fill remaining openings with fresh 8-year-olds.
         while (yt.roster.length < 14) {
-            const freshKid = generatePlayer(
-                8,
-                8,
-                thisYearsClassModifiers
-            );
-
+            const freshKid = generatePlayer(8, 8, thisYearsClassModifiers);
             freshKid.teamId = yt.id;
             freshKid.lifecycle = 'youth';
+
             freshKid.youthEntryAge = 8;
             freshKid.youthSeasonsPlayed = 0;
+            freshKid.youthSeasonHistory = [];
+            freshKid.youthCareerStats = createEmptySeasonStats();
 
             yt.roster.push(freshKid.id);
             game.players.push(freshKid);
@@ -5045,6 +5111,9 @@ export function advanceToOffseason() {
             aiManageTeamStaff(t, game);
         }
     });
+
+    // Mark completion only after all offseason phases have finished.
+    game._offseasonCompletedYear = completedSeasonYear;
 
     return { retiredPlayers, hofInductees, developmentResults, leavingPlayers, pendingRetentions };
 }

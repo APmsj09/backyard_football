@@ -292,6 +292,68 @@ function renderPublicPlayerRecord(info) {
         </section>`;
 }
 
+function renderPeeWeeHistory(player) {
+    const history = Array.isArray(player?.youthSeasonHistory)
+        ? [...player.youthSeasonHistory].sort(
+            (a, b) => (Number(a.year) || 0) - (Number(b.year) || 0)
+        )
+        : [];
+
+    const careerStats = player?.youthCareerStats;
+    const seasonsPlayed = history.length ||
+        (Number(player?.youthSeasonsPlayed) || 0);
+    const position = player?.pos || null;
+
+    const seasonHistoryHtml = history.length > 0
+        ? history.map(season => `
+            <div class="border-t border-slate-200 pt-2 first:border-t-0 first:pt-0">
+                <div class="flex flex-wrap items-center justify-between gap-1 mb-1">
+                    <span class="font-bold text-slate-700">
+                        Year ${season.year ?? '?'}
+                        ${season.age != null ? `· Age ${season.age}` : ''}
+                    </span>
+                    <span class="text-slate-400">${season.teamName || 'Pee Wee'}</span>
+                </div>
+                <div class="flex flex-wrap gap-1">
+                    ${renderPublicStatSummary(season.stats, position)}
+                </div>
+            </div>
+        `).join('')
+        : '<p class="text-slate-400 italic">No season-by-season Pee Wee stats recorded.</p>';
+
+    const careerHtml = careerStats
+        ? renderPublicStatSummary(careerStats, position)
+        : '<span class="text-slate-400 italic">No Pee Wee career totals recorded.</span>';
+
+    return `
+        <section class="rounded border border-amber-200 bg-amber-50/60 p-2 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-1">
+                <span class="font-black tracking-wide text-amber-900">PEE WEE CAREER</span>
+                <span class="text-[9px] text-slate-500">
+                    ${seasonsPlayed} completed season${seasonsPlayed === 1 ? '' : 's'}
+                </span>
+            </div>
+
+            <div>
+                <p class="text-[9px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                    Season-by-season history
+                </p>
+                <div class="space-y-2">
+                    ${seasonHistoryHtml}
+                </div>
+            </div>
+
+            <div>
+                <p class="text-[9px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                    Pee Wee career totals
+                </p>
+                <div class="flex flex-wrap gap-1">
+                    ${careerHtml}
+                </div>
+            </div>
+        </section>`;
+}
+
 function hasScoutingUncertainty(player) {
     return Object.values(player?.attributes || {}).some(category =>
         category &&
@@ -754,18 +816,69 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
     const watchlistCountEl = document.getElementById('draft-watchlist-count');
     if (watchlistCountEl) watchlistCountEl.textContent = draftWatchlist.size;
 
-    // 1. Strict Draft Pool Filtering (Culls 18-20 year olds from rookie drafts)
-    const poolSource = (gameState.draftClass && gameState.draftClass.length > 0)
+    // 1. Strict draft pool filtering.
+    // Never fall back to the general player pool when the rookie class is empty.
+    const poolSource = Array.isArray(gameState.draftClass)
         ? gameState.draftClass
-        : gameState.players;
+        : [];
 
-    let undraftedPlayers = poolSource.filter(p =>
-        p && !p.teamId &&
-        p.status?.type !== 'retired' &&
-        p.status?.type !== 'departed' &&
-        (p.personality?.entersDraft !== false) &&
-        (gameState.draftClass && gameState.draftClass.length > 0 ? true : (p.age <= 13 || p.lifecycle === 'draft_eligible'))
-    );
+    const isInauguralDraft = Number(gameState.year) === 1;
+
+    let undraftedPlayers = poolSource.filter(player => {
+        if (
+            !player ||
+            player.teamId ||
+            player.personality?.entersDraft === false ||
+            ['retired', 'departed', 'temporary'].includes(
+                player.status?.type
+            )
+        ) {
+            return false;
+        }
+
+        // Year 1 fills initial rosters and does not require Pee Wee history.
+        if (isInauguralDraft) {
+            return Number(player.age) >= 11;
+        }
+
+        // All subsequent rookie drafts require documented Pee Wee eligibility.
+        const age = Number(player.age);
+        const entryAge = Number(player.youthEntryAge);
+        const seasonsPlayed = Number(player.youthSeasonsPlayed);
+
+        if (
+            player.lifecycle !== 'draft_eligible' ||
+            !Number.isInteger(age) ||
+            age < 12 ||
+            !Number.isInteger(entryAge) ||
+            entryAge < 8 ||
+            entryAge > 11 ||
+            !Number.isInteger(seasonsPlayed) ||
+            seasonsPlayed < 0
+        ) {
+            return false;
+        }
+
+        const history = Array.isArray(player.youthSeasonHistory)
+            ? player.youthSeasonHistory
+            : [];
+
+        const recordedSeasonYears = new Set(
+            history
+                .filter(season =>
+                    season?.year != null &&
+                    Number.isInteger(Number(season.year))
+                )
+                .map(season => Number(season.year))
+        );
+
+        const requiredSeasons = 12 - entryAge;
+
+        return (
+            seasonsPlayed >= requiredSeasons &&
+            recordedSeasonYears.size >= requiredSeasons
+        );
+    });
 
     if (activeDraftView === 'watchlist') {
         undraftedPlayers = undraftedPlayers.filter(p => draftWatchlist.has(p.id));
@@ -830,6 +943,21 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="tackling">Tackle</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="blockShedding">B.Shed</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="playbookIQ">IQ</th>
+                </tr>`;
+        } else if (activeDraftView === 'youthStats') {
+            thead.innerHTML = `
+                <tr>
+                    <th class="py-2 px-2 text-center w-8">★</th>
+                    <th class="py-2 px-2 text-center">Pos</th>
+                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthSeasons">Seasons</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthPassYards">Pass Yds</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthRushYards">Rush Yds</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthRecYards">Rec Yds</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthTouchdowns">TD</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthTackles">Tackles</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthInterceptions">INT</th>
                 </tr>`;
         } else {
             // Watchlist View (mirrors overview)
@@ -916,6 +1044,38 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         return null;
     };
 
+    const YOUTH_STAT_SORT_FIELDS = {
+        youthPassYards: 'passYards',
+        youthRushYards: 'rushYards',
+        youthRecYards: 'recYards',
+        youthTouchdowns: 'touchdowns',
+        youthTackles: 'tackles',
+        youthInterceptions: 'interceptions'
+    };
+
+    const getYouthStatScore = (player, key) => {
+        const history = Array.isArray(player.youthSeasonHistory)
+            ? player.youthSeasonHistory
+            : [];
+
+        if (key === 'youthSeasons') {
+            const seasons = history.length ||
+                (Number(player.youthSeasonsPlayed) || 0);
+
+            return seasons > 0 ? seasons : null;
+        }
+
+        if (history.length === 0 || !player.youthCareerStats) {
+            return null;
+        }
+
+        const statKey = YOUTH_STAT_SORT_FIELDS[key];
+        if (!statKey) return null;
+
+        const value = Number(player.youthCareerStats[statKey]);
+        return Number.isFinite(value) ? value : null;
+    };
+
     const compareReportedValues = (a, b) => {
         if (a == null && b == null) return 0;
         if (a == null) return 1;
@@ -962,6 +1122,21 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 : b.age - a.age;
         }
 
+        if (
+            sortColumn === 'youthSeasons' ||
+            Object.prototype.hasOwnProperty.call(
+                YOUTH_STAT_SORT_FIELDS,
+                sortColumn
+            )
+        ) {
+            const youthCompare = compareReportedValues(
+                getYouthStatScore(a, sortColumn),
+                getYouthStatScore(b, sortColumn)
+            );
+
+            return youthCompare || a.name.localeCompare(b.name);
+        }
+
         const attrCompare = compareReportedValues(
             getAttributeScore(a),
             getAttributeScore(b)
@@ -972,8 +1147,15 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
     elements.draftPoolTbody.innerHTML = '';
     if (filtered.length === 0) {
-        const msg = activeDraftView === 'watchlist' ? 'No prospects pinned to your watchlist yet. Click the ★ next to any player to shortlist them.' : 'No prospects match filters.';
-        elements.draftPoolTbody.innerHTML = `<tr><td colspan="9" class="p-6 text-center text-slate-400 font-sans italic">${msg}</td></tr>`;
+        const hasEligibleClass = undraftedPlayers.length > 0;
+
+        const msg = activeDraftView === 'watchlist'
+            ? 'No prospects pinned to your watchlist yet. Click the ★ next to any player to shortlist them.'
+            : (!hasEligibleClass && Number(gameState.year) !== 1
+                ? 'No eligible Pee Wee graduates are available in this draft class.'
+                : 'No prospects match filters.');
+        const emptyColspan = activeDraftView === 'youthStats' ? 11 : 9;
+        elements.draftPoolTbody.innerHTML = `<tr><td colspan="${emptyColspan}" class="p-6 text-center text-slate-400 font-sans italic">${msg}</td></tr>`;
         return;
     }
 
@@ -1077,6 +1259,37 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.tackling ?? '?'}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.blockShedding ?? '?'}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.mental?.playbookIQ ?? '?'}</td>
+            `;
+        } else if (activeDraftView === 'youthStats') {
+            const youthHistory = Array.isArray(player.youthSeasonHistory)
+                ? player.youthSeasonHistory
+                : [];
+            const youthStats = player.youthCareerStats;
+            const hasYouthStats = youthHistory.length > 0 &&
+                youthStats &&
+                typeof youthStats === 'object';
+
+            const youthSeasons = youthHistory.length ||
+                (Number(player.youthSeasonsPlayed) || 0);
+
+            const youthStatDisplay = statKey => {
+                if (!hasYouthStats) return '—';
+
+                return (Number(youthStats[statKey]) || 0).toLocaleString();
+            };
+
+            row.innerHTML = `
+                <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
+                <td class="text-center py-2 px-2">${scouted.age}</td>
+                <td class="text-center py-2 px-2">${hasYouthStats ? youthSeasons : '—'}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('passYards')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('rushYards')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('recYards')}</td>
+                <td class="text-center py-2 px-2 font-bold">${youthStatDisplay('touchdowns')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('tackles')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('interceptions')}</td>
             `;
         } else {
             row.innerHTML = `
@@ -1187,6 +1400,7 @@ export function renderSelectedPlayerCard(player, gameState) {
         (scoutingLevel >= 3 ? 'Not included in this report' : 'Not assessed yet');
     const publicInfo = Game.getPublicPlayerInfo?.(player) || null;
     const publicRecordHtml = renderPublicPlayerRecord(publicInfo);
+    const youthRecordHtml = renderPeeWeeHistory(player);
 
     const bestFriend = playerRoster.find(r => r.id === player.social?.bestFriendId);
     const friendsOnTeam = playerRoster.filter(r => player.social?.goodFriendIds?.includes(r.id));
@@ -1282,6 +1496,7 @@ export function renderSelectedPlayerCard(player, gameState) {
             <!-- Tab 1: Overview Pane (Clean & Compact) -->
             <div id="dossier-pane-overview" class="dossier-pane ${activeDossierTab === 'overview' ? '' : 'hidden'} text-[10px] space-y-1.5">
                 ${publicRecordHtml}
+                ${youthRecordHtml}
                 <div class="flex flex-wrap items-center gap-1">
                     <span class="bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded border border-amber-200">Role: ${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Under evaluation' : 'Unscouted')}</span>
                     <span class="bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded border border-indigo-200">Character: ${characterSummary}</span>
