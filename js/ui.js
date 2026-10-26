@@ -293,13 +293,81 @@ function renderPublicPlayerRecord(info) {
 }
 
 function renderPeeWeeHistory(player) {
-    const history = Array.isArray(player?.youthSeasonHistory)
-        ? [...player.youthSeasonHistory].sort(
-            (a, b) => (Number(a.year) || 0) - (Number(b.year) || 0)
-        )
+    const rawHistory = Array.isArray(player?.youthSeasonHistory)
+        ? player.youthSeasonHistory
         : [];
 
-    const careerStats = player?.youthCareerStats;
+    // Deduplicate recorded seasons by year without modifying saved history.
+    const seenYears = new Set();
+    const history = rawHistory
+        .filter(season => {
+            if (!season || typeof season !== 'object') return false;
+
+            const year = Number(season.year);
+
+            // Keep legacy rows with an unknown year rather than discarding them.
+            if (!Number.isInteger(year)) return true;
+            if (seenYears.has(year)) return false;
+
+            seenYears.add(year);
+            return true;
+        })
+        .sort(
+            (a, b) => (Number(a.year) || 0) - (Number(b.year) || 0)
+        );
+
+    // Preserve saved totals, then reconstruct missing fields only when every
+    // recorded season contains a valid numeric value for that statistic.
+    const savedCareerStats = player?.youthCareerStats;
+    const careerStats = savedCareerStats &&
+        typeof savedCareerStats === 'object'
+        ? { ...savedCareerStats }
+        : {};
+
+    const statKeys = new Set(Object.keys(careerStats));
+
+    history.forEach(season => {
+        Object.keys(season.stats || {}).forEach(key => statKeys.add(key));
+    });
+
+    for (const statKey of statKeys) {
+        const savedValue = careerStats[statKey];
+
+        if (
+            savedValue !== undefined &&
+            savedValue !== null &&
+            Number.isFinite(Number(savedValue))
+        ) {
+            careerStats[statKey] = Number(savedValue);
+            continue;
+        }
+
+        if (history.length === 0) continue;
+
+        const seasonValues = history.map(
+            season => season.stats?.[statKey]
+        );
+
+        const hasCompleteHistory = seasonValues.every(value =>
+            value !== undefined &&
+            value !== null &&
+            Number.isFinite(Number(value))
+        );
+
+        if (hasCompleteHistory) {
+            careerStats[statKey] = seasonValues.reduce(
+                (total, value) => total + Number(value),
+                0
+            );
+        }
+    }
+
+    const hasCareerStats = Object.values(careerStats).some(value =>
+        value !== undefined &&
+        value !== null &&
+        Number.isFinite(Number(value))
+    );
+
     const seasonsPlayed = history.length ||
         (Number(player?.youthSeasonsPlayed) || 0);
     const position = player?.pos || null;
@@ -321,7 +389,7 @@ function renderPeeWeeHistory(player) {
         `).join('')
         : '<p class="text-slate-400 italic">No season-by-season Pee Wee stats recorded.</p>';
 
-    const careerHtml = careerStats
+    const careerHtml = hasCareerStats
         ? renderPublicStatSummary(careerStats, position)
         : '<span class="text-slate-400 italic">No Pee Wee career totals recorded.</span>';
 
@@ -1053,6 +1121,46 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         youthInterceptions: 'interceptions'
     };
 
+    // Read recorded youth career totals, rebuilding from season history
+    // when an aggregate field is missing in an older or partially migrated save.
+    const getYouthStatTotal = (player, statKey) => {
+        const careerValue = player?.youthCareerStats?.[statKey];
+
+        if (
+            careerValue !== undefined &&
+            careerValue !== null &&
+            Number.isFinite(Number(careerValue))
+        ) {
+            return Number(careerValue);
+        }
+
+        const history = Array.isArray(player?.youthSeasonHistory)
+            ? player.youthSeasonHistory
+            : [];
+
+        let total = 0;
+        let foundRecordedValue = false;
+
+        history.forEach(season => {
+            const stats = season?.stats;
+            const value = stats?.[statKey];
+
+            if (
+                value === undefined ||
+                value === null ||
+                !Number.isFinite(Number(value))
+            ) {
+                return;
+            }
+
+            total += Number(value);
+            foundRecordedValue = true;
+        });
+
+        // Missing historical data stays missing rather than becoming a fake zero.
+        return foundRecordedValue ? total : null;
+    };
+
     const getYouthStatScore = (player, key) => {
         const history = Array.isArray(player.youthSeasonHistory)
             ? player.youthSeasonHistory
@@ -1065,15 +1173,10 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             return seasons > 0 ? seasons : null;
         }
 
-        if (history.length === 0 || !player.youthCareerStats) {
-            return null;
-        }
-
         const statKey = YOUTH_STAT_SORT_FIELDS[key];
         if (!statKey) return null;
 
-        const value = Number(player.youthCareerStats[statKey]);
-        return Number.isFinite(value) ? value : null;
+        return getYouthStatTotal(player, statKey);
     };
 
     const compareReportedValues = (a, b) => {
@@ -1264,18 +1367,16 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             const youthHistory = Array.isArray(player.youthSeasonHistory)
                 ? player.youthSeasonHistory
                 : [];
-            const youthStats = player.youthCareerStats;
-            const hasYouthStats = youthHistory.length > 0 &&
-                youthStats &&
-                typeof youthStats === 'object';
 
             const youthSeasons = youthHistory.length ||
                 (Number(player.youthSeasonsPlayed) || 0);
 
             const youthStatDisplay = statKey => {
-                if (!hasYouthStats) return '—';
+                if (youthHistory.length === 0) return '—';
 
-                return (Number(youthStats[statKey]) || 0).toLocaleString();
+                const value = getYouthStatTotal(player, statKey);
+
+                return value === null ? '—' : value.toLocaleString();
             };
 
             row.innerHTML = `
@@ -1283,7 +1384,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <td class="py-2 px-2 text-center">${posBadge}</td>
                 <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
                 <td class="text-center py-2 px-2">${scouted.age}</td>
-                <td class="text-center py-2 px-2">${hasYouthStats ? youthSeasons : '—'}</td>
+                <td class="text-center py-2 px-2">${youthSeasons > 0 ? youthSeasons : '—'}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('passYards')}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('rushYards')}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('recYards')}</td>
