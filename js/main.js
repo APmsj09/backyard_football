@@ -186,7 +186,13 @@ async function startNewGame() {
 
             Game.simulateHistoricalSeason(y, gameState);
             const offseasonReport = Game.advanceToOffseason();
-            const draftResults = Game.simulateHistoricalDraft(y);
+
+            // Preserve the Year 5 rookie class for the user's takeover draft.
+            // Historical drafts run for Years 1-3; Year 4's graduates remain
+            // available for the first user-controlled draft in Year 5.
+            const draftResults = y < 4
+                ? Game.simulateHistoricalDraft(y)
+                : [];
 
             // REPORT 2: Record each historical season with age development curves
             debugCollector.recordHistoricalSeason(y, {
