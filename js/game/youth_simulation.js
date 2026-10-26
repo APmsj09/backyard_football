@@ -1428,6 +1428,17 @@ function resolvePassPlay(
         return evaluations.get(receiver.id);
     };
 
+    // A depleted roster or unusual formation may leave no eligible targets.
+    // Treat the play as an incompletion instead of crashing the simulation.
+    if (!primary) {
+        return {
+            type: 'incomplete',
+            yards: 0,
+            turnover: false,
+            target: null
+        };
+    }
+
     let chosen = evaluate(primary);
 
     // Honor the playbook's read progression first, then consider any
