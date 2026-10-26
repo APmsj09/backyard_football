@@ -1123,17 +1123,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
     // Read recorded youth career totals, rebuilding from season history
     // when an aggregate field is missing in an older or partially migrated save.
-    const getYouthStatTotal = (player, statKey) => {
-        const careerValue = player?.youthCareerStats?.[statKey];
-
-        if (
-            careerValue !== undefined &&
-            careerValue !== null &&
-            Number.isFinite(Number(careerValue))
-        ) {
-            return Number(careerValue);
-        }
-
+        const getYouthStatTotal = (player, statKey) => {
         const history = Array.isArray(player?.youthSeasonHistory)
             ? player.youthSeasonHistory
             : [];
@@ -1157,8 +1147,22 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             foundRecordedValue = true;
         });
 
+        // Per-season history is the source of truth when it contains this stat.
+        if (foundRecordedValue) return total;
+
+        // Fall back to the aggregate for players with no recorded stat history.
+        const careerValue = player?.youthCareerStats?.[statKey];
+
+        if (
+            careerValue !== undefined &&
+            careerValue !== null &&
+            Number.isFinite(Number(careerValue))
+        ) {
+            return Number(careerValue);
+        }
+
         // Missing historical data stays missing rather than becoming a fake zero.
-        return foundRecordedValue ? total : null;
+        return null;
     };
 
     const getYouthStatScore = (player, key) => {
