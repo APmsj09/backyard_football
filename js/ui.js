@@ -175,8 +175,11 @@ const PUBLIC_STAT_LABELS = {
     sacks: 'Sacks',
     interceptions: 'INT',
     touchdowns: 'TD',
+    fumbles: 'Fumbles',
+    fumblesLost: 'Fumbles Lost',
     returnYards: 'Return Yds',
-    fumblesRecovered: 'Fum Rec'
+    fumblesRecovered: 'Fum Rec',
+    safeties: 'Safeties'
 };
 
 const PUBLIC_STATS_BY_POSITION = {
@@ -247,7 +250,7 @@ function renderPublicPlayerRecord(info) {
                     <span class="text-slate-400">${season.teamName || ''}</span>
                 </div>
                 <div class="flex flex-wrap gap-1">
-                    ${renderPublicStatSummary(season.stats, info.listedPosition)}
+                    ${renderPublicStatSummary(season.stats, null)}
                 </div>
             </div>
         `).join('')
@@ -390,7 +393,7 @@ function renderPeeWeeHistory(player) {
         : '<p class="text-slate-400 italic">No season-by-season Pee Wee stats recorded.</p>';
 
     const careerHtml = hasCareerStats
-        ? renderPublicStatSummary(careerStats, position)
+        ? renderPublicStatSummary(careerStats, null)
         : '<span class="text-slate-400 italic">No Pee Wee career totals recorded.</span>';
 
     return `

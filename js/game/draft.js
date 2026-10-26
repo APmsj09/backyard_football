@@ -237,6 +237,82 @@ function scorePublicSeasonStats(stats, position) {
     return Math.max(0, Math.min(100, score));
 }
 
+function scorePublicTwoWaySeasonStats(stats, position) {
+    if (!stats || typeof stats !== 'object') return null;
+
+    const hasProduction = keys =>
+        keys.some(key =>
+            Number.isFinite(Number(stats[key])) &&
+            Number(stats[key]) > 0
+        );
+
+    // Touchdowns alone don't establish meaningful production on a side.
+    const hasOffense = hasProduction([
+        'passYards',
+        'passAttempts',
+        'passCompletions',
+        'rushYards',
+        'rushAttempts',
+        'recYards',
+        'receptions',
+        'targets',
+        'drops'
+    ]);
+
+    const hasDefense = hasProduction([
+        'tackles',
+        'sacks',
+        'interceptions',
+        'fumblesRecovered',
+        'safeties'
+    ]);
+
+    const bestScoreFor = positions => {
+        const scores = positions
+            .map(pos => scorePublicSeasonStats(stats, pos))
+            .filter(Number.isFinite);
+
+        return scores.length ? Math.max(...scores) : null;
+    };
+
+    const offenseScore = hasOffense
+        ? bestScoreFor(['QB', 'RB', 'WR', 'TE'])
+        : null;
+
+    const defenseScore = hasDefense
+        ? bestScoreFor(['DL', 'LB', 'DB'])
+        : null;
+
+    const isOffensivePosition =
+        OFFENSIVE_POSITION_FITS.includes(position);
+
+    const primarySideScore = isOffensivePosition
+        ? offenseScore
+        : defenseScore;
+
+    const otherSideScore = isOffensivePosition
+        ? defenseScore
+        : offenseScore;
+
+    // If only one side has meaningful production, use that evidence.
+    if (!Number.isFinite(primarySideScore)) {
+        return Number.isFinite(otherSideScore)
+            ? otherSideScore
+            : null;
+    }
+
+    // Keep ordinary one-way players' scores unchanged.
+    // Meaningful production on the opposite side adds a smaller contribution.
+    if (
+        Number.isFinite(otherSideScore) &&
+        otherSideScore >= 55
+    ) {
+        return primarySideScore * 0.70 + otherSideScore * 0.30;
+    }
+
+    return primarySideScore;
+}
+
 function getPublicProductionScore(player) {
     const position = player?.pos;
 
@@ -249,8 +325,47 @@ function getPublicProductionScore(player) {
         : [];
 
     let scores = seasons
-        .map(season => scorePublicSeasonStats(season.stats, position))
+        .map(season => scorePublicTwoWaySeasonStats(season.stats, position))
         .filter(Number.isFinite);
+
+    // Rookie prospects store their public production in Pee Wee history,
+    // not necessarily in the standard progression/career stat fields.
+    if (scores.length === 0) {
+        const youthSeasons = Array.isArray(player.youthSeasonHistory)
+            ? player.youthSeasonHistory
+                .filter(season => season?.stats)
+                .slice(-3)
+            : [];
+
+        scores = youthSeasons
+            .map(season => scorePublicTwoWaySeasonStats(season.stats, position))
+            .filter(Number.isFinite);
+    }
+
+    // Older or partially migrated saves may have only Pee Wee career totals.
+    if (
+        scores.length === 0 &&
+        player.youthCareerStats &&
+        Number(player.youthSeasonsPlayed) > 0
+    ) {
+        const seasonsPlayed = Number(player.youthSeasonsPlayed);
+        const averageSeasonStats = {};
+
+        for (const [key, rawValue] of Object.entries(player.youthCareerStats)) {
+            if (Number.isFinite(Number(rawValue))) {
+                averageSeasonStats[key] = Number(rawValue) / seasonsPlayed;
+            }
+        }
+
+        const youthCareerScore = scorePublicTwoWaySeasonStats(
+            averageSeasonStats,
+            position
+        );
+
+        if (Number.isFinite(youthCareerScore)) {
+            scores = [youthCareerScore];
+        }
+    }
 
     // Older saves may have career totals without season-by-season records.
     if (
@@ -267,7 +382,7 @@ function getPublicProductionScore(player) {
             }
         }
 
-        const careerScore = scorePublicSeasonStats(
+        const careerScore = scorePublicTwoWaySeasonStats(
             averageSeasonStats,
             position
         );

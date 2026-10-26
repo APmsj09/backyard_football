@@ -1034,7 +1034,9 @@ function matchupForReceiver(
         adjustedRouteSkill += (quickRouteSkill - 50) * 0.18;
     }
 
-    const coverageSkill = weightedSkill(defender, COVER_SKILLS);
+    const coverageSkill = defender
+        ? weightedSkill(defender, COVER_SKILLS)
+        : 50;
 
     // A second DB provides modest help against the route.
     // Blitzing removes that extra help because the defender is rushing.
