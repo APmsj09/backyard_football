@@ -481,3 +481,68 @@ tbody tr:hover {
     /* Prevent text wrapping */
     padding: 0.5rem 0.75rem;
 }
+/* --- 12. DRAFT SCREEN SCROLLING --- */
+
+/* Keep nested desktop panels inside the available height. */
+#draft-screen,
+#draft-main-layout,
+#draft-main-layout > div,
+#draft-tab-pool,
+#draft-tab-history,
+#draft-tab-teams {
+    min-height: 0;
+}
+
+#draft-main-layout > div:first-child {
+    overflow: hidden;
+}
+
+#draft-tab-pool > .overflow-auto {
+    min-height: 0;
+}
+
+/* On narrow screens, stack the panels and allow page-level scrolling. */
+@media (max-width: 1023px) {
+    body:has(#draft-screen:not(.hidden)) {
+        height: auto;
+        min-height: 100vh;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    body:has(#draft-screen:not(.hidden)) #app-shell {
+        flex: 0 0 auto;
+        height: auto;
+        min-height: 100vh;
+        overflow: visible;
+    }
+
+    body:has(#draft-screen:not(.hidden)) #draft-screen {
+        height: auto;
+        min-height: 100vh;
+        overflow: visible;
+    }
+
+    body:has(#draft-screen:not(.hidden)) #draft-main-layout {
+        display: flex;
+        flex: 0 0 auto;
+        flex-direction: column;
+        gap: 0.75rem;
+        overflow: visible;
+    }
+
+    /* Keep the prospect board at a usable height with its own scrolling table. */
+    body:has(#draft-screen:not(.hidden))
+    #draft-main-layout > div:first-child {
+        flex: 0 0 auto;
+        height: 70vh;
+        min-height: 400px;
+    }
+
+    /* Make the dossier and roster accessible below the board. */
+    body:has(#draft-screen:not(.hidden))
+    #draft-main-layout > div:last-child {
+        flex: 0 0 auto;
+        min-height: 85vh;
+    }
+}
