@@ -30,6 +30,7 @@ import {
 } from '../data.js';
 import { getRandom, getRandomInt } from '../utils.js';
 import { updatePlayerPosition, getDistance } from './physics.js';
+import { simulateYouthMatch } from './youth_simulation.js';
 import { TICK_DURATION_SECONDS } from './simulation_config.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
 import {
@@ -4033,6 +4034,12 @@ export function recordTeamGamePlanningOutcome(
 
 export function simulateMatchFast(homeTeam, awayTeam) {
     if (!homeTeam || !awayTeam) return null;
+
+    // Youth games use ordered probabilistic matchups; main-league games stay on the full engine.
+    if (homeTeam.leagueType === 'youth' && awayTeam.leagueType === 'youth') {
+        return simulateYouthMatch(homeTeam, awayTeam);
+    }
+
     resetGameStats(homeTeam, awayTeam);
     aiSetDepthChart(homeTeam);
     aiSetDepthChart(awayTeam);

@@ -15,6 +15,7 @@ import {
 import {
     rebuildDepthChartFromOrder, aiSetDepthChart, assignTeamCaptain, isPlayerViableForPosition
 } from './depth_chart.js';
+import { simulateYouthMatch } from './youth_simulation.js';
 import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach,
     aiManageTeamStaff, aiBuildGameplan, aiChooseWeeklyPractice,
@@ -54,6 +55,7 @@ const createEmptySeasonStats = () => ({
     receptions: 0,
     targets: 0,
     drops: 0,
+    pancakes: 0,
     tackles: 0,
     sacks: 0,
     interceptions: 0,
@@ -684,50 +686,301 @@ export function getTeamOverall(team) {
 
 export function generateHistoricalStats(team, score) {
     const roster = getRosterObjects(team);
+
     roster.forEach(p => {
         if (p && !p.gameStats) {
-            p.gameStats = { passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0, rushAttempts: 0, rushYards: 0, receptions: 0, recYards: 0, targets: 0, drops: 0, tackles: 0, sacks: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0, returnYards: 0, touchdowns: 0, safeties: 0 };
+            p.gameStats = {
+                passAttempts: 0,
+                passCompletions: 0,
+                passYards: 0,
+                interceptionsThrown: 0,
+                rushAttempts: 0,
+                rushYards: 0,
+                receptions: 0,
+                recYards: 0,
+                targets: 0,
+                drops: 0,
+                pancakes: 0,
+                tackles: 0,
+                sacks: 0,
+                interceptions: 0,
+                fumbles: 0,
+                fumblesLost: 0,
+                fumblesRecovered: 0,
+                returnYards: 0,
+                touchdowns: 0,
+                safeties: 0
+            };
+        }
+
+        if (p?.gameStats && !Number.isFinite(p.gameStats.pancakes)) {
+            p.gameStats.pancakes = 0;
         }
     });
 
-    const qb = roster.find(p => team.depthChart?.offense && p.id === team.depthChart.offense['QB1']) || roster.find(p => p.pos === 'QB') || roster[0];
-    const rb = roster.find(p => team.depthChart?.offense && p.id === team.depthChart.offense['RB1']) || roster.find(p => p.pos === 'RB') || roster[1];
-    const wr1 = roster.find(p => team.depthChart?.offense && p.id === team.depthChart.offense['WR1']) || roster.find(p => p.pos === 'WR') || roster[2];
-    const wr2 = roster.find(p => team.depthChart?.offense && p.id === team.depthChart.offense['WR2']) || roster.find(p => p.pos === 'WR' && p.id !== wr1?.id) || roster[3];
-    const def1 = roster.find(p => team.depthChart?.defense && p.id === team.depthChart.defense['LB1']) || roster.find(p => p.pos === 'LB') || roster[4];
-    const def2 = roster.find(p => team.depthChart?.defense && p.id === team.depthChart.defense['DB1']) || roster.find(p => p.pos === 'DB') || roster[5];
+    const getRoleEntries = (side, positionPrefix) => {
+        const depth = team.depthChart?.[side] || {};
+        const hasAssignments = Object.values(depth).some(
+            playerId => playerId != null && playerId !== ''
+        );
 
-    const tds = Math.floor(score / 7);
-    const passTds = Math.floor(tds * 0.6);
-    const rushTds = tds - passTds;
+        if (hasAssignments) {
+            const seenPlayerIds = new Set();
 
-    if (qb && qb.gameStats) {
-        qb.gameStats.passAttempts = getRandomInt(15, 25);
-        qb.gameStats.passCompletions = Math.floor(qb.gameStats.passAttempts * (0.5 + Math.random() * 0.2));
-        qb.gameStats.passYards = qb.gameStats.passCompletions * getRandomInt(8, 12);
-        qb.gameStats.touchdowns += passTds;
-        qb.gameStats.interceptionsThrown = getRandomInt(0, 2);
+            return Object.entries(depth)
+                .filter(([slot, playerId]) =>
+                    slot.startsWith(positionPrefix) &&
+                    playerId != null &&
+                    playerId !== ''
+                )
+                .map(([slot, playerId]) => ({
+                    slot,
+                    player: roster.find(p =>
+                        p && String(p.id) === String(playerId)
+                    )
+                }))
+                .filter(entry => {
+                    if (!entry.player?.gameStats) return false;
+
+                    const playerId = String(entry.player.id);
+                    if (seenPlayerIds.has(playerId)) return false;
+
+                    seenPlayerIds.add(playerId);
+                    return true;
+                });
+        }
+
+        const favoritePositionKey = side === 'offense'
+            ? 'favoriteOffensivePosition'
+            : 'favoriteDefensivePosition';
+
+        return roster
+            .filter(p =>
+                p?.gameStats &&
+                (p[favoritePositionKey] || p.pos) === positionPrefix
+            )
+            .map((player, index) => ({
+                slot: `${positionPrefix}${index + 1}`,
+                player
+            }));
+    };
+
+    const getRoleWeight = entry => {
+        const position = entry.slot.replace(/\d+$/, '');
+        const slotNumber = Number(entry.slot.match(/\d+$/)?.[0]) || 1;
+
+        if (position === 'WR') return slotNumber === 1 ? 4 : 3;
+        if (position === 'TE') return slotNumber === 1 ? 3 : 2;
+        if (position === 'RB') return slotNumber === 1 ? 2 : 1;
+
+        return 1;
+    };
+
+    const distributeTotal = (total, entries) => {
+        if (entries.length === 0) return [];
+
+        const safeTotal = Math.max(0, Math.floor(Number(total) || 0));
+        const weights = entries.map(getRoleWeight);
+        const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+
+        let cumulativeWeight = 0;
+
+        return weights.map(weight => {
+            const before = Math.floor(
+                safeTotal * cumulativeWeight / totalWeight
+            );
+
+            cumulativeWeight += weight;
+
+            const after = Math.floor(
+                safeTotal * cumulativeWeight / totalWeight
+            );
+
+            return after - before;
+        });
+    };
+
+    const addStat = (entry, stat, amount) => {
+        if (!entry?.player?.gameStats || !Number.isFinite(amount) || amount <= 0) {
+            return;
+        }
+
+        const stats = entry.player.gameStats;
+        stats[stat] = (Number(stats[stat]) || 0) + amount;
+    };
+
+    const qbs = getRoleEntries('offense', 'QB');
+    const runningBacks = getRoleEntries('offense', 'RB');
+    const wideReceivers = getRoleEntries('offense', 'WR');
+    const tightEnds = getRoleEntries('offense', 'TE');
+    const offensiveLine = getRoleEntries('offense', 'OL');
+
+    const defensiveLine = getRoleEntries('defense', 'DL');
+    const linebackers = getRoleEntries('defense', 'LB');
+    const defensiveBacks = getRoleEntries('defense', 'DB');
+
+    const qb = qbs[0] || null;
+    const totalTouchdowns = Math.floor(Math.max(0, score) / 7);
+    const passTds = qb ? Math.floor(totalTouchdowns * 0.6) : 0;
+    const rushTds = totalTouchdowns - passTds;
+
+    let passAttempts = 0;
+    let passCompletions = 0;
+
+    if (qb) {
+        passAttempts = getRandomInt(15, 25);
+        passCompletions = Math.floor(
+            passAttempts * (0.5 + Math.random() * 0.2)
+        );
+
+        addStat(qb, 'passAttempts', passAttempts);
+        addStat(qb, 'passCompletions', passCompletions);
+        addStat(
+            qb,
+            'passYards',
+            passCompletions * getRandomInt(8, 12)
+        );
+        addStat(qb, 'touchdowns', passTds);
+        addStat(qb, 'interceptionsThrown', getRandomInt(0, 2));
     }
-    if (rb && rb.gameStats) {
-        rb.gameStats.rushAttempts = getRandomInt(10, 20);
-        rb.gameStats.rushYards = rb.gameStats.rushAttempts * getRandomInt(3, 6);
-        rb.gameStats.touchdowns += rushTds;
-    }
-    if (wr1 && wr1.gameStats) {
-        wr1.gameStats.receptions = Math.floor((qb?.gameStats.passCompletions || 10) * 0.4);
-        wr1.gameStats.recYards = wr1.gameStats.receptions * getRandomInt(10, 15);
-        wr1.gameStats.touchdowns += Math.floor(passTds * 0.6);
-    }
-    if (wr2 && wr2.gameStats) {
-        wr2.gameStats.receptions = Math.floor((qb?.gameStats.passCompletions || 10) * 0.3);
-        wr2.gameStats.recYards = wr2.gameStats.receptions * getRandomInt(9, 13);
-        wr2.gameStats.touchdowns += (passTds - Math.floor(passTds * 0.6));
-    }
-    if (def1 && def1.gameStats) def1.gameStats.tackles = getRandomInt(4, 8);
-    if (def2 && def2.gameStats) def2.gameStats.interceptions = (qb?.gameStats.interceptionsThrown || 0) > 0 ? 1 : 0;
+
+    const rushers = runningBacks.length > 0 ? runningBacks : qbs;
+    const rushAttemptShares = distributeTotal(
+        rushers.length > 0 ? getRandomInt(10, 20) : 0,
+        rushers
+    );
+    const rushTdShares = distributeTotal(rushTds, rushers);
+
+    rushers.forEach((entry, index) => {
+        const attempts = rushAttemptShares[index] || 0;
+
+        addStat(entry, 'rushAttempts', attempts);
+        addStat(entry, 'rushYards', attempts * getRandomInt(3, 6));
+        addStat(entry, 'touchdowns', rushTdShares[index] || 0);
+    });
+
+    const receiverMap = new Map();
+
+    [...wideReceivers, ...tightEnds, ...runningBacks].forEach(entry => {
+        const playerId = String(entry.player.id);
+        const existing = receiverMap.get(playerId);
+
+        if (!existing || getRoleWeight(entry) > getRoleWeight(existing)) {
+            receiverMap.set(playerId, entry);
+        }
+    });
+
+    const receivers = [...receiverMap.values()];
+    const targetShares = distributeTotal(passAttempts, receivers);
+    const receptionShares = distributeTotal(passCompletions, receivers);
+    const receivingTdShares = distributeTotal(passTds, receivers);
+
+    receivers.forEach((entry, index) => {
+        const targets = targetShares[index] || 0;
+        const receptions = Math.min(
+            targets,
+            receptionShares[index] || 0
+        );
+        const isTightEnd = entry.slot.startsWith('TE');
+        const receivingYardsPerCatch = getRandomInt(
+            isTightEnd ? 8 : 9,
+            isTightEnd ? 13 : 15
+        );
+
+        addStat(entry, 'targets', targets);
+        addStat(entry, 'receptions', receptions);
+        addStat(
+            entry,
+            'recYards',
+            receptions * receivingYardsPerCatch
+        );
+
+        if (targets > receptions && Math.random() < 0.12) {
+            addStat(entry, 'drops', 1);
+        }
+
+        addStat(
+            entry,
+            'touchdowns',
+            Math.min(receptions, receivingTdShares[index] || 0)
+        );
+    });
+
+    offensiveLine.forEach(entry => {
+        addStat(entry, 'pancakes', getRandomInt(0, 3));
+    });
+
+    defensiveLine.forEach(entry => {
+        addStat(entry, 'tackles', getRandomInt(1, 4));
+
+        if (Math.random() < 0.25) {
+            addStat(entry, 'sacks', 1);
+        }
+
+        if (Math.random() < 0.025) {
+            addStat(entry, 'fumblesRecovered', 1);
+        }
+    });
+
+    linebackers.forEach(entry => {
+        addStat(entry, 'tackles', getRandomInt(2, 5));
+
+        if (Math.random() < 0.12) {
+            addStat(entry, 'sacks', 1);
+        }
+
+        if (Math.random() < 0.02) {
+            addStat(entry, 'interceptions', 1);
+        }
+
+        if (Math.random() < 0.025) {
+            addStat(entry, 'fumblesRecovered', 1);
+        }
+    });
+
+    defensiveBacks.forEach(entry => {
+        addStat(entry, 'tackles', getRandomInt(1, 3));
+        addStat(entry, 'returnYards', getRandomInt(0, 10));
+
+        if (Math.random() < 0.04) {
+            addStat(entry, 'interceptions', 1);
+            addStat(entry, 'returnYards', getRandomInt(5, 25));
+        }
+
+        if (Math.random() < 0.015) {
+            addStat(entry, 'fumblesRecovered', 1);
+        }
+    });
 }
 
 export function simulateHistoricalMatch(homeTeam, awayTeam) {
+    if (homeTeam && awayTeam) {
+        try {
+            const result = simulateYouthMatch(homeTeam, awayTeam);
+
+            if (
+                !result ||
+                !Number.isFinite(result.homeScore) ||
+                !Number.isFinite(result.awayScore)
+            ) {
+                throw new Error('Historical simulator returned an invalid result.');
+            }
+
+            return result;
+        } catch (error) {
+            console.error(
+                `[Historical Sim] Failed: ${
+                    homeTeam.name || homeTeam.id || 'Home'
+                } vs ${
+                    awayTeam.name || awayTeam.id || 'Away'
+                }`,
+                error
+            );
+
+            throw error;
+        }
+    }
+
     const homeOvr = getTeamOverall(homeTeam);
     const awayOvr = getTeamOverall(awayTeam);
 
@@ -753,6 +1006,32 @@ export function simulateHistoricalMatch(homeTeam, awayTeam) {
 }
 
 export function simulateHistoricalSeason(yearNum, gameInstance) {
+    if (!gameInstance?.teams || !gameInstance?.players) return;
+
+    // Every historical season starts with clean standings and player totals.
+    // Career statistics and historical records remain intact.
+    gameInstance.teams.forEach(team => {
+        if (!team) return;
+
+        team.wins = 0;
+        team.losses = 0;
+        team.ties = 0;
+    });
+
+    gameInstance.players.forEach(player => {
+        if (!player) return;
+
+        player.seasonStats = createEmptySeasonStats();
+        player.gameStats = null;
+
+        if (
+            player.careerStats &&
+            typeof player.careerStats === 'object'
+        ) {
+            player.careerStats.snapsThisSeason = 0;
+        }
+    });
+
     gameInstance.currentWeek = 0;
     generateSchedule();
 
