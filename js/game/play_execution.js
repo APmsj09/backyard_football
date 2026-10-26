@@ -13,7 +13,7 @@ import { calculateSafetyHelp, diagnosePlay, getSmartCarrierTarget } from './ai.j
 import { getPerceptionContext, getPerceptionWeight } from './perception.js';
 import { getDecisionProfile } from './decision_model.js';
 import { pushGameLog } from './collisions.js';
-import { initPlayTelemetry, finalizePlayTelemetry, logPlayDebug } from './telemetry.js';
+import { initPlayTelemetry, finalizePlayTelemetry, logPlayDebug, logPlayEventSnapshot } from './telemetry.js';
 import { initMovementIntent, setPointIntent, setHoldIntent, setTrackIntent, setLaneIntent, setRouteIntent, resolveMovementIntent } from './movement_intent.js';
 import { calculateSchemeClash } from './staff.js';
 import {
@@ -954,6 +954,8 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             snapTaker.routePath = calculateRoutePath(snapTaker.assignment || 'run_dive', snapTaker.x, snapTaker.y);
         }
     }
+    
+    logPlayEventSnapshot('Snap / Play Start', playState.activePlayers, playState.ballState, playState.tick);
 }
 
 export function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensivePlayKey, offensiveAssignments, defensivePlayKey, gameLog) {

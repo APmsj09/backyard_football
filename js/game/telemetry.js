@@ -9,19 +9,40 @@ let playHistoryBuffer = [];
 let nextPlaySequence = 1;
 let telemetryEnabled = false;
 
+/**
+ * Safely stringifies an object, handling circular references 
+ * to prevent crashes during telemetry generation.
+ */
+function safeStringify(obj, space = undefined) {
+    try {
+        return JSON.stringify(obj, null, space);
+    } catch (e) {
+        try {
+            const seen = new WeakSet();
+            return JSON.stringify(obj, (key, value) => {
+                if (typeof value === "object" && value !== null) {
+                    if (seen.has(value)) return "[Circular/Shared Reference]";
+                    seen.add(value);
+                }
+                return value;
+            }, space);
+        } catch (innerError) {
+            return `[Unserializable: ${innerError.message}]`;
+        }
+    }
+}
+
 function disableTelemetry() {
     telemetryEnabled = false;
     playHistoryBuffer = [];
 
-    if (typeof window !== 'undefined') {
-        window.__ACTIVE_PLAY_TELEMETRY__ = null;
-        delete window.__CURRENT_TICK__;
-    }
+    globalThis.__ACTIVE_PLAY_TELEMETRY__ = null;
+    delete globalThis.__CURRENT_TICK__;
 }
 
 // Immediately clear diagnostic data when Debug Mode is switched off.
-if (typeof window !== 'undefined') {
-    window.addEventListener('backyard-debug-mode-changed', event => {
+if (globalThis.addEventListener) {
+    globalThis.addEventListener('backyard-debug-mode-changed', event => {
         if (event.detail?.enabled === false) {
             disableTelemetry();
         }
@@ -31,57 +52,50 @@ if (typeof window !== 'undefined') {
 function snapshotBallState(ball) {
     if (!ball) return null;
 
-    return {
-        x: ball.x ?? null,
-        y: ball.y ?? null,
-        z: ball.z ?? null,
-        vx: ball.vx ?? null,
-        vy: ball.vy ?? null,
-        vz: ball.vz ?? null,
-        inAir: ball.inAir ?? null,
-        isLoose: ball.isLoose ?? null,
-        throwerId: ball.throwerId ?? null,
-        targetX: ball.targetX ?? null,
-        targetY: ball.targetY ?? null
-    };
+    const {
+        x = null, y = null, z = null,
+        vx = null, vy = null, vz = null,
+        inAir = null, isLoose = null,
+        throwerId = null, targetX = null, targetY = null
+    } = ball;
+
+    return { x, y, z, vx, vy, vz, inAir, isLoose, throwerId, targetX, targetY };
 }
 
 function snapshotPlayers(players) {
     if (!Array.isArray(players)) return [];
 
-    return players.map(p => ({
-        id: p.id ?? null,
-        name: p.name ?? null,
-        slot: p.slot ?? null,
-        role: p.role ?? null,
-        isOffense: p.isOffense ?? null,
+    return players.reduce((acc, p) => {
+        if (!p) return acc;
 
-        x: p.x ?? null,
-        y: p.y ?? null,
-        z: p.z ?? null,
-        vx: p.vx ?? null,
-        vy: p.vy ?? null,
+        const {
+            id = null, name = null, slot = null, role = null, isOffense = null,
+            x = null, y = null, z = null, vx = null, vy = null,
+            action = null, hasBall = false, isBallCarrier = false, isBlocked = false, stunnedTicks = null
+        } = p;
 
-        action: p.action ?? null,
-        hasBall: p.hasBall ?? false,
-        isBallCarrier: p.isBallCarrier ?? false,
-        isBlocked: p.isBlocked ?? false,
-        stunnedTicks: p.stunnedTicks ?? null
-    }));
+        acc.push({
+            id, name, slot, role, isOffense,
+            x, y, z, vx, vy,
+            action, hasBall, isBallCarrier, isBlocked, stunnedTicks
+        });
+
+        return acc;
+    }, []);
 }
 
 export function clearPlayTelemetry() {
     disableTelemetry();
 }
 
-export function initPlayTelemetry(context, playState, offPlayKey, defPlayKey, enabled = true) {
-    if (!enabled || !isDebugMode() || typeof window === 'undefined') {
+export function initPlayTelemetry(context = {}, playState = {}, offPlayKey = null, defPlayKey = null, enabled = true) {
+    if (!enabled || !isDebugMode()) {
         disableTelemetry();
         return;
     }
 
     telemetryEnabled = true;
-    window.__CURRENT_TICK__ = playState?.tick ?? 0;
+    globalThis.__CURRENT_TICK__ = playState.tick ?? 0;
 
     const sequence = nextPlaySequence++;
 
@@ -100,15 +114,17 @@ export function initPlayTelemetry(context, playState, offPlayKey, defPlayKey, en
         },
 
         startState: {
-            type: playState?.type ?? null,
-            lineOfScrimmage: playState?.lineOfScrimmage ?? null,
-            maxTicks: playState?.maxTicks ?? null,
-            playIsLive: playState?.playIsLive ?? null,
-            ball: snapshotBallState(playState?.ballState),
-            players: snapshotPlayers(playState?.activePlayers)
+            type: playState.type ?? null,
+            lineOfScrimmage: playState.lineOfScrimmage ?? null,
+            maxTicks: playState.maxTicks ?? null,
+            playIsLive: playState.playIsLive ?? null,
+            ball: snapshotBallState(playState.ballState),
+            players: snapshotPlayers(playState.activePlayers)
         },
 
+        // NEW CODE
         decisions: [],
+        snapshots: [],
         nextDecisionSequence: 1,
         droppedDecisions: 0,
         result: null,
@@ -121,7 +137,25 @@ export function initPlayTelemetry(context, playState, offPlayKey, defPlayKey, en
         playHistoryBuffer.shift();
     }
 
-    window.__ACTIVE_PLAY_TELEMETRY__ = playData;
+    globalThis.__ACTIVE_PLAY_TELEMETRY__ = playData;
+}
+
+export function logPlayEventSnapshot(eventName, players, ball = null, tick = null) {
+    if (!telemetryEnabled || !isDebugMode()) return;
+    
+    const current = globalThis.__ACTIVE_PLAY_TELEMETRY__;
+    if (!current) return;
+
+    const recordedTick = Number.isFinite(tick)
+        ? tick
+        : (Number.isFinite(globalThis.__CURRENT_TICK__) ? globalThis.__CURRENT_TICK__ : 0);
+
+    current.snapshots.push({
+        eventName,
+        tick: recordedTick,
+        ball: snapshotBallState(ball),
+        players: snapshotPlayers(players)
+    });
 }
 
 export function logPlayDebug(category, message, details = {}, tick = null, playId = null) {
@@ -132,23 +166,17 @@ export function logPlayDebug(category, message, details = {}, tick = null, playI
         return;
     }
 
-    if (typeof window === 'undefined' || !window.__ACTIVE_PLAY_TELEMETRY__) return;
+    const current = globalThis.__ACTIVE_PLAY_TELEMETRY__;
+    if (!current) return;
 
     // If an active debug ID is set, ignore events from concurrent background simulations
-    if (window.__DEBUG_PLAY_ID__ && playId && playId !== window.__DEBUG_PLAY_ID__) {
+    if (globalThis.__DEBUG_PLAY_ID__ && playId && playId !== globalThis.__DEBUG_PLAY_ID__) {
         return;
     }
 
-    const current = window.__ACTIVE_PLAY_TELEMETRY__;
-    if (!current) return;
-
     const recordedTick = Number.isFinite(tick)
         ? tick
-        : (
-            Number.isFinite(window.__CURRENT_TICK__)
-                ? window.__CURRENT_TICK__
-                : 0
-        );
+        : (Number.isFinite(globalThis.__CURRENT_TICK__) ? globalThis.__CURRENT_TICK__ : 0);
 
     if (current.decisions.length >= MAX_DECISIONS_PER_PLAY) {
         current.decisions.shift();
@@ -164,24 +192,20 @@ export function logPlayDebug(category, message, details = {}, tick = null, playI
     });
 }
 
-export function finalizePlayTelemetry(playResult, finalBallY, playState = null) {
-    if (!telemetryEnabled) return;
-
-    if (!isDebugMode()) {
+export function finalizePlayTelemetry(playResult = {}, finalBallY = null, playState = null) {
+    if (!telemetryEnabled || !isDebugMode()) {
         disableTelemetry();
         return;
     }
 
-    if (typeof window === 'undefined') return;
-
-    const current = window.__ACTIVE_PLAY_TELEMETRY__;
+    const current = globalThis.__ACTIVE_PLAY_TELEMETRY__;
     if (!current) return;
 
     current.result = { ...playResult, finalBallY };
 
     if (playState) {
         const flaggedCarriers = (playState.activePlayers || [])
-            .filter(p => p.hasBall || p.isBallCarrier);
+            .filter(p => p && (p.hasBall || p.isBallCarrier));
 
         current.finalState = {
             tick: playState.tick ?? null,
@@ -202,8 +226,8 @@ export function finalizePlayTelemetry(playResult, finalBallY, playState = null) 
     }
 
     // Close collection for this play while preserving the buffered report.
-    window.__ACTIVE_PLAY_TELEMETRY__ = null;
-    delete window.__CURRENT_TICK__;
+    globalThis.__ACTIVE_PLAY_TELEMETRY__ = null;
+    delete globalThis.__CURRENT_TICK__;
 }
 
 export function generatePlayDebugReport() {
@@ -223,7 +247,7 @@ export function generatePlayDebugReport() {
     lines.push("================================================================================\n");
 
     playHistoryBuffer.forEach((play, index) => {
-        const m = play.meta;
+        const m = play.meta || {};
         const r = play.result || {};
 
         lines.push("--------------------------------------------------------------------------------");
@@ -246,16 +270,12 @@ export function generatePlayDebugReport() {
                 `Max Ticks=${s.maxTicks ?? 'N/A'}`
             );
 
-            lines.push(`Initial Ball: ${JSON.stringify(s.ball)}`);
+            lines.push(`Initial Ball: ${safeStringify(s.ball)}`);
 
-            const initialCarriers = (s.players || [])
-                .filter(p => p.hasBall || p.isBallCarrier);
-
+            const initialCarriers = (s.players || []).filter(p => p.hasBall || p.isBallCarrier);
             lines.push(
                 `Initial Flagged Carriers: ${
-                    initialCarriers.map(p =>
-                        `${p.name} (x=${p.x}, y=${p.y})`
-                    ).join('; ') || 'None'
+                    initialCarriers.map(p => `${p.name} (x=${p.x}, y=${p.y})`).join('; ') || 'None'
                 }`
             );
         }
@@ -272,15 +292,29 @@ export function generatePlayDebugReport() {
                 `Return Start Y=${f.returnStartY ?? 'N/A'}`
             );
 
-            lines.push(`Final Ball: ${JSON.stringify(f.ball)}`);
+            lines.push(`Final Ball: ${safeStringify(f.ball)}`);
 
             lines.push(
                 `Final Flagged Carriers: ${
-                    f.flaggedCarriers.map(p =>
-                        `${p.name} (offense=${p.isOffense}, x=${p.x}, y=${p.y})`
-                    ).join('; ') || 'None'
+                    f.flaggedCarriers.map(p => `${p.name} (offense=${p.isOffense}, x=${p.x}, y=${p.y})`).join('; ') || 'None'
                 }`
             );
+        }
+
+// NEW CODE
+        if (play.snapshots && play.snapshots.length > 0) {
+            lines.push("--------------------------------------------------------------------------------");
+            lines.push("KEY EVENT SNAPSHOTS:");
+            play.snapshots.forEach(snap => {
+                lines.push(`  [Tick ${String(snap.tick).padStart(3, '0')}] EVENT: ${snap.eventName}`);
+                if (snap.ball) {
+                    lines.push(`    Ball: x=${snap.ball.x?.toFixed(1)}, y=${snap.ball.y?.toFixed(1)}`);
+                }
+                const pList = (snap.players || [])
+                    .map(p => `${p.name || p.id} (x=${p.x?.toFixed(1)}, y=${p.y?.toFixed(1)})`)
+                    .join('; ');
+                lines.push(`    Players: ${pList || 'None'}`);
+            });
         }
 
         lines.push("--------------------------------------------------------------------------------");
@@ -297,28 +331,33 @@ export function generatePlayDebugReport() {
                 );
 
                 if (d.details !== null && d.details !== undefined) {
-                    lines.push(
-                        `         Details: ${
-                            typeof d.details === 'object'
-                                ? JSON.stringify(d.details)
-                                : d.details
-                        }`
-                    );
+                    const isObject = typeof d.details === 'object';
+                    const isEmptyObject = isObject && Object.keys(d.details).length === 0;
+
+                    if (!isEmptyObject) {
+                        let detailsStr;
+                        if (d.details instanceof Error) {
+                            detailsStr = d.details.stack || d.details.message;
+                        } else if (isObject) {
+                            detailsStr = safeStringify(d.details);
+                        } else {
+                            detailsStr = String(d.details);
+                        }
+
+                        lines.push(`         Details: ${detailsStr}`);
+                    }
                 }
             });
         }
 
         if (play.droppedDecisions > 0) {
-            lines.push(
-                `WARNING: ${play.droppedDecisions} older diagnostic events were discarded.`
-            );
+            lines.push(`WARNING: ${play.droppedDecisions} older diagnostic events were discarded.`);
         }
 
         lines.push("\n");
     });
 
     lines.push("================================================================================");
-
     return lines.join("\n");
 }
 
@@ -330,10 +369,16 @@ export function downloadPlayDebugFile(format = 'json') {
 
     if (!telemetryEnabled) return;
 
+    // Gracefully abort in non-DOM environments like Node.js
+    if (typeof Blob === 'undefined' || typeof document === 'undefined') {
+        console.warn("downloadPlayDebugFile: Environment does not support file downloading.");
+        return;
+    }
+
     const useJson = format.toLowerCase() === 'json';
 
     const content = useJson
-        ? JSON.stringify(playHistoryBuffer, null, 2)
+        ? safeStringify(playHistoryBuffer, 2)
         : generatePlayDebugReport();
 
     const extension = useJson ? 'json' : 'txt';
@@ -343,10 +388,11 @@ export function downloadPlayDebugFile(format = 'json') {
 
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
+    
     const a = document.createElement('a');
-
     a.href = url;
     a.download = `play_debug_buffer_${Date.now()}.${extension}`;
+    a.style.display = 'none';
 
     document.body.appendChild(a);
     a.click();

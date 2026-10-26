@@ -78,6 +78,8 @@ export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) 
         playState.ballState.isLoose = true;
         playState.ballState.inAir = false;
 
+        logPlayEventSnapshot('Fumble Forced', playState.activePlayers, playState.ballState, playState.tick);
+
         const dx = ballCarrierState.x - tacklerState.x;
         const dy = ballCarrierState.y - tacklerState.y;
         playState.ballState.vx = dx * 2;
@@ -576,6 +578,8 @@ export function checkTackleCollisions(playState, gameLog) {
             playState.yards = carrier.y - playState.lineOfScrimmage;
             playState.finalBallY = carrier.y;
             playState.statEvents.push({ type: 'tackle', playerId: defender.id });
+            
+            logPlayEventSnapshot('Tackle / Play Dead', playState.activePlayers, playState.ballState, playState.tick);
 
             const inOwnEndzone = (carrier.isOffense && carrier.y <= 10.0) || (!carrier.isOffense && carrier.y >= 110.0);
             const caughtInEndzone = playState.returnStartY !== null && ((carrier.isOffense && playState.returnStartY <= 10.0) || (!carrier.isOffense && playState.returnStartY >= 110.0));
@@ -726,6 +730,8 @@ export function checkFumbleRecovery(playState, gameLog, tackleRange) {
     if (possessionChange) {
         playState.returnStartY = bestPlayer.y;
     }
+
+    logPlayEventSnapshot('Fumble Recovered', playState.activePlayers, playState.ballState, playState.tick);
 
     return {
         playerState: bestPlayer,
@@ -1319,6 +1325,8 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 playState.incomplete = true;
                 playState.finalBallY = playState.lineOfScrimmage;
                 if (gameLog && !ball.isThrowAway) pushGameLog(gameLog, `[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`, playState);
+                
+                logPlayEventSnapshot('Pass Incomplete', playState.activePlayers, ball, playState.tick);
             }
         }
         return;
@@ -1919,11 +1927,15 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 playState.turnover = true;
                 playState.returnStartY = bestCandidate.y;
                 playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
+                
+                logPlayEventSnapshot('Interception', playState.activePlayers, ball, playState.tick);
                 return;
             }
 
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👍 CATCH! ${bestCandidate.role} ${bestCandidate.name} at (${actionX}, ${actionY}, z:${actionZ})`, playState);
             playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: 0 });
+            
+            logPlayEventSnapshot('Pass Caught', playState.activePlayers, ball, playState.tick);
             return;
 
         } else if (ball.isLateral) {
@@ -2155,6 +2167,8 @@ if (playState.type === 'punt') {
                 ball.vz = 0; ball.vx = 0; ball.vy = 0;
                 playState.finalBallY = playState.lineOfScrimmage;
                 if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`, playState);
+                
+                logPlayEventSnapshot('Pass Incomplete', playState.activePlayers, ball, playState.tick);
             } else if (wasCaught && playState.playIsLive) {
                 playState.playIsLive = false;
                 if (gameLog && !playState.fumbleOccurred) pushGameLog(gameLog, `[Tick ${playState.tick}] ⏱️ Ball hits the ground.`, playState);

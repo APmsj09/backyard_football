@@ -1462,14 +1462,30 @@ function resolvePassPlay(
     const accuracy = getSkill(qb, 'throwingAccuracy');
     const maxGain = Math.max(0, 100 - ballOn);
 
-    // Establish the intended target depth before resolving the throw.
-    // Interceptions use this location; completions add yards after the catch.
+    // Estimate target depth from the type of pass being attempted.
+    // Interceptions occur near this depth; completions resolve separately.
+    const airYardRange = isScreen
+        ? [1, 5]
+        : isQuick
+            ? [3, 8]
+            : isDeep
+                ? [12, 24]
+                : [6, 15];
+
+    const baseAirYards = roll(airYardRange[0], airYardRange[1]);
+
     const intendedAirYards = clamp(
-        Math.round(4 + Math.random() * 9 + (chosen.separation - 50) * 0.10),
-        2,
-        18
+        Math.round(
+            baseAirYards + (chosen.separation - 50) * 0.10
+        ),
+        1,
+        isDeep ? 28 : 18
     );
-    const interceptionSpotYards = Math.min(maxGain, intendedAirYards);
+
+    const interceptionSpotYards = Math.min(
+        maxGain,
+        intendedAirYards
+    );
 
     // PHASE 4: the QB executes the throw; pressure and a tight window reduce accuracy.
     const onTargetChance = clamp(
@@ -1489,8 +1505,13 @@ function resolvePassPlay(
     const passOnTarget = Math.random() <= onTargetChance;
 
     // PHASE 4B: The defender contests every throw, not just inaccurate ones.
-    const defenderCoverageSkill = weightedSkill(chosen.defender, COVER_SKILLS);
-    const defenderHands = getSkill(chosen.defender, 'catchingHands');
+    const defenderCoverageSkill = chosen.defender
+        ? weightedSkill(chosen.defender, COVER_SKILLS)
+        : 50;
+
+    const defenderHands = chosen.defender
+        ? getSkill(chosen.defender, 'catchingHands')
+        : 50;
 
     const interceptionChance = clamp(
         0.004 +
