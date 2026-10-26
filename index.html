@@ -184,27 +184,30 @@
         <section id="draft-screen" class="screen hidden h-full min-h-0 flex flex-col overflow-hidden">
             <!-- Header & War Room Telemetry -->
             <div id="draft-header"
-                class="flex-shrink-0 p-3 bg-slate-900 text-white rounded-sm shadow-sm mb-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700">
-                <div>
-                    <div class="flex items-center gap-3">
-                        <h2 class="text-2xl font-display tracking-wide">Season <span id="draft-year">?</span> Draft</h2>
-                        <span id="draft-user-picks"
-                            class="text-[11px] bg-slate-800 text-amber-400 font-mono px-2 py-0.5 rounded border border-slate-700">Your
-                            Picks: Calculating...</span>
-                    </div>
-                    <p class="text-xs text-slate-400">War Room: Select future franchise stars.</p>
+                class="flex-shrink-0 px-3 py-2 bg-slate-900 text-white rounded-sm shadow-sm mb-1 flex flex-row flex-wrap justify-between items-center gap-x-3 gap-y-1 border-b border-slate-700">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+                    <h2 class="text-xl font-display tracking-wide">
+                        Season <span id="draft-year">?</span> Draft
+                    </h2>
+                    <span id="draft-user-picks"
+                        class="text-[10px] bg-slate-800 text-amber-400 font-mono px-2 py-0.5 rounded border border-slate-700">
+                        Your Picks: Calculating...
+                    </span>
                 </div>
-                <div class="flex items-center gap-3 bg-slate-800 px-4 py-1.5 rounded border border-slate-700">
-                    <span class="text-[10px] text-slate-400 uppercase tracking-widest font-bold">On The Clock:</span>
-                    <span class="text-xl font-black text-white" id="draft-pick-number">#1</span>
-                    <span class="text-sm text-amber-400 font-bold truncate max-w-[160px]"
+
+                <div class="flex items-center gap-2 bg-slate-800 px-2.5 py-1 rounded border border-slate-700">
+                    <span class="text-[9px] text-slate-400 uppercase tracking-wider font-bold">
+                        On Clock
+                    </span>
+                    <span class="text-lg font-black text-white" id="draft-pick-number">#1</span>
+                    <span class="text-xs text-amber-400 font-bold truncate max-w-[160px]"
                         id="draft-picking-team">?</span>
                 </div>
             </div>
 
             <!-- Recent Picks Ticker -->
             <div id="draft-recent-ticker"
-                class="flex-shrink-0 mb-2 py-1.5 px-3 bg-slate-800 border border-slate-700 rounded text-xs text-slate-300 flex items-center gap-2 overflow-x-auto whitespace-nowrap">
+                class="flex-shrink-0 mb-1 py-1 px-2 bg-slate-800 border border-slate-700 rounded text-[11px] text-slate-300 flex items-center gap-2 overflow-x-auto whitespace-nowrap">
                 <span class="text-amber-400 font-bold uppercase text-[10px] tracking-wider shrink-0">Recent
                     Picks:</span>
                 <div id="draft-ticker-items" class="flex items-center gap-3 text-slate-300 font-mono text-[11px]">
@@ -218,7 +221,7 @@
                 <div
                     class="lg:col-span-8 bg-white rounded-sm shadow-sm flex flex-col overflow-hidden border border-slate-300 min-h-0">
                     <!-- Main Navigation Tabs -->
-                    <div class="p-2 border-b border-slate-200 flex items-center justify-between bg-slate-900 shrink-0">
+                    <div class="px-2 py-1 border-b border-slate-200 flex items-center justify-between bg-slate-900 shrink-0">
                         <div class="flex items-center gap-1.5">
                             <button
                                 class="draft-tab-btn active px-3 py-1.5 rounded text-xs font-bold text-white bg-amber-600 transition"
@@ -236,7 +239,7 @@
                     <div id="draft-tab-pool" class="draft-tab-content flex flex-col flex-grow overflow-hidden min-h-0">
                         <!-- Filters & Stat View Tabs -->
                         <div
-                            class="p-2.5 border-b border-slate-200 flex flex-wrap justify-between items-center bg-slate-50 gap-2 shrink-0">
+                            class="px-2 py-1.5 border-b border-slate-200 flex flex-wrap justify-between items-center bg-slate-50 gap-1.5 shrink-0">
                             <!-- Left: Search & Pos Filter -->
                             <div class="flex items-center gap-2">
                                 <input type="text" id="draft-search" placeholder="Search prospects..."
