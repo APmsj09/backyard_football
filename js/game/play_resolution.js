@@ -2972,6 +2972,15 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         recPlayer.isBallCarrier = true;
                         recPlayer.action = 'run_path';
 
+                        // If the defense recovers the fumble, flip their momentum so they can return it 
+                        // smoothly instead of stalling out against their own forward sprint velocity.
+                        if (recovery.possessionChange) {
+                            const agility = recPlayer.agility || 50;
+                            recPlayer.vx *= 0.2;
+                            recPlayer.vy = -Math.abs(recPlayer.vy * 0.1) - (1.5 + (agility / 100));
+                            recPlayer.contactReduction = 0.6;
+                        }
+
                         ballCarrierState = recPlayer;
                         playState.possessionChanged = recovery.possessionChange;
                         playState.returnStartY = recPlayer.y;

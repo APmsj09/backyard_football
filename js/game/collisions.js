@@ -1380,6 +1380,11 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             }
         }
 
+        // Do not let lead blockers or other offensive teammates steal a designed lateral pitch out of the air!
+        if (ball.isLateral && !ball.isLoose && p.isOffense && p.id !== ball.targetPlayerId) {
+            return false;
+        }
+
         let playerHeight = p.hgt || p.height || 70;
         if (!p.hgt && !p.height) {
             if (p.attributes?.physical?.height) {
