@@ -2464,7 +2464,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         const activeOffense = playState.activePlayers.filter(p => p.isOffense);
         const activeDefense = playState.activePlayers.filter(p => !p.isOffense);
         const qb1 = playState.activePlayers.find(p => p.slot === 'QB1');
-        const defaultRb = playState.activePlayers.find(p => p.slot === 'RB1');
+        const rb1 = playState.activePlayers.find(p => p.slot === 'RB1');
 
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             playState.tick++;

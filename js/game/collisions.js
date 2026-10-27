@@ -1692,6 +1692,12 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 if (p.isOffense !== bestCandidate.isOffense) {
                     p.action = 'pursuit';
                     p.snapReactionTimer = 0;
+                    
+                    // Delay immediate tackles from contesting defenders who just lost the catch battle.
+                    // This gives the receiver a fraction of a second to secure the ball and turn upfield.
+                    if (getDistance(p, bestCandidate) < 2.5) {
+                        p.stunnedTicks = Math.max(p.stunnedTicks || 0, 8); // ~0.32s recovery time
+                    }
                 }
             });
 
