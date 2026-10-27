@@ -66,25 +66,6 @@ export function calculateAiTeamNeedAndDesire(
         return { shouldBid: false, desireScore: 0, offer: null, reason: 'Coach refuses to recruit high-ego divas' };
     }
 
-    // 3. VALUE OVER REPLACEMENT (VOR) & STARTER ROOM CAPACITY
-    // 8v8 scheme starter counts: OL requires 3; WR, DB, DL require 2-3; QB, RB, TE require 1
-    const requiredStarters = bestPos === 'OL' ? 3 : (['WR', 'DB', 'DL'].includes(bestPos) ? 2 : 1);
-    const viablePlayers = roster.filter(p => isPlayerViableForPosition(p, bestPos));
-    const sortedStarters = viablePlayers.map(p => calculateOverall(p, bestPos)).sort((a, b) => b - a);
-
-    // True vacancy: The team does not have enough viable players to even field their starting unit
-    const isDesperateVoid = viablePlayers.length < requiredStarters;
-
-    // Coach Scouting Accuracy: Poor evaluators perceive player ratings with noise; high-skill evaluators see true VOR
-    const evalNoise = evalSkill < 55 ? (Math.sin(playerOvr + age) * (60 - evalSkill) * 0.18) : 0;
-    const perceivedPlayerOvr = Math.round(playerOvr + evalNoise);
-
-    // Compare prospect against the WEAKEST starter in that room
-    const benchmarkIndex = Math.min(sortedStarters.length - 1, requiredStarters - 1);
-    const currentStarterOvr = sortedStarters.length > 0 ? (sortedStarters[benchmarkIndex] || 0) : 0;
-    const upgradeDelta = isDesperateVoid ? (perceivedPlayerOvr - 30) : (perceivedPlayerOvr - currentStarterOvr);
-
-    // Strict No-Spite Rule: If starting unit is full and prospect is not a real upgrade, pass completely
     // 3. VALUE OVER REPLACEMENT (VOR), STARTER GAPS & ROSTER DEPTH
     const allPositions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
 
