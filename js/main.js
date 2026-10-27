@@ -15,8 +15,13 @@ import {
 } from './game/season.js';
 import {
     initializeInheritedScoutingReports,
-    recordScoutingReportOutcome
+    recordScoutingReportOutcome,
+    processWeeklyScoutingAssignments
 } from './game/scouting.js';
+
+import {
+    getEffectiveStaffWorkHours
+} from './game/staff.js';
 
 let gameState = null;
 let selectedPlayerId = null;
@@ -1276,6 +1281,83 @@ async function runAIDraftPicks() {
     }
 }
 
+function resolveOffseasonFreeAgentScouting() {
+    const gs = Game.getGameState();
+    const team = gs?.playerTeam;
+
+    if (!gs || !team) {
+        return { playersUpdated: 0, hoursUsed: 0 };
+    }
+
+    const plan = Game.ensureTeamStaffWorkPlan?.(team);
+
+    if (!plan || !Array.isArray(plan.assignments)) {
+        return { playersUpdated: 0, hoursUsed: 0 };
+    }
+
+    const originalAssignments = plan.assignments;
+
+    // Calculate effective hours against the original full workload,
+    // before temporarily limiting this resolution to scouting alone.
+    const scoutingAssignments = originalAssignments
+        .filter(assignment =>
+            assignment?.task === 'scouting' &&
+            assignment.coachId != null &&
+            Number.isFinite(Number(assignment.hours)) &&
+            Number(assignment.hours) > 0
+        )
+        .map(assignment => ({
+            ...assignment,
+            hours: getEffectiveStaffWorkHours(team, assignment),
+            focus: 'freeAgents',
+
+            // Do not carry draft-specific targets into free-agent scouting.
+            targetPlayerIds: assignment.focus === 'freeAgents'
+                ? assignment.targetPlayerIds
+                : undefined
+        }))
+        .filter(assignment =>
+            Number.isFinite(assignment.hours) &&
+            assignment.hours > 0
+        );
+
+    if (scoutingAssignments.length === 0) {
+        return { playersUpdated: 0, hoursUsed: 0 };
+    }
+
+    const previousStaffWorkKey = team.staffWorkLastResolvedKey;
+    const previousScoutingWorkKey = team.scoutingWorkLastResolvedKey;
+
+    try {
+        // Only scouting assignments are processed before the bidding market.
+        plan.assignments = scoutingAssignments;
+
+        // Week -1 represents this pre-bidding scouting window.
+        // It is separate from regular-season Week 0.
+        return processWeeklyScoutingAssignments(
+            team,
+            gs,
+            Number(gs.year),
+            -1
+        );
+    } finally {
+        // Restore the user's workload exactly as it was.
+        plan.assignments = originalAssignments;
+
+        if (previousStaffWorkKey === undefined) {
+            delete team.staffWorkLastResolvedKey;
+        } else {
+            team.staffWorkLastResolvedKey = previousStaffWorkKey;
+        }
+
+        if (previousScoutingWorkKey === undefined) {
+            delete team.scoutingWorkLastResolvedKey;
+        } else {
+            team.scoutingWorkLastResolvedKey = previousScoutingWorkKey;
+        }
+    }
+}
+
 async function handleDraftEnd() {
     if (!gameState) return;
     Game.completeDraft();
@@ -1284,6 +1366,17 @@ async function handleDraftEnd() {
     Game.generateWeeklyFreeAgents();
     gameState = Game.getGameState();
     gameState.draftCompleted = true;
+
+    // Give the staff a scouting window before free-agent bidding begins.
+    const scoutingResult = resolveOffseasonFreeAgentScouting();
+
+    gameState = Game.getGameState();
+    Game.saveGameState(activeSaveKey);
+
+    console.info(
+        '[Offseason Scouting] Free-agent scouting completed:',
+        scoutingResult
+    );
 
     // REPORT 3: Finalize Draft Report
     debugCollector.finalizeDraftReport(gameState);
@@ -2326,17 +2419,341 @@ function buildResultsModalHtml(results) {
     return html;
 }
 
+function buildPlayerCardScoutingContext(sourcePlayer, gameState) {
+    const team = gameState?.playerTeam;
+    const rosterEntries = Array.isArray(team?.roster)
+        ? team.roster
+        : [];
+
+    const ownsPlayer = Boolean(
+        team &&
+        (
+            String(sourcePlayer.teamId) === String(team.id) ||
+            rosterEntries.some(entry => {
+                const rosterPlayerId =
+                    entry && typeof entry === 'object'
+                        ? entry.id
+                        : entry;
+
+                return rosterPlayerId != null &&
+                    String(rosterPlayerId) === String(sourcePlayer.id);
+            })
+        )
+    );
+
+    if (ownsPlayer) {
+        return {
+            player: sourcePlayer,
+            isOwned: true,
+            report: null,
+            level: 4,
+            friendTip: null,
+            potentialDisplay: sourcePlayer.potential || 'Unknown',
+            statusLabel: 'Your player'
+        };
+    }
+
+    const report = team
+        ? Game.getTeamScoutingReport?.(
+            team,
+            sourcePlayer.id
+        ) || null
+        : null;
+
+    const rawLevel = Number(report?.level);
+    const level =
+        Number.isInteger(rawLevel) && rawLevel >= 1 && rawLevel <= 4
+            ? rawLevel
+            : 0;
+
+    const hasId = (value, targetId) =>
+        value != null &&
+        targetId != null &&
+        String(value) === String(targetId);
+
+    const hasIdInList = (list, targetId) =>
+        Array.isArray(list) &&
+        list.some(id => hasId(id, targetId));
+
+    // A roster connection can provide a qualitative tip, not exact ratings.
+    const rosterMembers = rosterEntries
+        .map(entry => {
+            if (entry && typeof entry === 'object') {
+                if (entry.id != null && entry.attributes) {
+                    return entry;
+                }
+
+                return entry.id != null
+                    ? Game.getPlayer(entry.id)
+                    : null;
+            }
+
+            return Game.getPlayer(entry);
+        })
+        .filter(Boolean);
+
+    const friendTip = rosterMembers
+        .map(member => {
+            const isBestFriend =
+                hasId(sourcePlayer.social?.bestFriendId, member.id) ||
+                hasId(member.social?.bestFriendId, sourcePlayer.id);
+
+            const isGoodFriend =
+                hasIdInList(
+                    sourcePlayer.social?.goodFriendIds,
+                    member.id
+                ) ||
+                hasIdInList(
+                    member.social?.goodFriendIds,
+                    sourcePlayer.id
+                );
+
+            if (!isBestFriend && !isGoodFriend) return null;
+
+            return {
+                member,
+                relationship: isBestFriend
+                    ? 'close friend'
+                    : 'friend',
+                priority: isBestFriend ? 2 : 1
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.priority - a.priority)[0] || null;
+
+    // Friendship provides a rough character lead, not a formal rating.
+    // Close friends can offer a stronger clue than ordinary friends.
+    const characterValues = [
+        sourcePlayer.personality?.workEthic,
+        sourcePlayer.personality?.dependability
+    ]
+        .map(Number)
+        .filter(Number.isFinite);
+
+    const characterAverage = characterValues.length > 0
+        ? characterValues.reduce((sum, value) => sum + value, 0) /
+            characterValues.length
+        : null;
+
+    let friendTipText = null;
+
+    if (friendTip) {
+        if (!Number.isFinite(characterAverage)) {
+            friendTipText =
+                'Your roster connection knows this player, but has no clear read on their work habits.';
+        } else {
+            const isCloseFriend =
+                friendTip.relationship === 'close friend';
+
+            const strongThreshold = isCloseFriend ? 70 : 80;
+            const concernThreshold = isCloseFriend ? 40 : 30;
+
+            if (characterAverage >= strongThreshold) {
+                friendTipText =
+                    'The word from your connection is that this player tends to put in the work and follow through. Treat it as an unverified character lead.';
+            } else if (characterAverage <= concernThreshold) {
+                friendTipText =
+                    'Your connection has some concerns about this player’s effort or reliability. This could be biased or incomplete information; verify it through scouting.';
+            } else {
+                friendTipText =
+                    'Your connection has no decisive read on this player’s work ethic or reliability. Formal scouting is still needed.';
+            }
+        }
+
+        friendTip.text = friendTipText;
+    }
+
+    // Only height and weight are public measurements.
+    // All other attributes must come from this team's scouting report.
+    const ranges = report?.attributeRanges || {};
+    const safeAttributes = {};
+
+    for (const [category, values] of Object.entries(
+        sourcePlayer.attributes || {}
+    )) {
+        if (
+            !values ||
+            typeof values !== 'object' ||
+            Array.isArray(values)
+        ) {
+            continue;
+        }
+
+        safeAttributes[category] = {};
+
+        for (const [attribute, actualValue] of Object.entries(values)) {
+            if (
+                category === 'physical' &&
+                ['height', 'weight'].includes(attribute)
+            ) {
+                safeAttributes[category][attribute] = actualValue;
+                continue;
+            }
+
+            const range = ranges[category]?.[attribute];
+
+            safeAttributes[category][attribute] =
+                range &&
+                Number.isFinite(Number(range.low)) &&
+                Number.isFinite(Number(range.high))
+                    ? {
+                        low: Math.min(
+                            Number(range.low),
+                            Number(range.high)
+                        ),
+                        high: Math.max(
+                            Number(range.low),
+                            Number(range.high)
+                        )
+                    }
+                    : null;
+        }
+    }
+
+    const potentialRange = report?.potentialRange;
+    const potentialDisplay = level > 0 && potentialRange
+        ? `${potentialRange.bestPossible}–${potentialRange.worstPossible}`
+        : 'Unknown';
+
+    const progress = Number(report?.progressPoints) || 0;
+    const levelLabels = [
+        'Unscouted',
+        'Initial report',
+        'Evaluated',
+        'Detailed report',
+        'Fully scouted'
+    ];
+
+    let statusLabel = levelLabels[level];
+
+    if (level === 0 && progress > 0) {
+        statusLabel = `Scouting underway · ${progress.toFixed(1)} points`;
+    } else if (level === 0 && friendTip) {
+        statusLabel = 'Friend tip available · no formal report';
+    }
+
+    // Never pass hidden potential, personality ratings, talent ceilings,
+    // or raw attributes into the external player's rendered dossier.
+    const safePlayer = {
+        ...sourcePlayer,
+        archetypeName: null,
+        potential: null,
+        scouting: null,
+        talentAttributes: undefined,
+        developmentProfile: undefined,
+        favoriteOffensivePosition: null,
+        favoriteDefensivePosition: null,
+        personality: {},
+        social: {},
+        expectations: null,
+        attributes: safeAttributes,
+        bio: null,
+
+        // Retain season statistics for the public-record tab, but the
+        // growth-history panel will be hidden for external players.
+        progression: Array.isArray(sourcePlayer.progression)
+            ? sourcePlayer.progression
+            : []
+    };
+
+    return {
+        player: safePlayer,
+        isOwned: false,
+        report,
+        level,
+        friendTip,
+        potentialDisplay,
+        statusLabel
+    };
+}
+
 export function openPlayerCard(playerId) {
     const gs = Game.getGameState();
     if (!gs) return;
-    const player = Game.getPlayer(playerId) || gs.players?.find(p => p.id === playerId);
-    if (!player) return;
 
-    const team = gs.teams.find(t => t.id === player.teamId);
+    const sourcePlayer =
+        Game.getPlayer(playerId) ||
+        gs.players?.find(p => String(p.id) === String(playerId));
+
+    if (!sourcePlayer) return;
+
+    const view = buildPlayerCardScoutingContext(
+        sourcePlayer,
+        gs
+    );
+
+    const player = view.player;
+    const report = view.report;
+    const scoutingLevel = view.level;
+    const friendTip = view.friendTip;
+    const isMyTeam = view.isOwned;
+
+    const team = gs.teams.find(
+        t => String(t.id) === String(sourcePlayer.teamId)
+    );
+
     const teamName = team ? team.name : 'Free Agent';
-    const isMyTeam = player.teamId === gs.playerTeam?.id;
+    const potentialDisplay = view.potentialDisplay;
 
-    const fits = getBestTwoWayFits(player);
+    const makeReportedFit = fit => {
+        if (
+            !fit ||
+            typeof fit.position !== 'string' ||
+            !Number.isFinite(Number(fit.low)) ||
+            !Number.isFinite(Number(fit.high))
+        ) {
+            return { position: '—' };
+        }
+
+        return {
+            position: fit.position,
+            low: Math.min(Number(fit.low), Number(fit.high)),
+            high: Math.max(Number(fit.low), Number(fit.high))
+        };
+    };
+
+    const fits = isMyTeam
+        ? getBestTwoWayFits(sourcePlayer)
+        : {
+            offense: makeReportedFit(
+                report?.evaluation?.offenseFit
+            ),
+            defense: makeReportedFit(
+                report?.evaluation?.defenseFit
+            )
+        };
+
+    const formatFit = fit => {
+        if (!fit || fit.position === '—') {
+            return isMyTeam ? '—' : 'Not assessed';
+        }
+
+        if (isMyTeam) {
+            return `${fit.position} ${fit.ovr}`;
+        }
+
+        return `${fit.position} ${fit.low}–${fit.high}`;
+    };
+
+    const scoutingStatusHtml = !isMyTeam
+        ? `
+            <div class="rounded border border-slate-200 bg-slate-50 p-2.5 text-xs">
+                <div class="font-black uppercase tracking-wide text-slate-700">
+                    ${view.statusLabel}
+                </div>
+                ${
+                    report?.evaluation?.summary
+                        ? `<p class="mt-1 text-slate-600">${report.evaluation.summary}</p>`
+                        : ''
+                }
+                ${
+                    report?.evaluation?.characterSummary
+                        ? `<p class="mt-1 text-slate-600"><b>Character:</b> ${report.evaluation.characterSummary}</p>`
+                        : ''
+                }
+            </div>
+        `
+        : '';
 
     let activeCardTab = 'overview';
     window.app_switchPlayerCardTab = (tab) => {
@@ -2369,13 +2786,27 @@ export function openPlayerCard(playerId) {
                 ? 'text-blue-100'
                 : 'text-slate-400';
 
+        const reportedFit = fits.offense.position === pos
+            ? fits.offense
+            : fits.defense.position === pos
+                ? fits.defense
+                : null;
+
+        const ratingLabel = isMyTeam
+            ? calculateOverall(sourcePlayer, pos)
+            : reportedFit &&
+                Number.isFinite(reportedFit.low) &&
+                Number.isFinite(reportedFit.high)
+                ? `${reportedFit.low}–${reportedFit.high}`
+                : '—';
+
         overallsHtml += `
             <div class="${cardClass} p-1.5 rounded border">
                 <span class="text-[9px] font-bold block ${labelClass}">
                     ${pos}
                 </span>
                 <span class="font-black text-sm">
-                    ${calculateOverall(player, pos)}
+                    ${ratingLabel}
                 </span>
             </div>`;
     });
@@ -2383,16 +2814,54 @@ export function openPlayerCard(playerId) {
     overallsHtml += '</div>';
 
     // Tab 2: Detailed Attributes View
-    const renderAttrBar = (label, val) => `
-        <div class="flex items-center justify-between text-xs py-1 border-b border-slate-100">
-            <span class="text-slate-600 font-medium">${label}</span>
-            <div class="flex items-center gap-2">
-                <div class="w-24 bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                    <div class="h-full ${val >= 70 ? 'bg-emerald-500' : (val >= 50 ? 'bg-blue-500' : 'bg-amber-500')}" style="width: ${val}%"></div>
+    const renderAttrBar = (label, val) => {
+        const isRange = Boolean(
+            val &&
+            typeof val === 'object' &&
+            Number.isFinite(val.low) &&
+            Number.isFinite(val.high)
+        );
+
+        const hasNumber = Number.isFinite(val);
+
+        const numericValue = isRange
+            ? (val.low + val.high) / 2
+            : hasNumber
+                ? val
+                : 0;
+
+        const displayValue = isRange
+            ? `${val.low}–${val.high}`
+            : hasNumber
+                ? val
+                : 'Unknown';
+
+        const barColor = !isRange && !hasNumber
+            ? 'bg-slate-300'
+            : isRange
+                ? 'bg-indigo-400'
+                : numericValue >= 70
+                    ? 'bg-emerald-500'
+                    : numericValue >= 50
+                        ? 'bg-blue-500'
+                        : 'bg-amber-500';
+
+        return `
+            <div class="flex items-center justify-between text-xs py-1 border-b border-slate-100">
+                <span class="text-slate-600 font-medium">${label}</span>
+                <div class="flex items-center gap-2">
+                    <div class="w-24 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                        <div
+                            class="h-full ${barColor}"
+                            style="width: ${numericValue}%"
+                        ></div>
+                    </div>
+                    <span class="font-mono font-bold w-12 text-right">
+                        ${displayValue}
+                    </span>
                 </div>
-                <span class="font-mono font-bold w-6 text-right">${val}</span>
-            </div>
-        </div>`;
+            </div>`;
+    };
 
     const phys = player.attributes?.physical || {};
     const ment = player.attributes?.mental || {};
@@ -2400,7 +2869,11 @@ export function openPlayerCard(playerId) {
 
     // Tab 3: Detailed Growth History
     let growthHtml = '<p class="text-xs text-slate-400 italic py-4">No progression recorded yet.</p>';
-    if (player.progression && player.progression.length > 0) {
+    if (
+        isMyTeam &&
+        player.progression &&
+        player.progression.length > 0
+    ) {
         growthHtml = `
             <div class="space-y-2">
                 ${player.progression.slice().reverse().map(pr => {
@@ -2548,7 +3021,7 @@ export function openPlayerCard(playerId) {
                             OFF FIT
                         </span>
                         <span class="text-base font-black text-emerald-200">
-                            ${fits.offense.position} ${fits.offense.ovr}
+                            ${formatFit(fits.offense)}
                         </span>
                     </div>
 
@@ -2557,7 +3030,7 @@ export function openPlayerCard(playerId) {
                             DEF FIT
                         </span>
                         <span class="text-base font-black text-blue-200">
-                            ${fits.defense.position} ${fits.defense.ovr}
+                            ${formatFit(fits.defense)}
                         </span>
                     </div>
                 </div>
@@ -2567,63 +3040,104 @@ export function openPlayerCard(playerId) {
             <div class="flex bg-slate-100 p-1 rounded border border-slate-200 gap-1 text-xs">
                 <button class="pcard-tab-btn active px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition bg-slate-900 text-white shadow-sm" data-ptab="overview" onclick="app_switchPlayerCardTab('overview')">📋 Summary</button>
                 <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="attributes" onclick="app_switchPlayerCardTab('attributes')">📊 All Attributes</button>
-                <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="growth" onclick="app_switchPlayerCardTab('growth')">📈 Development History</button>
+                ${isMyTeam ? `<button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="growth" onclick="app_switchPlayerCardTab('growth')">📈 Development History</button>` : ''}
                 <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="stats" onclick="app_switchPlayerCardTab('stats')">📜 Career Stats</button>
             </div>
 
             <!-- PANE 1: SUMMARY -->
             <div id="pcard-pane-overview" class="pcard-pane space-y-3">
+                ${scoutingStatusHtml}
+
                 <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded border border-slate-200">
-                    <p><span class="text-slate-400 font-bold uppercase text-[9px] block">Archetype</span> <b>${player.archetypeName || 'Athlete'}</b></p>
-                    <p><span class="text-slate-400 font-bold uppercase text-[9px] block">Potential Ceiling</span> <b class="text-amber-700">${player.potential || 'C'}</b></p>
-                    <p><span class="text-slate-400 font-bold uppercase text-[9px] block">Work Ethic</span> <b>${player.personality?.workEthic || 50}</b></p>
-                    <p><span class="text-slate-400 font-bold uppercase text-[9px] block">Dependability</span> <b>${player.personality?.dependability || 50}</b></p>
+                    <p>
+                        <span class="text-slate-400 font-bold uppercase text-[9px] block">Archetype</span>
+                        <b>${isMyTeam ? (player.archetypeName || 'Athlete') : 'Not disclosed'}</b>
+                    </p>
+                    <p>
+                        <span class="text-slate-400 font-bold uppercase text-[9px] block">Potential Estimate</span>
+                        <b class="text-amber-700">${potentialDisplay}</b>
+                    </p>
+                    <p>
+                        <span class="text-slate-400 font-bold uppercase text-[9px] block">Work Ethic</span>
+                        <b>${isMyTeam ? (player.personality?.workEthic ?? 50) : (report?.evaluation?.characterSummary ? 'Qualitative report' : 'Not assessed')}</b>
+                    </p>
+                    <p>
+                        <span class="text-slate-400 font-bold uppercase text-[9px] block">Dependability</span>
+                        <b>${isMyTeam ? (player.personality?.dependability ?? 50) : 'Not assessed'}</b>
+                    </p>
                 </div>
 
-                ${player.bio ? `
+                ${isMyTeam && player.bio ? `
                 <div class="p-2.5 bg-amber-50/70 border border-amber-200 rounded text-xs text-slate-800 italic leading-relaxed">
                     <span class="font-bold uppercase tracking-wider text-[9px] text-amber-800 not-italic block mb-0.5">Scouting Lore & Blacktop Rep</span>
                     "${player.bio}"
                 </div>` : ''}
 
+                ${!isMyTeam && friendTip?.text ? `
+                <div class="p-2.5 bg-indigo-50 border border-indigo-200 rounded text-xs text-slate-800 leading-relaxed">
+                    <span class="font-bold uppercase tracking-wider text-[9px] text-indigo-800 block mb-1">
+                        🤝 Friend Tip · Unverified
+                    </span>
+                    <p>${friendTip.text}</p>
+                    <p class="mt-1 text-[10px] text-indigo-700">
+                        Via ${friendTip.member.name} · ${
+                            friendTip.relationship === 'close friend'
+                                ? 'Close friend'
+                                : 'Friend'
+                        }
+                    </p>
+                    <p class="mt-1 text-[10px] text-slate-500 italic">
+                        Informal intel only. This is not a staff scouting report.
+                    </p>
+                </div>` : ''}
+
                 <div class="bg-white p-3 rounded border border-slate-200">
-                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Positional Suitability Matrix</span>
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                        Positional Suitability Matrix
+                    </span>
                     ${overallsHtml}
                 </div>
 
+                ${isMyTeam ? `
                 <div class="bg-slate-50 p-2.5 rounded border border-slate-200 text-xs text-slate-700">
                     <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Neighborhood Network</span>
-                    Clique: <b class="text-indigo-600">${player.personality?.clique || 'Regular'}</b> | 
+                    Clique: <b class="text-indigo-600">${player.personality?.clique || 'Regular'}</b> |
                     Best Friend: <b>${player.social?.bestFriendId ? (Game.getPlayer(player.social.bestFriendId)?.name || 'None') : 'None'}</b>
                 </div>
+                ` : ''}
             </div>
 
             <!-- PANE 2: ALL ATTRIBUTES -->
             <div id="pcard-pane-attributes" class="pcard-pane hidden grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div class="bg-white p-3 rounded border border-slate-200">
                     <h5 class="font-bold text-xs uppercase text-slate-400 tracking-wider mb-2 border-b pb-1">Physicals</h5>
-                    ${renderAttrBar('Speed', phys.speed || 50)}
-                    ${renderAttrBar('Strength', phys.strength || 50)}
-                    ${renderAttrBar('Agility', phys.agility || 50)}
-                    ${renderAttrBar('Explosiveness', phys.explosiveness ?? 50)}
-                    ${renderAttrBar('Stamina', phys.stamina || 50)}
+                    ${renderAttrBar('Speed', phys.speed)}
+                    ${renderAttrBar('Strength', phys.strength)}
+                    ${renderAttrBar('Agility', phys.agility)}
+                    ${renderAttrBar('Explosiveness', phys.explosiveness)}
+                    ${renderAttrBar('Stamina', phys.stamina)}
                 </div>
                 <div class="bg-white p-3 rounded border border-slate-200">
                     <h5 class="font-bold text-xs uppercase text-slate-400 tracking-wider mb-2 border-b pb-1">Mental & IQ</h5>
-                    ${renderAttrBar('Playbook IQ', ment.playbookIQ || 50)}
-                    ${renderAttrBar('Decision Making', ment.decisionMaking || 50)}
-                    ${renderAttrBar('Toughness', ment.toughness || 50)}
-                    ${renderAttrBar('Consistency', ment.consistency || 50)}
-                    ${renderAttrBar('Clutch', ment.clutch || 50)}
+                    ${renderAttrBar('Playbook IQ', ment.playbookIQ)}
+                    ${renderAttrBar('Decision Making', ment.decisionMaking)}
+                    ${renderAttrBar('Toughness', ment.toughness)}
+                    ${renderAttrBar('Consistency', ment.consistency)}
+                    ${renderAttrBar('Clutch', ment.clutch)}
                 </div>
                 <div class="bg-white p-3 rounded border border-slate-200">
                     <h5 class="font-bold text-xs uppercase text-slate-400 tracking-wider mb-2 border-b pb-1">Technicals</h5>
-                    ${renderAttrBar('Throwing Acc', tech.throwingAccuracy || 30)}
-                    ${renderAttrBar('Catching Hands', tech.catchingHands || 50)}
-                    ${renderAttrBar('Blocking', tech.blocking || 50)}
-                    ${renderAttrBar('Tackling', tech.tackling || 50)}
-                    ${renderAttrBar('Pass Coverage', tech.coverage || tech.passCoverage || 50)}
-                    ${renderAttrBar('Block Shed', tech.blockShedding || 50)}
+                    ${renderAttrBar('Throwing Acc', tech.throwingAccuracy)}
+                    ${renderAttrBar('Catching Hands', tech.catchingHands)}
+                    ${renderAttrBar('Blocking', tech.blocking)}
+                    ${renderAttrBar('Tackling', tech.tackling)}
+                    ${renderAttrBar(
+                        'Pass Coverage',
+                        tech.coverage !== undefined
+                            ? tech.coverage
+                            : tech.passCoverage
+                    )}
+                    ${renderAttrBar('Block Shed', tech.blockShedding)}
                 </div>
             </div>
 

@@ -3352,19 +3352,239 @@ export function processOffseasonFADay(gameState, userBids = []) {
             !p.teamId && p.status?.type !== 'retired' && p.status?.type !== 'departed' && p.age >= 12 && p.age <= 18
         );
 
-        // Sort potential targets by upgrade value for this specific AI team
-        const evaluatedTargets = availableProspects.map(prospect => {
-            const activeLead = gameState._activeFaMarket.get(prospect.id);
-            const currentTopScore = activeLead ? activeLead.topScore : 0;
-            const evalResult = calculateAiTeamNeedAndDesire(aiTeam, prospect, gameState, currentTopScore, rosterLimit);
-            return { prospect, ...evalResult };
-        }).filter(t => t.shouldBid).sort((a, b) => b.desireScore - a.desireScore);
+        // Rank targets using roster need, market momentum, coach temperament,
+        // and a controlled amount of uncertainty.
+        const coach = aiTeam.staff?.coach || aiTeam.coach;
+        const coachPersonality =
+            coach?.biases?.personality?.name || "Players' Coach";
+        const tactical =
+            coach?.biases?.tactical?.name || 'Balanced Tactician';
+        const gmDirective =
+            aiTeam.gameplan?.gmDirective || 'COACH_AUTONOMY';
 
-        // Limit targets to two, or the team's remaining roster vacancies.
-        const teamBids = evaluatedTargets.slice(
-            0,
-            Math.min(2, rosterSpots)
+        const isAggressiveRecruiter =
+            coachPersonality === "Peaked in '94" ||
+            tactical === 'Blitz Addict' ||
+            gmDirective === 'WIN_NOW';
+
+        const isConservativeRecruiter =
+            tactical === 'Conservative Turtler' ||
+            coachPersonality === 'Analytical Savant';
+
+        const coachInstinct = Number(
+            coach?.ratings?.gameplanInstinct ?? 50
         );
+
+        const evaluatedTargets = availableProspects
+            .map(prospect => {
+                const activeLead =
+                    gameState._activeFaMarket.get(prospect.id);
+
+                const currentTopScore =
+                    activeLead?.topScore || 0;
+
+                const evalResult = calculateAiTeamNeedAndDesire(
+                    aiTeam,
+                    prospect,
+                    gameState,
+                    currentTopScore,
+                    rosterLimit
+                );
+
+                if (!evalResult.shouldBid) return null;
+
+                // Respond to terms the player raised during an earlier day.
+                // Different coaching temperaments require different levels
+                // of recruitment interest before conceding on the offer.
+                const counterRequest = activeLead?.counterRequest;
+
+                const willingnessThreshold = isConservativeRecruiter
+                    ? 70
+                    : isAggressiveRecruiter
+                        ? 54
+                        : 62;
+
+                if (
+                    counterRequest &&
+                    evalResult.offer &&
+                    evalResult.desireScore >= willingnessThreshold
+                ) {
+                    const updatedOffer = { ...evalResult.offer };
+
+                    if (
+                        counterRequest.role === 'STARTER' &&
+                        updatedOffer.role !== 'STARTER'
+                    ) {
+                        updatedOffer.role = 'STARTER';
+                    }
+
+                    const teamTokensAvailable = Math.max(
+                        0,
+                        Math.floor(
+                            Number(aiTeam.socialProfile?.favorTokens) || 0
+                        )
+                    );
+
+                    const currentOfferTokens = Math.max(
+                        0,
+                        Math.floor(Number(updatedOffer.tokensOffered) || 0)
+                    );
+
+                    const requestedTokens = Math.max(
+                        0,
+                        Math.min(
+                            2,
+                            Math.floor(
+                                Number(counterRequest.minimumTokens) || 0
+                            )
+                        )
+                    );
+
+                    const affordableRequestedTokens = Math.min(
+                        requestedTokens,
+                        teamTokensAvailable
+                    );
+
+                    if (affordableRequestedTokens > currentOfferTokens) {
+                        updatedOffer.tokensOffered = affordableRequestedTokens;
+                    }
+
+                    evalResult.offer = updatedOffer;
+                }
+
+                const alreadyLeading = String(
+                    activeLead?.leaderTeamId ?? ''
+                ) === String(aiTeam.id);
+
+                // Reward continuing a meaningful pursuit instead of
+                // abandoning yesterday's target just because of a small
+                // change in the rankings.
+                const marketMomentumBonus = !activeLead
+                    ? 0
+                    : alreadyLeading
+                        ? 14
+                        : 5;
+
+                // Better decision-makers behave more consistently.
+                // Aggressive coaches tolerate more risk; conservative
+                // coaches stay closer to their preferred rankings.
+                const noiseRange = isConservativeRecruiter
+                    ? 3
+                    : isAggressiveRecruiter
+                        ? 12
+                        : 8;
+
+                const decisionNoise =
+                    (Math.random() - 0.5) * noiseRange;
+
+                const instinctAdjustment =
+                    (coachInstinct - 50) * 0.08;
+
+                const targetScore =
+                    evalResult.desireScore +
+                    marketMomentumBonus +
+                    instinctAdjustment +
+                    decisionNoise;
+
+                return {
+                    prospect,
+                    ...evalResult,
+                    targetScore
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.targetScore - a.targetScore);
+
+        // Teams with larger vacancies can pursue more prospects per day.
+        // The number of targets never exceeds the number of open roster spots.
+        const targetBudget = Math.min(
+            rosterSpots,
+            rosterSpots >= 6
+                ? 4
+                : rosterSpots >= 3
+                    ? 3
+                    : 2
+        );
+
+        // Conservative teams stick close to the top of their rankings.
+        // Other teams can consider a broader shortlist, with aggressive
+        // coaches showing more willingness to explore alternatives.
+        const shortlistMultiplier = isConservativeRecruiter
+            ? 1
+            : isAggressiveRecruiter
+                ? 3
+                : 2;
+
+        const shortlistSize = Math.min(
+            evaluatedTargets.length,
+            Math.max(
+                targetBudget,
+                targetBudget * shortlistMultiplier
+            )
+        );
+
+        const shortlist = evaluatedTargets.slice(
+            0,
+            shortlistSize
+        );
+
+        const teamBids = [];
+
+        while (
+            teamBids.length < targetBudget &&
+            shortlist.length > 0
+        ) {
+            const windowSize = isConservativeRecruiter
+                ? 1
+                : Math.min(
+                    shortlist.length,
+                    isAggressiveRecruiter ? 5 : 3
+                );
+
+            const candidateWindow = shortlist.slice(
+                0,
+                windowSize
+            );
+
+            let selectedIndex = 0;
+
+            if (candidateWindow.length > 1) {
+                const exponent = isAggressiveRecruiter
+                    ? 1.3
+                    : 2;
+
+                const weights = candidateWindow.map(
+                    (_, index) =>
+                        Math.pow(
+                            candidateWindow.length - index,
+                            exponent
+                        )
+                );
+
+                const totalWeight = weights.reduce(
+                    (sum, weight) => sum + weight,
+                    0
+                );
+
+                let draw = Math.random() * totalWeight;
+
+                for (let i = 0; i < weights.length; i++) {
+                    draw -= weights[i];
+
+                    if (draw <= 0) {
+                        selectedIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            const [selected] = shortlist.splice(
+                selectedIndex,
+                1
+            );
+
+            teamBids.push(selected);
+        }
 
         aiBidAudit.prospectsEvaluated += availableProspects.length;
         aiBidAudit.candidatesPassingFilters += evaluatedTargets.length;
@@ -3465,13 +3685,67 @@ export function processOffseasonFADay(gameState, userBids = []) {
             gameState._activeFaMarket.delete(playerId);
         } else {
             // REMAINS IN ACTIVE NEGOTIATION FOR NEXT DAY'S COUNTER-BIDS
+            const offeredTokens = Math.max(
+                0,
+                Math.floor(Number(win.offer.tokensOffered) || 0)
+            );
+
+            const playerEgo = Math.max(
+                0,
+                Math.min(
+                    100,
+                    Number(player.personality?.ego ?? 50)
+                )
+            );
+
+            let counterRequest = null;
+
+            // High-ego prospects who are good enough to contribute may
+            // push back when offered a non-starter role.
+            if (
+                win.offer.role !== 'STARTER' &&
+                playerOvr >= 48 &&
+                playerEgo >= 65
+            ) {
+                counterRequest = {
+                    role: 'STARTER',
+                    label: 'a STARTER role'
+                };
+            } else {
+                // Better prospects can ask for a stronger commitment.
+                const requestedTokens =
+                    playerOvr >= 60 && playerEgo >= 70
+                        ? 2
+                        : playerOvr >= 54
+                            ? 1
+                            : 0;
+
+                if (requestedTokens > offeredTokens) {
+                    counterRequest = {
+                        minimumTokens: requestedTokens,
+                        label: `at least ${requestedTokens} Favor Token${requestedTokens === 1 ? '' : 's'}`
+                    };
+                }
+            }
+
+            const interestScore = Number(
+                win.evaluation?.interestScore ?? 0
+            );
+
+            const responseNote = counterRequest
+                ? `Player counter-request: ${counterRequest.label}.`
+                : interestScore >= 70
+                    ? 'Player is interested but is still weighing competing offers.'
+                    : 'Player remains uncertain about the fit and may need a stronger pitch.';
+
             gameState._activeFaMarket.set(playerId, {
                 playerId,
                 leaderTeamId: leaderTeam.id,
                 leaderTeamName: leaderTeam.name,
                 topScore: leaderScore,
                 leaderOffer: win.offer,
-                bidsCount: bids.length
+                bidsCount: bids.length,
+                counterRequest
             });
 
             activeNegotiations.push({
@@ -3479,19 +3753,21 @@ export function processOffseasonFADay(gameState, userBids = []) {
                 leaderTeam,
                 leaderOffer: win.offer,
                 bidsCount: bids.length,
-                isUserLeading: leaderTeam.id === gameState.playerTeam.id
+                isUserLeading: leaderTeam.id === gameState.playerTeam.id,
+                counterRequest,
+                responseNote
             });
 
             if (userBidOnThisPlayer) {
                 if (leaderTeam.id === gameState.playerTeam.id) {
                     userBidResults.push({
                         player, won: false, inProgress: true,
-                        message: `⏳ LEADING! You currently lead negotiations for ${player.name}. Rival coaches may counter tomorrow!`
+                            message: `⏳ LEADING! You currently lead negotiations for ${player.name}. ${responseNote} Rival coaches may counter tomorrow!`
                     });
                 } else {
                     userBidResults.push({
                         player, won: false, outbid: true,
-                        message: `⚠️ OUTBID! ${leaderTeam.name} leads for ${player.name} (${win.offer.role}, ${win.offer.tokensOffered}🪙). You can counter-bid tomorrow!`
+                            message: `⚠️ OUTBID! ${leaderTeam.name} leads for ${player.name} (${win.offer.role}, ${win.offer.tokensOffered}🪙). ${responseNote} You can counter-bid tomorrow!`
                     });
                 }
             }

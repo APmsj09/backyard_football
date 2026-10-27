@@ -749,8 +749,17 @@ export function advanceTeamScoutingReport(
     const scoutingToolkitMultiplier =
         1 + scoutingToolkitLevel * 0.10;
 
+    // Scouting ability has a meaningful effect on how quickly reports
+    // advance. Average evaluators stay near one point per hour;
+    // exceptional evaluators work substantially faster.
+    const scoutingSkillMultiplier = clamp(
+        0.55 + profile.overall / 100,
+        0.55,
+        1.55
+    );
+
     const productivity =
-        (0.75 + profile.overall / 200) *
+        scoutingSkillMultiplier *
         scoutingToolkitMultiplier;
 
     const previousProgress = Number.isFinite(Number(previous?.progressPoints))

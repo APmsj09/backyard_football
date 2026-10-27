@@ -85,14 +85,148 @@ export function calculateAiTeamNeedAndDesire(
     const upgradeDelta = isDesperateVoid ? (perceivedPlayerOvr - 30) : (perceivedPlayerOvr - currentStarterOvr);
 
     // Strict No-Spite Rule: If starting unit is full and prospect is not a real upgrade, pass completely
-    if (!isDesperateVoid && upgradeDelta <= -2 && viablePlayers.length >= (requiredStarters + 1)) {
-        return { shouldBid: false, desireScore: 0, offer: null, reason: `Adequately staffed at ${bestPos} (Weakest starter: ${currentStarterOvr} OVR)` };
+    // 3. VALUE OVER REPLACEMENT (VOR), STARTER GAPS & ROSTER DEPTH
+    const allPositions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+
+    const requiredForPosition = position =>
+        position === 'OL'
+            ? 3
+            : ['WR', 'DB', 'DL'].includes(position)
+                ? 2
+                : 1;
+
+    const backupTargetForPosition = position =>
+        requiredForPosition(position) >= 2 ? 2 : 1;
+
+    const requiredStarters = requiredForPosition(bestPos);
+
+    const viablePlayers = roster.filter(
+        p => isPlayerViableForPosition(p, bestPos)
+    );
+
+    const sortedStarters = viablePlayers
+        .map(p => calculateOverall(p, bestPos))
+        .sort((a, b) => b - a);
+
+    const missingStarters = Math.max(
+        0,
+        requiredStarters - viablePlayers.length
+    );
+
+    const isDesperateVoid = missingStarters > 0;
+
+    // Backups matter only after the team can field its starting unit.
+    const backupCount = Math.max(
+        0,
+        viablePlayers.length - requiredStarters
+    );
+
+    const missingBackups = isDesperateVoid
+        ? 0
+        : Math.max(
+            0,
+            backupTargetForPosition(bestPos) - backupCount
+        );
+
+    // Coach evaluation skill affects how accurately the prospect is judged.
+    const evalNoise = evalSkill < 55
+        ? Math.sin(playerOvr + age) * (60 - evalSkill) * 0.18
+        : 0;
+
+    const perceivedPlayerOvr = Math.round(playerOvr + evalNoise);
+
+    // Compare against the weakest actual starter when the room is filled.
+    const currentStarterOvr = sortedStarters.length >= requiredStarters
+        ? sortedStarters[requiredStarters - 1]
+        : (sortedStarters[sortedStarters.length - 1] || 0);
+
+    const upgradeDelta = isDesperateVoid
+        ? perceivedPlayerOvr - 30
+        : perceivedPlayerOvr - currentStarterOvr;
+
+    // A weak starting room creates recruitment demand even without a vacancy.
+    const starterQualityNeed = isDesperateVoid
+        ? 0
+        : Math.max(
+            0,
+            Math.min(
+                12,
+                Math.round((58 - currentStarterOvr) * 0.6)
+            )
+        );
+
+    // Reward genuine versatility when another position also lacks coverage.
+    const additionalFits = allPositions.filter(position => {
+        if (
+            position === bestPos ||
+            !isPlayerViableForPosition(player, position)
+        ) {
+            return false;
+        }
+
+        const alternativeOvr = calculateOverall(player, position);
+
+        // Ignore positions at which the player is substantially worse.
+        if (alternativeOvr < playerOvr - 8) return false;
+
+        const room = roster.filter(
+            p => isPlayerViableForPosition(p, position)
+        );
+
+        const depthTarget =
+            requiredForPosition(position) +
+            backupTargetForPosition(position);
+
+        return room.length < depthTarget;
+    });
+
+    const versatilityBonus = Math.min(
+        12,
+        additionalFits.reduce((total, position) => {
+            const room = roster.filter(
+                p => isPlayerViableForPosition(p, position)
+            );
+
+            return total + (
+                room.length < requiredForPosition(position)
+                    ? 7
+                    : 4
+            );
+        }, 0)
+    );
+
+    // Combine positional need, backup depth, and starter quality.
+    const roomNeedScore =
+        missingStarters * 18 +
+        missingBackups * 7 +
+        starterQualityNeed;
+
+    // Do not chase a downgrade when the room already has starters,
+    // adequate backups, and no meaningful quality problem.
+    if (
+        !isDesperateVoid &&
+        missingBackups === 0 &&
+        starterQualityNeed === 0 &&
+        upgradeDelta <= -2 &&
+        viablePlayers.length >= requiredStarters + 1
+    ) {
+        return {
+            shouldBid: false,
+            desireScore: 0,
+            offer: null,
+            reason: `Adequately staffed at ${bestPos} (Weakest starter: ${currentStarterOvr} OVR)`
+        };
     }
 
-    let desireScore = 40;
-    desireScore += Math.round(upgradeDelta * 2.5); // Major upgrade = huge desire
+    let desireScore =
+        38 +
+        Math.round(upgradeDelta * 2) +
+        roomNeedScore +
+        versatilityBonus;
 
-    if (isDesperateVoid) desireScore += 35; // Desperate vacancy
+    if (isDesperateVoid) {
+        desireScore += 15;
+    }
 
     // 4. SCHEME & TACTICAL BIAS ALIGNMENT
     if (tactical === 'Air Raid Purist') {
@@ -178,13 +312,23 @@ export function calculateAiTeamNeedAndDesire(
         tokensOffered: tokensToSpend
     };
 
+    const recruitmentReason = isDesperateVoid
+        ? `Urgent starter vacancy at ${bestPos}`
+        : missingBackups > 0
+            ? `Needs ${bestPos} backup depth`
+            : starterQualityNeed > 0
+                ? `Upgrade opportunity at ${bestPos}`
+                : additionalFits.length > 0
+                    ? `Versatile fit; also covers ${additionalFits.join(', ')}`
+                    : upgradeDelta > 0
+                        ? `+${upgradeDelta} OVR upgrade over current starter`
+                        : 'Depth rotational fit';
+
     return {
         shouldBid: true,
         desireScore,
         offer,
-        reason: isDesperateVoid 
-            ? `Urgent vacancy at ${bestPos}` 
-            : (upgradeDelta > 0 ? `+${upgradeDelta} OVR upgrade over current starter` : `Depth rotational fit`)
+        reason: recruitmentReason
     };
 }
 

@@ -1961,6 +1961,189 @@ export function switchTab(tabId, gameState) {
 }
 
 
+function getFreeAgentScoutingView(team, player) {
+    const report = Game.getTeamScoutingReport?.(
+        team,
+        player?.id
+    ) || null;
+
+    const rawLevel = Number(report?.level);
+    const level =
+        Number.isInteger(rawLevel) &&
+        rawLevel >= 1 &&
+        rawLevel <= 4
+            ? rawLevel
+            : 0;
+
+    const rawProgress = Number(report?.progressPoints);
+    const progress = Number.isFinite(rawProgress)
+        ? Math.max(0, rawProgress)
+        : 0;
+
+    const rawConfidence = Number(report?.confidence);
+    const confidence = Number.isFinite(rawConfidence)
+        ? Math.max(0, Math.min(1, rawConfidence))
+        : null;
+
+    const evaluation = report?.evaluation || {};
+
+    const getFit = fit => {
+        if (
+            level < 1 ||
+            !fit ||
+            typeof fit.position !== 'string' ||
+            !Number.isFinite(Number(fit.low)) ||
+            !Number.isFinite(Number(fit.high))
+        ) {
+            return null;
+        }
+
+        const low = Math.round(Number(fit.low));
+        const high = Math.round(Number(fit.high));
+
+        return {
+            position: fit.position,
+            low: Math.min(low, high),
+            high: Math.max(low, high),
+            estimate: (low + high) / 2
+        };
+    };
+
+    const offense = getFit(evaluation.offenseFit);
+    const defense = getFit(evaluation.defenseFit);
+
+    const levelThresholds = [0, 4, 12, 24, 40];
+
+    const progressStart = levelThresholds[level];
+    const progressEnd = level >= 4
+        ? 40
+        : levelThresholds[level + 1];
+
+    const progressToNextPercent = level >= 4
+        ? 100
+        : Math.max(
+            0,
+            Math.min(
+                100,
+                ((progress - progressStart) /
+                    (progressEnd - progressStart)) * 100
+            )
+        );
+
+    const status = level > 0
+        ? `Level ${level}${confidence !== null
+            ? ` · ${Math.round(confidence * 100)}% confidence`
+            : ''}`
+        : progress > 0
+            ? 'Scouting in progress'
+            : 'Unscouted';
+
+    const pointsWithinLevel = Math.max(
+        0,
+        Math.min(
+            progressEnd - progressStart,
+            progress - progressStart
+        )
+    );
+
+    const pointsNeeded = progressEnd - progressStart;
+
+    const progressLabel = level >= 4
+        ? 'Fully scouted'
+        : `${pointsWithinLevel.toFixed(1)} / ${pointsNeeded} pts to Level ${level + 1}`;
+
+    const fitScores = [offense, defense]
+        .filter(Boolean)
+        .map(fit => fit.estimate);
+
+    return {
+        level,
+        progress,
+        status,
+        progressToNextPercent,
+        progressLabel,
+        offense,
+        defense,
+        projectedRole: level > 0
+            ? evaluation.projectedRole || null
+            : null,
+
+        // Used only for table ordering. Never substitute the actual OVR.
+        sortScore: fitScores.length > 0
+            ? Math.max(...fitScores)
+            : -1
+    };
+}
+
+function compareFreeAgentsByScouting(a, b, team) {
+    const reportA = getFreeAgentScoutingView(team, a);
+    const reportB = getFreeAgentScoutingView(team, b);
+
+    // Prefer players with meaningful reports, then better estimated fits.
+    if (reportA.level !== reportB.level) {
+        return reportB.level - reportA.level;
+    }
+
+    if (
+        reportA.sortScore !== reportB.sortScore &&
+        reportA.sortScore >= 0 &&
+        reportB.sortScore >= 0
+    ) {
+        return reportB.sortScore - reportA.sortScore;
+    }
+
+    // Unknown players are not ranked by their hidden abilities.
+    if (
+        (reportA.progress > 0) !== (reportB.progress > 0)
+    ) {
+        return reportA.progress > 0 ? -1 : 1;
+    }
+
+    return a.age - b.age ||
+        String(a.name || '').localeCompare(String(b.name || ''));
+}
+
+function formatFreeAgentScoutingFit(fit) {
+    return fit
+        ? `${fit.position} ${fit.low}–${fit.high}`
+        : 'Not assessed';
+}
+
+function getFreeAgentDisplayPosition(team, player) {
+    const declaredPosition =
+        typeof player?.pos === 'string'
+            ? player.pos.trim()
+            : '';
+
+    if (declaredPosition) return declaredPosition;
+
+    const scouting = getFreeAgentScoutingView(team, player);
+
+    return scouting.offense?.position ||
+        scouting.defense?.position ||
+        'ATH';
+}
+
+function matchesFreeAgentPositionFilter(team, player, requestedPosition) {
+    if (!requestedPosition) return true;
+
+    const requested = String(requestedPosition).toUpperCase();
+    const declared = String(player?.pos || '').toUpperCase();
+
+    // A player's declared position is visible without a scouting report.
+    if (declared === requested) return true;
+
+    // Additional positional fits require our team's scouting report.
+    const scouting = getFreeAgentScoutingView(team, player);
+
+    if (scouting.level < 1) return false;
+
+    return (
+        String(scouting.offense?.position || '').toUpperCase() === requested ||
+        String(scouting.defense?.position || '').toUpperCase() === requested
+    );
+}
+
 export function renderFreeAgentsTab(gameState) {
     const container = document.getElementById('free-agents-container');
     if (!container || !gameState) return;
@@ -1974,17 +2157,22 @@ export function renderFreeAgentsTab(gameState) {
     );
 
     if (posFilter) {
-        pool = pool.filter(p => {
-            const pos = p.pos || estimateBestPosition(p);
-            return pos === posFilter || p.favoriteOffensivePosition === posFilter || p.favoriteDefensivePosition === posFilter;
-        });
+        pool = pool.filter(p =>
+            matchesFreeAgentPositionFilter(
+                gameState.playerTeam,
+                p,
+                posFilter
+            )
+        );
     }
 
-    pool.sort((a, b) => {
-        const ovrA = calculateOverall(a, a.pos || estimateBestPosition(a));
-        const ovrB = calculateOverall(b, b.pos || estimateBestPosition(b));
-        return ovrB - ovrA;
-    });
+    pool.sort((a, b) =>
+        compareFreeAgentsByScouting(
+            a,
+            b,
+            gameState.playerTeam
+        )
+    );
 
     if (pool.length === 0) {
         container.innerHTML = `<p class="p-8 text-center text-slate-400 italic text-xs">No free agents currently available matching filters.</p>`;
@@ -1995,38 +2183,70 @@ export function renderFreeAgentsTab(gameState) {
         <table class="min-w-full text-xs font-mono">
             <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
                 <tr>
-                    <th class="py-2.5 px-3 text-left font-sans">Prospect Name</th>
+                    <th class="py-2.5 px-3 text-left font-sans">Free Agent</th>
                     <th class="py-2 px-2 text-center">Pos</th>
-                    <th class="py-2 px-2 text-center">OVR</th>
                     <th class="py-2 px-2 text-center">Age</th>
-                    <th class="py-2 px-2 text-center">Pot</th>
-                    <th class="py-2 px-2 text-center text-blue-400">SPD</th>
-                    <th class="py-2 px-2 text-center">STR</th>
-                    <th class="py-2 px-2 text-center">AGI</th>
-                    <th class="py-2 px-2 text-center">HND</th>
-                    <th class="py-2 px-2 text-center">TKL</th>
+                    <th class="py-2 px-3 text-left">Scouting Report</th>
+                    <th class="py-2 px-2 text-center">OFF Estimate</th>
+                    <th class="py-2 px-2 text-center">DEF Estimate</th>
                     <th class="py-2 px-3 text-right font-sans">Action</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
                 ${pool.map(p => {
-                    const pos = p.pos || estimateBestPosition(p);
-                    const ovr = calculateOverall(p, pos);
+                    const pos = getFreeAgentDisplayPosition(
+                        gameState.playerTeam,
+                        p
+                    );
+                    const scouting = getFreeAgentScoutingView(
+                        gameState.playerTeam,
+                        p
+                    );
+
+                    const scoutingClass = scouting.level >= 3
+                        ? 'text-emerald-700'
+                        : scouting.level > 0
+                            ? 'text-blue-700'
+                            : 'text-amber-700';
+
+                    const roleLabel = scouting.projectedRole
+                        ? `<span class="block text-[10px] text-slate-500 mt-0.5">${scouting.projectedRole}</span>`
+                        : '';
+
                     return `
                     <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
-                        <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate">
-                            <span>${p.name}</span>
-                            <span class="text-slate-400 text-[10px] ml-1 font-mono">(${p.archetypeName || 'Athlete'})</span>
+                        <td class="py-2 px-3 font-sans font-semibold text-slate-900">
+                            ${p.name}
+                            <span class="block text-[10px] text-slate-400">Unsigned player</span>
                         </td>
-                        <td class="text-center py-2 px-2"><span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span></td>
-                        <td class="text-center py-2 px-2 font-black text-slate-900">${ovr}</td>
+                        <td class="text-center py-2 px-2">
+                            <span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span>
+                        </td>
                         <td class="text-center py-2 px-2 text-slate-600">${p.age}</td>
-                        <td class="text-center py-2 px-2 font-bold ${p.potential === 'A' ? 'text-amber-600' : 'text-slate-500'}">${p.potential || '?'}</td>
-                        <td class="text-center py-2 px-2 text-blue-600 font-bold">${p.attributes?.physical?.speed || 0}</td>
-                        <td class="text-center py-2 px-2">${p.attributes?.physical?.strength || 0}</td>
-                        <td class="text-center py-2 px-2">${p.attributes?.physical?.agility || 0}</td>
-                        <td class="text-center py-2 px-2">${p.attributes?.technical?.catchingHands || 0}</td>
-                        <td class="text-center py-2 px-2">${p.attributes?.technical?.tackling || 0}</td>
+                        <td class="py-2 px-3 font-sans min-w-[150px]">
+                            <span class="font-bold ${scoutingClass}">
+                                ${scouting.status}
+                            </span>
+
+                            <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1.5">
+                                <div
+                                    class="h-full bg-indigo-500 rounded-full"
+                                    style="width: ${scouting.progressToNextPercent}%"
+                                ></div>
+                            </div>
+
+                            <span class="block text-[9px] text-slate-500 mt-1">
+                                ${scouting.progressLabel}
+                            </span>
+
+                            ${roleLabel}
+                        </td>
+                        <td class="text-center py-2 px-2 font-mono text-slate-700">
+                            ${formatFreeAgentScoutingFit(scouting.offense)}
+                        </td>
+                        <td class="text-center py-2 px-2 font-mono text-slate-700">
+                            ${formatFreeAgentScoutingFit(scouting.defense)}
+                        </td>
                         <td class="text-right py-2 px-3 font-sans" onclick="event.stopPropagation()">
                             <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider shadow-sm transition" onclick="app.openBidModal('${p.id}')">
                                 Pitch Contract 🤝
@@ -2103,14 +2323,22 @@ export function renderOffseasonFAPool(gameState) {
     );
 
     if (filterPos) {
-        pool = pool.filter(p => Game.isPlayerViableForPosition(p, filterPos));
+        pool = pool.filter(p =>
+            matchesFreeAgentPositionFilter(
+                gameState.playerTeam,
+                p,
+                filterPos
+            )
+        );
     }
 
-    pool.sort((a, b) => {
-        const ovrA = calculateOverall(a, a.pos || estimateBestPosition(a));
-        const ovrB = calculateOverall(b, b.pos || estimateBestPosition(b));
-        return ovrB - ovrA;
-    });
+    pool.sort((a, b) =>
+        compareFreeAgentsByScouting(
+            a,
+            b,
+            gameState.playerTeam
+        )
+    );
 
     if (pool.length === 0) {
         container.innerHTML = `<p class="p-8 text-center text-slate-400 italic text-xs">No free agents available matching this filter.</p>`;
@@ -2121,20 +2349,25 @@ export function renderOffseasonFAPool(gameState) {
         <table class="min-w-full text-xs font-mono">
             <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
                 <tr>
-                    <th class="py-2 px-3 text-left font-sans">Prospect Name</th>
+                    <th class="py-2 px-3 text-left font-sans">Free Agent</th>
                     <th class="py-2 px-2 text-center">Pos</th>
-                    <th class="py-2 px-2 text-center">OVR</th>
-                    <th class="py-2 px-2 text-center">Pot</th>
-                    <th class="py-2 px-2 text-center text-blue-400">SPD</th>
-                    <th class="py-2 px-2 text-center">STR</th>
+                    <th class="py-2 px-2 text-center">Scout Status</th>
+                    <th class="py-2 px-2 text-center">OFF Estimate</th>
+                    <th class="py-2 px-2 text-center">DEF Estimate</th>
                     <th class="py-2 px-3 text-left font-sans">Blacktop Grapevine & Suitors</th>
                     <th class="py-2 px-3 text-right font-sans">Action</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
                 ${pool.map(p => {
-                    const pos = p.pos || estimateBestPosition(p);
-                    const ovr = calculateOverall(p, pos);
+                    const pos = getFreeAgentDisplayPosition(
+                        gameState.playerTeam,
+                        p
+                    );
+                    const scouting = getFreeAgentScoutingView(
+                        gameState.playerTeam,
+                        p
+                    );
                     const userBid = offseasonFABids.find(b => b.playerId === p.id);
                     const intel = Game.getPlayerMarketIntel(p, gameState);
 
@@ -2155,15 +2388,45 @@ export function renderOffseasonFAPool(gameState) {
 
                     return `
                     <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
-                        <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate max-w-[130px]">
+                        <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate max-w-[150px]">
                             <span>${p.name}</span>
-                            <span class="text-slate-400 text-[10px] ml-1 font-mono">(${p.age}yo)</span>
+                            <span class="block text-slate-400 text-[10px] font-mono">Age ${p.age}</span>
                         </td>
-                        <td class="text-center py-2 px-2"><span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span></td>
-                        <td class="text-center py-2 px-2 font-black text-slate-900">${ovr}</td>
-                        <td class="text-center py-2 px-2 font-bold ${p.potential === 'A' ? 'text-amber-600' : 'text-slate-500'}">${p.potential || '?'}</td>
-                        <td class="text-center py-2 px-2 text-blue-600 font-bold">${p.attributes?.physical?.speed || 0}</td>
-                        <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.physical?.strength || 0}</td>
+                        <td class="text-center py-2 px-2">
+                            <span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span>
+                        </td>
+                        <td class="text-center py-2 px-2 font-sans text-[10px] min-w-[140px]">
+                            <span class="${
+                                scouting.level >= 3
+                                    ? 'text-emerald-700'
+                                    : scouting.level > 0
+                                        ? 'text-blue-700'
+                                        : 'text-amber-700'
+                            } font-bold">
+                                ${scouting.status}
+                            </span>
+
+                            <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1.5">
+                                <div
+                                    class="h-full bg-indigo-500 rounded-full"
+                                    style="width: ${scouting.progressToNextPercent}%"
+                                ></div>
+                            </div>
+
+                            <span class="block text-[9px] text-slate-500 mt-1">
+                                ${scouting.progressLabel}
+                            </span>
+
+                            ${scouting.projectedRole
+                                ? `<span class="block text-slate-500 mt-0.5">${scouting.projectedRole}</span>`
+                                : ''}
+                        </td>
+                        <td class="text-center py-2 px-2 font-mono text-slate-700">
+                            ${formatFreeAgentScoutingFit(scouting.offense)}
+                        </td>
+                        <td class="text-center py-2 px-2 font-mono text-slate-700">
+                            ${formatFreeAgentScoutingFit(scouting.defense)}
+                        </td>
                         <td class="py-2 px-3 font-sans">
                             <div class="flex items-center gap-1.5 truncate max-w-[260px]">
                                 ${marketStatusHtml}
@@ -2269,7 +2532,7 @@ window.app_openBidModal = function(playerId) {
 
     const team = gs.playerTeam;
     const pos = player.pos || estimateBestPosition(player);
-    const ovr = calculateOverall(player, pos);
+    const scouting = getFreeAgentScoutingView(team, player);
     const existingBid = offseasonFABids.find(b => b.playerId === playerId);
 
     const availableTokens = (team.socialProfile?.favorTokens || 0) -
@@ -2286,11 +2549,18 @@ window.app_openBidModal = function(playerId) {
                         <h4 class="font-black text-sm text-white">${player.name}</h4>
                         <span class="bg-slate-800 text-amber-400 font-bold px-1.5 py-0.5 rounded text-[10px]">${player.age}yo • ${pos}</span>
                     </div>
-                    <p class="text-[11px] text-slate-400 mt-0.5">${player.archetypeName || 'Athlete'} • Style: ${player.personality?.clique || 'Regular'}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">
+                        Scouting: ${scouting.status} · ${scouting.progressLabel}
+                    </p>
                 </div>
-                <div class="text-right">
-                    <span class="text-[9px] uppercase tracking-wider text-slate-400 block">Rating</span>
-                    <span class="font-black text-lg text-amber-400">${ovr} OVR</span>
+                <div class="text-right shrink-0">
+                    <span class="text-[9px] uppercase tracking-wider text-slate-400 block">Estimated Fit</span>
+                    <span class="block font-bold text-xs text-amber-400">
+                        OFF ${formatFreeAgentScoutingFit(scouting.offense)}
+                    </span>
+                    <span class="block font-bold text-xs text-amber-400 mt-0.5">
+                        DEF ${formatFreeAgentScoutingFit(scouting.defense)}
+                    </span>
                 </div>
             </div>
 
@@ -3869,9 +4139,17 @@ export function renderStaffTab(gameState) {
                             };
 
                             if (allocation.task === 'scouting') {
-                                assignment.focus = isOffseason
-                                    ? 'draft'
-                                    : 'youth';
+                                if (!gs.draftCompleted) {
+                                    // Before the draft, scout the incoming class.
+                                    assignment.focus = 'draft';
+                                } else if (!gs.offseasonFACompleted) {
+                                    // After the draft, scout unsigned free agents.
+                                    assignment.focus = 'freeAgents';
+                                } else {
+                                    // During the regular season, scout youth prospects.
+                                    assignment.focus = 'youth';
+                                }
+
                                 assignment.maxTargets = 2;
                             }
 
