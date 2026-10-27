@@ -907,7 +907,12 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
     setupSide(offense, 'offense', offenseFormationData, true);
     setupSide(defense, 'defense', defenseFormationData, false);
 
-    const snapTaker = playState.activePlayers.find(p => p.isOffense && (p.assignment?.includes('qb_') || p.assignment === 'punt'));
+// Give the ball to the QB setup/punter, or fallback to the QB1 slot for direct snaps (Wildcat/QB Draws)
+    let snapTaker = playState.activePlayers.find(p => p.isOffense && (p.assignment?.includes('qb_') || p.assignment === 'punt'));
+    if (!snapTaker) {
+        snapTaker = playState.activePlayers.find(p => p.isOffense && p.slot === 'QB1');
+    }
+
     if (snapTaker) {
         snapTaker.hasBall = true;
         playState.ballState.x = snapTaker.x;
