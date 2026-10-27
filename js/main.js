@@ -158,6 +158,8 @@ function getPickTimeScoutingSnapshot(player, team) {
 
 async function startNewGame() {
     activeSaveKey = 'backyardFootballGameState';
+    let startupStage = 'opening loading screen';
+
     try {
         UI.showScreen("loading-screen");
         UI.startLoadingMessages();
@@ -184,15 +186,21 @@ async function startNewGame() {
             UI.updateLoadingProgress(30 + (y * 17));
             await new Promise(resolve => setTimeout(resolve, 50));
 
+            startupStage = `simulating historical Season ${y}`;
             Game.simulateHistoricalSeason(y, gameState);
+
+            startupStage = `advancing offseason after Season ${y}`;
             const offseasonReport = Game.advanceToOffseason();
 
             // Preserve the Year 5 rookie class for the user's takeover draft.
             // Historical drafts run for Years 1-3; Year 4's graduates remain
             // available for the first user-controlled draft in Year 5.
-            const draftResults = y < 4
-                ? Game.simulateHistoricalDraft(y)
-                : [];
+            let draftResults = [];
+
+            if (y < 4) {
+                startupStage = `running historical draft after Season ${y}`;
+                draftResults = Game.simulateHistoricalDraft(y);
+            }
 
             // REPORT 2: Record each historical season with age development curves
             debugCollector.recordHistoricalSeason(y, {
@@ -222,9 +230,52 @@ async function startNewGame() {
 
         renderTeamChooser(gameState);
     } catch (error) {
-        console.error("Error starting game:", error);
+        console.error(
+            `Error starting game during ${startupStage}:`,
+            error
+        );
+
         UI.stopLoadingMessages();
-        UI.showModal("Error", `Could not start game: ${error.message}`);
+
+        const escapeErrorText = value =>
+            String(value ?? '').replace(/[&<>"']/g, character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[character]);
+
+        const errorMessage = escapeErrorText(
+            error?.message || String(error)
+        );
+
+        const errorStack = escapeErrorText(
+            error?.stack || ''
+        );
+
+        UI.showModal(
+            "Error",
+            `
+                <div class="space-y-3 text-left">
+                    <p>
+                        Could not start game during
+                        <b>${escapeErrorText(startupStage)}</b>.
+                    </p>
+                    <p class="font-bold text-rose-700">
+                        ${errorMessage}
+                    </p>
+                    ${errorStack ? `
+                        <details open>
+                            <summary class="cursor-pointer font-bold">
+                                Technical details
+                            </summary>
+                            <pre class="mt-2 whitespace-pre-wrap break-words text-xs">${errorStack}</pre>
+                        </details>
+                    ` : ''}
+                </div>
+            `
+        );
     }
 }
 
