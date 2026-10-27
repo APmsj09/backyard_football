@@ -1212,6 +1212,97 @@ export function ensureTeamCoachingStaff(team) {
     return team.coaches;
 }
 
+function buildDefaultAutomatedStaffAssignments(coaches) {
+    const tasks = [
+        'scouting',
+        'training',
+        'offensePrep',
+        'defensePrep'
+    ];
+
+    const taskScore = (coach, task) => {
+        const skills = COACH_DEVELOPMENT_TASK_SKILLS[task] || [];
+
+        if (skills.length === 0) return 50;
+
+        return skills.reduce((total, skill) => {
+            const value = Number(coach.ratings?.[skill]);
+
+            return total + (
+                Number.isFinite(value)
+                    ? Math.max(0, Math.min(100, value))
+                    : 50
+            );
+        }, 0) / skills.length;
+    };
+
+    const eligibleCoaches = coaches
+        .filter(coach => coach?.id != null)
+        .map(coach => {
+            const availability = ensureStaffAvailability(coach);
+            const rawHours = Number(availability?.weeklyHours);
+
+            return {
+                coach,
+                capacity: Math.max(
+                    0,
+                    Math.min(
+                        WEEKLY_COACH_HOURS,
+                        Math.floor(
+                            Number.isFinite(rawHours) ? rawHours : 8
+                        )
+                    )
+                )
+            };
+        })
+        .filter(item => item.capacity > 0);
+
+    const remainingCoaches = [...eligibleCoaches];
+    const assignments = [];
+
+    // Give each task a primary specialist, using the staff skills to
+    // choose the best available coach for that responsibility.
+    for (const task of tasks) {
+        if (remainingCoaches.length === 0) break;
+
+        remainingCoaches.sort(
+            (a, b) =>
+                taskScore(b.coach, task) -
+                taskScore(a.coach, task)
+        );
+
+        const { coach, capacity } = remainingCoaches.shift();
+
+        // Most hours go toward the coach's assigned specialty.
+        // The remainder supports player development.
+        const specialtyHours = task === 'training'
+            ? capacity
+            : Math.max(1, Math.round(capacity * 0.7));
+
+        const trainingHours = capacity - specialtyHours;
+
+        assignments.push({
+            coachId: String(coach.id),
+            task,
+            hours: specialtyHours,
+            focus: 'all',
+            ...(task === 'scouting' ? { maxTargets: 2 } : {})
+        });
+
+        if (trainingHours > 0) {
+            assignments.push({
+                coachId: String(coach.id),
+                task: 'training',
+                hours: trainingHours,
+                focus: 'all',
+                maxTargets: 4
+            });
+        }
+    }
+
+    return assignments;
+}
+
 /**
  * Creates a persisted default work plan for existing and new teams.
  * Existing player-configured assignments are preserved.
@@ -1245,26 +1336,32 @@ export function ensureTeamStaffWorkPlan(team) {
     let plan = team.staffWorkPlan;
 
     if (!plan || !Array.isArray(plan.assignments)) {
-        const defaultEvaluator = getTeamCoachingSpecialist(
-            team,
-            'scouting'
-        );
-
         plan = {
             version: 1,
             weeklyHoursPerCoach: WEEKLY_COACH_HOURS,
-            assignments: defaultEvaluator?.id
-                ? [{
-                    coachId: defaultEvaluator.id,
-                    task: STAFF_WORK_TASKS.SCOUTING,
-                    hours: 4,
-                    focus: 'all',
-                    maxTargets: 1
-                }]
-                : []
+            assignments: buildDefaultAutomatedStaffAssignments(coaches),
+            defaultWorkloadSeeded: true
         };
 
         team.staffWorkPlan = plan;
+    }
+
+    // Migrate the untouched legacy default assignment once.
+    // Do not replace plans that have already been auto-assigned or customized.
+    const legacyDefaultAssignment =
+        plan.assignments.length === 1 &&
+        plan.assignments[0]?.task === STAFF_WORK_TASKS.SCOUTING &&
+        Number(plan.assignments[0]?.hours) === 4 &&
+        (plan.assignments[0]?.focus || 'all') === 'all' &&
+        Number(plan.assignments[0]?.maxTargets || 1) === 1;
+
+    if (
+        legacyDefaultAssignment &&
+        !plan.defaultWorkloadSeeded &&
+        !plan.autoAssignedFor
+    ) {
+        plan.assignments = buildDefaultAutomatedStaffAssignments(coaches);
+        plan.defaultWorkloadSeeded = true;
     }
 
     const configuredHours = Number(plan.weeklyHoursPerCoach);

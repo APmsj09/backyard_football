@@ -797,7 +797,10 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             startY = Math.max(0.5, Math.min(119.5, startY));
 
             if (isOffense) {
-                if (startY > playState.lineOfScrimmage - 0.2) {
+                // Keep Jet Sweep runners at least 2.8 yards behind the LOS so they don't collide with the guards' backsides
+                if (isSweepRunner) {
+                    startY = Math.min(startY, playState.lineOfScrimmage - 2.8);
+                } else if (startY > playState.lineOfScrimmage - 0.2) {
                     startY = playState.lineOfScrimmage - 0.2;
                 }
             } else {
@@ -828,7 +831,9 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             const consistency = Math.max(10, Math.min(99, (player.attributes?.mental?.consistency || 50) + schemeBoost - clashPenalty));
 
             let reactionTicks = 0;
-            if (slot !== 'QB1' && slot !== 'OL2') {
+            const isSweepRunner = isOffense && (play.tags?.includes('sweep') || offensivePlayKey?.includes('Jet')) && (assignment?.includes('sweep') || assignment?.includes('run_path'));
+
+            if (slot !== 'QB1' && slot !== 'OL2' && !isSweepRunner) {
                 reactionTicks = Math.max(1, 10 - Math.floor(playerIQ / 10)) + Math.floor(Math.random() * 3);
                 if (!isOffense) reactionTicks += 2;
             }
@@ -1051,20 +1056,37 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 // Use lane intent so they weave through traffic instead of running straight into a block
                 setLaneIntent(pState, pState.targetX, pState.targetY, 8);
             } else if (!pState.isOffense) {
-                const nearestOff = offenseStates
-                    .filter(o =>
-                        !o.isEngaged &&
-                        !o.isBlocked &&
-                        o.y < pState.y + 5 &&
-                        o.y > pState.y - 15
-                    )
-                    .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
+                // Latch onto an assigned escort target to prevent 25Hz flickering between defenders
+                let targetThreat = null;
+                if (pState.escortTargetId) {
+                    targetThreat = offenseStates.find(o => 
+                        o.id === pState.escortTargetId && 
+                        !o.isEngaged && 
+                        getDistance(pState, o) < 12.0
+                    );
+                }
 
-                if (nearestOff) {
-                    pState.targetX = nearestOff.x;
-                    pState.targetY = nearestOff.y;
+                if (!targetThreat) {
+                    targetThreat = offenseStates
+                        .filter(o =>
+                            !o.isEngaged &&
+                            !o.isBlocked &&
+                            o.y < pState.y + 5 &&
+                            o.y > pState.y - 15
+                        )
+                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
+
+                    if (targetThreat) {
+                        pState.escortTargetId = targetThreat.id;
+                    }
+                }
+
+                if (targetThreat) {
+                    pState.targetX = targetThreat.x;
+                    pState.targetY = targetThreat.y;
                     pState.action = 'run_block';
                 } else {
+                    pState.escortTargetId = null;
                     pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -3 : 3);
                     pState.targetY = ballCarrierState.y - 4; // Stay slightly ahead to lead block
                     pState.action = 'run_block';
@@ -2191,6 +2213,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 case 'qb_setup': {
+                    // On Jet Sweeps, hold station near the line to receive the crossing runner instead of dropping back
+                    if (playState.handoffRequired && (playState.playKey?.includes('Jet') || playState.playKey?.includes('Sweep'))) {
+                        setHoldIntent(pState, pState.initialX, pState.initialY);
+                        break;
+                    }
+
                     const qbIQ = pState.playbookIQ || 50;
 
                     // DROPBACK PHASE
@@ -3483,17 +3511,13 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                         )
                         : null;
 
-                const trapAwareness = iq + (Math.random() * 40 - 15);
-                
-                if (
-                    trapAwareness > 80 &&
-                    !isBallInAir &&
-                    playState.tick > 25
-                ) {
-                    // Smart safety intentionally sags to bait the throw. 
-                    // Lower IQ safeties might occasionally do this on instinct.
-                    pState.targetX = primaryThreat.x + (insideLeverageX * 2.5);
-                    pState.targetY = Math.max(zoneCenter.y, primaryThreat.y + 1.0);
+                // High-IQ safeties (>= 75) can subtly bait shallow throws by sagging slightly.
+                // Sag by ~5.5 yards (2 yards deeper than normal 3.5y cushion), NOT by retreating 25 yards to zoneCenter.y!
+                const shouldBaitThrow = iq >= 75 && !isBallInAir && playState.tick > 25 && (primaryThreat.y - LOS) < 12.0;
+
+                if (shouldBaitThrow) {
+                    pState.targetX = primaryThreat.x + (insideLeverageX * 2.0);
+                    pState.targetY = Math.min(109.0, primaryThreat.y + 5.5);
                 } else if (interceptionPoint) {
                     // Break on the ball only when a physical contest is plausible.
                     pState.targetX = interceptionPoint.x;

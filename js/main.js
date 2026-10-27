@@ -921,10 +921,22 @@ function handlePlayerSelectInDraft(playerId) {
         const isMyTurn = currentPickingTeam?.id === gameState.playerTeam.id;
         const rosterLimit = getDraftRosterLimit();
         const hasRoom = (gameState.playerTeam.roster?.length || 0) < rosterLimit;
-        draftBtn.disabled = !(isMyTurn && hasRoom && player);
+
+        // Only actual draft-class prospects can be selected for drafting.
+        // The Pee Wee Stats view includes rostered youth players from gameState.players.
+        const isDraftClassPlayer = Array.isArray(gameState.draftClass) &&
+            gameState.draftClass.some(p =>
+                String(p?.id) === String(playerId)
+            );
+
+        draftBtn.disabled = !(
+            isMyTurn &&
+            hasRoom &&
+            player &&
+            isDraftClassPlayer
+        );
     }
 }
-
 function handleDraftPlayer() {
     if (!gameState || isDraftingLocked) return;
     if (selectedPlayerId) {

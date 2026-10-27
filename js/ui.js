@@ -887,22 +887,53 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
     const watchlistCountEl = document.getElementById('draft-watchlist-count');
     if (watchlistCountEl) watchlistCountEl.textContent = draftWatchlist.size;
 
-    // 1. Strict draft pool filtering.
-    // Never fall back to the general player pool when the rookie class is empty.
-    const poolSource = Array.isArray(gameState.draftClass)
-        ? gameState.draftClass
-        : [];
+    // 1. Use active Pee Wee rosters for youth stats, but keep the actual
+    // rookie draft restricted to eligible, unassigned prospects.
+    const isYouthStatsView = activeDraftView === 'youthStats';
+
+    const poolSource = isYouthStatsView
+        ? (gameState.players || []).filter(player => {
+            if (!player?.teamId) return false;
+
+            const assignedTeam = (gameState.teams || []).find(team =>
+                String(team?.id) === String(player.teamId)
+            );
+
+            return assignedTeam?.leagueType === 'youth';
+        })
+        : Array.isArray(gameState.draftClass)
+            ? gameState.draftClass
+            : [];
 
     const isInauguralDraft = Number(gameState.year) === 1;
 
     let undraftedPlayers = poolSource.filter(player => {
         if (
             !player ||
-            player.teamId ||
-            player.personality?.entersDraft === false ||
             ['retired', 'departed', 'temporary'].includes(
                 player.status?.type
             )
+        ) {
+            return false;
+        }
+
+        // Youth Stats is a scouting/research view, not a draft-eligibility list.
+        if (isYouthStatsView) {
+            const age = Number(player.age);
+
+            return (
+                player.lifecycle === 'youth' &&
+                player.teamId != null &&
+                Number.isInteger(age) &&
+                age >= 8 &&
+                age <= 11
+            );
+        }
+
+        // The actual draft must only show unassigned eligible prospects.
+        if (
+            player.teamId ||
+            player.personality?.entersDraft === false
         ) {
             return false;
         }
@@ -1261,9 +1292,11 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
         const msg = activeDraftView === 'watchlist'
             ? 'No prospects pinned to your watchlist yet. Click the ★ next to any player to shortlist them.'
-            : (!hasEligibleClass && Number(gameState.year) !== 1
-                ? 'No eligible Pee Wee graduates are available in this draft class.'
-                : 'No prospects match filters.');
+            : activeDraftView === 'youthStats'
+                ? 'No active Pee Wee players match these filters.'
+                : (!hasEligibleClass && Number(gameState.year) !== 1
+                    ? 'No eligible Pee Wee graduates are available in this draft class.'
+                    : 'No prospects match filters.');
         const emptyColspan = activeDraftView === 'youthStats' ? 11 : 9;
         elements.draftPoolTbody.innerHTML = `<tr><td colspan="${emptyColspan}" class="p-6 text-center text-slate-400 font-sans italic">${msg}</td></tr>`;
         return;
@@ -1510,9 +1543,23 @@ export function renderSelectedPlayerCard(player, gameState) {
     const publicRecordHtml = renderPublicPlayerRecord(publicInfo);
     const youthRecordHtml = renderPeeWeeHistory(player);
 
-    const bestFriend = playerRoster.find(r => r.id === player.social?.bestFriendId);
-    const friendsOnTeam = playerRoster.filter(r => player.social?.goodFriendIds?.includes(r.id));
-    const rivalOnTeam = playerRoster.find(r => player.social?.rivalIds?.includes(r.id));
+    // External prospects' exact relationships are hidden until the game
+    // has a dedicated scouting report field for verified connections.
+    const canShowDirectSocialInfo = !scouted.isExternalProspect;
+
+    const bestFriend = canShowDirectSocialInfo
+        ? playerRoster.find(r => r.id === player.social?.bestFriendId)
+        : null;
+
+    const friendsOnTeam = canShowDirectSocialInfo
+        ? playerRoster.filter(r =>
+            player.social?.goodFriendIds?.includes(r.id)
+        )
+        : [];
+
+    const rivalOnTeam = canShowDirectSocialInfo
+        ? playerRoster.find(r => player.social?.rivalIds?.includes(r.id))
+        : null;
 
     let socialBadgeHtml = '';
     if (bestFriend) socialBadgeHtml += `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1 py-0.5 rounded text-[9px] font-bold">🤝 BFF: ${bestFriend.name.split(' ')[0]}</span>`;
@@ -4169,9 +4216,18 @@ export function renderStaffTab(gameState) {
                             for the same limited free time.
                         </p>
                     </div>
-                    <div class="text-xs font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2">
-                        <b>${totalRequestedHours}</b> hours assigned across
-                        <b>${workCoaches.length}</b> coaches
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="text-xs font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2">
+                            <b>${totalRequestedHours}</b> hours assigned across
+                            <b>${workCoaches.length}</b> coaches
+                        </div>
+                        <button
+                            type="button"
+                            class="shrink-0 px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs rounded"
+                            onclick="app_autoAssignStaffWorkload()"
+                            title="Allocate each coach's available hours across scouting, development, and preparation">
+                            Auto-assign workload
+                        </button>
                     </div>
                 </div>
 

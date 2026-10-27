@@ -633,7 +633,7 @@ export async function initializeLeague(onProgress) {
 
     // Generate enough players for the 20 initial main-team rosters
     // plus a small free-agent pool. Future rookie classes come from Pee Wee.
-    const totalPlayers = 300;
+    const totalPlayers = 400;
     const initialClassModifiers = generateDraftClassModifiers();
 
     for (let i = 0; i < totalPlayers; i++) {
@@ -4970,6 +4970,10 @@ export function advanceToOffseason() {
     const tier2 = game.teams.filter(t => t.tier === 2).sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
     const youthT = game.teams.filter(t => t.leagueType === 'youth').sort((a, b) => (b.wins || 0) - (a.wins || 0) || (a.losses || 0) - (b.losses || 0));
 
+    // Preserve last season's youth standings before team records are reset.
+    // Pee Wee draft order runs from worst-performing team to best-performing team.
+    const youthDraftOrder = [...youthT].reverse();
+
     const relegated = tier1.slice(-2);
     const promoted = tier2.slice(0, 2);
 
@@ -5814,14 +5818,18 @@ export function advanceToOffseason() {
 
     addMessage("Offseason Summary", `Offseason complete. ${totalVacancies} roster spots opened.\n\n${proRelMsg}\n\nPreparing for the draft.`, false, game);
 
-    // PEE WEE TURNOVER: A small number of returning players leave.
-    // Graduates have already been removed by the youth lifecycle pass above.
+    // PEE WEE BACKGROUND DRAFT
+    // Returning players stay. Departures create vacancies, and the weakest
+    // youth teams get first choice of the best available new prospects.
+    const youthRosterLimit = 14;
+
+    // 1. Apply small annual turnover before calculating roster vacancies.
     youthTeams.forEach(yt => {
-        yt.roster = yt.roster.filter(id => {
+        yt.roster = (yt.roster || []).filter(id => {
             const kid = getPlayer(id);
             if (!kid) return false;
 
-            // Apply minimal turnover to returning 9–11-year-olds.
+            // Only returning youth players can leave through this turnover roll.
             if (
                 kid.age >= 9 &&
                 kid.age <= 11 &&
@@ -5840,44 +5848,100 @@ export function advanceToOffseason() {
 
             return true;
         });
+    });
 
-        // Occasionally, a newcomer joins at age 9–11 instead of age 8.
-        // They must complete the required seasons from their entry age.
-        if (yt.roster.length < 14 && Math.random() < 0.20) {
-            const lateArrival = generatePlayer(
-                9,
-                11,
-                thisYearsClassModifiers
-            );
+    // 2. Count vacant spots after graduation and youth turnover.
+    const vacanciesByTeam = new Map(
+        youthTeams.map(yt => [
+            yt.id,
+            Math.max(
+                0,
+                youthRosterLimit - (yt.roster?.length || 0)
+            )
+        ])
+    );
 
-            lateArrival.teamId = yt.id;
-            lateArrival.lifecycle = 'youth';
-            lateArrival.youthEntryAge = Number(lateArrival.age) || 9;
-            lateArrival.youthSeasonsPlayed = 0;
-            lateArrival.youthSeasonHistory = [];
-            lateArrival.youthCareerStats = createEmptySeasonStats();
+    const totalYouthVacancies = [...vacanciesByTeam.values()]
+        .reduce((sum, vacancies) => sum + vacancies, 0);
 
-            yt.roster.push(lateArrival.id);
-            game.players.push(lateArrival);
-            playerMap.set(lateArrival.id, lateArrival);
+    const newYouthEntrants = [];
+
+    if (totalYouthVacancies > 0) {
+        // Generate two candidates for every open roster spot.
+        // Unselected candidates never enter the persistent player pool.
+        const prospectPoolSize = totalYouthVacancies * 2;
+
+        const rankedYouthProspects = Array.from(
+            { length: prospectPoolSize },
+            () => generatePlayer(8, 8, thisYearsClassModifiers)
+        )
+            .map(player => ({
+                player,
+                score:
+                    (Number(
+                        calculateOverall(
+                            player,
+                            estimateBestPosition(player)
+                        )
+                    ) || 0) + Math.random() * 0.001
+            }))
+            .sort((a, b) => b.score - a.score)
+            .map(entry => entry.player);
+
+        let remainingVacancies = totalYouthVacancies;
+
+        // 3. Run the draft in repeated rounds, worst team first.
+        while (
+            remainingVacancies > 0 &&
+            rankedYouthProspects.length > 0
+        ) {
+            let picksThisRound = 0;
+
+            for (const yt of youthDraftOrder) {
+                const teamVacancies = vacanciesByTeam.get(yt.id) || 0;
+
+                if (teamVacancies <= 0) continue;
+
+                const prospect = rankedYouthProspects.shift();
+                if (!prospect) break;
+
+                // Initialize the selected prospect as a new Pee Wee player.
+                prospect.teamId = yt.id;
+                prospect.lifecycle = 'youth';
+                prospect.youthEntryAge = 8;
+                prospect.youthSeasonsPlayed = 0;
+                prospect.youthSeasonHistory = [];
+                prospect.youthCareerStats = createEmptySeasonStats();
+
+                yt.roster.push(prospect.id);
+
+                game.players.push(prospect);
+                playerMap.set(prospect.id, prospect);
+                newYouthEntrants.push(prospect);
+
+                vacanciesByTeam.set(yt.id, teamVacancies - 1);
+                remainingVacancies--;
+                picksThisRound++;
+            }
+
+            // Defensive guard in case no team can accept another prospect.
+            if (picksThisRound === 0) break;
         }
+    }
 
-        // Fill remaining openings with fresh 8-year-olds.
-        while (yt.roster.length < 14) {
-            const freshKid = generatePlayer(8, 8, thisYearsClassModifiers);
-            freshKid.teamId = yt.id;
-            freshKid.lifecycle = 'youth';
+    // 4. Give selected newcomers social relationships and rebuild youth depth charts.
+    if (newYouthEntrants.length > 0) {
+        const livingActivePlayers = game.players.filter(
+            player =>
+                player &&
+                player.status?.type !== 'retired' &&
+                player.status?.type !== 'departed'
+        );
 
-            freshKid.youthEntryAge = 8;
-            freshKid.youthSeasonsPlayed = 0;
-            freshKid.youthSeasonHistory = [];
-            freshKid.youthCareerStats = createEmptySeasonStats();
+        buildSocialNetworks(newYouthEntrants, livingActivePlayers);
+    }
 
-            yt.roster.push(freshKid.id);
-            game.players.push(freshKid);
-            playerMap.set(freshKid.id, freshKid);
-        }
-
+    youthTeams.forEach(yt => {
         aiSetDepthChart(yt);
     });
 

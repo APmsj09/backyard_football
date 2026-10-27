@@ -2547,12 +2547,12 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     const isTossPlay = handoffTarget.assignment?.includes('toss');
                     const isJetSweep = playState.playKey?.includes('Jet') || handoffTarget.slot?.startsWith('WR');
 
-                    const handoffDistThreshold = isTossPlay ? 4.5 : (isJetSweep ? 3.0 : 1.8);
+                    const handoffDistThreshold = isTossPlay ? 4.5 : (isJetSweep ? 3.2 : 1.8);
                     const handoffTickThreshold = isTossPlay
-                        ? 24
-                        : (isJetSweep ? 18 : (qbDepth < 4.0 ? 16 : 22));
+                        ? 28
+                        : (isJetSweep ? 34 : (qbDepth < 4.0 ? 16 : 22));
 
-                    const minExchangeTick = isTossPlay ? 14 : (isJetSweep ? 10 : 8);
+                    const minExchangeTick = isTossPlay ? 14 : (isJetSweep ? 12 : 8);
 
                     if ((dist < handoffDistThreshold && playState.tick >= minExchangeTick) || (playState.tick >= handoffTickThreshold)) {
                         if (isTossPlay) {

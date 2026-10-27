@@ -214,8 +214,100 @@ function getBestPositionFit(center, lowPlayer, highPlayer, positions) {
     };
 }
 
-function estimatePotential(team, player, evaluator, level) {
-    const actualIndex = GRADES.indexOf(player.potential);
+function estimatePotential(team, player, evaluator, level, ranges) {
+    const age = Number(player?.age);
+
+    // Pee Wee potential must be inferred from the scout's estimated
+    // attributes, not read directly from the player's hidden potential.
+    if (Number.isInteger(age) && age >= 8 && age <= 11) {
+        const youthProgress = Math.max(0, Math.min(1, (age - 8) / 3));
+
+        const developmentScale = {
+            physical: 0.52 + (youthProgress * 0.18),
+            mental: 0.48 + (youthProgress * 0.18),
+            technical: 0.45 + (youthProgress * 0.20)
+        };
+
+        const inferredTalent = [];
+
+        for (const [category, attributes] of Object.entries(ranges || {})) {
+            const scale = developmentScale[category];
+
+            if (!Number.isFinite(scale) || scale <= 0) continue;
+
+            for (const range of Object.values(attributes || {})) {
+                const low = Number(range?.low);
+                const high = Number(range?.high);
+
+                if (!Number.isFinite(low) || !Number.isFinite(high)) continue;
+
+                const estimatedCurrent = (low + high) / 2;
+
+                inferredTalent.push(
+                    clamp(estimatedCurrent / scale, 0, 100)
+                );
+            }
+        }
+
+        if (inferredTalent.length === 0) return null;
+
+        const averageEstimatedTalent =
+            inferredTalent.reduce((sum, value) => sum + value, 0) /
+            inferredTalent.length;
+
+        // Approximate the generator's potential model using estimated talent
+        // and a neutral background component. This is an estimate, not a
+        // reconstruction of the player's actual hidden potential.
+        const profile = getEvaluatorProfile(evaluator, team, player);
+
+        const scoutAccuracyFactor = clamp(
+            1.2 - profile.overall / 100,
+            0.55,
+            1.1
+        );
+
+        const uncertaintyPoints = {
+            1: 8,
+            2: 5,
+            3: 3,
+            4: 1.5
+        }[level] ?? 8;
+
+        const seed = [
+            team.id,
+            player.id,
+            evaluator?.id || evaluator?.name || 'staff',
+            level,
+            'youth-potential'
+        ].join('|');
+
+        const estimatedScore =
+            averageEstimatedTalent * 0.75 +
+            65 * 0.25 +
+            stableNoise(seed) * uncertaintyPoints * scoutAccuracyFactor;
+
+        const estimatedIndex = estimatedScore >= 88
+            ? 0
+            : estimatedScore >= 76
+                ? 1
+                : estimatedScore >= 58
+                    ? 2
+                    : estimatedScore >= 43
+                        ? 3
+                        : 4;
+
+        const radius = level <= 2 ? 2 : 1;
+
+        return {
+            bestPossible: GRADES[Math.max(0, estimatedIndex - radius)],
+            worstPossible: GRADES[
+                Math.min(GRADES.length - 1, estimatedIndex + radius)
+            ]
+        };
+    }
+
+    // Preserve the existing behavior for non-youth prospects for now.
+    const actualIndex = GRADES.indexOf(player?.potential);
     if (actualIndex < 0) return null;
 
     const seed = [
@@ -236,8 +328,304 @@ function estimatePotential(team, player, evaluator, level) {
 
     return {
         bestPossible: GRADES[Math.max(0, estimatedIndex - radius)],
-        worstPossible: GRADES[Math.min(GRADES.length - 1, estimatedIndex + radius)]
+        worstPossible: GRADES[
+            Math.min(GRADES.length - 1, estimatedIndex + radius)
+        ]
     };
+}
+
+function estimateCharacterSummary(team, player, evaluator, level) {
+    if (level < 3) return null;
+
+    const personality = player?.personality;
+
+    if (!personality || typeof personality !== 'object') {
+        return null;
+    }
+
+    const profile = getEvaluatorProfile(evaluator, team, player);
+
+    // Character specialists produce more precise estimates.
+    // Other scouting styles are less reliable on personality evaluation.
+    const biasMultiplier = profile.bias === 'Character First'
+        ? 0.6
+        : profile.bias === 'Objective Scout'
+            ? 1
+            : 1.2;
+
+    const baseRadius = level >= 4 ? 10 : 18;
+
+    const uncertainty =
+        baseRadius *
+        (1.25 - profile.character / 200) *
+        biasMultiplier;
+
+    const estimate = key => {
+        const actual = Number(personality[key]);
+
+        if (!Number.isFinite(actual)) return null;
+
+        const noise = stableNoise(
+            `character:${team?.id}:${player.id}:${evaluator?.id}:${level}:${key}`
+        );
+
+        return clamp(actual + noise * uncertainty, 0, 100);
+    };
+
+    const average = values => {
+        const validValues = values.filter(Number.isFinite);
+
+        return validValues.length
+            ? validValues.reduce((sum, value) => sum + value, 0) /
+                validValues.length
+            : null;
+    };
+
+    const effort = average([
+        estimate('workEthic'),
+        estimate('dependability'),
+        estimate('loyalty')
+    ]);
+
+    const teamFit = average([
+        estimate('likeability'),
+        estimate('loyalty'),
+        (() => {
+            const ego = estimate('ego');
+            return ego === null ? null : 100 - ego;
+        })()
+    ]);
+
+    const presence = average([
+        estimate('streetCred'),
+        estimate('ego')
+    ]);
+
+    if (effort === null && teamFit === null && presence === null) {
+        return null;
+    }
+
+    const effortNote = effort === null
+        ? null
+        : effort >= 72
+            ? 'Strong effort/reliability signals'
+            : effort >= 48
+                ? 'Generally steady effort'
+                : 'Effort/reliability need closer review';
+
+    const teamNote = teamFit === null
+        ? null
+        : teamFit >= 72
+            ? 'team-oriented'
+            : teamFit >= 48
+                ? 'may fit with clear expectations'
+                : 'may need relationship-building';
+
+    const presenceNote = presence === null
+        ? null
+        : presence >= 72
+            ? 'confident, assertive presence'
+            : presence >= 48
+                ? 'moderately assertive'
+                : 'quieter competitive presence';
+
+    const notes = [effortNote, teamNote, presenceNote].filter(Boolean);
+
+    const prefix = profile.bias === 'Character First'
+        ? 'Character-focused: '
+        : '';
+
+    return `${prefix}${notes.join('; ')}.`;
+}
+
+function buildYouthPerformanceSummary(player, level) {
+    if (level < 2) return null;
+
+    const history = Array.isArray(player?.youthSeasonHistory)
+        ? player.youthSeasonHistory.filter(season =>
+            season?.stats &&
+            typeof season.stats === 'object' &&
+            !Array.isArray(season.stats)
+        )
+        : [];
+
+    const isActiveYouth = player?.lifecycle === 'youth';
+
+    // Do not interpret ordinary main-league statistics as Pee Wee history.
+    if (
+        !isActiveYouth &&
+        history.length === 0 &&
+        !(Number(player?.youthSeasonsPlayed) > 0)
+    ) {
+        return null;
+    }
+
+    const statKeys = [
+        'passYards',
+        'passAttempts',
+        'passCompletions',
+        'interceptionsThrown',
+        'rushYards',
+        'rushAttempts',
+        'recYards',
+        'receptions',
+        'targets',
+        'touchdowns',
+        'tackles',
+        'sacks',
+        'interceptions',
+        'fumblesRecovered'
+    ];
+
+    const readStats = source => Object.fromEntries(
+        statKeys.map(key => {
+            const value = Number(source?.[key]);
+
+            return [
+                key,
+                Number.isFinite(value) ? Math.max(0, value) : 0
+            ];
+        })
+    );
+
+    const completedTotals = readStats({});
+
+    history.forEach(season => {
+        const stats = readStats(season.stats);
+
+        statKeys.forEach(key => {
+            completedTotals[key] += stats[key];
+        });
+    });
+
+    // Current-season stats have not yet been added to the completed-history
+    // rows. Keep them separate so a partial season is not treated as complete.
+    const currentStats = isActiveYouth
+        ? readStats(player.seasonStats)
+        : readStats({});
+
+    const hasCurrentStats = statKeys.some(
+        key => currentStats[key] > 0
+    );
+
+    const position = String(
+        player?.pos || player?.bestPosition || ''
+    ).toUpperCase();
+
+    const completedMetrics = [];
+    const currentMetrics = [];
+
+    const addMetric = (
+        destination,
+        stats,
+        label,
+        key,
+        divisor = 1
+    ) => {
+        if (!(stats[key] > 0)) return;
+
+        destination.push(
+            `${label} ${Math.round(stats[key] / divisor).toLocaleString('en-US')}`
+        );
+    };
+
+    const addPositionMetrics = (destination, stats, divisor = 1) => {
+        if (position === 'QB') {
+            addMetric(destination, stats, 'Pass yards', 'passYards', divisor);
+
+            if (stats.passAttempts > 0) {
+                destination.push(
+                    `Completion rate ${Math.round(
+                        stats.passCompletions /
+                        stats.passAttempts * 100
+                    )}%`
+                );
+            }
+
+            addMetric(
+                destination,
+                stats,
+                'Interceptions thrown',
+                'interceptionsThrown',
+                divisor
+            );
+        } else if (position === 'RB') {
+            addMetric(destination, stats, 'Rush yards', 'rushYards', divisor);
+            addMetric(destination, stats, 'Carries', 'rushAttempts', divisor);
+            addMetric(destination, stats, 'Receiving yards', 'recYards', divisor);
+        } else if (position === 'WR' || position === 'TE') {
+            addMetric(destination, stats, 'Receiving yards', 'recYards', divisor);
+            addMetric(destination, stats, 'Receptions', 'receptions', divisor);
+            addMetric(destination, stats, 'Targets', 'targets', divisor);
+            addMetric(destination, stats, 'Rush yards', 'rushYards', divisor);
+        } else if (['DL', 'LB', 'DB'].includes(position)) {
+            addMetric(destination, stats, 'Tackles', 'tackles', divisor);
+            addMetric(destination, stats, 'Sacks', 'sacks', divisor);
+            addMetric(destination, stats, 'Interceptions', 'interceptions', divisor);
+            addMetric(
+                destination,
+                stats,
+                'Fumbles recovered',
+                'fumblesRecovered',
+                divisor
+            );
+        } else if (position !== 'OL') {
+            addMetric(destination, stats, 'Pass yards', 'passYards', divisor);
+            addMetric(destination, stats, 'Rush yards', 'rushYards', divisor);
+            addMetric(destination, stats, 'Receiving yards', 'recYards', divisor);
+            addMetric(destination, stats, 'Tackles', 'tackles', divisor);
+        }
+    };
+
+    if (history.length > 0) {
+        addPositionMetrics(
+            completedMetrics,
+            completedTotals,
+            history.length
+        );
+    }
+
+    if (hasCurrentStats) {
+        addPositionMetrics(currentMetrics, currentStats);
+    }
+
+    const sections = [];
+
+    if (history.length > 0) {
+        sections.push(
+            `Completed-season sample (${history.length} season${history.length === 1 ? '' : 's'}): ` +
+            (
+                completedMetrics.length > 0
+                    ? completedMetrics.join(', ') +
+                        (history.length > 1 ? ' per season on average' : '')
+                    : 'no role-specific box-score production recorded'
+            ) +
+            '.'
+        );
+    }
+
+    if (hasCurrentStats) {
+        sections.push(
+            `Current season so far: ${
+                currentMetrics.length > 0
+                    ? currentMetrics.join(', ')
+                    : 'no role-specific production recorded'
+            }.`
+        );
+    }
+
+    if (position === 'OL') {
+        sections.push(
+            'Box-score stats are a weak measure of offensive-line play; ' +
+            'attribute estimates and positional fit carry more weight.'
+        );
+    }
+
+    if (sections.length === 0) {
+        return 'Pee Wee performance: no recorded role-specific production yet.';
+    }
+
+    return `Pee Wee performance evidence: ${sections.join(' ')}`;
 }
 
 function generateEvaluation(team, player, evaluator, level, ranges) {
@@ -268,14 +656,18 @@ function generateEvaluation(team, player, evaluator, level, ranges) {
         .map(x => `Area to investigate: ${x.attribute} (estimated ${x.value})`);
 
     const best = Math.max(
-        offenseFit?.low || 0,
-        offenseFit?.high || 0,
-        defenseFit?.low || 0,
-        defenseFit?.high || 0
+        offenseFit ? (offenseFit.low + offenseFit.high) / 2 : 0,
+        defenseFit ? (defenseFit.low + defenseFit.high) / 2 : 0
     );
 
     return {
-        potentialRange: estimatePotential(team, player, evaluator, level),
+        potentialRange: estimatePotential(
+            team,
+            player,
+            evaluator,
+            level,
+            ranges
+        ),
         evaluation: {
             offenseFit,
             defenseFit,
@@ -288,7 +680,16 @@ function generateEvaluation(team, player, evaluator, level, ranges) {
                     : best >= 60
                         ? 'Developmental rotation option'
                         : 'Long-term development project',
-            summary: `${offenseFit ? `OFF ${offenseFit.position}` : 'OFF fit unclear'} / ${defenseFit ? `DEF ${defenseFit.position}` : 'DEF fit unclear'}; estimates reflect the evaluator's report.`
+            characterSummary: estimateCharacterSummary(
+                team,
+                player,
+                evaluator,
+                level
+            ),
+            summary: [
+                `${offenseFit ? `OFF ${offenseFit.position}` : 'OFF fit unclear'} / ${defenseFit ? `DEF ${defenseFit.position}` : 'DEF fit unclear'}; estimates reflect the evaluator's report.`,
+                buildYouthPerformanceSummary(player, level)
+            ].filter(Boolean).join(' ')
         }
     };
 }
@@ -1055,15 +1456,11 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
     // Other scouting focuses retain the team's normal age range.
     const minAge = focus === 'youth'
         ? 8
-        : Number.isFinite(team.ageMin)
-            ? team.ageMin
-            : 12;
+        : Number.isFinite(team.ageMin) ? team.ageMin : 12;
 
     const maxAge = focus === 'youth'
         ? 11
-        : Number.isFinite(team.ageMax)
-            ? team.ageMax
-            : 18;
+        : Number.isFinite(team.ageMax) ? team.ageMax : 18;
 
     const candidates = [];
 
@@ -1087,6 +1484,15 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
         const otherTeam = player.teamId
             ? teamById.get(String(player.teamId))
             : null;
+
+        // Youth scouting targets enrolled Pee Wee players only.
+        // Do not mix in unrelated free agents or main-league players.
+        if (
+            focus === 'youth' &&
+            (!otherTeam || otherTeam.leagueType !== 'youth')
+        ) {
+            continue;
+        }
 
         if (focus === 'draft') {
             const isDraftTarget = targetIds

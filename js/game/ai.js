@@ -549,11 +549,25 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             shouldHelp = maxPressure > 4.0;
         }
     } else if (helpTarget?.type === 'zone_match') {
-        // Deep zone defenders should actively bracket or match threats
-        shouldHelp = maxPressure > 2.0; 
+        // In Cover 2, deep-half safeties must protect the deep boundary.
+        // Never allow them to bite on underneath routes shallower than 10 yards!
+        if (isCover2 && helpTarget.receiver && (helpTarget.receiver.y - LOS) < 10.0) {
+            shouldHelp = false;
+        } else {
+            // Hysteresis latch: Require a decisive threshold to bite,
+            // and maintain the help assignment to prevent 25Hz target flickering.
+            const isAlreadyHelping = safetyState._isHelpingWithZoneMatch;
+            const threshold = isAlreadyHelping ? 1.4 : 2.6;
+
+            shouldHelp = maxPressure > threshold;
+            safetyState._isHelpingWithZoneMatch = shouldHelp;
+        }
     }
 
-    if (!shouldHelp) return null;
+    if (!shouldHelp) {
+        safetyState._isHelpingWithZoneMatch = false;
+        return null;
+    }
 
     if (helpTarget && helpTarget.receiver) {
         let helpX = helpTarget.receiver.x;

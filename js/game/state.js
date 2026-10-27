@@ -609,6 +609,9 @@ export function setTeamScoutingReport(team, playerId, report) {
             projectedRole: typeof evaluation.projectedRole === 'string'
                 ? evaluation.projectedRole.slice(0, 80)
                 : null,
+            characterSummary: typeof evaluation.characterSummary === 'string'
+                ? evaluation.characterSummary.slice(0, 160)
+                : null,
             summary: typeof evaluation.summary === 'string'
                 ? evaluation.summary.slice(0, 500)
                 : null
