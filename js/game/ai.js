@@ -340,7 +340,13 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
                     : 'run';
         }
     } else if (currentGuess === 'pass') {
-        if (finalRunScore > finalPassScore + 20) {
+        // Changing from a pass read back to a run read requires overwhelming evidence,
+        // because once the QB drops back, the play is almost certainly a pass.
+        // Prevent aggressive linemen from tricking DBs into abandoning deep coverage.
+        const requiresRunEvidence = qb && (qb.action === 'qb_setup' || qb.hasCompletedDropback);
+        const flipMargin = requiresRunEvidence ? 45 : 20;
+
+        if (finalRunScore > finalPassScore + flipMargin) {
             guess = 'run';
         }
     }

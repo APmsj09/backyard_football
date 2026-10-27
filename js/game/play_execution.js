@@ -734,7 +734,12 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             ? (isSlot ? 1.0 : -0.5)
                             : (isSlot ? -1.0 : 0.5);
 
-                        let yOffset = playState.lineOfScrimmage >= 95 ? 1.0 : 2.0;
+                        // Give DBs a realistic off-man cushion (~5 yards) in normal situations,
+                        // compressing only on the goal line (1.5 yards).
+                        const isPressCall = defPlay.tags?.includes('press') || defPlay.isPress;
+                        let yOffset = playState.lineOfScrimmage >= 95 
+                            ? 1.5 
+                            : (isPressCall ? 2.0 : 5.0);
 
                         // Keep intentional double coverage staggered.
                         const existingCoverers = playState.activePlayers.filter(
@@ -746,7 +751,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             yOffset += 2.0;
                         } else if (existingCoverers >= 2) {
                             xOffset = 0;
-                            yOffset += 5.0;
+                            yOffset += 4.0;
                         }
 
                         const desiredX = tState.x + (
@@ -755,33 +760,23 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                                 : xOffset
                         );
 
-                        // Retain each defender's natural side of the formation.
-                        // LBs can shade toward a back, but cannot be pulled across
-                        // the formation into another linebacker's starting lane.
-                        const maxLateralShift = isLB ? 2.5 : (isDB ? 5.0 : 1.5);
-                        const lateralShift = Math.max(
-                            -maxLateralShift,
-                            Math.min(maxLateralShift, desiredX - formationStartX)
-                        );
-
-                        startX = formationStartX + lateralShift;
+                        // In pure man coverage, defenders line up directly across from their man laterally.
+                        // We do not clamp them to base formation lanes.
+                        startX = Math.max(1.0, Math.min(FIELD_WIDTH - 1.0, desiredX));
 
                         if (isRB && isLB) {
-                            // Preserve the linebacker-depth adjustment.
+                            // Linebackers covering RBs maintain standard linebacker depth
                             startY = playState.lineOfScrimmage + 4.5;
                         } else if (isRB) {
-                            // Do not drag DBs or linemen into LB depth just
-                            // because their coverage target is a back.
                             startY = Math.max(
                                 formationStartY,
-                                playState.lineOfScrimmage + 1.5
+                                playState.lineOfScrimmage + 2.0
                             );
                         } else {
                             startY = tState.y + yOffset;
                         }
 
-                        // Pre-snap movement targets match the defender's own
-                        // alignment. Coverage pursuit adjusts after the snap.
+                        // Pre-snap movement targets match the defender's own alignment.
                         targetX = startX;
                         targetY = startY;
                     }
@@ -3088,7 +3083,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             const distToLanding = Math.hypot(pState.x - ballPos.targetX, pState.y - ballPos.targetY);
 
                             if (isAssignedToTarget || distToLanding < 6.5) {
-                                setPointIntent(pState, ballPos.targetX, ballPos.targetY, 0.45);
+                                let trackTargetY = ballPos.targetY;
+                                
+                                // Do not let deep safeties bite on shallow checkdowns while the ball is in the air.
+                                // If the ball is thrown short, let the linebackers rally to it.
+                                if (isDeepZoneDB) {
+                                    trackTargetY = Math.max(LOS + 8.0, trackTargetY);
+                                }
+                                
+                                setPointIntent(pState, ballPos.targetX, trackTargetY, 0.45);
                                 pState.action = 'tracking_ball';
                                 pState.contactReduction = 1.15;
                             } else {
@@ -3203,21 +3206,22 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             // so high-IQ DBs naturally squeeze them. Wide splits require deeper cushions.
             const receiverWidth = Math.abs(targetRec.x - CENTER_X);
             const isTightSplit = receiverWidth < 10.0; // Slot or compressed alignment
-            
+                
             const iqFactor = Math.max(-0.6, Math.min(1.0, (defIQ - 50) / 40)); // -0.6 (slow learner) to +1.0 (shut-down lock)
-            
-            // Base cushion depends on alignment width and distance to goal line
-            let baseCushionY = isTightSplit ? 1.1 : 2.2; 
+                
+            // Base cushion depends on alignment width and distance to goal line.
+            // Cushion must remain >= 1.35y so it never violates the 1.30y physical collision radius.
+            let baseCushionY = isTightSplit ? 1.8 : 2.5; 
             if (distanceToGoal <= 5.0) {
-                baseCushionY = 0.5; // Goal line press alignment
+                baseCushionY = 1.45; // Tight press alignment outside collision repulsion boundary
             }
 
-            let baseCushionX = (targetRec.x < CENTER_X) ? 0.5 : -0.5; // Inside leverage
+            let baseCushionX = (targetRec.x < CENTER_X) ? 0.6 : -0.6; // Inside leverage
 
             // Attribute Scaling: High-IQ / High-Agility DBs squeeze tighter; low-IQ DBs play soft and give cushion
             const defAgility = pState.agility || pState.agi || 50;  
             let agilityFactor = (defAgility / 50);
-            let cushionY = Math.max(distanceToGoal <= 5.0 ? 0.3 : 0.6, (baseCushionY * cushionShrink) - (iqFactor * 0.5) - ((agilityFactor - 1) * 0.3));
+            let cushionY = Math.max(1.35, (baseCushionY * cushionShrink) - (iqFactor * 0.4) - ((agilityFactor - 1) * 0.2));
             let cushionX = (baseCushionX * cushionShrink) * (0.8 + (iqFactor * 0.2));
 
             // Speed mismatch adjustment: If the receiver is a burner, DBs should bail out deeper.
@@ -3299,6 +3303,14 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
             let perfectX = targetRec.x + cushionX;
             let perfectY = targetRec.y + cushionY;
+
+            // Once the receiver reaches or crosses the DB's level, transition to hip-to-hip trail coverage.
+            // Do not continue commanding the DB to stand directly in front of the receiver's forward running lane.
+            const isReceiverReleasing = targetRec.y >= (pState.y - 0.4);
+            if (isReceiverReleasing && !targetSlot.startsWith('RB')) {
+                perfectY = targetRec.y - 0.2; // Trail slightly on the hip
+                perfectX = targetRec.x + (targetRec.x < CENTER_X ? 0.8 : -0.8); // Maintain inside/outside shoulder leverage
+            }
 
             // Keep RB coverage leverage consistent as the back crosses
             // the line of scrimmage. Toggling this adjustment at LOS causes
@@ -3542,7 +3554,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 pState.targetY = Math.max(minDropDepth, Math.min(maxSinkDepth, pState.targetY));
             }
             pState.zoneDriftTick = playState.tick;
-            
+
         } else {
             let needsNewDrift = false;
             if (!pState.zoneDriftTick || playState.tick > pState.zoneDriftTick + 25 || pState.dynamicTargetX === undefined) {
