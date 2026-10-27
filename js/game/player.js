@@ -728,28 +728,150 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         potential = 'A';
     }
 
-    // 8. AGE SCALING & DEVELOPMENT VARIANCE (Deriving Current Ability)
-    let basePhysicalScale, baseMentalScale, baseTechnicalScale;
+        // 8. INDIVIDUAL MATURATION PROFILES
+    // Physical, mental, and technical development are independent.
+    // Players can mature early in one area and late in another.
 
-    if (isWonderkid) {
-        basePhysicalScale = 0.92;
-        baseMentalScale = 0.86;
-        baseTechnicalScale = 0.88;
-    } else if (age < 12) {
-        // Ages 8-11: Pee-Wee scale from 52% up to 70% of ceiling
-        const youthProgress = Math.max(0, (age - 8) / 3.0);
-        basePhysicalScale = 0.52 + (youthProgress * 0.18);
-        baseMentalScale = 0.48 + (youthProgress * 0.18);
-        baseTechnicalScale = 0.45 + (youthProgress * 0.20);
-    } else {
-        // Ages 12-18: Realistic sandlot baseline (74% at age 12 up to 100% at age 18)
-        const teenProgress = Math.min(1.0, (age - 12) / 6.0);
-        basePhysicalScale = 0.74 + (teenProgress * 0.26);
-        baseMentalScale = 0.70 + (teenProgress * 0.30);
-        baseTechnicalScale = 0.68 + (teenProgress * 0.32);
-    }
+    const createDevelopmentTrajectory = domain => {
+        const timingRoll = Math.random();
 
-    const playerGrowthTempo = 1 + gaussianRandom(0, 0.04);
+        const earlyChance = domain === 'physical'
+            ? 0.12
+            : domain === 'mental'
+                ? 0.22
+                : 0.25;
+
+        const lateChance = domain === 'physical'
+            ? 0.30
+            : domain === 'mental'
+                ? 0.25
+                : 0.30;
+
+        let style;
+        let minMaturityAge;
+        let maxMaturityAge;
+
+        if (timingRoll < earlyChance) {
+            style = 'early';
+
+            if (domain === 'physical') {
+                minMaturityAge = 14;
+                maxMaturityAge = 15;
+            } else {
+                minMaturityAge = 13;
+                maxMaturityAge = 15;
+            }
+        } else if (timingRoll >= 1 - lateChance) {
+            style = 'late';
+            minMaturityAge = 18;
+            maxMaturityAge = 20;
+        } else {
+            style = 'typical';
+            minMaturityAge = domain === 'technical' ? 15 : 16;
+            maxMaturityAge = 18;
+        }
+
+        const ranges = {
+            physical: {
+                start: [0.46, 0.59],
+                peak: [0.95, 1.00]
+            },
+            mental: {
+                start: [0.42, 0.68],
+                peak: [0.92, 1.00]
+            },
+            technical: {
+                start: [0.40, 0.70],
+                peak: [0.92, 1.00]
+            }
+        };
+
+        const range = ranges[domain];
+
+        const randomBetween = (min, max) =>
+            min + (Math.random() * (max - min));
+
+        return {
+            style,
+            startAge: 8,
+            maturityAge: getRandomInt(
+                minMaturityAge,
+                maxMaturityAge
+            ),
+            startScale: randomBetween(
+                range.start[0],
+                range.start[1]
+            ),
+            peakScale: randomBetween(
+                range.peak[0],
+                range.peak[1]
+            )
+        };
+    };
+
+    // This profile is saved with the player so offseason development
+    // can follow the same trajectory instead of rerolling it every year.
+    const developmentProfile = {
+        physical: createDevelopmentTrajectory('physical'),
+        mental: createDevelopmentTrajectory('mental'),
+        technical: createDevelopmentTrajectory('technical')
+    };
+
+    // Hard limits prevent a generated age-12 player from already
+    // having adult-level physical ratings relative to their ceiling.
+    const getPhysicalScaleCap = playerAge => {
+        if (playerAge <= 8) return 0.60;
+        if (playerAge <= 9) return 0.65;
+        if (playerAge <= 10) return 0.72;
+        if (playerAge <= 11) return 0.79;
+        if (playerAge <= 12) return 0.86;
+
+        return 1.00;
+    };
+
+    const getTrajectoryScale = (trajectory, playerAge) => {
+        const duration = Math.max(
+            1,
+            trajectory.maturityAge - trajectory.startAge
+        );
+
+        const progress = Math.max(
+            0,
+            Math.min(
+                1,
+                (playerAge - trajectory.startAge) / duration
+            )
+        );
+
+        // Smoothstep creates gradual growth without a sudden age jump.
+        const easedProgress =
+            progress * progress * (3 - (2 * progress));
+
+        return trajectory.startScale +
+            (
+                (trajectory.peakScale - trajectory.startScale) *
+                easedProgress
+            );
+    };
+
+    const basePhysicalScale = Math.min(
+        getTrajectoryScale(developmentProfile.physical, age),
+        getPhysicalScaleCap(age)
+    );
+
+    const baseMentalScale = getTrajectoryScale(
+        developmentProfile.mental,
+        age
+    );
+
+    const baseTechnicalScale = getTrajectoryScale(
+        developmentProfile.technical,
+        age
+    );
+
+    // Retain a small player-wide variation, while the three
+    // independent profiles provide the main maturation differences.
+    const playerGrowthTempo = 1 + gaussianRandom(0, 0.025);
 
     let attributes = {
         physical: { height, weight },
@@ -768,18 +890,53 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         Object.keys(talentAttributes[cat]).forEach(attr => {
             if (attr === 'height' || attr === 'weight') return;
 
-            const attrVariance = 1 + gaussianRandom(0, 0.05);
-            const devFactor = Math.min(1.0, baseScale * playerGrowthTempo * attrVariance);
+                        const attrVariance = 1 + gaussianRandom(0, 0.05);
 
-            let rawVal = Math.round(talentAttributes[cat][attr] * devFactor);
+            const maxCurrentScale = cat === 'physical'
+                ? getPhysicalScaleCap(age)
+                : 1.00;
 
-            // Cap catching hands for non-elite youth (under 16) to prevent 95+ hands on 50-OVR players
-            if (attr === 'catchingHands' && age < 16 && !isWonderkid) {
-                const maxYouthHands = potential === 'A' ? 85 : (potential === 'B' ? 76 : 68);
+            const devFactor = Math.min(
+                maxCurrentScale,
+                baseScale * playerGrowthTempo * attrVariance
+            );
+
+            let rawVal = Math.round(
+                talentAttributes[cat][attr] * devFactor
+            );
+
+            // Cap catching hands for non-elite youth (under 16)
+            // without bypassing the maturity and rating limits below.
+            if (
+                attr === 'catchingHands' &&
+                age < 16 &&
+                !isWonderkid
+            ) {
+                const maxYouthHands =
+                    potential === 'A' ? 85 :
+                    potential === 'B' ? 76 :
+                    68;
+
                 rawVal = Math.min(maxYouthHands, rawVal);
             }
 
-            attributes[cat][attr] = Math.max(ratingFloor, Math.min(99, rawVal));
+            // Physical ratings must respect the player's age-specific
+            // maturity ceiling, including when applying the rating floor.
+            const ageScaledCeiling = cat === 'physical'
+                ? Math.floor(
+                    talentAttributes[cat][attr] * maxCurrentScale
+                )
+                : 99;
+
+            const effectiveRatingFloor = Math.min(
+                ratingFloor,
+                ageScaledCeiling
+            );
+
+            attributes[cat][attr] = Math.max(
+                effectiveRatingFloor,
+                Math.min(ageScaledCeiling, 99, rawVal)
+            );
         });
     });
 
@@ -890,6 +1047,10 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
 
         // Active current ability ratings used in-game
         attributes,
+
+        // Persistent individual maturation trajectory.
+        // Used by offseason development and available for diagnostics.
+        developmentProfile,
 
         // Underlying full-potential ceiling ratings
         talentAttributes,

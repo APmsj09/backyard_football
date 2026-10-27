@@ -4129,12 +4129,18 @@ export function developPlayer(player, team = null) {
     const ego = player.personality?.ego || 50;
     const ethicMod = 0.65 + (ethic / 110);
 
-    // Live snaps create massive development leverage
+    // Playing time helps skill development, but should not compound
+    // the age and depth-chart advantage into runaway attribute growth.
     const snaps = player.careerStats?.snapsThisSeason || 0;
     let experienceMod = 1.0;
-    if (snaps >= 250) experienceMod = 1.45;     // Full-time starter leap
-    else if (snaps >= 100) experienceMod = 1.20; // Active rotational contributor
-    else if (snaps < 25) experienceMod = 0.65;   // Bench rot penalty
+
+    if (snaps >= 250) {
+        experienceMod = 1.10; // Full-time starter: modest development bonus
+    } else if (snaps >= 100) {
+        experienceMod = 1.05; // Rotational contributor: small bonus
+    } else if (snaps < 25) {
+        experienceMod = 0.90; // Bench player: reduced, not crippled
+    }
 
     const playerTrainingAssignments = [];
 
@@ -4211,22 +4217,171 @@ export function developPlayer(player, team = null) {
     // =========================================================================
     // 1. IMPACTFUL BIOLOGICAL MATURATION (Closing the Gap to Adult Ceiling)
     // =========================================================================
-    if (player.talentAttributes && player.age >= 12 && player.age <= 18) {
-        // Boosted growth step: youth naturally close 15-28% of the ceiling gap per year
+    // =========================================================================
+    // 1. PROFILE-DRIVEN BIOLOGICAL MATURATION
+    // Physical, mental, and technical development follow independent,
+    // persistent player trajectories instead of one universal growth rate.
+    // =========================================================================
+    const maturationDomains = [
+        'physical',
+        'mental',
+        'technical'
+    ];
+
+    const maturationProfile = player.developmentProfile;
+
+    const hasMaturationProfile = maturationDomains.every(domain => {
+        const trajectory = maturationProfile?.[domain];
+
+        return (
+            trajectory &&
+            Number.isFinite(Number(trajectory.startAge)) &&
+            Number.isFinite(Number(trajectory.maturityAge)) &&
+            Number(trajectory.maturityAge) > Number(trajectory.startAge) &&
+            Number.isFinite(Number(trajectory.startScale)) &&
+            Number.isFinite(Number(trajectory.peakScale))
+        );
+    });
+
+    if (
+        player.talentAttributes &&
+        player.age >= 8 &&
+        player.age <= 18 &&
+        hasMaturationProfile
+    ) {
+        // Development is resolved before the offseason age increment.
+        // Advance the maturation curve to the age the player is entering.
+        const targetAge = player.age + 1;
+
+        const getPhysicalScaleCap = age => {
+            if (age <= 8) return 0.60;
+            if (age <= 9) return 0.65;
+            if (age <= 10) return 0.72;
+            if (age <= 11) return 0.79;
+            if (age <= 12) return 0.86;
+
+            return 1.00;
+        };
+
+        const getTrajectoryScale = trajectory => {
+            const startAge = Number(trajectory.startAge);
+            const maturityAge = Number(trajectory.maturityAge);
+            const startScale = Number(trajectory.startScale);
+            const peakScale = Number(trajectory.peakScale);
+
+            const progress = Math.max(
+                0,
+                Math.min(
+                    1,
+                    (targetAge - startAge) /
+                        (maturityAge - startAge)
+                )
+            );
+
+            // Smoothstep gives gradual maturation rather than abrupt jumps.
+            const easedProgress =
+                progress * progress * (3 - (2 * progress));
+
+            return startScale +
+                ((peakScale - startScale) * easedProgress);
+        };
+
+        for (const domain of maturationDomains) {
+            const currentAttributes = player.attributes?.[domain];
+            const talentAttributes = player.talentAttributes?.[domain];
+            const trajectory = maturationProfile[domain];
+
+            if (
+                !currentAttributes ||
+                !talentAttributes ||
+                !trajectory
+            ) {
+                continue;
+            }
+
+            let targetScale = getTrajectoryScale(trajectory);
+
+            // Retain the age-based physical maturity limits.
+            // In particular, a player entering age 12 cannot have
+            // generated physical ratings at 100% of their ceiling.
+            if (domain === 'physical') {
+                targetScale = Math.min(
+                    targetScale,
+                    getPhysicalScaleCap(targetAge)
+                );
+            }
+
+            for (const [attr, currentRaw] of Object.entries(
+                currentAttributes
+            )) {
+                if (attr === 'height' || attr === 'weight') {
+                    continue;
+                }
+
+                const currentValue = Number(currentRaw);
+                const ceilingValue = Number(talentAttributes[attr]);
+
+                if (
+                    !Number.isFinite(currentValue) ||
+                    !Number.isFinite(ceilingValue)
+                ) {
+                    continue;
+                }
+
+                const targetValue = Math.max(
+                    0,
+                    Math.min(
+                        99,
+                        ceilingValue,
+                        Math.round(ceilingValue * targetScale)
+                    )
+                );
+
+                // Maturation never forcibly lowers a trained or
+                // naturally exceptional attribute to fit the curve.
+                if (targetValue > currentValue) {
+                    player.attributes[domain][attr] = targetValue;
+                }
+            }
+        }
+    } else if (
+        // Backward compatibility for players generated before
+        // individual maturation profiles were added.
+        player.talentAttributes &&
+        player.age >= 12 &&
+        player.age <= 18
+    ) {
         const youthAgeMultiplier = player.age <= 15 ? 1.35 : 1.0;
-        const growthStep = 0.16 * potMod * ethicMod * teachingMod * experienceMod * youthAgeMultiplier;
+        const growthStep =
+            0.16 *
+            potMod *
+            ethicMod *
+            teachingMod *
+            experienceMod *
+            youthAgeMultiplier;
 
         Object.keys(player.attributes).forEach(cat => {
             if (!player.talentAttributes[cat]) return;
+
             Object.keys(player.attributes[cat]).forEach(attr => {
                 if (attr === 'height' || attr === 'weight') return;
 
                 const currentVal = player.attributes[cat][attr] || 40;
-                const ceilingVal = player.talentAttributes[cat][attr] || 70;
+                const ceilingVal =
+                    player.talentAttributes[cat][attr] || 70;
 
                 if (ceilingVal > currentVal) {
-                    const naturalGain = Math.max(1, Math.round((ceilingVal - currentVal) * growthStep));
-                    player.attributes[cat][attr] = Math.min(ceilingVal, currentVal + naturalGain);
+                    const naturalGain = Math.max(
+                        1,
+                        Math.round(
+                            (ceilingVal - currentVal) * growthStep
+                        )
+                    );
+
+                    player.attributes[cat][attr] = Math.min(
+                        ceilingVal,
+                        currentVal + naturalGain
+                    );
                 }
             });
         });
