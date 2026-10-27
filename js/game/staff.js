@@ -1339,7 +1339,9 @@ export function ensureTeamStaffWorkPlan(team) {
         plan = {
             version: 1,
             weeklyHoursPerCoach: WEEKLY_COACH_HOURS,
-            assignments: buildDefaultAutomatedStaffAssignments(coaches),
+            assignments: buildDefaultAutomatedStaffAssignments(
+                ensureTeamCoachingStaff(team)
+            ),
             defaultWorkloadSeeded: true
         };
 
@@ -1360,7 +1362,9 @@ export function ensureTeamStaffWorkPlan(team) {
         !plan.defaultWorkloadSeeded &&
         !plan.autoAssignedFor
     ) {
-        plan.assignments = buildDefaultAutomatedStaffAssignments(coaches);
+        plan.assignments = buildDefaultAutomatedStaffAssignments(
+        ensureTeamCoachingStaff(team)
+    );
         plan.defaultWorkloadSeeded = true;
     }
 
