@@ -4107,6 +4107,11 @@ export function developPlayer(player, team = null) {
     if (!player || !player.attributes) return { player, improvements: [] };
     const developmentReport = { player, improvements: [] };
 
+    // Keep coach lookups scoped to the team whose player is developing.
+    const coaches = Array.isArray(team?.coaches)
+        ? team.coaches.filter(coach => coach?.id != null)
+        : [];
+
     const attributesBefore = Object.fromEntries(
         Object.entries(player.attributes).map(([category, attributes]) => [
             category,
