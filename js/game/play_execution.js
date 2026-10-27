@@ -1699,6 +1699,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         pState.action = 'run_block';
                         setHoldIntent(pState, pState.targetX, pState.targetY);
                         return;
+                    } else {
+                        // Deep returners should also hold their pre-snap depth until the ball is kicked!
+                        pState.targetX = pState.initialX;
+                        pState.targetY = pState.initialY;
+                        pState.action = 'idle';
+                        setHoldIntent(pState, pState.targetX, pState.targetY);
+                        return;
                     }
                 }
 
@@ -2818,8 +2825,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 // Zone defenders must break on the ball if:
                 // 1. Confirmed run read, OR
                 // 2. Ball carrier has crossed the line of scrimmage, OR
-                // 3. Ball carrier has broken into their sector (< 14 yards)
-                if (!isConfidentRun && !(qbScrambling && carrierPastLOS) && !carrierPastLOS && !isRunReadAtMesh && distToCarrier > 14.0) {
+                // 3. Ball carrier has leaked dangerously close (< 6 yards)
+                if (!isConfidentRun && !(qbScrambling && carrierPastLOS) && !carrierPastLOS && !isRunReadAtMesh && distToCarrier > 6.0) {
                     shouldPursue = false;
                 }
             }
@@ -3530,9 +3537,12 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
             if (!isDeep) {
                 const maxSinkDepth = LOS + (zone?.maxY || 15.0);
-                pState.targetY = Math.min(maxSinkDepth, pState.targetY);
+                const minDropDepth = Math.max(LOS + 1.0, zoneCenter.y - 4.0); // Maintain zone integrity; do not cross LOS
+                
+                pState.targetY = Math.max(minDropDepth, Math.min(maxSinkDepth, pState.targetY));
             }
             pState.zoneDriftTick = playState.tick;
+            
         } else {
             let needsNewDrift = false;
             if (!pState.zoneDriftTick || playState.tick > pState.zoneDriftTick + 25 || pState.dynamicTargetX === undefined) {
@@ -3568,7 +3578,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 baselineDepth = pState.initialY + (playState.tick * Math.max(0.07, pState._backpedalSpeed));
             } else if (!isDeep && playState.tick < pState._readWindowTicks * 0.5) {
                 // Short zones also hold/read before bailing
-                baselineDepth = pState.initialY + (playState.tick * 0.05);
+                baselineDepth = pState.initialY + (playState.tick * 0.15);
             }
 
             pState.dynamicTargetY = Math.min(zoneCenter.y, baselineDepth);
