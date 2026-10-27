@@ -1,7 +1,7 @@
 import { getDistance, applyImpactDisruption } from './physics.js';
 import { getRandomInt, formatHeight } from '../utils.js';
 import { getPlayer } from './state.js';
-import { logPlayDebug } from './telemetry.js';
+import { logPlayDebug, logPlayEventSnapshot } from './telemetry.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
