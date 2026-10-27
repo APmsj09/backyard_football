@@ -6095,6 +6095,461 @@ export function renderHallOfFameTab(gameState) {
     }).join('');
 }
 
+let activeHistoryReportView = 'overview';
+let activeHistoryReportYear = null;
+
+window.app_setHistoryReportView = function (view) {
+    const debugEnabled =
+        typeof Game.isDebugMode === 'function' &&
+        Game.isDebugMode();
+
+    const allowedViews = [
+        'overview',
+        'premier',
+        'sandlot',
+        'peewee',
+        'graduating'
+    ];
+
+    if (debugEnabled) {
+        allowedViews.push('simulationHealth');
+    }
+
+    activeHistoryReportView = allowedViews.includes(view)
+        ? view
+        : 'overview';
+
+    const gameState = getGameState();
+
+    if (gameState) renderHistoryTab(gameState);
+};
+
+window.app_openSeasonReport = function (year) {
+    const targetYear = Number(year);
+
+    if (!Number.isInteger(targetYear) || targetYear < 1) return;
+
+    const gameState = getGameState();
+
+    const season = [...(gameState?.history?.seasons || [])]
+        .reverse()
+        .find(item => Number(item?.year) === targetYear);
+
+    if (!season) return;
+
+    activeHistoryReportYear = targetYear;
+    activeHistoryReportView = 'overview';
+
+    renderHistoryTab(gameState);
+};
+
+function escapeHistoryHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderHistoryStandings(league) {
+    const standings = Array.isArray(league?.standings)
+        ? league.standings
+        : [];
+
+    if (!standings.length) {
+        return '<p class="text-slate-400 py-3">No standings recorded.</p>';
+    }
+
+    return `
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-xs">
+                <thead class="bg-slate-800 text-white">
+                    <tr>
+                        <th class="p-2 text-left">#</th>
+                        <th class="p-2 text-left">Team</th>
+                        <th class="p-2 text-center">W</th>
+                        <th class="p-2 text-center">L</th>
+                        <th class="p-2 text-center">T</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    ${standings.map(team => `
+                        <tr>
+                            <td class="p-2">${Number(team.place) || '—'}</td>
+                            <td class="p-2 font-semibold">
+                                ${escapeHistoryHtml(team.name)}
+                            </td>
+                            <td class="p-2 text-center">${Number(team.wins) || 0}</td>
+                            <td class="p-2 text-center">${Number(team.losses) || 0}</td>
+                            <td class="p-2 text-center">${Number(team.ties) || 0}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>`;
+}
+
+function renderHistoryLeagueReport(season, leagueKey, leagueLabel) {
+    const league = season.reportSnapshot?.leagues?.[leagueKey];
+
+    if (!league) {
+        return `
+            <section class="bg-white rounded-lg border border-slate-200 p-4">
+                <h4 class="font-bold text-slate-800">
+                    Year ${escapeHistoryHtml(season.year)} — ${leagueLabel}
+                </h4>
+                <p class="text-sm text-slate-400 mt-2">
+                    No detailed report is available for this season.
+                </p>
+            </section>`;
+    }
+
+    const leaderLabels = {
+        passing: 'Passing Yards',
+        rushing: 'Rushing Yards',
+        receiving: 'Receiving Yards',
+        defense: 'Tackles',
+        scoring: 'Touchdowns'
+    };
+
+    const leadersHtml = Object.entries(leaderLabels).map(([key, label]) => {
+        const leaders = league.leaders?.[key] || [];
+
+        return `
+            <div class="border border-slate-200 rounded-lg p-3">
+                <h5 class="font-bold text-slate-600 uppercase text-[10px] tracking-wider mb-2">
+                    ${label}
+                </h5>
+                ${leaders.length
+                    ? leaders.map((player, index) => `
+                        <div class="flex justify-between gap-3 py-1 text-xs border-b last:border-0 border-slate-100">
+                            <div class="min-w-0">
+                                <span class="text-slate-400">${index + 1}.</span>
+                                <span class="font-semibold text-slate-800">
+                                    ${escapeHistoryHtml(player.name)}
+                                </span>
+                                <span class="block text-slate-400 truncate">
+                                    ${escapeHistoryHtml(player.teamName)}
+                                    · ${escapeHistoryHtml(player.position)}
+                                </span>
+                            </div>
+                            <span class="font-black text-slate-900 whitespace-nowrap">
+                                ${Number(player.value).toLocaleString()}
+                            </span>
+                        </div>
+                    `).join('')
+                    : '<p class="text-xs text-slate-400">No recorded production.</p>'}
+            </div>`;
+    }).join('');
+
+    return `
+        <section class="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+            <div class="bg-slate-900 text-white px-4 py-3 flex flex-wrap justify-between gap-2 items-center">
+                <h4 class="font-black uppercase tracking-wide">
+                    Year ${escapeHistoryHtml(season.year)} — ${leagueLabel}
+                </h4>
+                <span class="text-xs text-slate-300">
+                    ${Number(league.teamCount) || 0} teams ·
+                    ${Number(league.playerCount) || 0} players
+                </span>
+            </div>
+            <div class="p-4">
+                <h5 class="font-bold text-slate-700 mb-2">Final Standings</h5>
+                ${renderHistoryStandings(league)}
+                <h5 class="font-bold text-slate-700 mt-5 mb-3">
+                    Top Statistical Performers
+                </h5>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    ${leadersHtml}
+                </div>
+            </div>
+        </section>`;
+}
+
+function renderHistoryGraduatingClass(season) {
+    const players = Array.isArray(season.reportSnapshot?.graduatingClass)
+        ? season.reportSnapshot.graduatingClass
+        : [];
+
+    return `
+        <section class="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+            <div class="bg-slate-900 text-white px-4 py-3">
+                <h4 class="font-black uppercase tracking-wide">
+                    Year ${escapeHistoryHtml(season.year)} — Pee Wee Graduation Class
+                </h4>
+                <p class="text-xs text-slate-300 mt-1">
+                    Production and completed youth seasons before the rookie draft.
+                </p>
+            </div>
+            ${players.length ? `
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-xs">
+                        <thead class="bg-slate-100 text-slate-600">
+                            <tr>
+                                <th class="p-2 text-left">Player</th>
+                                <th class="p-2 text-left">Team</th>
+                                <th class="p-2 text-center">Age</th>
+                                <th class="p-2 text-center">Seasons</th>
+                                <th class="p-2 text-center">Draft Experience</th>
+                                <th class="p-2 text-right">Pass Yds</th>
+                                <th class="p-2 text-right">Rush Yds</th>
+                                <th class="p-2 text-right">Rec Yds</th>
+                                <th class="p-2 text-right">TDs</th>
+                                <th class="p-2 text-right">Tackles</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            ${players.map(player => `
+                                <tr>
+                                    <td class="p-2">
+                                        <span class="font-semibold">
+                                            ${escapeHistoryHtml(player.name)}
+                                        </span>
+                                        <span class="block text-slate-400">
+                                            ${escapeHistoryHtml(player.position)}
+                                        </span>
+                                    </td>
+                                    <td class="p-2">${escapeHistoryHtml(player.teamName)}</td>
+                                    <td class="p-2 text-center">
+                                        ${Number(player.ageAtSeasonEnd) || '—'}
+                                    </td>
+                                    <td class="p-2 text-center">
+                                        ${Number(player.youthSeasonsPlayed) || 0}/
+                                        ${Number(player.requiredYouthSeasons) || 0}
+                                    </td>
+                                    <td class="p-2 text-center">
+                                        <span class="${
+                                            player.meetsDraftExperienceRule
+                                                ? 'text-emerald-700'
+                                                : 'text-amber-700'
+                                        } font-semibold">
+                                            ${player.meetsDraftExperienceRule
+                                                ? 'Eligible by experience'
+                                                : 'Short of requirement'}
+                                        </span>
+                                    </td>
+                                    <td class="p-2 text-right">${Number(player.stats?.passYards) || 0}</td>
+                                    <td class="p-2 text-right">${Number(player.stats?.rushYards) || 0}</td>
+                                    <td class="p-2 text-right">${Number(player.stats?.recYards) || 0}</td>
+                                    <td class="p-2 text-right">${Number(player.stats?.touchdowns) || 0}</td>
+                                    <td class="p-2 text-right">${Number(player.stats?.tackles) || 0}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            ` : `
+                <p class="p-4 text-sm text-slate-400">
+                    No graduating-player data was captured for this season.
+                </p>
+            `}
+        </section>`;
+}
+
+function renderHistorySimulationHealth(season) {
+    const health = season.reportSnapshot?.debug?.simulationHealth;
+
+    if (!health) {
+        return `
+            <section class="bg-white rounded-lg border border-slate-200 p-4">
+                <h4 class="font-bold text-slate-800">
+                    Year ${escapeHistoryHtml(season.year)} — Simulation Health
+                </h4>
+                <p class="text-sm text-slate-400 mt-2">
+                    No diagnostic snapshot is available for this season.
+                </p>
+            </section>`;
+    }
+
+    const diagnostics = Array.isArray(health.diagnostics)
+        ? health.diagnostics
+        : [];
+
+    const productionColumns = [
+        { key: 'passYards', label: 'Pass Yds' },
+        { key: 'rushYards', label: 'Rush Yds' },
+        { key: 'recYards', label: 'Rec Yds' },
+        { key: 'touchdowns', label: 'TDs' },
+        { key: 'tackles', label: 'Tackles' }
+    ];
+
+    const formatProductionNumber = value =>
+        (Number(value) || 0).toLocaleString();
+
+    const renderProductionGroupTable = (title, groups) => {
+        const rows = !Array.isArray(groups)
+            ? `
+                <tr>
+                    <td colspan="7" class="p-3 text-slate-400">
+                        Not captured for this season. Debug Mode may have
+                        been disabled when the season was archived.
+                    </td>
+                </tr>`
+            : groups.length
+                ? groups.map(group => `
+                    <tr class="border-t border-slate-100">
+                        <td class="p-2 font-semibold whitespace-nowrap">
+                            ${escapeHistoryHtml(group.group)}
+                        </td>
+                        <td class="p-2 text-center">
+                            ${Number(group.producingPlayers) || 0}/
+                            ${Number(group.playerCount) || 0}
+                        </td>
+                        ${productionColumns.map(column => `
+                            <td class="p-2 text-right whitespace-nowrap">
+                                ${formatProductionNumber(
+                                    group.stats?.[column.key]
+                                )}
+                            </td>
+                        `).join('')}
+                    </tr>
+                `).join('')
+                : `
+                    <tr>
+                        <td colspan="8" class="p-3 text-slate-400">
+                            No player groups recorded.
+                        </td>
+                    </tr>`;
+
+        return `
+            <div class="border border-slate-200 rounded-lg overflow-hidden">
+                <h6 class="bg-slate-100 px-3 py-2 font-bold text-xs text-slate-700">
+                    ${title}
+                </h6>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-xs">
+                        <thead class="text-slate-500 bg-white">
+                            <tr>
+                                <th class="p-2 text-left">Group</th>
+                                <th class="p-2 text-center">Producing / Total</th>
+                                ${productionColumns.map(column => `
+                                    <th class="p-2 text-right whitespace-nowrap">
+                                        ${column.label}
+                                    </th>
+                                `).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+    };
+
+    const leagueProductionSections = [
+        { key: 'premier', label: 'Premier League' },
+        { key: 'sandlot', label: 'Sandlot Circuit' },
+        { key: 'peewee', label: 'Pee Wee League' }
+    ].map(({ key, label }) => {
+        const league = season.reportSnapshot?.leagues?.[key];
+
+        if (!league) return '';
+
+        return `
+            <section class="border border-slate-200 rounded-lg p-3 space-y-3">
+                <h5 class="font-black text-slate-800 uppercase tracking-wide">
+                    ${label} — Production Breakdown
+                </h5>
+                <p class="text-xs text-slate-500">
+                    Production is the combined season total for the group.
+                    Producing / Total counts players with at least one recorded
+                    passing, rushing, receiving, scoring, or defensive statistic.
+                </p>
+                ${renderProductionGroupTable(
+                    'By Player Age',
+                    league.productionByAge
+                )}
+                ${renderProductionGroupTable(
+                    'By Seasons Played',
+                    league.productionByExperience
+                )}
+            </section>`;
+    }).join('');
+
+    return `
+        <section class="bg-white rounded-lg border border-amber-200 shadow-sm overflow-hidden">
+            <div class="bg-amber-50 border-b border-amber-200 p-4">
+                <h4 class="font-black text-amber-900 uppercase tracking-wide">
+                    Year ${escapeHistoryHtml(season.year)} — Developer Diagnostics
+                </h4>
+                <p class="text-xs text-amber-800 mt-1">
+                    ${Number(health.playersChecked) || 0} players checked ·
+                    ${Number(health.warningCount) || 0} warning instances
+                </p>
+            </div>
+            <div class="p-4 space-y-4">
+                <div>
+                    <h5 class="font-black text-slate-800 uppercase tracking-wide mb-3">
+                        Production by Age & Experience
+                    </h5>
+                    <div class="space-y-4">
+                        ${leagueProductionSections}
+                    </div>
+                </div>
+
+                <div>
+                    <h5 class="font-black text-slate-800 uppercase tracking-wide mb-3">
+                        Data Integrity Checks
+                    </h5>
+                    <div class="space-y-3">
+                        ${diagnostics.length ? diagnostics.map(item => `
+                    <div class="border border-slate-200 rounded-lg p-3">
+                        <div class="flex flex-wrap justify-between gap-2">
+                            <code class="text-xs font-bold text-slate-800">
+                                ${escapeHistoryHtml(item.code)}
+                            </code>
+                            <span class="text-xs font-bold text-amber-700">
+                                ${Number(item.count) || 0} occurrence(s)
+                            </span>
+                        </div>
+                        ${(item.examples || []).length ? `
+                            <ul class="mt-2 space-y-1 text-xs text-slate-600">
+                                ${item.examples.map(example => `
+                                    <li class="border-l-2 border-amber-200 pl-2">
+                                        ${escapeHistoryHtml(
+                                            [
+                                                example.playerName,
+                                                example.stat,
+                                                example.value !== undefined
+                                                    ? `Value: ${example.value}`
+                                                    : null,
+                                                example.completions !== undefined
+                                                    ? `Completions: ${example.completions}`
+                                                    : null,
+                                                example.attempts !== undefined
+                                                    ? `Attempts: ${example.attempts}`
+                                                    : null,
+                                                example.receptions !== undefined
+                                                    ? `Receptions: ${example.receptions}`
+                                                    : null,
+                                                example.targets !== undefined
+                                                    ? `Targets: ${example.targets}`
+                                                    : null,
+                                                example.teamId !== undefined
+                                                    ? `Team ID: ${example.teamId}`
+                                                    : null
+                                            ].filter(Boolean).join(' · ')
+                                        )}
+                                    </li>
+                                `).join('')}
+                            </ul>
+                        ` : ''}
+                    </div>
+                `).join('') : `
+                    <p class="text-sm text-emerald-700">
+                        No stat-integrity warnings were recorded by these checks.
+                    </p>
+                `}
+                    </div>
+                    <p class="text-xs text-slate-400 mt-3">
+                        These are targeted integrity checks, not proof that the
+                        entire simulation behaved correctly.
+                    </p>
+                </div>
+            </div>
+        </section>`;
+}
+
 export function renderHistoryTab(gameState) {
     const container = document.getElementById('history-container');
     if (!container) return;
@@ -6103,6 +6558,269 @@ export function renderHistoryTab(gameState) {
         container.innerHTML = `<p class="text-slate-400 text-center py-12">No history available yet.</p>`;
         return;
     }
+
+    const debugEnabled =
+        typeof Game.isDebugMode === 'function' &&
+        Game.isDebugMode();
+
+    // Enforce the debug-only view even if a previous selection is stale.
+    if (
+        !debugEnabled &&
+        activeHistoryReportView === 'simulationHealth'
+    ) {
+        activeHistoryReportView = 'overview';
+    }
+
+    const reportViews = [
+        { key: 'overview', label: 'Season Overview' },
+        { key: 'premier', label: 'Premier' },
+        { key: 'sandlot', label: 'Sandlot' },
+        { key: 'peewee', label: 'Pee Wee' },
+        { key: 'graduating', label: 'Graduating Class' }
+    ];
+
+    if (debugEnabled) {
+        reportViews.push({
+            key: 'simulationHealth',
+            label: 'Simulation Health'
+        });
+    }
+
+    // Deduplicate by year and use only the newest six detailed snapshots.
+    // Lightweight records for older years remain in the existing archive.
+    const seenReportYears = new Set();
+    const reportSeasons = [];
+
+    for (const season of [...gameState.history.seasons].reverse()) {
+        if (!season || !season.reportSnapshot) continue;
+
+        const yearKey = String(season.year);
+
+        if (seenReportYears.has(yearKey)) continue;
+
+        seenReportYears.add(yearKey);
+        reportSeasons.push(season);
+
+        if (reportSeasons.length >= 6) break;
+    }
+
+    // An inbox link takes precedence over the default six-season view.
+    // Older seasons can still open their lightweight historical record,
+    // even when their detailed report snapshot has been pruned.
+    if (activeHistoryReportYear !== null) {
+        const selectedSeason = [...gameState.history.seasons]
+            .reverse()
+            .find(
+                season =>
+                    Number(season?.year) ===
+                    Number(activeHistoryReportYear)
+            );
+
+        reportSeasons.length = 0;
+
+        if (selectedSeason) {
+            reportSeasons.push(selectedSeason);
+        } else {
+            activeHistoryReportYear = null;
+        }
+    }
+
+    let reportContentHtml = '';
+
+    if (activeHistoryReportView === 'overview') {
+        const selectedSeason = activeHistoryReportYear !== null
+            ? reportSeasons[0]
+            : null;
+
+        if (selectedSeason) {
+            const premierLeaders =
+                selectedSeason.reportSnapshot?.leagues?.premier?.leaders || {};
+
+            const formatLeader = (key, suffix) => {
+                const leader = premierLeaders[key]?.[0];
+
+                return leader
+                    ? `${escapeHistoryHtml(leader.name)} — ${
+                        Number(leader.value).toLocaleString()
+                    } ${suffix}`
+                    : 'No recorded leader';
+            };
+
+            const hasSnapshot = !!selectedSeason.reportSnapshot;
+
+            reportContentHtml = `
+                <section class="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+                    <div class="bg-slate-900 text-white p-4">
+                        <p class="text-xs uppercase tracking-widest text-slate-300">
+                            Season Yearbook
+                        </p>
+                        <h4 class="font-black text-xl mt-1">
+                            Year ${escapeHistoryHtml(selectedSeason.year)}
+                        </h4>
+                        <p class="text-sm text-amber-300 mt-2">
+                            Premier Champion:
+                            ${escapeHistoryHtml(selectedSeason.champion)}
+                        </p>
+                    </div>
+
+                    <div class="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div class="rounded-lg border border-slate-200 p-3">
+                            <p class="text-xs font-bold uppercase text-slate-400">
+                                Sandlot Champion
+                            </p>
+                            <p class="font-bold text-slate-800 mt-1">
+                                ${escapeHistoryHtml(selectedSeason.tier2Champion || 'Unknown')}
+                            </p>
+                        </div>
+
+                        <div class="rounded-lg border border-slate-200 p-3">
+                            <p class="text-xs font-bold uppercase text-slate-400">
+                                Pee Wee Champion
+                            </p>
+                            <p class="font-bold text-slate-800 mt-1">
+                                ${escapeHistoryHtml(selectedSeason.youthChampion || 'Unknown')}
+                            </p>
+                        </div>
+
+                        <div class="rounded-lg border border-slate-200 p-3">
+                            <p class="text-xs font-bold uppercase text-slate-400">
+                                Premier Runner-Up
+                            </p>
+                            <p class="font-bold text-slate-800 mt-1">
+                                ${escapeHistoryHtml(selectedSeason.runnerUp || 'Unknown')}
+                            </p>
+                        </div>
+                    </div>
+
+                    ${hasSnapshot ? `
+                        <div class="px-4 pb-4">
+                            <h5 class="font-bold text-slate-700 mb-2">
+                                Premier League Standouts
+                            </h5>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                                <p class="rounded bg-slate-50 p-3">
+                                    <span class="block text-xs text-slate-400 font-bold uppercase">
+                                        Passing
+                                    </span>
+                                    ${formatLeader('passing', 'yards')}
+                                </p>
+                                <p class="rounded bg-slate-50 p-3">
+                                    <span class="block text-xs text-slate-400 font-bold uppercase">
+                                        Rushing
+                                    </span>
+                                    ${formatLeader('rushing', 'yards')}
+                                </p>
+                                <p class="rounded bg-slate-50 p-3">
+                                    <span class="block text-xs text-slate-400 font-bold uppercase">
+                                        Receiving
+                                    </span>
+                                    ${formatLeader('receiving', 'yards')}
+                                </p>
+                                <p class="rounded bg-slate-50 p-3">
+                                    <span class="block text-xs text-slate-400 font-bold uppercase">
+                                        Touchdowns
+                                    </span>
+                                    ${formatLeader('scoring', 'TDs')}
+                                </p>
+                            </div>
+                        </div>
+                    ` : `
+                        <p class="px-4 pb-4 text-sm text-slate-500">
+                            The detailed snapshot for this older season has
+                            been trimmed to conserve storage. Its historical
+                            summary and standings remain in the archive below.
+                        </p>
+                    `}
+                </section>`;
+        } else {
+            reportContentHtml = `
+                <div class="rounded-lg border border-slate-200 bg-white p-4">
+                    <h4 class="font-bold text-slate-800">The Season Yearbook</h4>
+                    <p class="text-sm text-slate-600 mt-1">
+                        Explore final standings, statistical leaders and the
+                        graduating class. Your full season recap and all-time
+                        records remain below.
+                    </p>
+                    <p class="text-xs text-slate-400 mt-2">
+                        Detailed reports are retained for the six most recent
+                        seasons; older season summaries remain in the archive.
+                    </p>
+                </div>`;
+        }
+    } else if (
+        ['premier', 'sandlot', 'peewee'].includes(
+            activeHistoryReportView
+        )
+    ) {
+        const leagueConfig = {
+            premier: {
+                key: 'premier',
+                label: 'Premier League'
+            },
+            sandlot: {
+                key: 'sandlot',
+                label: 'Sandlot Circuit'
+            },
+            peewee: {
+                key: 'peewee',
+                label: 'Pee Wee League'
+            }
+        }[activeHistoryReportView];
+
+        reportContentHtml = reportSeasons.length
+            ? reportSeasons.map(season =>
+                renderHistoryLeagueReport(
+                    season,
+                    leagueConfig.key,
+                    leagueConfig.label
+                )
+            ).join('')
+            : `
+                <p class="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
+                    No detailed yearbook snapshots are available yet.
+                    Existing season summaries are still preserved below.
+                </p>`;
+    } else if (activeHistoryReportView === 'graduating') {
+        reportContentHtml = reportSeasons.length
+            ? reportSeasons.map(renderHistoryGraduatingClass).join('')
+            : `
+                <p class="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
+                    No detailed graduating-class snapshots are available yet.
+                </p>`;
+    } else if (
+        activeHistoryReportView === 'simulationHealth' &&
+        debugEnabled
+    ) {
+        reportContentHtml = reportSeasons.length
+            ? reportSeasons.map(renderHistorySimulationHealth).join('')
+            : `
+                <p class="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
+                    No diagnostic snapshots are available yet.
+                </p>`;
+    }
+
+    const reportPanelHtml = `
+        <section class="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-6">
+            <div class="flex flex-wrap gap-2" role="tablist" aria-label="Season yearbook sections">
+                ${reportViews.map(view => `
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected="${activeHistoryReportView === view.key}"
+                        onclick="app_setHistoryReportView('${view.key}')"
+                        class="px-3 py-2 rounded-md text-xs font-bold transition ${
+                            activeHistoryReportView === view.key
+                                ? 'bg-slate-900 text-white shadow-sm'
+                                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                        }">
+                        ${view.label}
+                    </button>
+                `).join('')}
+            </div>
+            <div class="mt-3 space-y-4">
+                ${reportContentHtml}
+            </div>
+        </section>`;
 
     // Render Record Book
     let recordsHtml = '';
@@ -6160,7 +6878,9 @@ export function renderHistoryTab(gameState) {
         }
     }
 
-    let html = '<div class="space-y-4 pb-6">' + recordsHtml;
+    let html = '<div class="space-y-4 pb-6">' +
+        reportPanelHtml +
+        recordsHtml;
     uniqueSeasons.forEach(season => {
         const topPicks = (season.draftResults || []).slice(0, 3).map(p => `<strong>1.${p.pick}</strong> ${p.playerName} <span class="text-slate-500">(${p.teamName})</span>`).join('<br>');
         const l = season.leaders || {};

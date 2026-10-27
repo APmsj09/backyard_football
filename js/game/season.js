@@ -1,4 +1,5 @@
 import { getRandom, getRandomInt } from '../utils.js';
+import { isDebugMode } from './debug_mode.js';
 import {
     game, setGame, playerMap, getPlayer, getRosterObjects, addMessage,
     getRelationshipLevel, improveRelationship, decreaseRelationship, getScoutedPlayerInfo
@@ -66,6 +67,473 @@ const createEmptySeasonStats = () => ({
     returnYards: 0,
     safeties: 0
 });
+
+const SEASON_REPORT_STAT_KEYS = [
+    'passYards', 'passAttempts', 'passCompletions', 'interceptionsThrown',
+    'rushYards', 'rushAttempts', 'recYards', 'receptions', 'targets', 'drops',
+    'pancakes', 'tackles', 'sacks', 'interceptions', 'fumbles',
+    'fumblesLost', 'fumblesRecovered', 'touchdowns', 'returnYards', 'safeties'
+];
+
+const SEASON_REPORT_TOTAL_KEYS = [
+    'passYards', 'rushYards', 'recYards', 'touchdowns',
+    'tackles', 'sacks', 'interceptions'
+];
+
+const SEASON_REPORT_LEADER_GROUPS = [
+    {
+        key: 'passing',
+        stat: 'passYards',
+        statKeys: [
+            'passYards', 'passAttempts', 'passCompletions',
+            'interceptionsThrown', 'touchdowns'
+        ]
+    },
+    {
+        key: 'rushing',
+        stat: 'rushYards',
+        statKeys: ['rushYards', 'rushAttempts', 'touchdowns']
+    },
+    {
+        key: 'receiving',
+        stat: 'recYards',
+        statKeys: [
+            'recYards', 'receptions', 'targets', 'drops', 'touchdowns'
+        ]
+    },
+    {
+        key: 'defense',
+        stat: 'tackles',
+        statKeys: [
+            'tackles', 'sacks', 'interceptions',
+            'fumblesRecovered', 'returnYards', 'touchdowns'
+        ]
+    },
+    {
+        key: 'scoring',
+        stat: 'touchdowns',
+        statKeys: [
+            'touchdowns', 'passYards', 'rushYards', 'recYards'
+        ]
+    }
+];
+
+function buildSeasonReportSnapshot(
+    gameState,
+    seasonYear,
+    tier1Teams,
+    tier2Teams,
+    youthTeams
+) {
+    const allPlayers = Array.isArray(gameState?.players)
+        ? gameState.players
+        : [];
+
+    const allTeams = Array.isArray(gameState?.teams)
+        ? gameState.teams
+        : [];
+
+    // Debug-only summaries and diagnostics must not run or be stored
+    // when Debug Mode is disabled.
+    const debugEnabled = isDebugMode();
+
+    const teamById = new Map(
+        allTeams
+            .filter(team => team?.id != null)
+            .map(team => [String(team.id), team])
+    );
+
+    const readStat = (player, key) => {
+        const value = Number(player?.seasonStats?.[key]);
+
+        return Number.isFinite(value) && value > 0
+            ? value
+            : 0;
+    };
+
+    const copyStats = (player, keys = SEASON_REPORT_STAT_KEYS) =>
+        Object.fromEntries(
+            keys.map(key => [key, readStat(player, key)])
+        );
+
+    const makeLeagueSnapshot = (teams, tier) => {
+        const safeTeams = Array.isArray(teams) ? teams : [];
+        const teamIds = new Set(
+            safeTeams.map(team => String(team.id))
+        );
+
+        const leaguePlayers = allPlayers.filter(player =>
+            player?.teamId != null &&
+            teamIds.has(String(player.teamId))
+        );
+
+        const standings = safeTeams.map((team, index) => ({
+            id: team.id,
+            name: team.name || 'Unknown',
+            place: index + 1,
+            wins: Number(team.wins) || 0,
+            losses: Number(team.losses) || 0,
+            ties: Number(team.ties) || 0,
+            tier
+        }));
+
+        const leaders = {};
+
+        for (const group of SEASON_REPORT_LEADER_GROUPS) {
+            leaders[group.key] = leaguePlayers
+                .map(player => ({
+                    player,
+                    team: teamById.get(String(player.teamId)),
+                    value: readStat(player, group.stat)
+                }))
+                .filter(entry => entry.value > 0)
+                .sort((a, b) =>
+                    b.value - a.value ||
+                    String(a.player.name || '').localeCompare(
+                        String(b.player.name || '')
+                    )
+                )
+                .slice(0, 3)
+                .map(({ player, team, value }) => {
+                    const priorSeasons = Number(
+                        player.careerStats?.seasonsPlayed
+                    );
+
+                    const age = Number(player.age);
+
+                    return {
+                        id: player.id,
+                        name: player.name || 'Unknown',
+                        teamName: team?.name || 'Unknown',
+                        position: player.pos ||
+                            estimateBestPosition(player) ||
+                            'ATH',
+                        age: Number.isFinite(age) ? age : null,
+                        yearsPlayed: (
+                            Number.isFinite(priorSeasons)
+                                ? Math.max(0, priorSeasons)
+                                : 0
+                        ) + 1,
+                        value,
+                        stats: copyStats(player, group.statKeys)
+                    };
+                });
+        }
+
+        const totals = Object.fromEntries(
+            SEASON_REPORT_TOTAL_KEYS.map(key => [
+                key,
+                leaguePlayers.reduce(
+                    (sum, player) => sum + readStat(player, key),
+                    0
+                )
+            ])
+        );
+
+        // Compact aggregate statistics reveal whether production is
+        // concentrated among younger players or experienced veterans.
+        // Keep only a small set of meaningful production categories.
+        const productionStatKeys = [
+            'passYards',
+            'rushYards',
+            'recYards',
+            'touchdowns',
+            'tackles',
+            'sacks',
+            'interceptions'
+        ];
+
+        const summarizeProductionGroups = getGroup => {
+            const groups = new Map();
+
+            leaguePlayers.forEach(player => {
+                const descriptor = getGroup(player);
+
+                if (!descriptor) return;
+
+                let group = groups.get(descriptor.key);
+
+                if (!group) {
+                    group = {
+                        group: descriptor.label,
+                        value: descriptor.value,
+                        playerCount: 0,
+                        producingPlayers: 0,
+                        stats: Object.fromEntries(
+                            productionStatKeys.map(key => [key, 0])
+                        )
+                    };
+
+                    groups.set(descriptor.key, group);
+                }
+
+                group.playerCount++;
+
+                let hasProduction = false;
+
+                productionStatKeys.forEach(key => {
+                    const value = readStat(player, key);
+
+                    group.stats[key] += value;
+
+                    if (value > 0) hasProduction = true;
+                });
+
+                if (hasProduction) group.producingPlayers++;
+            });
+
+            return [...groups.values()].sort((a, b) =>
+                (a.value ?? 999) - (b.value ?? 999)
+            );
+        };
+
+        const productionByAge = debugEnabled
+            ? summarizeProductionGroups(player => {
+                const rawAge = Number(player.age);
+
+                if (!Number.isFinite(rawAge)) {
+                    return {
+                        key: 'unknown',
+                        label: 'Unknown age',
+                        value: null
+                    };
+                }
+
+                const age = Math.floor(rawAge);
+
+                return {
+                    key: String(age),
+                    label: `Age ${age}`,
+                    value: age
+                };
+            })
+            : null;
+
+        const productionByExperience = debugEnabled
+            ? summarizeProductionGroups(player => {
+                const rawSeasons = Number(
+                    player.careerStats?.seasonsPlayed
+                );
+
+                const priorSeasons = Number.isFinite(rawSeasons)
+                    ? Math.max(0, Math.floor(rawSeasons))
+                    : 0;
+
+                const yearsPlayed = priorSeasons + 1;
+
+                return {
+                    key: String(yearsPlayed),
+                    label: yearsPlayed === 1
+                        ? '1 season'
+                        : `${yearsPlayed} seasons`,
+                    value: yearsPlayed
+                };
+            })
+            : null;
+
+        return {
+            teamCount: safeTeams.length,
+            playerCount: leaguePlayers.length,
+            standings,
+            leaders,
+            totals,
+            ...(debugEnabled
+                ? { productionByAge, productionByExperience }
+                : {})
+        };
+    };
+
+    // Build a small diagnostic record. Examples are capped so that a bad
+    // season cannot create an enormous report.
+    const diagnosticCounts = {};
+    const diagnosticExamples = {};
+
+    const recordDiagnostic = (code, example) => {
+        diagnosticCounts[code] =
+            (diagnosticCounts[code] || 0) + 1;
+
+        if (!diagnosticExamples[code]) {
+            diagnosticExamples[code] = [];
+        }
+
+        if (diagnosticExamples[code].length < 5) {
+            diagnosticExamples[code].push(example);
+        }
+    };
+
+    const productionKeys = [
+        'passYards', 'rushYards', 'recYards',
+        'touchdowns', 'tackles', 'sacks', 'interceptions'
+    ];
+
+    if (debugEnabled) {
+        allPlayers.forEach(player => {
+            if (!player) return;
+
+        for (const key of SEASON_REPORT_STAT_KEYS) {
+            const rawValue = player.seasonStats?.[key];
+
+            if (rawValue === undefined || rawValue === null) continue;
+
+            const value = Number(rawValue);
+
+            if (!Number.isFinite(value) || value < 0) {
+                recordDiagnostic('invalid_stat_value', {
+                    playerId: player.id ?? null,
+                    playerName: player.name || 'Unknown',
+                    stat: key,
+                    value: String(rawValue)
+                });
+            }
+        }
+
+        const passAttempts = readStat(player, 'passAttempts');
+        const passCompletions = readStat(player, 'passCompletions');
+
+        if (passCompletions > passAttempts) {
+            recordDiagnostic('completions_exceed_attempts', {
+                playerId: player.id ?? null,
+                playerName: player.name || 'Unknown',
+                completions: passCompletions,
+                attempts: passAttempts
+            });
+        }
+
+        const targets = readStat(player, 'targets');
+        const receptions = readStat(player, 'receptions');
+
+        if (receptions > targets) {
+            recordDiagnostic('receptions_exceed_targets', {
+                playerId: player.id ?? null,
+                playerName: player.name || 'Unknown',
+                receptions,
+                targets
+            });
+        }
+
+        const hasProduction = productionKeys.some(
+            key => readStat(player, key) > 0
+        );
+
+        if (
+            hasProduction &&
+            (
+                player.teamId == null ||
+                !teamById.has(String(player.teamId))
+            )
+        ) {
+            recordDiagnostic('production_without_team', {
+                playerId: player.id ?? null,
+                playerName: player.name || 'Unknown',
+                teamId: player.teamId ?? null
+            });
+        }
+        });
+    }
+
+    const graduatingClass = allPlayers
+        .filter(player => {
+            const team = player?.teamId != null
+                ? teamById.get(String(player.teamId))
+                : null;
+
+            return team?.leagueType === 'youth' &&
+                Number(player.age) >= 11;
+        })
+        .map(player => {
+            const team = teamById.get(String(player.teamId));
+            const youthHistory = Array.isArray(player.youthSeasonHistory)
+                ? player.youthSeasonHistory
+                : [];
+
+            const alreadyRecorded = youthHistory.some(
+                season => Number(season?.year) === Number(seasonYear)
+            );
+
+            const trackedSeasons = Number(player.youthSeasonsPlayed);
+
+            const completedSeasons = Math.max(
+                0,
+                Number.isFinite(trackedSeasons)
+                    ? trackedSeasons
+                    : youthHistory.length
+            ) + (alreadyRecorded ? 0 : 1);
+
+            const rawEntryAge = Number(player.youthEntryAge);
+            const entryAge = Number.isFinite(rawEntryAge)
+                ? Math.max(8, Math.min(11, rawEntryAge))
+                : Math.max(
+                    8,
+                    Math.min(11, Number(player.age) || 8)
+                );
+
+            const requiredSeasons = Math.max(1, 12 - entryAge);
+            const age = Number(player.age) || 0;
+
+            return {
+                id: player.id,
+                name: player.name || 'Unknown',
+                position: player.pos ||
+                    estimateBestPosition(player) ||
+                    'ATH',
+                ageAtSeasonEnd: age,
+                teamName: team?.name || 'Unknown',
+                youthSeasonsPlayed: completedSeasons,
+                requiredYouthSeasons: requiredSeasons,
+                meetsDraftExperienceRule:
+                    age + 1 >= 12 &&
+                    completedSeasons >= requiredSeasons,
+                stats: copyStats(player)
+            };
+        })
+        .sort((a, b) =>
+            Number(b.meetsDraftExperienceRule) -
+                Number(a.meetsDraftExperienceRule) ||
+            b.ageAtSeasonEnd - a.ageAtSeasonEnd ||
+            (
+                (b.stats.passYards + b.stats.rushYards + b.stats.recYards) -
+                (a.stats.passYards + a.stats.rushYards + a.stats.recYards)
+            ) ||
+            b.stats.touchdowns - a.stats.touchdowns
+        );
+
+    const diagnostics = debugEnabled
+        ? Object.keys(diagnosticCounts).map(code => ({
+            code,
+            count: diagnosticCounts[code],
+            examples: diagnosticExamples[code] || []
+        }))
+        : null;
+
+    return {
+        schemaVersion: 1,
+        seasonYear: Number(seasonYear) || null,
+
+        leagues: {
+            premier: makeLeagueSnapshot(tier1Teams, 1),
+            sandlot: makeLeagueSnapshot(tier2Teams, 2),
+            peewee: makeLeagueSnapshot(youthTeams, null)
+        },
+
+        graduatingClass,
+
+        // Do not create or store diagnostic data when Debug Mode is off.
+        ...(debugEnabled
+            ? {
+                debug: {
+                    simulationHealth: {
+                        playersChecked: allPlayers.length,
+                        warningCount: diagnostics.reduce(
+                            (sum, item) => sum + item.count,
+                            0
+                        ),
+                        diagnostics
+                    }
+                }
+            }
+            : {})
+    };
+}
 
 export function getCurrentRosterLimit(gameState) {
     // Week 0 Summer expansion (24) only applies while draft and offseason FA are active
@@ -1079,10 +1547,34 @@ export function simulateHistoricalSeason(yearNum, gameInstance) {
             rusher: topRusher && (topRusher.seasonStats?.rushYards || 0) > 0 ? `${topRusher.name} (${topRusher.seasonStats.rushYards} yds)` : 'None',
             tackler: topTackler && (topTackler.seasonStats?.tackles || 0) > 0 ? `${topTackler.name} (${topTackler.seasonStats.tackles} tkls)` : 'None'
         },
-        standings: [...tier1Teams, ...tier2Teams].map(t => ({ name: t.name, wins: t.wins, losses: t.losses, tier: t.tier })),
+        standings: [
+            ...tier1Teams.map(t => ({
+                id: t.id,
+                name: t.name,
+                wins: t.wins,
+                losses: t.losses,
+                ties: t.ties || 0,
+                tier: 1
+            })),
+            ...tier2Teams.map(t => ({
+                id: t.id,
+                name: t.name,
+                wins: t.wins,
+                losses: t.losses,
+                ties: t.ties || 0,
+                tier: 2
+            }))
+        ],
         promoted: promoted.map(t => t.name),
         relegated: relegated.map(t => t.name),
-        draftResults: []
+        draftResults: [],
+        reportSnapshot: buildSeasonReportSnapshot(
+            gameInstance,
+            yearNum,
+            tier1Teams,
+            tier2Teams,
+            youthTeams
+        )
     });
 }
 
@@ -4591,9 +5083,46 @@ export function advanceToOffseason() {
             },
             promoted: promoted.map(t => t.name),
             relegated: relegated.map(t => t.name),
-            standings: [...tier1, ...tier2].map(t => ({ name: t.name, wins: t.wins, losses: t.losses, tier: t.tier })),
+            standings: [
+                ...tier1.map(t => ({
+                    id: t.id,
+                    name: t.name,
+                    wins: t.wins,
+                    losses: t.losses,
+                    ties: t.ties || 0,
+                    tier: 1
+                })),
+                ...tier2.map(t => ({
+                    id: t.id,
+                    name: t.name,
+                    wins: t.wins,
+                    losses: t.losses,
+                    ties: t.ties || 0,
+                    tier: 2
+                }))
+            ],
             draftResults: []
         });
+    }
+
+    // Historical simulation may already have created the season row.
+    // Attach a snapshot when one is missing, but never replace an archive
+    // that has already been captured for this season.
+    const completedSeasonEntry = game.history.seasons.find(
+        season => Number(season?.year) === Number(game.year)
+    );
+
+    if (
+        completedSeasonEntry &&
+        !completedSeasonEntry.reportSnapshot
+    ) {
+        completedSeasonEntry.reportSnapshot = buildSeasonReportSnapshot(
+            game,
+            game.year,
+            tier1,
+            tier2,
+            youthT
+        );
     }
 
     // Preserve the season being completed before advancing to the next year.

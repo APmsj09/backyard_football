@@ -1072,6 +1072,29 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
         return false;
     }
 
+    // Preserve every season's lightweight history, but retain detailed
+    // yearbook snapshots for only the six most recent seasons.
+    // This also releases the larger snapshots from live game memory.
+    const runtimeSeasonHistory = activeGame.history?.seasons;
+
+    if (Array.isArray(runtimeSeasonHistory)) {
+        const firstDetailedSeasonIndex = Math.max(
+            0,
+            runtimeSeasonHistory.length - 6
+        );
+
+        runtimeSeasonHistory.forEach((season, index) => {
+            if (
+                index < firstDetailedSeasonIndex &&
+                season &&
+                typeof season === 'object' &&
+                season.reportSnapshot
+            ) {
+                delete season.reportSnapshot;
+            }
+        });
+    }
+
     // Strictly save primitive fields for matches: prevents attached team objects, results, or telemetry leaks
     const cleanMatchStrict = (m) => {
         if (!m || typeof m !== 'object') return null;
@@ -1221,20 +1244,44 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
         }
 
         if (Array.isArray(dataToSave.history?.seasons)) {
-            if (dataToSave.history.seasons.length > 6) {
-                dataToSave.history.seasons = dataToSave.history.seasons.slice(-6);
-            }
-            dataToSave.history.seasons = dataToSave.history.seasons.map(s => {
-                if (!s || typeof s !== 'object') return s;
-                const cleanSeason = { ...s };
-                delete cleanSeason.gameLogs;
-                delete cleanSeason.plays;
-                delete cleanSeason.playByPlay;
-                if (Array.isArray(cleanSeason.schedule)) {
-                    cleanSeason.schedule = cleanSeason.schedule.map(cleanMatchStrict).filter(Boolean);
-                }
-                return cleanSeason;
-            });
+            const seasonHistory = dataToSave.history.seasons;
+            const firstDetailedSeasonIndex = Math.max(
+                0,
+                seasonHistory.length - 6
+            );
+
+            // Clone the history object and each season. Do not assign a
+            // truncated array back through the shallow game-state clone:
+            // that would silently erase history from the live game.
+            dataToSave.history = {
+                ...dataToSave.history,
+                seasons: seasonHistory.map((season, index) => {
+                    if (!season || typeof season !== 'object') {
+                        return season;
+                    }
+
+                    const cleanSeason = { ...season };
+
+                    delete cleanSeason.gameLogs;
+                    delete cleanSeason.plays;
+                    delete cleanSeason.playByPlay;
+
+                    // Older years retain their champions, standings,
+                    // leaders, promotion/relegation and draft history,
+                    // but not the larger detailed report snapshot.
+                    if (index < firstDetailedSeasonIndex) {
+                        delete cleanSeason.reportSnapshot;
+                    }
+
+                    if (Array.isArray(cleanSeason.schedule)) {
+                        cleanSeason.schedule = cleanSeason.schedule
+                            .map(cleanMatchStrict)
+                            .filter(Boolean);
+                    }
+
+                    return cleanSeason;
+                })
+            };
         }
 
         const serialized = JSON.stringify(dataToSave);
@@ -1256,7 +1303,63 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
             delete dataToSave.messages;
             delete dataToSave.gameResults;
             delete dataToSave.pickHistory;
-            delete dataToSave.history;
+
+            // Emergency saves discard detailed reports, not the dynasty's
+            // essential season archive. Whitelist compact fields so an
+            // unexpected large object or circular reference in a history
+            // entry cannot prevent the fallback save from succeeding.
+            if (Array.isArray(activeGame.history?.seasons)) {
+                dataToSave.history = {
+                    seasons: activeGame.history.seasons.map(season => {
+                        if (!season || typeof season !== 'object') {
+                            return season;
+                        }
+
+                        return {
+                            year: season.year,
+                            champion: season.champion,
+                            runnerUp: season.runnerUp,
+                            tier2Champion: season.tier2Champion,
+                            youthChampion: season.youthChampion,
+                            leaders: season.leaders || {},
+                            promoted: Array.isArray(season.promoted)
+                                ? season.promoted.slice(0, 2)
+                                : [],
+                            relegated: Array.isArray(season.relegated)
+                                ? season.relegated.slice(0, 2)
+                                : [],
+                            standings: Array.isArray(season.standings)
+                                ? season.standings.map(team => ({
+                                    id: team?.id ?? null,
+                                    name: team?.name || 'Unknown',
+                                    wins: Number(team?.wins) || 0,
+                                    losses: Number(team?.losses) || 0,
+                                    ties: Number(team?.ties) || 0,
+                                    tier: team?.tier ?? null
+                                }))
+                                : [],
+                            // Keep a small draft-history sample if a
+                            // compressed save is necessary.
+                            draftResults: Array.isArray(season.draftResults)
+                                ? season.draftResults.slice(0, 3).map(pick => ({
+                                    pick: pick?.pick ?? null,
+                                    playerId: pick?.playerId ?? null,
+                                    playerName: pick?.playerName ??
+                                        pick?.name ?? 'Unknown',
+                                    teamId: pick?.teamId ?? null,
+                                    teamName: pick?.teamName ?? 'Unknown',
+                                    pos: pick?.pos ?? null,
+                                    ovr: Number.isFinite(Number(pick?.ovr))
+                                        ? Number(pick.ovr)
+                                        : null
+                                }))
+                                : []
+                        };
+                    })
+                };
+            } else {
+                delete dataToSave.history;
+            }
 
             const resolvedPlayerTeamId = activeGame.playerTeam?.id ?? activeGame.playerTeam;
             dataToSave.playerTeam = resolvedPlayerTeamId != null ? String(resolvedPlayerTeamId) : null;

@@ -1930,6 +1930,70 @@ async function handleAdvanceWeek() {
         const report = Game.advanceToOffseason();
 
         gameState = Game.getGameState();
+
+        // The offseason advances gameState.year, so the completed season
+        // is the preceding year. Do not generate reports during the
+        // historical pre-simulation or duplicate an existing report email.
+        const completedYear = Number(gameState?.year) - 1;
+
+        if (completedYear >= 5 && Array.isArray(gameState?.history?.seasons)) {
+            const seasonEntry = gameState.history.seasons.find(
+                season => Number(season?.year) === completedYear
+            );
+
+            const hasExistingReport = (gameState.messages || []).some(
+                message =>
+                    message?.action?.type === 'open_season_report' &&
+                    Number(message.action.year) === completedYear
+            );
+
+            if (seasonEntry?.reportSnapshot && !hasExistingReport) {
+                const escapeReportText = value =>
+                    String(value ?? 'Unknown').replace(/[&<>"']/g, char => ({
+                        '&': '&amp;',
+                        '<': '&lt;',
+                        '>': '&gt;',
+                        '"': '&quot;',
+                        "'": '&#39;'
+                    })[char]);
+
+                const premier = seasonEntry.reportSnapshot.leagues?.premier;
+                const passer = premier?.leaders?.passing?.[0];
+                const rusher = premier?.leaders?.rushing?.[0];
+                const scorer = premier?.leaders?.scoring?.[0];
+
+                const reportBody = [
+                    `<p><b>Year ${completedYear} is in the books.</b></p>`,
+                    `<p><b>Premier Champion:</b> ${escapeReportText(seasonEntry.champion)}</p>`,
+                    `<p><b>Sandlot Champion:</b> ${escapeReportText(seasonEntry.tier2Champion)}</p>`,
+                    `<p><b>Pee Wee Champion:</b> ${escapeReportText(seasonEntry.youthChampion)}</p>`,
+                    '<p><b>Premier League standouts</b></p>',
+                    `<p>Passing: ${passer ? `${escapeReportText(passer.name)} — ${Number(passer.value).toLocaleString()} yards` : 'No recorded leader'}</p>`,
+                    `<p>Rushing: ${rusher ? `${escapeReportText(rusher.name)} — ${Number(rusher.value).toLocaleString()} yards` : 'No recorded leader'}</p>`,
+                    `<p>Touchdowns: ${scorer ? `${escapeReportText(scorer.name)} — ${Number(scorer.value).toLocaleString()}` : 'No recorded leader'}</p>`,
+                    '<p>Open the History yearbook for final standings, league leaders, and the graduating class.</p>'
+                ].join('');
+
+                Game.addMessage(
+                    `Year ${completedYear} Yearbook: Season in Review`,
+                    reportBody,
+                    false,
+                    gameState,
+                    {
+                        category: 'season',
+                        priority: 'normal',
+                        source: 'season_yearbook',
+                        year: completedYear,
+                        week: WEEKS_IN_SEASON,
+                        action: {
+                            type: 'open_season_report',
+                            year: completedYear
+                        }
+                    }
+                );
+            }
+        }
+
         Game.saveGameState(activeSaveKey);
 
         const retentions = Array.isArray(report.pendingRetentions)
@@ -4416,11 +4480,20 @@ function main() {
         if (diagnosticsBar) diagnosticsBar.classList.toggle('hidden', !enabled);
     }
 
+    function refreshHistoryAfterDebugChange() {
+        const latestState = Game.getGameState();
+
+        if (latestState?.history?.seasons) {
+            UI.renderHistoryTab(latestState);
+        }
+    }
+
     startupCheckbox?.addEventListener('change', (e) => {
         const enabled = e.target.checked;
         setDebugMode(enabled);
         syncDebugUI(enabled);
         refreshDebugModeButton();
+        refreshHistoryAfterDebugChange();
     });
 
     syncDebugUI(isDebugMode());
@@ -4530,6 +4603,7 @@ function main() {
         setDebugMode(enabled);
         syncDebugUI(enabled);
         refreshDebugModeButton();
+        refreshHistoryAfterDebugChange();
     });
 
     // Initialize the button from the saved setting.
@@ -4792,13 +4866,27 @@ document.getElementById('sim-speed-faster')
             'social'
         ]);
 
+        const reportYear = Number(action?.year);
+
+        const canOpenSeasonReport =
+            action?.type === 'open_season_report' &&
+            Number.isInteger(reportYear) &&
+            reportYear > 0 &&
+            Array.isArray(gameState.history?.seasons) &&
+            gameState.history.seasons.some(
+                season => Number(season?.year) === reportYear
+            );
+
         const canNavigate =
-            action?.type === 'open_tab' &&
-            allowedTabs.has(action.tab) &&
+            canOpenSeasonReport ||
             (
-                action.tab !== 'front-office' ||
-                !action.subTab ||
-                allowedFrontOfficeTabs.has(action.subTab)
+                action?.type === 'open_tab' &&
+                allowedTabs.has(action.tab) &&
+                (
+                    action.tab !== 'front-office' ||
+                    !action.subTab ||
+                    allowedFrontOfficeTabs.has(action.subTab)
+                )
             );
 
         const actionLabels = {
@@ -4809,17 +4897,19 @@ document.getElementById('sim-speed-faster')
             'front-office': 'Review Front Office'
         };
 
-        const actionLabel = canNavigate
-            ? (
-                action.tab === 'front-office' && action.subTab === 'staff'
-                    ? 'Review Staff'
-                    : action.tab === 'front-office' && action.subTab === 'finances'
-                        ? 'Review Finances'
-                        : action.tab === 'front-office' && action.subTab === 'social'
-                            ? 'Review Social Network'
-                            : actionLabels[action.tab]
-            )
-            : 'Close';
+        const actionLabel = canOpenSeasonReport
+            ? 'Open Yearbook'
+            : canNavigate
+                ? (
+                    action.tab === 'front-office' && action.subTab === 'staff'
+                        ? 'Review Staff'
+                        : action.tab === 'front-office' && action.subTab === 'finances'
+                            ? 'Review Finances'
+                            : action.tab === 'front-office' && action.subTab === 'social'
+                                ? 'Review Social Network'
+                                : actionLabels[action.tab]
+                )
+                : 'Close';
 
         UI.showModal(
             message.subject || '(No Subject)',
@@ -4828,6 +4918,26 @@ document.getElementById('sim-speed-faster')
                 const latestState = Game.getGameState();
 
                 if (!latestState) return;
+
+                if (canOpenSeasonReport) {
+                    UI.switchTab('league', latestState);
+
+                    const historyButton = Array.from(
+                        document.querySelectorAll('.league-tab')
+                    ).find(btn => btn.dataset.subTab === 'history');
+
+                    historyButton?.click();
+
+                    // The year-specific selector is optional so this action
+                    // remains functional with older UI code or saved reports.
+                    if (typeof window.app_openSeasonReport === 'function') {
+                        window.app_openSeasonReport(reportYear);
+                    } else {
+                        UI.renderHistoryTab(latestState);
+                    }
+
+                    return;
+                }
 
                 UI.switchTab(action.tab, latestState);
 
