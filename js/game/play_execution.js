@@ -796,6 +796,8 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             startX = Math.max(0.5, Math.min(53.3 - 0.5, startX));
             startY = Math.max(0.5, Math.min(119.5, startY));
 
+            const isSweepRunner = isOffense && (play.tags?.includes('sweep') || offensivePlayKey?.includes('Jet')) && (assignment?.includes('sweep') || assignment?.includes('run_path'));
+
             if (isOffense) {
                 // Keep Jet Sweep runners at least 2.8 yards behind the LOS so they don't collide with the guards' backsides
                 if (isSweepRunner) {
@@ -831,7 +833,6 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             const consistency = Math.max(10, Math.min(99, (player.attributes?.mental?.consistency || 50) + schemeBoost - clashPenalty));
 
             let reactionTicks = 0;
-            const isSweepRunner = isOffense && (play.tags?.includes('sweep') || offensivePlayKey?.includes('Jet')) && (assignment?.includes('sweep') || assignment?.includes('run_path'));
 
             if (slot !== 'QB1' && slot !== 'OL2' && !isSweepRunner) {
                 reactionTicks = Math.max(1, 10 - Math.floor(playerIQ / 10)) + Math.floor(Math.random() * 3);
@@ -1094,29 +1095,29 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 setPointIntent(pState, pState.targetX, pState.targetY, 0.45);
 
                 if (
-                    nearestOff &&
-                    !nearestOff.isEngaged &&
-                    !nearestOff.isBlocked &&
-                    getDistance(pState, nearestOff) < 1.8
+                    targetThreat &&
+                    !targetThreat.isEngaged &&
+                    !targetThreat.isBlocked &&
+                    getDistance(pState, targetThreat) < 1.8
                 ) {
                     const strDiff =
-                        (pState.str || 50) - (nearestOff.str || 50);
+                        (pState.str || 50) - (targetThreat.str || 50);
 
                     pState.isEngaged = true;
-                    pState.engagedWith = nearestOff;
+                    pState.engagedWith = targetThreat;
 
-                    nearestOff.isEngaged = true;
-                    nearestOff.isBlocked = true;
-                    nearestOff.blockedBy = pState;
+                    targetThreat.isEngaged = true;
+                    targetThreat.isBlocked = true;
+                    targetThreat.blockedBy = pState;
 
                     pState.vx *= 0.15;
                     pState.vy *= 0.15;
-                    nearestOff.vx *= 0.15;
-                    nearestOff.vy *= 0.15;
+                    targetThreat.vx *= 0.15;
+                    targetThreat.vy *= 0.15;
 
                     playState.blockBattles.push({
                         blocker: pState,
-                        defender: nearestOff,
+                        defender: targetThreat,
                         status: 'ongoing',
                         battleScore: strDiff / 10,
                         startTick: playState.tick
