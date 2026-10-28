@@ -25,7 +25,8 @@ import {
     ensureAiStaffWorkPlan, getTeamCoachingSpecialist,
     processWeeklyCoachDevelopment, ensureTeamStaffWorkPlan,
     getEffectiveStaffWorkHours, processWeeklyStaffPreparation,
-    processCoachOffseasonRetention, resolveCoachCarousel
+    processCoachOffseasonRetention, resolveCoachCarousel,
+    processStaffMarketDecay
 } from './staff.js';
 import {
     evaluatePlayerRetention,
@@ -2905,10 +2906,9 @@ export function processEndOfWeek() {
     generateWeeklyEvents();
     processRelationshipEvents();
 
-    // Decay demands for unemployed coaches on the market
-    import('./staff.js').then(s => {
-        if (s.processStaffMarketDecay) s.processStaffMarketDecay(game);
-    }).catch(() => {});
+    // Update unemployed coaches' market demands as part of this week's
+    // resolution, before the game advances to another week.
+    processStaffMarketDecay(game);
 
     // Process Coach-Player Culture & Morale across all teams
     game.teams.forEach(t => {

@@ -2415,13 +2415,12 @@ export function resolveCoachCarousel(
             .filter(coach => coach?.id != null && !coach.isUserCoach);
 
     const getVacancies = team => {
-        const stored = Number(team.coachingVacancies);
+        const activeNpcCoaches = getNpcCoaches(team);
 
-        if (Number.isFinite(stored)) {
-            return Math.max(0, Math.min(3, Math.floor(stored)));
-        }
-
-        return Math.max(0, 3 - getNpcCoaches(team).length);
+        return Math.max(
+            0,
+            Math.min(3, 3 - activeNpcCoaches.length)
+        );
     };
 
     const teams = gameState.teams
@@ -2733,33 +2732,70 @@ export function resolveCoachCarousel(
             });
         }
 
-        // Restore legacy references only when they no longer point to
-        // an active member of this team's coaching group.
-        const isCurrentCoach = member =>
-            member?.id != null &&
-            team.coaches.some(coach =>
-                String(coach?.id) === String(member.id)
-            );
-
         const activeCoaches = getNpcCoaches(team);
 
-        if (!isCurrentCoach(team.staff.coach)) {
-            team.staff.coach = activeCoaches[0] || null;
+        team.coachingVacancies = Math.max(
+            0,
+            3 - activeCoaches.length
+        );
+
+        if (!team.staff || typeof team.staff !== 'object') {
+            team.staff = {};
         }
 
-        if (!isCurrentCoach(team.staff.scout)) {
-            team.staff.scout = activeCoaches[1] || activeCoaches[0] || null;
-        }
+        const isCurrentCoach = member =>
+            member?.id != null &&
+            activeCoaches.some(
+                coach => String(coach?.id) === String(member.id)
+            );
 
-        if (!isCurrentCoach(team.staff.trainer)) {
-            team.staff.trainer = activeCoaches[2] ||
-                activeCoaches[0] ||
-                null;
-        }
+        // Keep a valid head coach in place. If the previous reference
+        // is no longer employed, use another active coach.
+        const headCoach =
+            (isCurrentCoach(team.staff.coach) && team.staff.coach) ||
+            (isCurrentCoach(team.coach) && team.coach) ||
+            activeCoaches[0] ||
+            null;
 
-        if (!isCurrentCoach(team.coach)) {
-            team.coach = team.staff.coach;
-        }
+        team.staff.coach = headCoach;
+        team.coach = headCoach;
+
+        // Preserve valid assignments where possible, while preventing
+        // different staff roles from pointing to the same coach when
+        // enough active coaches are available.
+        const assignedCoachIds = new Set(
+            headCoach?.id != null
+                ? [String(headCoach.id)]
+                : []
+        );
+
+        const assignStaffRole = currentCoach => {
+            if (
+                isCurrentCoach(currentCoach) &&
+                !assignedCoachIds.has(String(currentCoach.id))
+            ) {
+                assignedCoachIds.add(String(currentCoach.id));
+                return currentCoach;
+            }
+
+            const replacement = activeCoaches.find(
+                coach =>
+                    coach?.id != null &&
+                    !assignedCoachIds.has(String(coach.id))
+            );
+
+            if (replacement) {
+                assignedCoachIds.add(String(replacement.id));
+                return replacement;
+            }
+
+            // Matching legacy behavior: temporarily reuse an active
+            // coach if the team has fewer than three NPC coaches.
+            return headCoach;
+        };
+
+        team.staff.scout = assignStaffRole(team.staff.scout);
+        team.staff.trainer = assignStaffRole(team.staff.trainer);
     }
 
     gameState.coachCarouselResolvedYear = year;

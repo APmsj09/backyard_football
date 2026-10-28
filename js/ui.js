@@ -2648,10 +2648,31 @@ export function renderStaffTab(gameState) {
         { key: 'trainer', title: 'Sideline Anchor (Trainer)', icon: '🧊', desc: 'Controls fatigue dissipation, conditioning, and injury rehabilitation.' }
     ];
 
+    const isStaffChangeWindowOpen = () =>
+        !(
+            gameState?.draftCompleted === true &&
+            gameState?.offseasonFACompleted === true
+        );
+
     window.app_fireStaff = (roleKey) => {
+        if (!isStaffChangeWindowOpen()) {
+            showModal(
+                'Staff Changes Closed',
+                'Coaching staff changes are only available during the offseason. You can still manage your current coaches and adjust their weekly workload during the season.',
+                null,
+                null,
+                null,
+                'Close'
+            );
+            return;
+        }
         const member = team.staff[roleKey];
         if (!member) return;
-        const roleLabels = { coach: 'Head Coach', scout: 'Park Scout', trainer: 'Sideline Trainer' };
+        const roleLabels = {
+            coach: 'Coach',
+            scout: 'Park Scout',
+            trainer: 'Sideline Trainer'
+        };
         const roleLabel = roleLabels[roleKey] || roleKey.toUpperCase();
 
         const modalHtml = `
@@ -2669,6 +2690,18 @@ export function renderStaffTab(gameState) {
             `Relieve ${roleLabel} of Duties?`,
             modalHtml,
             () => {
+                if (!isStaffChangeWindowOpen()) {
+                    showModal(
+                        'Staff Changes Closed',
+                        'The offseason staff-change window has closed. No coach has been dismissed.',
+                        null,
+                        null,
+                        null,
+                        'Close'
+                    );
+                    return;
+                }
+
                 // Release the coach from the team before returning them
                 // to the shared staff market.
                 const dismissedId = String(member.id);
@@ -2710,10 +2743,7 @@ export function renderStaffTab(gameState) {
                     }
                 }
 
-                if (
-                    String(team.coach?.id ?? '') === dismissedId ||
-                    roleKey === 'coach'
-                ) {
+                if (String(team.coach?.id ?? '') === dismissedId) {
                     team.coach = null;
                 }
 
@@ -2745,7 +2775,7 @@ export function renderStaffTab(gameState) {
                 saveGameState();
 
                 const marketPane = document.getElementById(
-                    'fo-pane-staff-market'
+                    'fo-pane-staff-carousel'
                 );
 
                 if (
@@ -2764,6 +2794,18 @@ export function renderStaffTab(gameState) {
     };
 
     window.app_hireStaff = (staffId, roleKey) => {
+        if (!isStaffChangeWindowOpen()) {
+            showModal(
+                'Staff Changes Closed',
+                'Coaching staff can only be hired or replaced during the offseason. You can continue managing your current staff and weekly workload during the regular season.',
+                null,
+                null,
+                null,
+                'Close'
+            );
+            return;
+        }
+
         const isStaffEmployed = candidateId => {
             const id = String(candidateId);
 
@@ -2949,6 +2991,18 @@ export function renderStaffTab(gameState) {
         `;
 
         showModal(`Recruit ${roleName}: ${staff.name}`, pitchModalHtml, () => {
+            if (!isStaffChangeWindowOpen()) {
+                showModal(
+                    'Staff Changes Closed',
+                    'The offseason staff-change window has closed. No offer has been processed and no resources have been spent.',
+                    null,
+                    null,
+                    null,
+                    'Close'
+                );
+                return;
+            }
+
             // The candidate may have been hired or removed while the offer
             // modal was open. Recheck the market before evaluating the offer.
             const latestMarketMatches = (
@@ -3235,9 +3289,6 @@ export function renderStaffTab(gameState) {
                 staff.role = roleKey;
                 staff.teamId = team.id;
 
-                staff.role = roleKey;
-                staff.teamId = team.id;
-
                 if (!team.staff) {
                     team.staff = {};
                 }
@@ -3351,7 +3402,7 @@ export function renderStaffTab(gameState) {
                 // staff references, workload assignments, and vacancy count.
                 saveGameState();
 
-                const marketPane = document.getElementById('fo-pane-staff-market');
+                const marketPane = document.getElementById('fo-pane-staff-carousel');
 
                 if (marketPane && !marketPane.classList.contains('hidden')) {
                     renderStaffMarketTab(gameState);
@@ -3588,17 +3639,23 @@ export function renderStaffTab(gameState) {
     ).length;
 
     const developmentSummaryHtml = `
-        <section class="mb-5 rounded-lg border border-slate-300 bg-white p-4 shadow-sm">
-            <div class="mb-3">
-                <h4 class="font-black text-sm uppercase tracking-wide text-slate-900">
-                    Staff Development Overview
-                </h4>
-                <p class="text-xs text-slate-500 mt-1">
-                    Track recorded skill increases alongside the current weekly workload.
-                </p>
-            </div>
+        <details class="mb-5 rounded-lg border border-slate-300 bg-white shadow-sm">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 p-4">
+                <div class="min-w-0">
+                    <h4 class="font-black text-sm uppercase tracking-wide text-slate-900">
+                        Staff Development Overview
+                    </h4>
+                    <p class="mt-1 text-xs text-slate-500">
+                        Review historical improvements and current workload when needed.
+                    </p>
+                </div>
+                <span class="shrink-0 text-[10px] font-bold uppercase tracking-wide text-blue-700">
+                    Expand details ↓
+                </span>
+            </summary>
 
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+            <div class="px-4 pb-4">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
                 <div class="rounded border border-slate-200 bg-slate-50 p-3">
                     <p class="text-[10px] uppercase tracking-wide text-slate-500">
                         Recorded Increases
@@ -3673,7 +3730,8 @@ export function renderStaffTab(gameState) {
                 They help you compare workload and outcomes but do not prove that the current
                 assignments caused a past increase.
             </p>
-        </section>
+            </div>
+        </details>
     `;
 
     html += `
@@ -3687,9 +3745,149 @@ export function renderStaffTab(gameState) {
 
             ${developmentSummaryHtml}
 
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="overflow-x-auto rounded-lg border border-slate-300 bg-white shadow-sm">
+                <table class="w-full min-w-[900px] text-left text-xs">
+                    <thead class="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
+                        <tr>
+                            <th class="px-3 py-2.5">Coach</th>
+                            <th class="px-2 py-2.5 text-center">Role</th>
+                            <th class="px-2 py-2.5 text-center">Avg.</th>
+                            <th class="px-2 py-2.5 text-center">Offense</th>
+                            <th class="px-2 py-2.5 text-center">Defense</th>
+                            <th class="px-2 py-2.5 text-center">Scouting</th>
+                            <th class="px-2 py-2.5 text-center">Teaching</th>
+                            <th class="px-2 py-2.5 text-center">Planning</th>
+                            <th class="px-2 py-2.5 text-center">Practice</th>
+                            <th class="px-3 py-2.5 text-right">Workload</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200">
+                        ${currentCoaches.map(coach => {
+                            const ratings = coach.ratings || {};
+                            const coachId = String(coach.id ?? '');
+
+                            const isHeadCoach = [
+                                team.coach,
+                                team.staff?.coach
+                            ].some(member =>
+                                member?.id != null &&
+                                String(member.id) === coachId
+                            );
+
+                            const isScout =
+                                team.staff?.scout?.id != null &&
+                                String(team.staff.scout.id) === coachId;
+
+                            const isTrainer =
+                                team.staff?.trainer?.id != null &&
+                                String(team.staff.trainer.id) === coachId;
+
+                            const roleLabel = coach.isUserCoach
+                                ? 'You'
+                                : isHeadCoach
+                                    ? 'Head Coach'
+                                    : isScout
+                                        ? 'Scout'
+                                        : isTrainer
+                                            ? 'Trainer'
+                                            : 'Coach';
+
+                            const offense = staffSkill(
+                                ratings.offSchemeMastery
+                            );
+
+                            const defense = staffSkill(
+                                ratings.defSchemeMastery
+                            );
+
+                            const scouting = staffAverage(
+                                ratings.evalPhysicals,
+                                ratings.evalTechnique,
+                                ratings.evalCharacter
+                            );
+
+                            const teaching = staffSkill(ratings.teaching);
+
+                            const planning = staffAverage(
+                                ratings.gameplanInstinct,
+                                ratings.inGameAdjustments
+                            );
+
+                            const practice = staffAverage(
+                                ratings.practiceDiscipline,
+                                ratings.conditioning
+                            );
+
+                            const average = staffAverage(
+                                offense,
+                                defense,
+                                scouting,
+                                teaching,
+                                planning,
+                                practice
+                            );
+
+                            const workload = developmentRows.find(
+                                row => String(row.id) === coachId
+                            )?.assignedHours ?? 0;
+
+                            const cell = value => `
+                                <td class="px-2 py-2.5 text-center">
+                                    <span class="font-mono font-bold tabular-nums text-slate-900">
+                                        ${value ?? '—'}
+                                    </span>
+                                </td>
+                            `;
+
+                            return `
+                                <tr class="hover:bg-blue-50/50">
+                                    <td class="px-3 py-2.5">
+                                        <span class="font-bold text-slate-900">
+                                            ${coach.name || 'Unnamed Coach'}
+                                        </span>
+                                    </td>
+                                    <td class="px-2 py-2.5 text-center">
+                                        <span class="inline-block rounded bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">
+                                            ${roleLabel}
+                                        </span>
+                                    </td>
+                                    ${cell(average)}
+                                    ${cell(offense)}
+                                    ${cell(defense)}
+                                    ${cell(scouting)}
+                                    ${cell(teaching)}
+                                    ${cell(planning)}
+                                    ${cell(practice)}
+                                    <td class="px-3 py-2.5 text-right font-mono tabular-nums">
+                                        <span class="font-bold text-slate-900">
+                                            ${workload}
+                                        </span>
+                                        <span class="text-slate-500"> hrs</span>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+
+            <details class="mt-3 rounded-lg border border-slate-300 bg-white shadow-sm">
+                <summary class="cursor-pointer list-none px-4 py-3 flex items-center justify-between gap-3">
+                    <span class="text-xs font-black uppercase tracking-wide text-slate-800">
+                        Detailed Staff Profiles
+                    </span>
+                    <span class="text-[10px] font-semibold text-blue-700">
+                        Ratings · Development · History · Availability ↓
+                    </span>
+                </summary>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 p-3">
                 ${currentCoaches.map((coach, index) => {
                     const r = coach.ratings || {};
+
+                    const coachWorkloadRow = developmentRows.find(
+                        row => String(row.id) === String(coach.id)
+                    );
 
                     const availability = coach.availability || {};
 
@@ -3751,6 +3949,15 @@ export function renderStaffTab(gameState) {
                         ['Game Planning', staffAverage(r.gameplanInstinct, r.inGameAdjustments), 'bg-sky-500'],
                         ['Practice', staffAverage(r.practiceDiscipline, r.conditioning), 'bg-rose-500']
                     ];
+
+                    const compactSkillLabels = {
+                        'Offense Scheme': 'OFF',
+                        'Defense Scheme': 'DEF',
+                        'Player Evaluation': 'SCOUT',
+                        'Teaching': 'TEACH',
+                        'Game Planning': 'PLAN',
+                        'Practice': 'PRACTICE'
+                    };
 
                                         const rated = skills.filter(skill => skill[1] !== null);
                     const overall = staffAverage(...rated.map(skill => skill[1]));
@@ -3835,6 +4042,32 @@ export function renderStaffTab(gameState) {
                                 </div>
                                 <p class="text-[10px] text-slate-500">Overall skill average</p>
 
+                                <div class="mt-2 flex flex-wrap items-center gap-2">
+                                    <span class="rounded border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] text-blue-900">
+                                        Assigned: <b>${coachWorkloadRow?.assignedHours ?? 0} hrs</b>
+                                    </span>
+                                    <span class="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600">
+                                        ${weeklyHours === null
+                                            ? 'Availability not set'
+                                            : `${weeklyHours} hrs available / week`}
+                                    </span>
+                                </div>
+
+                                <div class="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                                    ${skills.map(([label, value]) => `
+                                        <div
+                                            title="${label}"
+                                            class="rounded border border-slate-200 bg-white px-1.5 py-2 text-center">
+                                            <span class="block text-[9px] font-bold text-slate-500">
+                                                ${compactSkillLabels[label] || label}
+                                            </span>
+                                            <span class="mt-0.5 block text-sm font-black tabular-nums text-slate-900">
+                                                ${value ?? '—'}
+                                            </span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+
                                 ${strongest ? `
                                     <div class="mt-3 text-xs font-bold text-emerald-900 bg-emerald-50 border border-emerald-200 rounded p-2">
                                         Strongest: ${strongest[0]} (${strongest[1]})
@@ -3842,22 +4075,34 @@ export function renderStaffTab(gameState) {
                                 ` : ''}
                             </div>
 
-                            <div class="p-4 space-y-3">
-                                                                ${skills.map(([label, value, color]) => `
-                                    <div>
-                                        <div class="flex justify-between items-center gap-2 mb-1">
-                                            <span class="text-xs font-semibold text-slate-700">${label}</span>
-                                            <span class="text-sm font-black text-slate-900">
-                                                ${value ?? '—'}
-                                            </span>
-                                        </div>
-                                        <div class="h-2.5 rounded-full bg-slate-200 overflow-hidden">
-                                            <div class="h-full rounded-full ${color}"
-                                                style="width:${value ?? 0}%">
+                            <details class="border-t border-slate-200 p-4 space-y-3">
+                                <summary class="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-bold text-slate-700">
+                                    <span>Full ratings &amp; coach details</span>
+                                    <span class="text-[10px] font-semibold text-slate-500">
+                                        Development · History · Availability ↓
+                                    </span>
+                                </summary>
+                                <div class="grid grid-cols-2 gap-2">
+                                    ${skills.map(([label, value, color]) => `
+                                        <div class="rounded border border-slate-200 bg-slate-50 p-2">
+                                            <div class="flex justify-between items-center gap-2">
+                                                <span class="text-[10px] leading-tight font-semibold text-slate-600">
+                                                    ${label}
+                                                </span>
+                                                <span class="text-sm font-black text-slate-900 tabular-nums">
+                                                    ${value ?? '—'}
+                                                </span>
+                                            </div>
+
+                                            <div class="mt-1.5 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                                                <div
+                                                    class="h-full rounded-full ${color}"
+                                                    style="width:${value ?? 0}%">
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                `).join('')}
+                                    `).join('')}
+                                </div>
 
                                 <details class="mt-3 rounded-lg border border-slate-200 bg-slate-50">
                                     <summary class="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-bold text-slate-700">
@@ -4035,11 +4280,12 @@ export function renderStaffTab(gameState) {
                                 </div>
                                     </div>
                                 </details>
-                            </div>
+                            </details>
                         </article>
                     `;
                 }).join('')}
-            </div>
+                </div>
+            </details>
         </section>
     `;
 
@@ -5048,9 +5294,13 @@ export function renderStaffTab(gameState) {
         `;
     }
 
-    // Staff candidates are displayed in the separate Staff Free Agents pane.
+    // Staff candidates are displayed in the dedicated Staff Carousel pane.
     container.innerHTML = html;
 }
+
+let staffCarouselSearch = '';
+let staffCarouselSort = 'overall';
+let staffCarouselSortDirection = 'desc';
 
 export function renderStaffMarketTab(gameState) {
     const container = document.getElementById('staff-market-container');
@@ -5066,11 +5316,57 @@ export function renderStaffMarketTab(gameState) {
         ? gameState.availableStaff
         : [];
 
+    const staffChangesOpen = !(
+        gameState?.draftCompleted === true &&
+        gameState?.offseasonFACompleted === true
+    );
+
+    if (!staffChangesOpen) {
+        container.innerHTML = `
+            <section class="mx-auto max-w-2xl rounded-lg border border-slate-300 bg-white p-6 shadow-sm">
+                <div class="text-center">
+                    <div class="text-3xl mb-3">🏈</div>
+                    <h3 class="text-lg font-black uppercase tracking-wide text-slate-900">
+                        Staff Carousel Closed
+                    </h3>
+                    <p class="mt-2 text-sm leading-relaxed text-slate-600">
+                        Coaching changes are restricted to the offseason.
+                        Your current staff remains in place throughout the season.
+                    </p>
+                    <div class="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-left">
+                        <p class="text-xs font-bold text-slate-800">
+                            Available during the regular season
+                        </p>
+                        <p class="mt-1 text-xs leading-relaxed text-slate-600">
+                            Manage staff workloads, review coach development,
+                            and adjust weekly assignments from My Staff.
+                        </p>
+                    </div>
+                    <p class="mt-4 text-[10px] text-slate-500">
+                        The carousel reopens when the next offseason staff window begins.
+                    </p>
+                </div>
+            </section>
+        `;
+        return;
+    }
+
+    const activeNpcCoaches = (
+        Array.isArray(team.coaches) ? team.coaches : []
+    ).filter(coach =>
+        coach?.id != null && !coach.isUserCoach
+    );
+
+    const openCoachingSlots = Math.max(
+        0,
+        3 - activeNpcCoaches.length
+    );
+
     if (candidates.length === 0) {
         container.innerHTML = `
             <section class="bg-white rounded border border-slate-300 p-6 text-center">
                 <h3 class="font-black text-sm uppercase tracking-wide text-slate-800">
-                    Staff Free Agents
+                    Staff Carousel
                 </h3>
                 <p class="text-xs text-slate-500 mt-2">
                     No candidates are currently available.
@@ -5079,16 +5375,436 @@ export function renderStaffMarketTab(gameState) {
         return;
     }
 
+    const candidateRating = (candidate, key) => {
+        const value = Number(candidate?.ratings?.[key]);
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, Math.round(value)))
+            : null;
+    };
+
+    const averageRatings = values => {
+        const valid = values.filter(value => value !== null);
+
+        return valid.length
+            ? Math.round(
+                valid.reduce((sum, value) => sum + value, 0) /
+                valid.length
+            )
+            : null;
+    };
+
+    const getCandidateRoleFit = (candidate, role) => {
+        if (typeof Game.calculateCoachRoleFit !== 'function') {
+            return null;
+        }
+
+        const score = Number(
+            Game.calculateCoachRoleFit(candidate, role)
+        );
+
+        return Number.isFinite(score)
+            ? Math.max(0, Math.min(100, Math.round(score)))
+            : null;
+    };
+
+    const getCandidateMetric = (candidate, key) => {
+        const ratings = candidate?.ratings || {};
+
+        const offense = candidateRating(candidate, 'offSchemeMastery');
+        const defense = candidateRating(candidate, 'defSchemeMastery');
+        const scouting = averageRatings([
+            candidateRating(candidate, 'evalPhysicals'),
+            candidateRating(candidate, 'evalTechnique'),
+            candidateRating(candidate, 'evalCharacter')
+        ]);
+        const teaching = candidateRating(candidate, 'teaching');
+        const gameplan = averageRatings([
+            candidateRating(candidate, 'gameplanInstinct'),
+            candidateRating(candidate, 'inGameAdjustments')
+        ]);
+        const practice = averageRatings([
+            candidateRating(candidate, 'practiceDiscipline'),
+            candidateRating(candidate, 'conditioning')
+        ]);
+
+        switch (key) {
+            case 'name':
+                return String(candidate?.name || '').toLowerCase();
+            case 'generalFit':
+                return getCandidateRoleFit(candidate, 'general');
+            case 'scoutingFit':
+                return getCandidateRoleFit(candidate, 'scouting');
+            case 'trainingFit':
+                return getCandidateRoleFit(candidate, 'training');
+            case 'offense':
+                return offense;
+            case 'defense':
+                return defense;
+            case 'scouting':
+                return scouting;
+            case 'teaching':
+                return teaching;
+            case 'gameplan':
+                return gameplan;
+            case 'stipend': {
+                const stipend = Number(candidate?.stipendDemand);
+
+                return Number.isFinite(stipend)
+                    ? Math.max(0, stipend)
+                    : null;
+            }
+            case 'overall':
+            default:
+                return averageRatings([
+                    offense,
+                    defense,
+                    scouting,
+                    teaching,
+                    gameplan,
+                    practice
+                ]);
+        }
+    };
+
+    const normalizedSearch = staffCarouselSearch.trim().toLowerCase();
+
+    const displayCandidates = candidates
+        .filter(candidate => {
+            const searchableText = [
+                candidate?.name,
+                candidate?.age,
+                candidate?.biases?.personality?.name,
+                candidate?.biases?.tactical?.name,
+                candidate?.biases?.scouting?.name,
+                candidate?.formerPlayerBio
+            ].join(' ').toLowerCase();
+
+            return searchableText.includes(normalizedSearch);
+        })
+        .sort((a, b) => {
+            const first = getCandidateMetric(a, staffCarouselSort);
+            const second = getCandidateMetric(b, staffCarouselSort);
+
+            if (first == null && second != null) return 1;
+            if (second == null && first != null) return -1;
+
+            const comparison = staffCarouselSort === 'name'
+                ? String(first ?? '').localeCompare(String(second ?? ''))
+                : (Number(first) || 0) - (Number(second) || 0);
+
+            return staffCarouselSortDirection === 'asc'
+                ? comparison
+                : -comparison;
+        });
+
+    const escapeStaffAttribute = value =>
+        String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[char]);
+
+    window.app_applyStaffCarouselSearch = () => {
+        staffCarouselSearch =
+            document.getElementById('staff-carousel-search')?.value || '';
+
+        renderStaffMarketTab(Game.getGameState() || gameState);
+    };
+
+    window.app_setStaffCarouselSort = key => {
+        const allowedSorts = new Set([
+            'overall',
+            'name',
+            'generalFit',
+            'scoutingFit',
+            'trainingFit',
+            'offense',
+            'defense',
+            'scouting',
+            'teaching',
+            'gameplan',
+            'stipend'
+        ]);
+
+        if (!allowedSorts.has(key)) return;
+
+        staffCarouselSort = key;
+        staffCarouselSortDirection =
+            key === 'name' || key === 'stipend' ? 'asc' : 'desc';
+
+        renderStaffMarketTab(Game.getGameState() || gameState);
+    };
+
+    window.app_toggleStaffCarouselSortDirection = () => {
+        staffCarouselSortDirection =
+            staffCarouselSortDirection === 'asc' ? 'desc' : 'asc';
+
+        renderStaffMarketTab(Game.getGameState() || gameState);
+    };
+
+    window.app_resetStaffCarouselFilters = () => {
+        staffCarouselSearch = '';
+        staffCarouselSort = 'overall';
+        staffCarouselSortDirection = 'desc';
+
+        renderStaffMarketTab(Game.getGameState() || gameState);
+    };
+
+        window.app_viewStaffCandidate = candidateId => {
+        const latestState = Game.getGameState() || gameState;
+
+        const candidate = (
+            Array.isArray(latestState?.availableStaff)
+                ? latestState.availableStaff
+                : []
+        ).find(member =>
+            member?.id != null &&
+            String(member.id) === String(candidateId) &&
+            member.teamId == null
+        );
+
+        if (!candidate) {
+            showModal(
+                'Candidate Unavailable',
+                'This candidate is no longer available in the staff market. Refresh the carousel before continuing.',
+                null,
+                null,
+                null,
+                'Close'
+            );
+            return;
+        }
+
+        const ratings = candidate.ratings || {};
+        const biases = candidate.biases || {};
+        const personality = biases.personality || {};
+        const tactical = biases.tactical || {};
+        const scouting = biases.scouting || {};
+
+        const profileSkills = [
+            ['Offense scheme', 'offSchemeMastery'],
+            ['Defense scheme', 'defSchemeMastery'],
+            ['Physical evaluation', 'evalPhysicals'],
+            ['Technique evaluation', 'evalTechnique'],
+            ['Character evaluation', 'evalCharacter'],
+            ['Teaching', 'teaching'],
+            ['Gameplan instincts', 'gameplanInstinct'],
+            ['In-game adjustments', 'inGameAdjustments'],
+            ['Practice discipline', 'practiceDiscipline'],
+            ['Conditioning', 'conditioning']
+        ];
+
+        const escapeProfileText = value =>
+            String(value ?? '').replace(/[&<>"']/g, char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[char]);
+
+        const tendencies =
+            typeof Game.previewCoachTendencies === 'function'
+                ? Game.previewCoachTendencies(candidate, team)
+                : null;
+
+        const profileHtml = `
+            <div class="space-y-4 text-left">
+                <section class="rounded-lg border border-slate-700 bg-slate-900 p-4 text-white">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h4 class="text-lg font-black">
+                                ${escapeProfileText(candidate.name || 'Unnamed Coach')}
+                            </h4>
+                            <p class="mt-1 text-xs text-slate-300">
+                                Age ${escapeProfileText(candidate.age ?? '—')}
+                                · ${escapeProfileText(personality.name || 'Unknown personality')}
+                            </p>
+                        </div>
+                        ${candidate.formerPlayerBio ? `
+                            <span class="rounded bg-amber-400 px-2 py-1 text-[10px] font-bold text-slate-950">
+                                PARK ALUMNI
+                            </span>
+                        ` : ''}
+                    </div>
+
+                    ${candidate.formerPlayerBio ? `
+                        <p class="mt-3 border-t border-slate-700 pt-3 text-xs leading-relaxed text-amber-100">
+                            ${escapeProfileText(candidate.formerPlayerBio)}
+                        </p>
+                    ` : ''}
+                </section>
+
+                <section>
+                    <h5 class="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">
+                        Coaching skill ratings
+                    </h5>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        ${profileSkills.map(([label, key]) => `
+                            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                                <span class="block text-[10px] leading-tight text-slate-500">
+                                    ${label}
+                                </span>
+                                <span class="mt-1 block font-mono text-xl font-black tabular-nums text-slate-900">
+                                    ${candidateRating(candidate, key) ?? '—'}
+                                </span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </section>
+
+                <section class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div class="rounded border border-slate-200 p-3">
+                        <span class="block text-[10px] font-bold uppercase text-slate-500">
+                            General fit
+                        </span>
+                        <span class="mt-1 block text-xl font-black text-slate-900">
+                            ${getCandidateRoleFit(candidate, 'general') ?? '—'}
+                        </span>
+                    </div>
+                    <div class="rounded border border-slate-200 p-3">
+                        <span class="block text-[10px] font-bold uppercase text-slate-500">
+                            Scouting fit
+                        </span>
+                        <span class="mt-1 block text-xl font-black text-slate-900">
+                            ${getCandidateRoleFit(candidate, 'scouting') ?? '—'}
+                        </span>
+                    </div>
+                    <div class="rounded border border-slate-200 p-3">
+                        <span class="block text-[10px] font-bold uppercase text-slate-500">
+                            Training fit
+                        </span>
+                        <span class="mt-1 block text-xl font-black text-slate-900">
+                            ${getCandidateRoleFit(candidate, 'training') ?? '—'}
+                        </span>
+                    </div>
+                </section>
+
+                <section class="space-y-3">
+                    <div class="rounded border border-slate-200 p-3">
+                        <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
+                            Tactical philosophy
+                        </h5>
+                        <p class="mt-1 text-sm font-bold text-slate-900">
+                            ${escapeProfileText(tactical.name || 'Balanced')}
+                        </p>
+                        <p class="mt-1 text-xs leading-relaxed text-slate-600">
+                            ${escapeProfileText(tactical.desc || 'No tactical notes available.')}
+                        </p>
+                    </div>
+
+                    <div class="rounded border border-slate-200 p-3">
+                        <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
+                            Scouting style
+                        </h5>
+                        <p class="mt-1 text-sm font-bold text-slate-900">
+                            ${escapeProfileText(scouting.name || 'Balanced evaluator')}
+                        </p>
+                        <p class="mt-1 text-xs leading-relaxed text-slate-600">
+                            ${escapeProfileText(scouting.desc || 'No scouting notes available.')}
+                        </p>
+                    </div>
+
+                    <div class="rounded border border-slate-200 p-3">
+                        <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
+                            Personality
+                        </h5>
+                        <p class="mt-1 text-sm font-bold text-slate-900">
+                            ${escapeProfileText(personality.name || 'Unknown')}
+                        </p>
+                        <p class="mt-1 text-xs leading-relaxed text-slate-600">
+                            ${escapeProfileText(personality.desc || 'No personality notes available.')}
+                        </p>
+                    </div>
+                </section>
+
+                <section class="rounded border border-slate-200 bg-slate-50 p-3">
+                    <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
+                        Market information
+                    </h5>
+                    <div class="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                        <div>
+                            <span class="block text-slate-500">Stipend demand</span>
+                            <span class="font-mono font-bold text-slate-900">
+                                ${Number.isFinite(Number(candidate.stipendDemand))
+                                    ? `$${Math.max(0, Number(candidate.stipendDemand))}`
+                                    : 'Not listed'}
+                            </span>
+                        </div>
+                        <div>
+                            <span class="block text-slate-500">Weeks unemployed</span>
+                            <span class="font-mono font-bold text-slate-900">
+                                ${Number.isFinite(Number(candidate.weeksUnemployed))
+                                    ? Math.max(0, Math.floor(Number(candidate.weeksUnemployed)))
+                                    : '—'}
+                            </span>
+                        </div>
+                        <div>
+                            <span class="block text-slate-500">Skill average</span>
+                            <span class="font-mono font-bold text-slate-900">
+                                ${getCandidateMetric(candidate, 'overall') ?? '—'}
+                            </span>
+                        </div>
+                    </div>
+                </section>
+
+                ${tendencies ? `
+                    <section class="rounded border border-slate-200 p-3">
+                        <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
+                            Expected play-calling tendencies
+                        </h5>
+                        <div class="mt-2 grid grid-cols-3 gap-2 text-center">
+                            <div class="rounded bg-slate-50 p-2">
+                                <span class="block text-[9px] text-slate-500">Run tendency</span>
+                                <span class="font-mono font-black text-slate-900">
+                                    ${Number(tendencies.earlyDownTendency) || 0}%
+                                </span>
+                            </div>
+                            <div class="rounded bg-slate-50 p-2">
+                                <span class="block text-[9px] text-slate-500">Blitz</span>
+                                <span class="font-mono font-black text-slate-900">
+                                    ${Number(tendencies.defenseAggressiveness) || 0}%
+                                </span>
+                            </div>
+                            <div class="rounded bg-slate-50 p-2">
+                                <span class="block text-[9px] text-slate-500">4th down</span>
+                                <span class="font-mono font-black text-slate-900">
+                                    ${Number(tendencies.fourthDownBravery) || 0}%
+                                </span>
+                            </div>
+                        </div>
+                    </section>
+                ` : ''}
+            </div>
+        `;
+
+        showModal(
+            `Candidate Profile: ${escapeProfileText(candidate.name || 'Unnamed Coach')}`,
+            profileHtml,
+            null,
+            null,
+            null,
+            'Close'
+        );
+    };
+
     container.innerHTML = `
         <section class="mb-4 bg-slate-900 text-white rounded p-4 border border-slate-700">
             <div class="flex flex-wrap justify-between items-center gap-3">
                 <div>
                     <h3 class="text-lg font-black uppercase tracking-wide text-amber-400">
-                        Staff Free Agents
+                        Staff Carousel
                     </h3>
                     <p class="text-xs text-slate-300 mt-1">
-                        Compare coaching strengths, scouting ability, teaching,
-                        personality, and tactical preferences before making an offer.
+                        Compare skill ratings, specialty fit, personality, tactical
+                        philosophy, and stipend demands. Skill Avg. is a broad summary,
+                        not a role-fit score.
+                        ${openCoachingSlots > 0
+                            ? `${openCoachingSlots} coaching position${openCoachingSlots === 1 ? '' : 's'} available to fill.`
+                            : 'All three coaching positions are occupied; hiring requires replacing a current coach.'}
                     </p>
                 </div>
                 <span class="text-xs font-mono bg-slate-800 border border-slate-700 rounded px-3 py-2">
@@ -5097,230 +5813,225 @@ export function renderStaffMarketTab(gameState) {
             </div>
         </section>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            ${candidates.map(s => {
-                const ratings = s.ratings || {};
-                const biases = s.biases || {};
-                const personality = biases.personality || {};
-                const tactical = biases.tactical || {};
-                const scouting = biases.scouting || {};
+        <section class="mb-3 flex flex-col xl:flex-row xl:items-end justify-between gap-3 rounded border border-slate-300 bg-white p-3">
+            <div class="flex flex-col sm:flex-row sm:items-end gap-2">
+                <form
+                    class="flex flex-col sm:flex-row sm:items-end gap-2"
+                    onsubmit="event.preventDefault(); app_applyStaffCarouselSearch()">
+                    <label class="block">
+                        <span class="block text-[10px] font-bold uppercase tracking-wide text-slate-600 mb-1">
+                            Search candidates
+                        </span>
+                        <input
+                            id="staff-carousel-search"
+                            type="search"
+                            value="${escapeStaffAttribute(staffCarouselSearch)}"
+                            placeholder="Name, personality, style..."
+                            class="w-full sm:w-64 rounded border border-slate-300 px-3 py-2 text-xs outline-none focus:border-blue-500">
+                    </label>
+                    <button
+                        type="submit"
+                        class="rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800">
+                        Search
+                    </button>
+                </form>
 
-                const skillValue = value => {
-                    if (value == null || value === '') return null;
-                    const number = Number(value);
+                <label class="block">
+                    <span class="block text-[10px] font-bold uppercase tracking-wide text-slate-600 mb-1">
+                        Sort candidates
+                    </span>
+                    <select
+                        class="w-full sm:w-44 rounded border border-slate-300 bg-white px-2 py-2 text-xs"
+                        onchange="app_setStaffCarouselSort(this.value)">
+                        <option value="overall" ${staffCarouselSort === 'overall' ? 'selected' : ''}>Skill average</option>
+                        <option value="name" ${staffCarouselSort === 'name' ? 'selected' : ''}>Name</option>
+                        <option value="offense" ${staffCarouselSort === 'offense' ? 'selected' : ''}>Offense scheme</option>
+                        <option value="defense" ${staffCarouselSort === 'defense' ? 'selected' : ''}>Defense scheme</option>
+                        <option value="scouting" ${staffCarouselSort === 'scouting' ? 'selected' : ''}>Scouting</option>
+                        <option value="teaching" ${staffCarouselSort === 'teaching' ? 'selected' : ''}>Teaching</option>
+                        <option value="gameplan" ${staffCarouselSort === 'gameplan' ? 'selected' : ''}>Game planning</option>
+                        <option value="stipend" ${staffCarouselSort === 'stipend' ? 'selected' : ''}>Stipend demand</option>
+                        <option value="generalFit" ${staffCarouselSort === 'generalFit' ? 'selected' : ''}>General role fit</option>
+                        <option value="scoutingFit" ${staffCarouselSort === 'scoutingFit' ? 'selected' : ''}>Scouting role fit</option>
+                        <option value="trainingFit" ${staffCarouselSort === 'trainingFit' ? 'selected' : ''}>Training role fit</option>
+                    </select>
+                </label>
 
-                    return Number.isFinite(number)
-                        ? Math.max(0, Math.min(100, Math.round(number)))
-                        : null;
-                };
+                <button
+                    type="button"
+                    class="rounded border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                    onclick="app_toggleStaffCarouselSortDirection()">
+                    ${staffCarouselSortDirection === 'asc' ? '↑ Ascending' : '↓ Descending'}
+                </button>
 
-                const skillAverage = (...values) => {
-                    const valid = values
-                        .map(skillValue)
-                        .filter(value => value !== null);
+                <button
+                    type="button"
+                    class="rounded border border-slate-300 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                    onclick="app_resetStaffCarouselFilters()">
+                    Reset
+                </button>
+            </div>
 
-                    return valid.length
-                        ? Math.round(
-                            valid.reduce((sum, value) => sum + value, 0) /
-                            valid.length
-                        )
-                        : null;
-                };
+            <p class="text-[11px] font-mono text-slate-500">
+                Showing <b class="text-slate-900">${displayCandidates.length}</b>
+                of <b class="text-slate-900">${candidates.length}</b> candidates
+            </p>
+        </section>
 
-                const candidateSkills = [
-                    {
-                        label: 'Offense Scheme',
-                        value: skillValue(ratings.offSchemeMastery),
-                        color: 'bg-emerald-500'
-                    },
-                    {
-                        label: 'Defense Scheme',
-                        value: skillValue(ratings.defSchemeMastery),
-                        color: 'bg-blue-500'
-                    },
-                    {
-                        label: 'Player Evaluation',
-                        value: skillAverage(
-                            ratings.evalPhysicals,
-                            ratings.evalTechnique,
-                            ratings.evalCharacter
-                        ),
-                        color: 'bg-violet-500'
-                    },
-                    {
-                        label: 'Teaching',
-                        value: skillValue(ratings.teaching),
-                        color: 'bg-amber-500'
-                    },
-                    {
-                        label: 'Game Planning',
-                        value: skillAverage(
-                            ratings.gameplanInstinct,
-                            ratings.inGameAdjustments
-                        ),
-                        color: 'bg-sky-500'
-                    },
-                    {
-                        label: 'Practice & Conditioning',
-                        value: skillAverage(
-                            ratings.practiceDiscipline,
-                            ratings.conditioning
-                        ),
-                        color: 'bg-rose-500'
-                    }
-                ];
+        <div class="overflow-x-auto rounded border border-slate-300 bg-white shadow-sm">
+            <table class="w-full min-w-[1100px] text-left text-xs">
+                <thead class="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
+                    <tr>
+                        <th class="px-3 py-2.5">Candidate</th>
+                        <th class="px-2 py-2.5 text-center">General Fit</th>
+                        <th class="px-2 py-2.5 text-center">Scouting Fit</th>
+                        <th class="px-2 py-2.5 text-center">Training Fit</th>
+                        <th class="px-2 py-2.5 text-center">Offense</th>
+                        <th class="px-2 py-2.5 text-center">Defense</th>
+                        <th class="px-2 py-2.5 text-center">Scouting</th>
+                        <th class="px-2 py-2.5 text-center">Teaching</th>
+                        <th class="px-2 py-2.5 text-center">Planning</th>
+                        <th class="px-2 py-2.5 text-center">Practice</th>
+                        <th class="px-2 py-2.5 text-center">Demand</th>
+                        <th class="px-2 py-2.5 text-center">Weeks</th>
+                        <th class="px-3 py-2.5 text-right">Action</th>
+                    </tr>
+                </thead>
 
-                const ratedSkills = candidateSkills.filter(
-                    skill => skill.value !== null
-                );
+                <tbody class="divide-y divide-slate-200">
+                    ${displayCandidates.length > 0
+                        ? displayCandidates.map(s => {
+                            const ratings = s.ratings || {};
+                            const biases = s.biases || {};
+                            const personality = biases.personality || {};
+                            const tactical = biases.tactical || {};
+                            const scouting = biases.scouting || {};
 
-                const overallRating = skillAverage(
-                    ...ratedSkills.map(skill => skill.value)
-                );
+                            const overall = getCandidateMetric(s, 'overall');
+                            const generalFit = getCandidateMetric(s, 'generalFit');
+                            const scoutingFit = getCandidateMetric(s, 'scoutingFit');
+                            const trainingFit = getCandidateMetric(s, 'trainingFit');
+                            const offense = getCandidateMetric(s, 'offense');
+                            const defense = getCandidateMetric(s, 'defense');
+                            const scoutingScore = getCandidateMetric(s, 'scouting');
+                            const teaching = getCandidateMetric(s, 'teaching');
+                            const planning = getCandidateMetric(s, 'gameplan');
+                            const practice = averageRatings([
+                                candidateRating(s, 'practiceDiscipline'),
+                                candidateRating(s, 'conditioning')
+                            ]);
+                            const stipend = getCandidateMetric(s, 'stipend');
 
-                const strongestSkill = [...ratedSkills].sort(
-                    (a, b) => b.value - a.value
-                )[0];
+                            const weeksValue = Number(s.weeksUnemployed);
+                            const weeksUnemployed = Number.isFinite(weeksValue)
+                                ? Math.max(0, Math.floor(weeksValue))
+                                : null;
 
-                const tend = Game.previewCoachTendencies(s, team);
+                            const tendencies = Game.previewCoachTendencies(s, team);
 
-                return `
-                    <article class="bg-white rounded border border-slate-300 p-4 shadow-sm flex flex-col justify-between">
-                        <div>
-                            <div class="flex justify-between items-start gap-2 mb-2">
-                                <div>
-                                    <h4 class="font-black text-sm text-slate-900">
-                                        ${s.name}
-                                    </h4>
-                                    <p class="text-[10px] text-slate-500 mt-0.5">
-                                        Age ${s.age} · ${personality.name || 'Unknown personality'}
-                                    </p>
-                                </div>
-                                ${s.formerPlayerBio ? `
-                                    <span
-                                        class="shrink-0 text-[9px] bg-amber-100 text-amber-900 font-bold px-1.5 py-1 rounded"
-                                        title="${s.formerPlayerBio}">
-                                        🎓 Park Legend
+                            const detailedSkills = [
+                                ['Offense scheme', 'offSchemeMastery'],
+                                ['Defense scheme', 'defSchemeMastery'],
+                                ['Physical evaluation', 'evalPhysicals'],
+                                ['Technique evaluation', 'evalTechnique'],
+                                ['Character evaluation', 'evalCharacter'],
+                                ['Teaching', 'teaching'],
+                                ['Gameplan instincts', 'gameplanInstinct'],
+                                ['In-game adjustments', 'inGameAdjustments'],
+                                ['Practice discipline', 'practiceDiscipline'],
+                                ['Conditioning', 'conditioning']
+                            ];
+
+                            const scoreCell = value => `
+                                <td class="px-2 py-2.5 text-center">
+                                    <span class="font-mono text-sm font-black tabular-nums ${
+                                        value !== null && value !== undefined
+                                            ? 'text-slate-900'
+                                            : 'text-slate-400'
+                                    }">
+                                        ${value ?? '—'}
                                     </span>
-                                ` : ''}
-                            </div>
+                                </td>
+                            `;
 
-                            <p class="text-[11px] text-slate-600 italic mb-3">
-                                ${tactical.desc || scouting.desc || personality.desc || 'No scouting notes available.'}
-                            </p>
-
-                            <div class="rounded-lg border border-slate-200 p-3 mb-3">
-                                <div class="flex items-center justify-between gap-2 mb-3">
-                                    <h5 class="text-[10px] font-black uppercase tracking-widest text-slate-600">
-                                        Coaching Skills
-                                    </h5>
-
-                                    <span class="text-sm font-black text-slate-900 bg-slate-100 rounded px-2 py-1">
-                                        ${overallRating ?? '—'} Avg.
-                                    </span>
-                                </div>
-
-                                ${strongestSkill ? `
-                                    <div class="rounded border border-emerald-200 bg-emerald-50 p-2 mb-3">
-                                        <span class="block text-[9px] font-bold uppercase text-emerald-800">
-                                            Strongest Area
-                                        </span>
-                                        <span class="text-xs font-black text-emerald-950">
-                                            ${strongestSkill.label} · ${strongestSkill.value}
-                                        </span>
-                                    </div>
-                                ` : ''}
-
-                                <div class="space-y-3">
-                                    ${candidateSkills.map(skill => `
-                                        <div>
-                                            <div class="flex items-center justify-between gap-2 mb-1">
-                                                <span class="text-xs font-semibold text-slate-700">
-                                                    ${skill.label}
+                            return `
+                                <tr class="align-top hover:bg-blue-50/40">
+                                                                        <td class="px-3 py-2.5">
+                                        <div class="min-w-0">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-bold text-slate-900">
+                                                    ${escapeStaffAttribute(s.name || 'Unnamed Coach')}
                                                 </span>
-                                                <span class="text-sm font-black text-slate-900 tabular-nums">
-                                                    ${skill.value ?? '—'}
-                                                </span>
+                                                ${s.formerPlayerBio ? `
+                                                    <span class="shrink-0 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-900">
+                                                        Alumni
+                                                    </span>
+                                                ` : ''}
                                             </div>
 
-                                            <div class="h-2.5 rounded-full bg-slate-200 overflow-hidden">
-                                                <div
-                                                    class="h-full rounded-full ${skill.color}"
-                                                    style="width:${skill.value ?? 0}%">
-                                                </div>
-                                            </div>
+                                            <p class="mt-0.5 text-[10px] text-slate-500">
+                                                Age ${escapeStaffAttribute(s.age ?? '—')}
+                                                · ${escapeStaffAttribute(personality.name || 'Unknown personality')}
+                                            </p>
+
+                                            <button
+                                                type="button"
+                                                data-staff-id="${escapeStaffAttribute(s.id)}"
+                                                class="mt-2 rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-blue-700 hover:bg-blue-50"
+                                                onclick="app_viewStaffCandidate(this.dataset.staffId)">
+                                                View Profile
+                                            </button>
                                         </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                                <div class="rounded border border-slate-200 bg-slate-50 p-2">
-                                    <span class="block text-[9px] uppercase text-slate-500">
-                                        Offense Tactics
-                                    </span>
-                                    <b class="text-sm text-slate-900">
-                                        ${ratings.offSchemeMastery ?? '—'}
-                                    </b>
-                                </div>
-                                <div class="rounded border border-slate-200 bg-slate-50 p-2">
-                                    <span class="block text-[9px] uppercase text-slate-500">
-                                        Defense Tactics
-                                    </span>
-                                    <b class="text-sm text-slate-900">
-                                        ${ratings.defSchemeMastery ?? '—'}
-                                    </b>
-                                </div>
-                                <div class="rounded border border-slate-200 bg-slate-50 p-2">
-                                    <span class="block text-[9px] uppercase text-slate-500">
-                                        Scouting
-                                    </span>
-                                    <b class="text-sm text-slate-900">
-                                        ${Math.round((
-                                            (Number(ratings.evalPhysicals) || 0) +
-                                            (Number(ratings.evalTechnique) || 0) +
-                                            (Number(ratings.evalCharacter) || 0)
-                                        ) / 3)}
-                                    </b>
-                                </div>
-                                <div class="rounded border border-slate-200 bg-slate-50 p-2">
-                                    <span class="block text-[9px] uppercase text-slate-500">
-                                        Teaching
-                                    </span>
-                                    <b class="text-sm text-slate-900">
-                                        ${ratings.teaching ?? '—'}
-                                    </b>
-                                </div>
-                            </div>
+                                    </td>
 
-                            <div class="border-t border-slate-200 pt-2">
-                                <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">
-                                    Expected Playcalling DNA
-                                </span>
-                                <div class="flex flex-wrap gap-1.5 text-[10px] text-slate-700">
-                                    <span class="bg-slate-100 border border-slate-200 rounded px-1.5 py-1">
-                                        Run: <b>${tend.earlyDownTendency}%</b>
-                                    </span>
-                                    <span class="bg-slate-100 border border-slate-200 rounded px-1.5 py-1">
-                                        Blitz: <b>${tend.defenseAggressiveness}%</b>
-                                    </span>
-                                    <span class="bg-slate-100 border border-slate-200 rounded px-1.5 py-1">
-                                        4th Down: <b>${tend.fourthDownBravery}%</b>
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
+                                    ${scoreCell(overall)}
+                                    ${scoreCell(generalFit)}
+                                    ${scoreCell(scoutingFit)}
+                                    ${scoreCell(trainingFit)}
+                                    ${scoreCell(offense)}
+                                    ${scoreCell(defense)}
+                                    ${scoreCell(scoutingScore)}
+                                    ${scoreCell(teaching)}
+                                    ${scoreCell(planning)}
+                                    ${scoreCell(practice)}
 
-                        <div class="border-t border-slate-200 pt-3 mt-3">
-                            <button
-                                class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded text-xs"
-                                onclick="app_hireStaff('${s.id}', 'coach')">
-                                Recruit to Coaching Staff
-                            </button>
-                            <p class="text-[10px] text-slate-500 text-center mt-2">
-                                Recruit based on skills, philosophy, and fit with your staff.
-                            </p>
-                        </div>
-                    </article>`;
-            }).join('')}
+                                    <td class="px-2 py-2.5 text-center">
+                                        <span class="font-mono font-bold tabular-nums text-slate-800">
+                                            ${stipend === null ? '—' : `$${stipend}`}
+                                        </span>
+                                    </td>
+
+                                    <td class="px-2 py-2.5 text-center font-mono tabular-nums text-slate-600">
+                                        ${weeksUnemployed ?? '—'}
+                                    </td>
+
+                                    <td class="px-3 py-2.5 text-right">
+                                        <button
+                                            type="button"
+                                            data-staff-id="${escapeStaffAttribute(s.id)}"
+                                            class="whitespace-nowrap rounded bg-slate-900 px-3 py-2 text-[10px] font-bold text-white hover:bg-slate-700"
+                                            onclick="app_hireStaff(this.dataset.staffId, 'coach')">
+                                            ${openCoachingSlots > 0 ? 'Fill Vacancy' : 'Review Replacement'}
+                                        </button>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')
+                        : `
+                            <tr>
+                                <td colspan="14" class="px-4 py-8 text-center">
+                                    <p class="font-bold text-slate-700">
+                                        No matching candidates
+                                    </p>
+                                    <p class="mt-1 text-xs text-slate-500">
+                                        Try another search or reset your filters.
+                                    </p>
+                                </td>
+                            </tr>
+                        `
+                    }
+                </tbody>
+            </table>
         </div>
     `;
 }

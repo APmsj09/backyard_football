@@ -5434,7 +5434,7 @@ function main() {
                     UI.renderStaffTab(gameState);
                 }
 
-                if (btn.dataset.subTab === 'staff-market') {
+                if (btn.dataset.subTab === 'staff-carousel') {
                     UI.renderStaffMarketTab?.(gameState);
                 }
 
