@@ -1758,7 +1758,7 @@ export function processWeeklyPlayerGrowth() {
         ],
         RB: [
             'speed', 'agility', 'explosiveness', 'carrying',
-            'catchingHands', 'stamina', 'toughness'
+            'playbookIQ', 'catchingHands', 'stamina', 'toughness'
         ],
         WR: [
             'speed', 'agility', 'explosiveness', 'jumping',
@@ -4806,7 +4806,7 @@ export function developPlayer(player, team = null) {
     const pos = player.pos || estimateBestPosition(player);
     let focusGroup = [];
     if (pos === 'QB') focusGroup = ['throwingAccuracy', 'playbookIQ', 'decisionMaking', 'speed', 'consistency'];
-    else if (pos === 'RB') focusGroup = ['speed', 'agility', 'strength', 'catchingHands', 'toughness'];
+    else if (pos === 'RB') focusGroup = ['speed', 'carrying', 'agility', 'playbookIQ', 'strength', 'catchingHands'];
     else if (pos === 'WR') focusGroup = ['speed', 'catchingHands', 'agility', 'playbookIQ'];
     else if (pos === 'TE') focusGroup = ['catchingHands', 'blocking', 'strength', 'toughness'];
     else if (pos === 'OL') focusGroup = ['strength', 'blocking', 'toughness', 'playbookIQ'];

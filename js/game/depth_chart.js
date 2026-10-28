@@ -31,6 +31,22 @@ export function normalizeFormationKey(formations, formationKey, defaultKey) {
     return keys.length > 0 ? keys[0] : null;
 }
 
+export function isPlayerNaturalForPosition(p, pos) {
+    if (!p) return false;
+    const normalize = (raw) => {
+        if (!raw) return null;
+        if (['FB'].includes(raw)) return 'RB';
+        if (['OT', 'OG', 'C'].includes(raw)) return 'OL';
+        if (['DE', 'DT', 'NT'].includes(raw)) return 'DL';
+        if (['CB', 'S', 'FS', 'SS'].includes(raw)) return 'DB';
+        return raw;
+    };
+    const primary = normalize(p.pos);
+    const off = normalize(p.favoriteOffensivePosition);
+    const def = normalize(p.favoriteDefensivePosition);
+    return primary === pos || off === pos || def === pos;
+}
+
 export function isPlayerViableForPosition(p, pos) {
     if (!p) return false;
     

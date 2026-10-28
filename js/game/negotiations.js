@@ -3,7 +3,7 @@
 import { game, getRelationshipLevel, getPlayer, getRosterObjects } from './state.js';
 import { relationshipLevels } from '../data.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
-import { isPlayerViableForPosition } from './depth_chart.js';
+import { isPlayerNaturalForPosition, isPlayerViableForPosition } from './depth_chart.js';
 
 /**
  * Evaluates whether an AI team genuinely needs and desires a free agent
@@ -81,17 +81,18 @@ export function calculateAiTeamNeedAndDesire(
 
     const requiredStarters = requiredForPosition(bestPos);
 
-    const viablePlayers = roster.filter(
-        p => isPlayerViableForPosition(p, bestPos)
+    // FIX: Filter strictly by natural position fit so entire rosters don't crowd out positions
+    const naturalPlayers = roster.filter(
+        p => isPlayerNaturalForPosition(p, bestPos)
     );
 
-    const sortedStarters = viablePlayers
+    const sortedStarters = naturalPlayers
         .map(p => calculateOverall(p, bestPos))
         .sort((a, b) => b - a);
 
     const missingStarters = Math.max(
         0,
-        requiredStarters - viablePlayers.length
+        requiredStarters - naturalPlayers.length
     );
 
     const isDesperateVoid = missingStarters > 0;
@@ -99,7 +100,7 @@ export function calculateAiTeamNeedAndDesire(
     // Backups matter only after the team can field its starting unit.
     const backupCount = Math.max(
         0,
-        viablePlayers.length - requiredStarters
+        naturalPlayers.length - requiredStarters
     );
 
     const missingBackups = isDesperateVoid
@@ -130,17 +131,14 @@ export function calculateAiTeamNeedAndDesire(
         ? 0
         : Math.max(
             0,
-            Math.min(
-                12,
-                Math.round((58 - currentStarterOvr) * 0.6)
-            )
+            Math.round((58 - currentStarterOvr) * 0.6)
         );
 
     // Reward genuine versatility when another position also lacks coverage.
     const additionalFits = allPositions.filter(position => {
         if (
             position === bestPos ||
-            !isPlayerViableForPosition(player, position)
+            !isPlayerNaturalForPosition(player, position)
         ) {
             return false;
         }
@@ -151,7 +149,7 @@ export function calculateAiTeamNeedAndDesire(
         if (alternativeOvr < playerOvr - 8) return false;
 
         const room = roster.filter(
-            p => isPlayerViableForPosition(p, position)
+            p => isPlayerNaturalForPosition(p, position)
         );
 
         const depthTarget =
@@ -165,7 +163,7 @@ export function calculateAiTeamNeedAndDesire(
         12,
         additionalFits.reduce((total, position) => {
             const room = roster.filter(
-                p => isPlayerViableForPosition(p, position)
+                p => isPlayerNaturalForPosition(p, position)
             );
 
             return total + (
@@ -189,7 +187,7 @@ export function calculateAiTeamNeedAndDesire(
         missingBackups === 0 &&
         starterQualityNeed === 0 &&
         upgradeDelta <= -2 &&
-        viablePlayers.length >= requiredStarters + 1
+        naturalPlayers.length >= requiredStarters + 1
     ) {
         return {
             shouldBid: false,
@@ -252,8 +250,6 @@ export function calculateAiTeamNeedAndDesire(
 
     const retentionOptions = getRetentionPitchOptions(player);
 
-    // AI teams only offer workload guarantees supported by the shared
-    // position-specific promise definitions.
     let promiseTouches = (
         ego > 65 &&
         retentionOptions.focusPromise &&
@@ -265,19 +261,13 @@ export function calculateAiTeamNeedAndDesire(
         const isFranchiseCornerstone = playerOvr >= 60 && (upgradeDelta >= 6 || isDesperateVoid);
         const isMajorUpgrade = upgradeDelta >= 8 || (isDesperateVoid && playerOvr >= 48);
 
-        // When trailing behind a rival's bid in multi-day negotiations
         if (currentTopBidScore > 0) {
-            // Smart coaches bow out if the player isn't a game-changer and the price is too high
             const canJustifyWar = desireScore >= 68 || isDesperateVoid || isFranchiseCornerstone;
 
             if (canJustifyWar && !isConservativeCoach) {
-                // Escalate role to STARTER if player is demanding it and we really need him
                 if (role === 'ROTATION' && ego > 60) role = 'STARTER';
-
-                // Escalate tokens: Spend 2 tokens if cornerstone, otherwise 1
                 tokensToSpend = (isAggressiveCoach && tokensAvailable >= 2 && desireScore >= 78) ? 2 : 1;
             } else if (isConservativeCoach) {
-                // Conservative GMs know when to walk away rather than overpaying in bidding wars
                 return { shouldBid: false, desireScore: 0, offer: null, reason: 'Market price exceeded disciplined value threshold' };
             }
         } else if (isFranchiseCornerstone && (isAggressiveCoach || coachInstinct > 65)) {
@@ -385,13 +375,11 @@ export function checkInstantCommit(player, team, evalResult, offer) {
     const bestPos = player.pos || estimateBestPosition(player);
     const playerOvr = calculateOverall(player, bestPos);
 
-    // High caliber prospects (OVR >= 55) never commit instantly unless blown away by tokens and BFF bonds
     if (playerOvr >= 55) {
         const hasBFF = player.social?.bestFriendId && team.roster?.includes(player.social.bestFriendId);
         return evalResult.interestScore >= 88 && (offer.tokensOffered >= 2 || hasBFF);
     }
 
-    // Role players can commit early if they love the fit
     const isBlowaway = (offer.tokensOffered >= 2) && (offer.role === 'STARTER');
     return isBlowaway || evalResult.interestScore >= 82;
 }
@@ -411,7 +399,6 @@ export function resolvePlayerBiddingWar(player, bids = []) {
     scoredBids.sort((a, b) => b.score - a.score);
     const winningBid = scoredBids[0];
 
-    // Dynamic threshold enforcement based on player caliber
     const threshold = winningBid.evaluation.threshold || 48;
     if (winningBid.evaluation.interestScore < threshold) {
         const negativeReasons = winningBid.evaluation.reasons.filter(r => r.includes('-'));
@@ -490,17 +477,15 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
     const teamOffense = team.formations?.offense || 'Balanced';
 
     // 1. TALENT LEVERAGE & AGE BASELINE
-    // Superstars have leverage and demand serious incentives. Raw developmental kids just want a jersey.
     let interest = 36;
     if (playerOvr >= 62) {
-        interest = 18; // Star leverage: high skepticism of empty pitches
+        interest = 18;
     } else if (playerOvr >= 52) {
         interest = 28;
     } else if (playerOvr < 40) {
-        interest = 44; // Eager walk-on bench candidate
+        interest = 44;
     }
 
-    // Older teens (17-18) have cars, jobs, and varsity options; young kids (12-13) are eager
     if (age >= 17) {
         interest -= 8;
         reasons.push("🚗 Senior with outside options & high expectations (-8)");
@@ -515,7 +500,6 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
         interest += 8;
         reasons.push("🏟️ Premier Parks lights prestige (+8)");
     } else if (team.tier === 2 && playerOvr >= 52) {
-        // High caliber players look down on Tier 2
         interest -= 14;
         reasons.push("📉 Reluctant to play in Sandlot Circuit Tier 2 (-14)");
     }
@@ -543,12 +527,12 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
     }
 
     // 4. DEPTH CHART REALITY CHECK (Detecting Fake "Starter" Promises)
-    const viableCompetitors = roster.filter(p => isPlayerViableForPosition(p, bestPos));
-    const topCompetitorOvr = viableCompetitors.map(p => calculateOverall(p, bestPos)).sort((a, b) => b - a)[0] || 0;
+    // FIX: Only natural players for this position count as true competitors
+    const naturalCompetitors = roster.filter(p => isPlayerNaturalForPosition(p, bestPos));
+    const topCompetitorOvr = naturalCompetitors.map(p => calculateOverall(p, bestPos)).sort((a, b) => b - a)[0] || 0;
 
     if (roleOffered === 'STARTER') {
         if (topCompetitorOvr >= playerOvr + 4 && ego > 55) {
-            // Player sees through the empty promise: "You already have a starter better than me!"
             interest -= 22;
             reasons.push(`🤨 Sees through fake starter pitch: Depth chart already led by ${topCompetitorOvr} OVR star (-22)`);
         } else {
@@ -577,7 +561,8 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
     const isPassCatcher = ['WR', 'TE'].includes(bestPos) || player.archetypeName?.includes('Receiving');
     if (isPassCatcher) {
         const qb1Id = team.depthChart?.offense?.QB1;
-        const qb1 = qb1Id ? getPlayer(qb1Id) : roster.find(p => isPlayerViableForPosition(p, 'QB'));
+        // FIX: Look for natural QB instead of accidental skill crossover
+        const qb1 = qb1Id ? getPlayer(qb1Id) : roster.find(p => isPlayerNaturalForPosition(p, 'QB'));
         const qbThrow = qb1?.attributes?.technical?.throwingAccuracy ?? 40;
 
         if (qbThrow >= 65) {
@@ -616,7 +601,6 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
         if (focusPromise) {
             const touchBonus = ego > 65 ? 18 : 10;
             interest += touchBonus;
-
             reasons.push(
                 `🏈 Promised ${focusPromise.label.toLowerCase()} (+${touchBonus})`
             );
@@ -629,9 +613,7 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
 
     // 8. COACHING CLASHES
     const coach = team.staff?.coach || team.coach;
-    const coachStyle =
-        coach?.biases?.personality?.name ||
-        coach?.type;
+    const coachStyle = coach?.biases?.personality?.name || coach?.type;
     if (coachStyle === "Old-School Disciplinarian") {
         if (ego > 70 || ethic < 40) {
             interest -= 20;
@@ -654,7 +636,6 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
 
     // 9A. GENERAL MANAGER RECRUITING PHILOSOPHY
     const gmNegotiationBonus = team.gmProfile?.bonuses?.negotiationInterest || 0;
-
     if (gmNegotiationBonus !== 0) {
         interest += gmNegotiationBonus;
         reasons.push(
@@ -664,11 +645,10 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
     }
 
     // 10. DYNAMIC CALIBER THRESHOLD
-    // Superstars demand deep courtship (62+ interest). Bench walk-ons accept at 45.
     let threshold = 42;
-    if (playerOvr >= 62) threshold += 12;     // Threshold = 54
-    else if (playerOvr >= 52) threshold += 6; // Threshold = 48
-    if (ego > 75) threshold += 6;             // Divas are harder to satisfy
+    if (playerOvr >= 62) threshold += 12;
+    else if (playerOvr >= 52) threshold += 6;
+    if (ego > 75) threshold += 6;
     if (age >= 17) threshold += 4;
 
     const accepted = interest >= threshold;
@@ -724,7 +704,6 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
         reasons.push("🤝 Volunteer/humble coach: Asks $0.00 upfront stipend (+0)");
     }
 
-    // Unemployment Desperation Bonus (Humble coaches get desperate; stubborn hold out)
     if (weeksUnemployed >= 2) {
         const desperationBonus = Math.round(weeksUnemployed * 6 * (1.0 - (staff.stubbornness || 0.75)));
         if (desperationBonus > 0) {
@@ -733,7 +712,6 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
         }
     }
 
-    // 1. TIER STANDARDS & REPUTATION
     if (team.tier === 1) {
         interest += 14;
         reasons.push("🏟️ Premier Parks floodlights prestige (+14)");
@@ -759,9 +737,9 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
     const teamOffense = team.formations?.offense || 'Balanced';
 
     if (roleKey === 'coach') {
-        // Air Raid Coach inspects QB and WR readiness
+        // FIX: Find natural QB for Air Raid audit
         if (tactical === 'Air Raid Purist') {
-            const qb1 = roster.find(p => isPlayerViableForPosition(p, 'QB'));
+            const qb1 = roster.find(p => isPlayerNaturalForPosition(p, 'QB'));
             const qbThrow = qb1?.attributes?.technical?.throwingAccuracy || 35;
             if (qbThrow < 45) {
                 interest -= 20;
@@ -771,8 +749,9 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
                 interest += 14;
                 reasons.push("🚀 Roster already set in Spread formations (+14)");
             }
+        // FIX: Count natural OL & TE blockers for Smashmouth front
         } else if (tactical === 'Smashmouth Zealot') {
-            const heavyCount = roster.filter(p => isPlayerViableForPosition(p, 'OL') || isPlayerViableForPosition(p, 'TE')).length;
+            const heavyCount = roster.filter(p => isPlayerNaturalForPosition(p, 'OL') || isPlayerNaturalForPosition(p, 'TE')).length;
             if (heavyCount < 4) {
                 interest -= 18;
                 reasons.push("❌ Lacks physical blockers needed for Smashmouth front (-18)");
@@ -783,7 +762,6 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
             }
         }
 
-        // Scheme autonomy expectations
         if (schemePromise === 'COACH_CHOICE') {
             interest += 18;
             reasons.push("📋 Full Play-Calling & Scheme Autonomy (+18)");
@@ -824,14 +802,12 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
         reasons.push(`🤝 Favor Tokens offered (+${tokenBoost})`);
     }
 
-    // Dynamic threshold: Elite coaches require 58+ score; average candidates accept at 45
     let threshold = 46;
     if (ratingAvg >= 72) threshold += 12;
     else if (ratingAvg >= 62) threshold += 6;
 
     const accepted = interest >= threshold;
 
-    // Lore Reaction Quote
     let quote = "";
     if (accepted) {
         if (personality === 'Old-School Disciplinarian') {
@@ -861,10 +837,6 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
     };
 }
 
-/**
- * Evaluates offseason retention and enforces any promise due for the
- * completed season. A broken commitment destroys trust permanently.
- */
 /**
  * Evaluates offseason retention using the shared contract model.
  */
@@ -904,18 +876,15 @@ export function evaluatePlayerRetention(player, team, snapsThisSeason = 0) {
     const gmRetentionBonus = team.gmProfile?.bonuses?.retention || 0;
     stayScore += gmRetentionBonus;
 
-    // General playing-time frustration, separate from explicit promises.
     if (player.expectations?.desiredRole === 'STARTER' && snapsThisSeason < 40) {
         stayScore -= 28;
     }
 
-    // Losing-program frustration.
     if (team.wins <= 2) {
         if (ego > 70) stayScore -= 14;
         else if (ego > 50) stayScore -= 6;
     }
 
-    // High-caliber upperclassmen may want stronger competition.
     if (team.tier === 2 && ovr >= 60 && player.age >= 17 && ego > 65) {
         stayScore -= 14;
     }
@@ -1054,10 +1023,8 @@ export function getRetentionPitchOptions(player) {
     };
 }
 
-
 /**
  * Creates a normalized, season-specific commitment after a player accepts.
- * Does not spend tokens or modify the roster.
  */
 export function createPlayerPromise(
     player,
@@ -1077,14 +1044,12 @@ export function createPlayerPromise(
 
     let promiseType = offer.promiseType;
 
-    // Normalize legacy recruiting offers that use promiseTouches.
     if (promiseType == null) {
         promiseType = offer.promiseTouches === 'FEATURED'
             ? (options.focusPromise?.value || 'NONE')
             : 'NONE';
     }
 
-    // Do not record a workload guarantee that is invalid for the position.
     if (
         promiseType !== 'NONE' &&
         promiseType !== options.focusPromise?.value
@@ -1106,14 +1071,10 @@ export function createPlayerPromise(
         promiseTarget: promiseType === options.focusPromise?.value
             ? options.focusPromise.target
             : null,
-
-        // Legacy compatibility for older recruiting code and saves.
         promiseTouches: promiseType === 'NONE' ? 'NORMAL' : 'FEATURED',
-
         promiseSeason: Number.isFinite(promiseSeason)
             ? promiseSeason
             : (game?.year ?? 1),
-
         source,
         teamId: team.id,
         broken: false
@@ -1149,7 +1110,6 @@ function isPlayerStarterAtPosition(player, team, position) {
 
 /**
  * Resolves a player's contract promise for the completed season.
- * A broken commitment permanently damages trust with the promising team.
  */
 function evaluateActivePlayerPromise(
     player,
@@ -1214,7 +1174,6 @@ function evaluateActivePlayerPromise(
 
     const promiseSeason = Number(promise.promiseSeason);
 
-    // A promise must not be evaluated before its promised season finishes.
     if (
         promise.promiseSeason != null &&
         Number.isFinite(promiseSeason) &&
@@ -1229,7 +1188,6 @@ function evaluateActivePlayerPromise(
 
     const snaps = Math.max(0, Number(snapsThisSeason) || 0);
 
-    // STARTER and ROTATION have measurable minimum role expectations.
     if (promise.role === 'STARTER') {
         if (!isPlayerStarterAtPosition(player, team, position)) {
             return markPermanentDeparture(
@@ -1248,7 +1206,6 @@ function evaluateActivePlayerPromise(
         );
     }
 
-    // Normalize promises from older saves.
     let promiseType = promise.promiseType;
 
     if (
@@ -1303,7 +1260,6 @@ function evaluateActivePlayerPromise(
         outcome: 'PROMISE_KEPT'
     });
 
-    // A successfully completed contract promise is resolved exactly once.
     player.activePromise = null;
 
     return { status: 'KEPT', broken: false };
@@ -1311,7 +1267,6 @@ function evaluateActivePlayerPromise(
 
 /**
  * Evaluates a GM's exit interview pitch to convince a flight-risk player to stay.
- * This function evaluates terms only; it does not mutate the roster or spend tokens.
  */
 export function evaluateRetentionPitch(player, team, pitch = {}) {
     if (!player || !team) {
@@ -1361,7 +1316,6 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
         Math.floor(Number(team.socialProfile?.favorTokens) || 0)
     );
 
-    // Normalize the old modal's generic FEATURED value for compatibility.
     let promiseType = pitch.promiseType || 'NONE';
 
     if (!pitch.promiseType && pitch.promiseTouches === 'FEATURED') {
@@ -1374,7 +1328,6 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
         }
     }
 
-    // Prevent impossible promises and invalid token spending.
     if (
         !['STARTER', 'ROTATION'].includes(rolePromised) ||
         !Number.isInteger(tokens) ||
@@ -1402,7 +1355,6 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
         Math.round(loyalty * 0.40) +
         Math.round((cred - 50) * 0.25);
 
-    // A retention pitch must fit the team's established culture.
     if (coachStyle === 'Old-School Disciplinarian') {
         if (ego > 70 || ethic < 40) {
             score -= 12;
@@ -1479,7 +1431,6 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
 
     // 7. Team outlook and acceptance threshold
     let threshold = 52;
-
     if (ego > 75) threshold += 12;
 
     const completedWins = Number.isFinite(Number(pitch.completedWins))
@@ -1495,9 +1446,7 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
 
     const accepted = score >= threshold;
 
-    // 8. Position-aware player response
     let quote;
-
     if (accepted) {
         if (tokens > 0) {
             quote = `"Alright, deal! I'll give the squad one more season, Coach."`;
@@ -1526,7 +1475,6 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
 
 /**
  * Builds and evaluates an AI coach's offseason retention offer.
- * AI and user offers use the same player-acceptance rules.
  */
 export function evaluateAiRetentionPitch(player, team, context = {}) {
     if (!player || !team) {
@@ -1552,10 +1500,7 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
     const options = getRetentionPitchOptions(player);
     const position = options.position;
     const coach = team.staff?.coach || team.coach;
-    const coachStyle =
-        coach?.biases?.personality?.name ||
-        coach?.type ||
-        'Balanced Tactician';
+    const coachStyle = coach?.biases?.personality?.name || coach?.type || 'Balanced Tactician';
     const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
     const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
 
@@ -1571,11 +1516,7 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
         Number(context.snapsThisSeason ?? player.careerStats?.snapsThisSeason) || 0
     );
 
-    // Estimate contribution from position-relevant season production.
-    // OL uses tracked snaps and starter status because its box-score stats
-    // are limited compared with skill positions and defenders.
     let production = 0;
-
     if (position === 'QB') {
         production =
             (stats.passYards || 0) / 20 +
@@ -1621,8 +1562,9 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
         position
     );
 
+    // FIX: Filter roster competitors strictly by natural position fit
     const rosterCompetitors = getRosterObjects(team).filter(
-        p => p && p.id !== player.id && isPlayerViableForPosition(p, position)
+        p => p && p.id !== player.id && isPlayerNaturalForPosition(p, position)
     );
 
     const requiredStarters = position === 'OL'
@@ -1639,7 +1581,6 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
         ]
         : 0;
 
-    // Avoid making a starting-role promise the roster plainly cannot support.
     const canCrediblyOfferStarter =
         currentStarter ||
         rosterCompetitors.length < requiredStarters ||
@@ -1664,9 +1605,6 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
         tactical === 'Conservative Turtler' ||
         coachStyle === 'Analytical Savant';
 
-    // Coaches don't all fight equally hard for every player.
-    // High-value contributors matter most; player-friendly coaches are
-    // more willing to repair a relationship with a lower-rated player.
     if (!isHighValue && !isPlayerFriendly) {
         return {
             attempted: false,
@@ -1677,8 +1615,6 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
         };
     }
 
-    // Strict coaches are less likely to chase a low-value player whose
-    // ego and work ethic conflict with their program.
     if (
         coachStyle === 'Old-School Disciplinarian' &&
         ego >= 82 &&
@@ -1707,8 +1643,6 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
         currentWorkload = stats.receptions || 0;
     }
 
-    // AI coaches only promise a workload the player has already demonstrated
-    // he can receive. Non-offensive positions have no workload promise.
     const shouldPromiseWorkload =
         focusPromise &&
         currentWorkload >= focusPromise.target &&
@@ -1730,16 +1664,11 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
     );
 
     let tokensOffered = 0;
-
-    const needsRelationshipRepair =
-        loyalty < 45 || happiness < 50;
-
+    const needsRelationshipRepair = loyalty < 45 || happiness < 50;
     const coachTeaching = coach?.ratings?.teaching ?? 50;
     const coachAuthority = coach?.ratings?.authority ?? 50;
     const coachQuality = (coachTeaching + coachAuthority) / 2;
 
-    // Aggressive coaches may spend two tokens on a genuine cornerstone.
-    // Conservative coaches reserve that spend for exceptional players.
     if (
         tokensAvailable >= 2 &&
         playerOvr >= 60 &&
@@ -1831,8 +1760,15 @@ export function discussPositionChange(player, targetPos, team, useToken = false)
     const targetCluster = getCluster(targetPos);
     const ceilingWgt = player.talentAttributes?.physical?.weight || wgt + 20;
 
+    // FIX: Check if the player already has targetPos in their natural profile (e.g. secondary side)
+    const isNatural = isPlayerNaturalForPosition(player, targetPos);
+
     let transitionDifficulty = 'LOW';
-    if (currentCluster === targetCluster) {
+    if (isNatural) {
+        transitionDifficulty = 'NATURAL';
+        interest += 25;
+        reasons.push("Natural two-way position transition (+25)");
+    } else if (currentCluster === targetCluster) {
         transitionDifficulty = 'NATURAL';
         interest += 22;
         reasons.push("Natural sibling position transition (+22)");
@@ -1890,7 +1826,7 @@ export function discussPositionChange(player, targetPos, team, useToken = false)
         }
     }
 
-    // 4. Token Persuasion (Borrowing a bike, candy bribe)
+    // 4. Token Persuasion
     if (useToken) {
         interest += 30;
         reasons.push("Persuaded with a Favor Token sweetener (+30)");
@@ -1909,13 +1845,11 @@ export function discussPositionChange(player, targetPos, team, useToken = false)
 
         if (isOffensive) {
             player.favoriteOffensivePosition = targetPos;
-            // Clean up defensive counterpart so frame makes sense
             if (['OL', 'TE'].includes(targetPos) && ['DB'].includes(player.favoriteDefensivePosition)) {
-                player.favoriteDefensivePosition = 'DL'; // Bulked up kids can't be DBs
+                player.favoriteDefensivePosition = 'DL';
             }
         } else {
             player.favoriteDefensivePosition = targetPos;
-            // Clean up offensive counterpart
             if (['DL'].includes(targetPos) && ['WR', 'QB'].includes(player.favoriteOffensivePosition)) {
                 player.favoriteOffensivePosition = 'OL';
             }

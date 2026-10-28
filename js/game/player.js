@@ -20,22 +20,22 @@ export const positionOverallWeights = {
 
     // 2. RB: Speed, ball security, elusiveness, and receiving touch
     RB: {
-        speed: 0.25,
-        carrying: 0.25,
-        agility: 0.15,
-        strength: 0.15,
-        catchingHands: 0.10,
-        explosiveness: 0.10
+        speed: 0.26,
+        carrying: 0.20,
+        agility: 0.16,
+        playbookIQ: 0.12,
+        strength: 0.12,
+        explosiveness: 0.08,
+        catchingHands: 0.06
     },
 
-    // 3. WR: Added a pinch of carrying (5%) for YAC ball security
+    // 3. WR: Concentrated into core receiving attributes to match trench formula density
     WR: {
-        speed: 0.28,
-        catchingHands: 0.28,
-        agility: 0.15,
-        jumping: 0.14,
+        speed: 0.32,
+        catchingHands: 0.32,
+        agility: 0.16,
         explosiveness: 0.10,
-        carrying: 0.05
+        jumping: 0.10
     },
 
     // 4. TE: Complete two-way weapon (hands, blocking, size, jumping)
@@ -301,11 +301,11 @@ const archetypes = [
     { name: 'Cannon Arm', off: 'QB', def: 'DL', weightMod: 1.1, heightMod: 2, keyAttrs: ['throwPower', 'throwingAccuracy', 'strength'], speedMod: 0.85, strMod: 1.2 },
 
     // --- BALL CARRIERS ---
-    { name: 'Power Back', off: 'RB', def: 'LB', weightMod: 1.25, heightMod: -1, keyAttrs: ['strength', 'toughness', 'tackling', 'stamina'], speedMod: 0.9, strMod: 1.2 },
+    { name: 'Power Back', off: 'RB', def: 'LB', weightMod: 1.25, heightMod: -1, keyAttrs: ['strength', 'toughness', 'carrying', 'stamina'], speedMod: 0.9, strMod: 1.2 },
     { name: 'Speed Back', off: 'RB', def: 'DB', weightMod: 0.85, heightMod: -2, keyAttrs: ['speed', 'agility', 'explosiveness', 'clutch', 'catchingHands'], speedMod: 1.10, strMod: 0.7 },
-    { name: 'Workhorse', off: 'RB', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['stamina', 'consistency', 'tackling', 'toughness'], speedMod: 1.0, strMod: 1.0 },
-    { name: 'Receiving Back', off: 'RB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['catchingHands', 'agility', 'speed', 'coverage'], speedMod: 1.1, strMod: 0.8 },
-    { name: 'Bruiser', off: 'RB', def: 'DL', weightMod: 1.4, heightMod: 0, keyAttrs: ['strength', 'toughness', 'stamina', 'blocking'], speedMod: 0.75, strMod: 1.3 },
+    { name: 'Workhorse', off: 'RB', def: 'LB', weightMod: 1.1, heightMod: 0, keyAttrs: ['stamina', 'consistency', 'playbookIQ', 'carrying'], speedMod: 1.0, strMod: 1.0 },
+    { name: 'Receiving Back', off: 'RB', def: 'DB', weightMod: 0.9, heightMod: -1, keyAttrs: ['catchingHands', 'agility', 'speed', 'playbookIQ'], speedMod: 1.1, strMod: 0.8 },
+    { name: 'Bruiser', off: 'RB', def: 'DL', weightMod: 1.4, heightMod: 0, keyAttrs: ['strength', 'toughness', 'carrying', 'blocking'], speedMod: 0.75, strMod: 1.3 },
     { name: 'Third-Down Back', off: 'RB', def: 'DB', weightMod: 0.95, heightMod: 0, keyAttrs: ['blocking', 'catchingHands', 'playbookIQ', 'agility'], speedMod: 1.0, strMod: 0.9 },
     { name: 'Change-of-Pace', off: 'RB', def: 'DB', weightMod: 0.8, heightMod: -3, keyAttrs: ['speed', 'agility', 'clutch'], speedMod: 1.3, strMod: 0.6 },
     { name: 'Slashing Back', off: 'RB', def: 'LB', weightMod: 1.0, heightMod: 0, keyAttrs: ['agility', 'speed', 'playbookIQ', 'consistency'], speedMod: 1.1, strMod: 1.0 },
@@ -377,24 +377,24 @@ const archetypeBoosts = {
     'Backyard Magician': { agility: 14, clutch: 12, throwingAccuracy: 12, throwPower: 8 },
     'Cannon Arm': { throwPower: 22, strength: 10, throwingAccuracy: 8 },
 
-    // Boosted Carrying to match the 25% RB formula weight
+    // Boosted Carrying and PlaybookIQ for vision, pass-pro blitz reads, and cutbacks
     'Power Back': { strength: 12, toughness: 10, carrying: 14, speed: 6 },
     'Speed Back': { speed: 14, agility: 12, explosiveness: 10, carrying: 10 },
-    'Workhorse': { stamina: 15, consistency: 12, carrying: 15, speed: 5 },
-    'Receiving Back': { catchingHands: 12, agility: 10, carrying: 10, speed: 8 },
+    'Workhorse': { stamina: 15, consistency: 12, carrying: 15, playbookIQ: 8, speed: 5 },
+    'Receiving Back': { catchingHands: 12, agility: 10, carrying: 10, playbookIQ: 6, speed: 8 },
     'Bruiser': { strength: 12, toughness: 12, carrying: 10, stamina: 5 },
-    'Third-Down Back': { blocking: 10, catchingHands: 10, carrying: 10, playbookIQ: 5 },
+    'Third-Down Back': { blocking: 10, catchingHands: 10, carrying: 10, playbookIQ: 10 },
     'Change-of-Pace': { speed: 10, agility: 12, explosiveness: 12, carrying: 8 },
-    'Slashing Back': { agility: 10, speed: 8, carrying: 12, playbookIQ: 5 },
+    'Slashing Back': { agility: 10, speed: 8, carrying: 12, playbookIQ: 10 },
 
     // Calibrated hands boosts so 90+ hands are reserved for generational phenoms
-    'Deep Threat': { speed: 8, agility: 5, explosiveness: 10 },
-    'Route Technician': { agility: 7, playbookIQ: 5 },
-    'Red Zone Specialist': { catchingHands: 5, strength: 5 },
-    'Slot Brawler': { toughness: 6, catchingHands: 4 },
-    'Possession Receiver': { catchingHands: 6, clutch: 8, toughness: 5 },
-    'Gadget Player': { agility: 12, speed: 8, explosiveness: 12 },
-    'Jump Ball Specialist': { catchingHands: 6, clutch: 6 },
+    'Deep Threat': { speed: 12, agility: 8, explosiveness: 10, catchingHands: 6 },
+    'Route Technician': { agility: 12, playbookIQ: 10, catchingHands: 10, speed: 6 },
+    'Red Zone Specialist': { catchingHands: 12, strength: 8, jumping: 10 },
+    'Slot Brawler': { toughness: 10, catchingHands: 8, agility: 8, strength: 6 },
+    'Possession Receiver': { catchingHands: 14, clutch: 10, toughness: 6, speed: 4 },
+    'Gadget Player': { agility: 14, speed: 12, explosiveness: 12, carrying: 8 },
+    'Jump Ball Specialist': { catchingHands: 12, jumping: 14, clutch: 8, speed: 6 },
 
     'Vertical TE': { speed: 6, catchingHands: 6 },
     'Jumbo Athlete': { strength: 7, blocking: 6 },
@@ -536,14 +536,14 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         let targetPos;
 
         // Rebalanced quotas: Increases LB generation pool from 9% to 14% to prevent league-wide shortage
-        if (roll < 0.09) targetPos = 'QB';
-        else if (roll < 0.17) targetPos = 'RB';
-        else if (roll < 0.31) targetPos = 'WR';
-        else if (roll < 0.39) targetPos = 'TE';
-        else if (roll < 0.57) targetPos = 'OL';
-        else if (roll < 0.71) targetPos = 'DL';
-        else if (roll < 0.85) targetPos = 'LB'; // 14% share ensures 70-80 LBs in league
-        else targetPos = 'DB';
+        if (roll < 0.09) targetPos = 'QB';         // 9%
+        else if (roll < 0.21) targetPos = 'RB';    // 12% (+4% boost solves league-wide shortage)
+        else if (roll < 0.35) targetPos = 'WR';    // 14%
+        else if (roll < 0.43) targetPos = 'TE';    // 8%
+        else if (roll < 0.58) targetPos = 'OL';    // 15%
+        else if (roll < 0.72) targetPos = 'DL';    // 14%
+        else if (roll < 0.86) targetPos = 'LB';    // 14%
+        else targetPos = 'DB';                     // 14%
 
         const primarySide = ['DL', 'LB', 'DB'].includes(targetPos)
             ? 'defense'
@@ -553,13 +553,17 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
             if (primarySide === 'offense') {
                 return a.off === targetPos;
             }
-
-            // QB archetypes must remain QB-primary, not become defensive-primary
-            // simply because they have a defensive position listed.
+            // Prioritize dedicated defensive archetypes so dual-eligible skill players don't drown out DB/LB/DL specialists
+            const isDedicatedDefender = ['DL', 'LB', 'DB'].includes(a.def) && ['OL', 'TE', 'WR', 'RB'].includes(a.off);
             return a.def === targetPos && a.off !== 'QB';
         });
 
-        const archetype = getRandom(valid) || getRandom(archetypes);
+        // Give dedicated position archetypes priority weighting
+        const dedicated = valid.filter(a => (primarySide === 'defense' ? ['DL', 'LB', 'DB'].includes(a.def) : a.off === targetPos));
+        const archetype = (Math.random() < 0.75 && dedicated.length > 0)
+            ? getRandom(dedicated)
+            : (getRandom(valid) || getRandom(archetypes));
+
         return { archetype, primarySide };
     };
 
@@ -713,14 +717,14 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         0
     ) / Math.max(1, archetype.keyAttrs.length);
 
-    const potentialScore = (avgKeyTalent * 0.75) + (gaussianRandom(65, 7) * 0.25) + (classEffect * 0.5);
+    const potentialScore = (avgKeyTalent * 0.85) + (gaussianRandom(50, 14) * 0.15) + (classEffect * 0.75);
 
     let potential = 'C';
-    if (potentialScore >= 88) potential = 'A';
-    else if (potentialScore >= 76) potential = 'B';
-    else if (potentialScore >= 58) potential = 'C';
-    else if (potentialScore >= 43) potential = 'D';
-    else potential = 'F';
+    if (potentialScore >= 84) potential = 'A';      // ~4%
+    else if (potentialScore >= 72) potential = 'B'; // ~24%
+    else if (potentialScore >= 56) potential = 'C'; // ~52%
+    else if (potentialScore >= 46) potential = 'D'; // ~14%
+    else potential = 'F';                           // ~6%
 
     // Rare "Neighborhood Wonderkid / Phenom" roll (1.5% chance)
     const isWonderkid = Math.random() < 0.015;
@@ -820,11 +824,14 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     // Hard limits prevent a generated age-12 player from already
     // having adult-level physical ratings relative to their ceiling.
     const getPhysicalScaleCap = playerAge => {
-        if (playerAge <= 8) return 0.60;
-        if (playerAge <= 9) return 0.65;
-        if (playerAge <= 10) return 0.72;
-        if (playerAge <= 11) return 0.79;
-        if (playerAge <= 12) return 0.86;
+        if (playerAge <= 8) return 0.52;
+        if (playerAge <= 9) return 0.59;
+        if (playerAge <= 10) return 0.67;
+        if (playerAge <= 11) return 0.75;
+        if (playerAge <= 12) return 0.82;
+        if (playerAge <= 13) return 0.88;
+        if (playerAge <= 14) return 0.93;
+        if (playerAge <= 15) return 0.97;
 
         return 1.00;
     };

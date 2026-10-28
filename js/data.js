@@ -208,7 +208,7 @@ export const offenseFormations = {
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, throwPower: 2, playbookIQ: 2 },
-            RB1: { speed: 2, agility: 2, catchingHands: 1 },
+            RB1: { speed: 2, agility: 2, carrying: 2, playbookIQ: 2, catchingHands: 1 },
             WR1: { speed: 3, catchingHands: 3 },
             WR2: { speed: 3, catchingHands: 3 },
             TE1: { blocking: 2, catchingHands: 2, strength: 2 },
@@ -260,8 +260,8 @@ export const offenseFormations = {
         },
         slotPriorities: {
             QB1: { throwPower: 2, strength: 2, playbookIQ: 2 },
-            RB1: { strength: 3, speed: 2 },
-            RB2: { blocking: 3, strength: 3 },
+            RB1: { strength: 3, carrying: 2, playbookIQ: 2, speed: 2 },
+            RB2: { blocking: 3, strength: 3, playbookIQ: 1 },
             WR1: { blocking: 2, catchingHands: 2 },
             TE1: { blocking: 3, strength: 3 },
             OL1: { strength: 3, blocking: 3 },
@@ -286,7 +286,7 @@ export const offenseFormations = {
         },
         slotPriorities: {
             QB1: { throwingAccuracy: 3, throwPower: 2, playbookIQ: 2 },
-            RB1: { blocking: 2, catchingHands: 2 },
+            RB1: { blocking: 2, catchingHands: 2, playbookIQ: 2, carrying: 1 },
             WR1: { speed: 3, catchingHands: 2 },
             WR2: { agility: 3, catchingHands: 2 },
             WR3: { agility: 3, catchingHands: 2 },
