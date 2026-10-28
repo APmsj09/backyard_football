@@ -2628,8 +2628,20 @@ window.app_openBidModal = function(playerId) {
 
 let staffWorkloadExpanded = false;
 
-export function renderStaffTab(gameState) {
-    const container = document.getElementById('staff-container');
+export function renderStaffTab(gameState, targetContainerId = null) {
+    const carouselScreen = document.getElementById('staff-carousel-screen');
+
+    const isDedicatedCarouselVisible =
+        carouselScreen && !carouselScreen.classList.contains('hidden');
+
+    const containerId = targetContainerId || (
+        isDedicatedCarouselVisible
+            ? 'staff-carousel-staff-container'
+            : 'staff-container'
+    );
+
+    const container = document.getElementById(containerId);
+
     if (!container || !gameState?.playerTeam) return;
 
     const team = gameState.playerTeam;
@@ -2783,11 +2795,23 @@ export function renderStaffTab(gameState) {
                 // Persist the departure and refresh the relevant screen.
                 saveGameState();
 
+                const carouselScreen = document.getElementById(
+                    'staff-carousel-screen'
+                );
+
                 const marketPane = document.getElementById(
                     'fo-pane-staff-carousel'
                 );
 
                 if (
+                    carouselScreen &&
+                    !carouselScreen.classList.contains('hidden')
+                ) {
+                    renderStaffTab(
+                        gameState,
+                        'staff-carousel-staff-container'
+                    );
+                } else if (
                     marketPane &&
                     !marketPane.classList.contains('hidden')
                 ) {
@@ -3596,9 +3620,26 @@ export function renderStaffTab(gameState) {
                 // staff references, workload assignments, and vacancy count.
                 saveGameState();
 
-                const marketPane = document.getElementById('fo-pane-staff-carousel');
+                const carouselScreen = document.getElementById(
+                    'staff-carousel-screen'
+                );
 
-                if (marketPane && !marketPane.classList.contains('hidden')) {
+                const marketPane = document.getElementById(
+                    'fo-pane-staff-carousel'
+                );
+
+                if (
+                    carouselScreen &&
+                    !carouselScreen.classList.contains('hidden')
+                ) {
+                    renderStaffCarouselTab(
+                        gameState,
+                        'staff-carousel-market-container'
+                    );
+                } else if (
+                    marketPane &&
+                    !marketPane.classList.contains('hidden')
+                ) {
                     renderStaffCarouselTab(gameState);
                 } else {
                     renderStaffTab(gameState);
@@ -5495,10 +5536,24 @@ let staffCarouselSort = 'overall';
 let staffCarouselSortDirection = 'desc';
 let staffCarouselFitRole = 'general';
 
-export function renderStaffCarouselTab(gameState) {
+export function renderStaffCarouselTab(
+    gameState,
+    targetContainerId = null
+) {
     gameState = Game.getGameState() || gameState;
 
-    const container = document.getElementById('staff-carousel-container');
+    const carouselScreen = document.getElementById('staff-carousel-screen');
+
+    const isDedicatedCarouselVisible =
+        carouselScreen && !carouselScreen.classList.contains('hidden');
+
+    const containerId = targetContainerId || (
+        isDedicatedCarouselVisible
+            ? 'staff-carousel-market-container'
+            : 'staff-carousel-container'
+    );
+
+    const container = document.getElementById(containerId);
 
     if (!container || !gameState?.playerTeam) return;
 
@@ -5507,6 +5562,45 @@ export function renderStaffCarouselTab(gameState) {
     renderStaffTab(gameState);
 
     const team = gameState.playerTeam;
+
+    const carouselDayLabel = document.getElementById(
+        'staff-carousel-day-label'
+    );
+
+    const carouselState = gameState.offseasonState || {};
+    const currentReviewDay = Number(carouselState.staffReviewDay);
+    const totalReviewDays = Number(carouselState.staffReviewDays);
+
+    const displayedReviewDay =
+        Number.isInteger(currentReviewDay) && currentReviewDay > 0
+            ? currentReviewDay
+            : 1;
+
+    const displayedReviewDays =
+        Number.isInteger(totalReviewDays) &&
+        totalReviewDays >= displayedReviewDay
+            ? totalReviewDays
+            : COACH_CAROUSEL_DAYS;
+
+    if (carouselDayLabel) {
+        carouselDayLabel.textContent =
+            `Staff Review · Day ${displayedReviewDay} of ${displayedReviewDays}`;
+    }
+
+    const carouselBudgetLabel = document.getElementById(
+        'staff-carousel-budget-label'
+    );
+
+    if (carouselBudgetLabel) {
+        carouselBudgetLabel.textContent = String(
+            Math.max(
+                0,
+                Math.floor(
+                    Number(team.socialProfile?.favorTokens) || 0
+                )
+            )
+        );
+    }
 
     const employedStaffIds = new Set();
 

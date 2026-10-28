@@ -765,6 +765,7 @@ function ensureOffseasonReviewState(gs = Game.getGameState()) {
             phase: OFFSEASON_PHASES.STAFF_REVIEW,
             staffReviewDay: 1,
             staffReviewDays: COACH_CAROUSEL_DAYS,
+            staffCarouselOpened: false,
             recruitingDay: 0,
             recruitingDays: FREE_AGENCY_RECRUITING_DAYS,
             completed: false,
@@ -786,6 +787,10 @@ function ensureOffseasonReviewState(gs = Game.getGameState()) {
         state.draftPrepared = false;
     }
 
+    if (state.staffCarouselOpened == null) {
+        state.staffCarouselOpened = false;
+    }
+
     return state;
 }
 
@@ -797,13 +802,49 @@ function updateOffseasonAdvanceButton(gs = Game.getGameState()) {
 
     if (!advanceButton) return;
 
+    advanceButton.classList.remove(
+        'bg-amber-500',
+        'bg-green-600',
+        'bg-emerald-700'
+    );
+
+    if (
+        state.phase === OFFSEASON_PHASES.STAFF_REVIEW &&
+        state.staffCarouselOpened !== true
+    ) {
+        advanceButton.innerHTML = '<span>Advance Day →</span>';
+        advanceButton.classList.add('bg-emerald-700');
+
+        advanceButton.title =
+            'Explore your franchise first. Advancing opens the Coach Carousel without simulating a game.';
+
+        return;
+    }
+
+    if (
+        state.phase === OFFSEASON_PHASES.STAFF_REVIEW &&
+        state.staffCarouselOpened === true
+    ) {
+        const day = Number(state.staffReviewDay) || 1;
+        const days = Number(state.staffReviewDays) || COACH_CAROUSEL_DAYS;
+
+        advanceButton.innerHTML =
+            `<span>Return to Coach Carousel · Day ${day} of ${days} →</span>`;
+
+        advanceButton.classList.add('bg-emerald-700');
+
+        advanceButton.title =
+            'Return to the standalone Coach Carousel to continue staff review.';
+
+        return;
+    }
+
     const day = state.staffReviewDay || 1;
 
     advanceButton.innerHTML = day < COACH_CAROUSEL_DAYS
         ? `<span>Coach Carousel: Day ${day} of ${COACH_CAROUSEL_DAYS} →</span>`
         : '<span>Continue to Rookie Draft →</span>';
 
-    advanceButton.classList.remove('bg-amber-500');
     advanceButton.classList.add('bg-green-600');
 
     advanceButton.title = day < COACH_CAROUSEL_DAYS
@@ -816,27 +857,214 @@ function openOffseasonStaffReview() {
 
     if (!gameState?.playerTeam) return;
 
-    ensureOffseasonReviewState(gameState);
+    const state = ensureOffseasonReviewState(gameState);
+
+    activeStaffCarouselTab = 'staff';
+    state.staffCarouselOpened = false;
     gameState.draftCompleted = false;
 
+    // Give the player a normal dashboard day to inspect the franchise.
+    // The first advance will open the standalone Coach Carousel screen.
     UI.renderDashboard(gameState);
-    UI.switchTab('front-office', gameState);
-
-    const staffMarketButton = Array.from(
-        document.querySelectorAll('.fo-tab')
-    ).find(button =>
-        button.dataset.subTab === 'staff-market'
-    );
-
-    if (staffMarketButton) {
-        staffMarketButton.click();
-    } else {
-        UI.renderStaffCarouselTab?.(gameState);
-    }
-
+    UI.switchTab('my-team', gameState);
     updateOffseasonAdvanceButton(gameState);
 
     UI.showScreen('dashboard-screen');
+    Game.saveGameState(activeSaveKey);
+}
+
+let activeStaffCarouselTab = 'staff';
+
+function openStaffCarouselScreen() {
+    gameState = Game.getGameState();
+
+    if (!gameState?.playerTeam) return;
+
+    const screen = document.getElementById('staff-carousel-screen');
+
+    if (!screen) {
+        console.error('Coach Carousel screen is missing from index.html.');
+        return;
+    }
+
+    const state = ensureOffseasonReviewState(gameState);
+    state.staffCarouselOpened = true;
+    gameState.draftCompleted = false;
+
+    const dayValue = Number(state.staffReviewDay);
+    const daysValue = Number(state.staffReviewDays);
+
+    const day = Number.isInteger(dayValue) && dayValue > 0
+        ? dayValue
+        : 1;
+
+    const days = Number.isInteger(daysValue) && daysValue > 0
+        ? daysValue
+        : COACH_CAROUSEL_DAYS;
+
+    const dayLabel = document.getElementById(
+        'staff-carousel-day-label'
+    );
+
+    if (dayLabel) {
+        dayLabel.textContent = `Staff Review · Day ${day} of ${days}`;
+    }
+
+    const budgetLabel = document.getElementById(
+        'staff-carousel-budget-label'
+    );
+
+    if (budgetLabel) {
+        budgetLabel.textContent = String(
+            Math.max(
+                0,
+                Math.floor(
+                    Number(gameState.playerTeam.socialProfile?.favorTokens) || 0
+                )
+            )
+        );
+    }
+
+    const statusLabel = document.getElementById(
+        'staff-carousel-status'
+    );
+
+    if (statusLabel) {
+        statusLabel.textContent =
+            'Review your coaching staff and compare available candidates before advancing.';
+    }
+
+    const advanceButton = document.getElementById(
+        'staff-carousel-advance-btn'
+    );
+
+    if (advanceButton) {
+        advanceButton.textContent = day < days
+            ? `Continue to Day ${day + 1} →`
+            : 'Continue to Rookie Draft →';
+
+        advanceButton.onclick = () => {
+            gameState = Game.getGameState();
+
+            if (!gameState?.playerTeam) return;
+
+            const latestState = getOffseasonState(gameState);
+
+            if (latestState.staffReviewDay < COACH_CAROUSEL_DAYS) {
+                const result = advanceOffseasonStaffReviewDay(gameState);
+
+                if (!result.success) {
+                    UI.showModal(
+                        'Staff Review Error',
+                        `<p>${escapeHtml(
+                            result.message || 'Could not advance staff review.'
+                        )}</p>`
+                    );
+                    return;
+                }
+
+                gameState = Game.getGameState();
+
+                Game.saveGameState(activeSaveKey);
+                openStaffCarouselScreen();
+                return;
+            }
+
+            launchOffseasonDraft();
+        };
+    }
+
+    const finishEarlyButton = document.getElementById(
+        'staff-carousel-finish-early-btn'
+    );
+
+    if (finishEarlyButton) {
+        finishEarlyButton.classList.toggle('hidden', day >= days);
+
+        finishEarlyButton.onclick = () => {
+            launchOffseasonDraft({ finishEarly: true });
+        };
+    }
+
+    const returnButton = document.getElementById(
+        'staff-carousel-return-btn'
+    );
+
+    if (returnButton) {
+        returnButton.onclick = () => {
+            gameState = Game.getGameState();
+
+            if (!gameState?.playerTeam) return;
+
+            UI.renderDashboard(gameState);
+            UI.switchTab('my-team', gameState);
+            updateOffseasonAdvanceButton(gameState);
+            UI.showScreen('dashboard-screen');
+
+            Game.saveGameState(activeSaveKey);
+        };
+    }
+
+    const activateTab = tabName => {
+        if (!['staff', 'candidates'].includes(tabName)) return;
+
+        activeStaffCarouselTab = tabName;
+
+        const latestState = Game.getGameState() || gameState;
+
+        document.querySelectorAll('.staff-carousel-tab-btn').forEach(
+            button => {
+                const active =
+                    button.dataset.staffCarouselTab === tabName;
+
+                button.classList.toggle('bg-slate-900', active);
+                button.classList.toggle('text-white', active);
+                button.classList.toggle('text-slate-600', !active);
+                button.classList.toggle('hover:bg-slate-100', !active);
+
+                button.setAttribute(
+                    'aria-selected',
+                    String(active)
+                );
+            }
+        );
+
+        document.querySelectorAll('.staff-carousel-pane').forEach(
+            pane => {
+                pane.classList.toggle(
+                    'hidden',
+                    pane.id !== `staff-carousel-pane-${tabName}`
+                );
+            }
+        );
+
+        if (tabName === 'staff') {
+            UI.renderStaffTab(
+                latestState,
+                'staff-carousel-staff-container'
+            );
+        } else if (tabName === 'candidates') {
+            UI.renderStaffCarouselTab(
+                latestState,
+                'staff-carousel-market-container'
+            );
+        }
+    };
+
+    document.querySelectorAll('.staff-carousel-tab-btn').forEach(
+        button => {
+            button.onclick = () => {
+                activateTab(button.dataset.staffCarouselTab);
+            };
+        }
+    );
+
+    // Show the dedicated screen before rendering so the UI renderers
+    // recognize that their standalone containers should be used.
+    UI.showScreen('staff-carousel-screen');
+
+    activateTab(activeStaffCarouselTab);
+
     Game.saveGameState(activeSaveKey);
 }
 
@@ -2360,46 +2588,10 @@ async function handleAdvanceWeek() {
         }
 
         if (phase === OFFSEASON_PHASES.STAFF_REVIEW) {
-            const state = getOffseasonState(gameState);
-
-            if (state.staffReviewDay < COACH_CAROUSEL_DAYS) {
-                UI.showModal(
-                    'Coach Carousel — Day 1 of 2',
-                    `<div class="space-y-3 text-sm">
-                        <p>Review your current coaches, compare available candidates, and make your initial offers.</p>
-                        <p>Continue to Day 2 for final negotiations, or finish early and move straight to the rookie draft.</p>
-                    </div>`,
-                    () => {
-                        const result = advanceOffseasonStaffReviewDay(
-                            gameState
-                        );
-
-                        if (!result.success) {
-                            UI.showModal(
-                                'Staff Review Error',
-                                `<p>${escapeHtml(result.message || 'Could not advance staff review.')}</p>`
-                            );
-                            return;
-                        }
-
-                        gameState = Game.getGameState();
-
-                        updateOffseasonAdvanceButton(gameState);
-                        Game.saveGameState(activeSaveKey);
-                    },
-                    'Continue to Day 2',
-                    () => {
-                        launchOffseasonDraft({
-                            finishEarly: true
-                        });
-                    },
-                    'Finish Early & Draft'
-                );
-
-                return;
-            }
-
-            launchOffseasonDraft();
+            // Staff review now has its own full-screen interface.
+            // The dashboard's Advance button opens that screen; the
+            // screen's footer controls review-day progression.
+            openStaffCarouselScreen();
             return;
         }
 

@@ -181,6 +181,100 @@
             </div>
         </section>
 
+        <!-- Standalone Coach Carousel: Opening Staff Review -->
+        <section id="staff-carousel-screen"
+            class="screen hidden h-full min-h-0 flex flex-col overflow-hidden bg-slate-100">
+
+            <!-- Compact Carousel Header -->
+            <header class="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-900 px-4 py-2.5 text-white border-b border-slate-700">
+                <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 class="text-xl font-black uppercase tracking-wide text-amber-400">
+                            Coach Carousel
+                        </h2>
+                        <span id="staff-carousel-day-label"
+                            class="rounded border border-slate-600 bg-slate-800 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-200">
+                            Staff Review · Day 1 of 2
+                        </span>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-400">
+                        Review your staff, compare candidates, and decide who will lead your program.
+                    </p>
+                </div>
+
+                <div class="flex shrink-0 flex-wrap items-center gap-2">
+                    <span class="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-[11px] font-mono text-slate-300">
+                        Favor Tokens:
+                        <b id="staff-carousel-budget-label" class="text-white">—</b>
+                    </span>
+                </div>
+            </header>
+
+            <!-- Carousel Tabs -->
+            <nav id="staff-carousel-tabs"
+                class="shrink-0 flex items-center gap-1 overflow-x-auto border-b border-slate-300 bg-white px-3 py-1.5"
+                aria-label="Coach Carousel sections">
+
+                <button type="button"
+                    class="staff-carousel-tab-btn rounded bg-slate-900 px-3 py-1.5 text-xs font-bold text-white"
+                    data-staff-carousel-tab="staff"
+                    aria-selected="true">
+                    👔 My Staff
+                </button>
+
+                <button type="button"
+                    class="staff-carousel-tab-btn rounded px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100"
+                    data-staff-carousel-tab="candidates"
+                    aria-selected="false">
+                    🔎 Available Coaches
+                </button>
+            </nav>
+
+            <!-- Scrollable Content: only the active tab scrolls -->
+            <main class="relative flex-grow min-h-0 overflow-hidden">
+
+                <section id="staff-carousel-pane-staff"
+                    class="staff-carousel-pane absolute inset-0 overflow-y-auto overscroll-contain bg-slate-50 p-3">
+                    <div id="staff-carousel-staff-container"></div>
+                </section>
+
+                <section id="staff-carousel-pane-candidates"
+                    class="staff-carousel-pane hidden absolute inset-0 overflow-y-auto overscroll-contain bg-slate-50 p-3">
+                    <div id="staff-carousel-market-container"></div>
+                </section>
+
+            </main>
+
+            <!-- Carousel Progression Controls -->
+            <footer class="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-300 bg-white px-3 py-2">
+                <p id="staff-carousel-status"
+                    class="text-[10px] leading-relaxed text-slate-500">
+                    Review both sections before advancing.
+                </p>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <button id="staff-carousel-return-btn"
+                        type="button"
+                        class="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                        ← Dashboard
+                    </button>
+
+                    <button id="staff-carousel-finish-early-btn"
+                        type="button"
+                        class="hidden rounded border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                        Finish Review Early
+                    </button>
+
+                    <button id="staff-carousel-advance-btn"
+                        type="button"
+                        class="rounded bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800">
+                        Continue to Day 2 →
+                    </button>
+                </div>
+            </footer>
+
+        </section>
+
         <section id="draft-screen" class="screen hidden h-full min-h-0 flex flex-col overflow-hidden">
             <!-- Header & War Room Telemetry -->
             <div id="draft-header"
