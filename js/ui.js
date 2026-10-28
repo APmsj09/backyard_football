@@ -2669,9 +2669,19 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             currentState?.offseasonState?.phase ?? ''
         ).toLowerCase().replace(/[^a-z]/g, '');
 
+        const carouselScreen = document.getElementById(
+            'staff-carousel-screen'
+        );
+
+        const isCarouselVisible =
+            carouselScreen &&
+            !carouselScreen.classList.contains('hidden');
+
         return (
             offseasonPhase === 'staffreview' &&
-            currentState?.offseasonState?.completed !== true
+            currentState?.offseasonState?.completed !== true &&
+            currentState?.offseasonState?.staffCarouselOpened === true &&
+            isCarouselVisible
         );
     };
 

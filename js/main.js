@@ -2581,9 +2581,11 @@ async function handleAdvanceWeek() {
     if (gameState.currentWeek === 0 && !gameState.draftCompleted) {
         const phase = gameState.offseasonState?.phase;
 
-        // Route legacy saves through staff review instead of skipping it.
+        // Initialize older saves that lack an offseason phase, then
+        // open the standalone Carousel on this same advance.
         if (!phase) {
-            openOffseasonStaffReview();
+            ensureOffseasonReviewState(gameState);
+            openStaffCarouselScreen();
             return;
         }
 
