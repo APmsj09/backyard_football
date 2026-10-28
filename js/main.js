@@ -831,7 +831,7 @@ function openOffseasonStaffReview() {
     if (staffMarketButton) {
         staffMarketButton.click();
     } else {
-        UI.renderStaffMarketTab?.(gameState);
+        UI.renderStaffCarouselTab?.(gameState);
     }
 
     updateOffseasonAdvanceButton(gameState);
@@ -5435,7 +5435,7 @@ function main() {
                 }
 
                 if (btn.dataset.subTab === 'staff-carousel') {
-                    UI.renderStaffMarketTab?.(gameState);
+                    UI.renderStaffCarouselTab?.(gameState);
                 }
 
                 if (btn.dataset.subTab === 'finances') {
@@ -5771,7 +5771,9 @@ document.getElementById('sim-speed-faster')
 
         const allowedFrontOfficeTabs = new Set([
             'staff',
+            'staff-carousel',
             'finances',
+            'store',
             'social'
         ]);
 
@@ -5812,11 +5814,15 @@ document.getElementById('sim-speed-faster')
                 ? (
                     action.tab === 'front-office' && action.subTab === 'staff'
                         ? 'Review Staff'
-                        : action.tab === 'front-office' && action.subTab === 'finances'
-                            ? 'Review Finances'
-                            : action.tab === 'front-office' && action.subTab === 'social'
-                                ? 'Review Social Network'
-                                : actionLabels[action.tab]
+                        : action.tab === 'front-office' && action.subTab === 'staff-carousel'
+                            ? 'Open Staff Carousel'
+                            : action.tab === 'front-office' && action.subTab === 'finances'
+                                ? 'Review Finances'
+                                : action.tab === 'front-office' && action.subTab === 'store'
+                                    ? 'Open Corner Store'
+                                    : action.tab === 'front-office' && action.subTab === 'social'
+                                        ? 'Review Social Network'
+                                        : actionLabels[action.tab]
                 )
                 : 'Close';
 

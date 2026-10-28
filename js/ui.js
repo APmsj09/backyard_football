@@ -1935,7 +1935,7 @@ export function switchTab(tabId, gameState) {
             }
 
             if (foSub === 'staff-market') {
-                renderStaffMarketTab(gameState);
+                renderStaffCarouselTab(gameState);
             }
 
             if (foSub === 'finances') {
@@ -2648,11 +2648,18 @@ export function renderStaffTab(gameState) {
         { key: 'trainer', title: 'Sideline Anchor (Trainer)', icon: '🧊', desc: 'Controls fatigue dissipation, conditioning, and injury rehabilitation.' }
     ];
 
-    const isStaffChangeWindowOpen = () =>
-        !(
-            gameState?.draftCompleted === true &&
-            gameState?.offseasonFACompleted === true
+    const isStaffChangeWindowOpen = () => {
+        const currentState = Game.getGameState() || gameState;
+
+        const offseasonPhase = String(
+            currentState?.offseasonState?.phase ?? ''
+        ).toLowerCase().replace(/[^a-z]/g, '');
+
+        return (
+            offseasonPhase === 'staffreview' &&
+            currentState?.offseasonState?.completed !== true
         );
+    };
 
     window.app_fireStaff = (roleKey) => {
         if (!isStaffChangeWindowOpen()) {
@@ -2782,7 +2789,7 @@ export function renderStaffTab(gameState) {
                     marketPane &&
                     !marketPane.classList.contains('hidden')
                 ) {
-                    renderStaffMarketTab(gameState);
+                    renderStaffCarouselTab(gameState);
                 } else {
                     renderStaffTab(gameState);
                 }
@@ -3405,7 +3412,7 @@ export function renderStaffTab(gameState) {
                 const marketPane = document.getElementById('fo-pane-staff-carousel');
 
                 if (marketPane && !marketPane.classList.contains('hidden')) {
-                    renderStaffMarketTab(gameState);
+                    renderStaffCarouselTab(gameState);
                 } else {
                     renderStaffTab(gameState);
                 }
@@ -5302,8 +5309,8 @@ let staffCarouselSearch = '';
 let staffCarouselSort = 'overall';
 let staffCarouselSortDirection = 'desc';
 
-export function renderStaffMarketTab(gameState) {
-    const container = document.getElementById('staff-market-container');
+export function renderStaffCarouselTab(gameState) {
+    const container = document.getElementById('staff-carousel-container');
 
     if (!container || !gameState?.playerTeam) return;
 
@@ -5316,10 +5323,13 @@ export function renderStaffMarketTab(gameState) {
         ? gameState.availableStaff
         : [];
 
-    const staffChangesOpen = !(
-        gameState?.draftCompleted === true &&
-        gameState?.offseasonFACompleted === true
-    );
+    const offseasonPhase = String(
+        gameState?.offseasonState?.phase ?? ''
+    ).toLowerCase().replace(/[^a-z]/g, '');
+
+    const staffChangesOpen =
+        offseasonPhase === 'staffreview' &&
+        gameState?.offseasonState?.completed !== true;
 
     if (!staffChangesOpen) {
         container.innerHTML = `
@@ -5511,7 +5521,7 @@ export function renderStaffMarketTab(gameState) {
         staffCarouselSearch =
             document.getElementById('staff-carousel-search')?.value || '';
 
-        renderStaffMarketTab(Game.getGameState() || gameState);
+        renderStaffCarouselTab(Game.getGameState() || gameState);
     };
 
     window.app_setStaffCarouselSort = key => {
@@ -5535,14 +5545,14 @@ export function renderStaffMarketTab(gameState) {
         staffCarouselSortDirection =
             key === 'name' || key === 'stipend' ? 'asc' : 'desc';
 
-        renderStaffMarketTab(Game.getGameState() || gameState);
+        renderStaffCarouselTab(Game.getGameState() || gameState);
     };
 
     window.app_toggleStaffCarouselSortDirection = () => {
         staffCarouselSortDirection =
             staffCarouselSortDirection === 'asc' ? 'desc' : 'asc';
 
-        renderStaffMarketTab(Game.getGameState() || gameState);
+        renderStaffCarouselTab(Game.getGameState() || gameState);
     };
 
     window.app_resetStaffCarouselFilters = () => {
@@ -5550,10 +5560,10 @@ export function renderStaffMarketTab(gameState) {
         staffCarouselSort = 'overall';
         staffCarouselSortDirection = 'desc';
 
-        renderStaffMarketTab(Game.getGameState() || gameState);
+        renderStaffCarouselTab(Game.getGameState() || gameState);
     };
 
-        window.app_viewStaffCandidate = candidateId => {
+    window.app_viewStaffCandidate = candidateId => {
         const latestState = Game.getGameState() || gameState;
 
         const candidate = (
