@@ -2893,26 +2893,6 @@ export function renderStaffTab(gameState) {
                     </p>
                 </div>
                 ` : ''}
-                        class="block text-[10px] font-black uppercase tracking-wider text-blue-900 mb-1">
-                        Replace Which Coach?
-                    </label>
-
-                    <select
-                        id="staff-replacement-coach"
-                        class="w-full p-2 border border-blue-300 rounded bg-white text-xs font-bold text-slate-800">
-                        ${currentStaffCoaches.map((coach, index) => `
-                            <option value="${coach.id}">
-                                ${coach.name || `Staff Coach ${index + 1}`}
-                            </option>
-                        `).join('')}
-                    </select>
-
-                    <p class="text-[10px] text-blue-800 mt-2">
-                        The selected coach will return to the free-agent market
-                        if this candidate accepts.
-                    </p>
-                </div>
-                ` : ''}
 
                 <!-- Deep Pitch Options -->
                 <div class="space-y-2.5">
@@ -3010,6 +2990,59 @@ export function renderStaffTab(gameState) {
             const replacementCoachId =
                 document.getElementById('staff-replacement-coach')?.value || '';
 
+            // Revalidate the offer against current resources. The modal may
+            // have been open while another transaction changed the balance.
+            const cashBalanceValue = Number(team.finances?.balance);
+            const currentCashBalance = Number.isFinite(cashBalanceValue)
+                ? Math.max(0, cashBalanceValue)
+                : 0;
+
+            const tokenBalanceValue = Number(
+                team.socialProfile?.favorTokens
+            );
+            const currentTokenBalance = Number.isFinite(tokenBalanceValue)
+                ? Math.max(0, Math.floor(tokenBalanceValue))
+                : 0;
+
+            const validCashOffers = [0, 3, 6, 10, 15];
+
+            const offerIsValid =
+                Number.isInteger(tokensOffered) &&
+                tokensOffered >= 0 &&
+                tokensOffered <= 2 &&
+                tokensOffered <= currentTokenBalance &&
+                Number.isFinite(cashOffered) &&
+                validCashOffers.includes(cashOffered) &&
+                cashOffered <= currentCashBalance;
+
+            if (!offerIsValid) {
+                showModal(
+                    'Offer Terms No Longer Available',
+                    `
+                        <div class="space-y-2 text-sm text-slate-700">
+                            <p>
+                                Your available cash or Favor Tokens changed,
+                                or the submitted offer terms are invalid.
+                            </p>
+                            <p>
+                                Current cash: <b>$${currentCashBalance.toFixed(2)}</b><br>
+                                Current Favor Tokens: <b>${currentTokenBalance}</b>
+                            </p>
+                            <p>
+                                No resources have been spent. Close this message
+                                and reopen the offer with affordable terms.
+                            </p>
+                        </div>
+                    `,
+                    null,
+                    null,
+                    null,
+                    'Close'
+                );
+                return;
+            }
+            
+        
             const pitch = {
                 tokensOffered,
                 cashOffered,

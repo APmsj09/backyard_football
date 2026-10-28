@@ -10,6 +10,7 @@ import {
 } from '../data.js';
 import { getRosterObjects } from './state.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
+import { evaluateStaffNegotiation } from './negotiations.js';
 import { isPlayerViableForPosition, rebuildDepthChartFromOrder } from './depth_chart.js';
 
 export const tacticalBiases = [
@@ -2486,7 +2487,7 @@ export function resolveCoachCarousel(
 
         const requiredStipend = Math.max(
             0,
-            Math.round(Math.max(0, (rep - 52) * 0.45) * demandDecay)
+            Math.round(Math.max(0, (rep - 52) * 0.50) * demandDecay)
         );
 
         const requiredTokens =
@@ -2575,12 +2576,56 @@ export function resolveCoachCarousel(
             fitScore += 6;
         }
 
+        const practiceStyle = String(
+            team.gameplan?.weeklyPractice || ''
+        ).toLowerCase();
+
+        const practiceFocus =
+            practiceStyle === 'conditioning'
+                ? 'CONDITIONING'
+                : ['chalk_talk', 'scouting'].includes(practiceStyle)
+                    ? 'CHALK_TALK'
+                    : practiceStyle === 'scrimmage'
+                        ? 'FUN_SCRIMMAGE'
+                        : 'BALANCED';
+
+        const pitch = {
+            cashOffered: requiredStipend,
+            tokensOffered: requiredTokens,
+            schemePromise: directive === 'COACH_AUTONOMY'
+                ? 'COACH_CHOICE'
+                : 'GM_CHOICE',
+            practiceFocus
+        };
+
+        const negotiation = evaluateStaffNegotiation(
+            candidate,
+            team,
+            'coach',
+            pitch
+        );
+
+        // Preserve skill and role fit as the primary ranking criteria,
+        // while allowing acceptance likelihood to influence close calls.
+        const negotiationScore = Number(negotiation.interestScore);
+
+        const combinedFitScore =
+            fitScore * 0.80 +
+            (
+                Number.isFinite(negotiationScore)
+                    ? negotiationScore
+                    : 0
+            ) * 0.20;
+
         return {
             candidate,
             canAfford,
+            negotiationAccepted: negotiation.accepted,
+            negotiation,
+            pitch,
             requiredStipend,
             requiredTokens,
-            fitScore
+            fitScore: combinedFitScore
         };
     };
 
@@ -2615,7 +2660,10 @@ export function resolveCoachCarousel(
                 .map(candidate =>
                     getCandidateEvaluation(team, candidate)
                 )
-                .filter(result => result.canAfford)
+                .filter(result =>
+                    result.canAfford &&
+                    result.negotiationAccepted
+                )
                 .sort((a, b) => b.fitScore - a.fitScore);
 
             // Do not manufacture a replacement when the shared market
