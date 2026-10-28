@@ -2626,6 +2626,8 @@ window.app_openBidModal = function(playerId) {
     }, existingBid ? "Update Offer" : "Submit Contract Offer");
 };
 
+let staffWorkloadExpanded = false;
+
 export function renderStaffTab(gameState) {
     const container = document.getElementById('staff-container');
     if (!container || !gameState?.playerTeam) return;
@@ -2815,8 +2817,18 @@ export function renderStaffTab(gameState) {
 
         const isStaffEmployed = candidateId => {
             const id = String(candidateId);
+            const latestState = Game.getGameState() || gameState;
 
-            return (gameState.teams || []).some(candidateTeam => {
+            const teamsToCheck = [
+                ...(Array.isArray(latestState?.teams)
+                    ? latestState.teams
+                    : []),
+                ...(latestState?.playerTeam
+                    ? [latestState.playerTeam]
+                    : [])
+            ];
+
+            return teamsToCheck.some(candidateTeam => {
                 if (!candidateTeam) return false;
 
                 const coachingGroup = Array.isArray(candidateTeam.coaches)
@@ -2824,6 +2836,7 @@ export function renderStaffTab(gameState) {
                     : [];
 
                 const legacyStaff = [
+                    candidateTeam.coach,
                     candidateTeam.staff?.coach,
                     candidateTeam.staff?.scout,
                     candidateTeam.staff?.trainer
@@ -2882,6 +2895,71 @@ export function renderStaffTab(gameState) {
         const roleName = roleLabels[roleKey] || roleKey.toUpperCase();
         const isHeadCoach = roleKey === 'coach';
 
+        const getCoachSkillAverage = coach => {
+            const ratings = coach?.ratings || {};
+
+            const readRating = key => {
+                const rawValue = ratings[key];
+
+                if (rawValue == null || rawValue === '') {
+                    return null;
+                }
+
+                const value = Number(rawValue);
+
+                return Number.isFinite(value)
+                    ? Math.max(0, Math.min(100, Math.round(value)))
+                    : null;
+            };
+
+            const average = values => {
+                const valid = values.filter(value => value !== null);
+
+                return valid.length
+                    ? Math.round(
+                        valid.reduce((sum, value) => sum + value, 0) /
+                        valid.length
+                    )
+                    : null;
+            };
+
+            return average([
+                readRating('offSchemeMastery'),
+                readRating('defSchemeMastery'),
+                average([
+                    readRating('evalPhysicals'),
+                    readRating('evalTechnique'),
+                    readRating('evalCharacter')
+                ]),
+                readRating('teaching'),
+                average([
+                    readRating('gameplanInstinct'),
+                    readRating('inGameAdjustments')
+                ]),
+                average([
+                    readRating('practiceDiscipline'),
+                    readRating('conditioning')
+                ])
+            ]);
+        };
+
+        const getCoachRoleFit = (coach, role) => {
+            const calculateRoleFit =
+                typeof Game.calculateCoachRoleFit === 'function'
+                    ? Game.calculateCoachRoleFit
+                    : typeof Game.staff?.calculateCoachRoleFit === 'function'
+                        ? Game.staff.calculateCoachRoleFit
+                        : null;
+
+            if (!calculateRoleFit) return null;
+
+            const score = Number(calculateRoleFit(coach, role));
+
+            return Number.isFinite(score)
+                ? Math.max(0, Math.min(100, Math.round(score)))
+                : null;
+        };
+
         const pitchModalHtml = `
             <div class="space-y-3.5 text-left text-xs">
                 <!-- Candidate Identity Header -->
@@ -2908,6 +2986,44 @@ export function renderStaffTab(gameState) {
                     "${staff.biases.tactical?.desc || staff.biases.personality.desc}"
                 </div>
 
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div class="rounded border border-slate-200 bg-white p-2">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Skill average
+                        </span>
+                        <span class="mt-1 block text-lg font-black tabular-nums text-slate-900">
+                            ${getCoachSkillAverage(staff) ?? '—'}
+                        </span>
+                    </div>
+
+                    <div class="rounded border border-slate-200 bg-white p-2">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            General fit
+                        </span>
+                        <span class="mt-1 block text-lg font-black tabular-nums text-slate-900">
+                            ${getCoachRoleFit(staff, 'general') ?? '—'}
+                        </span>
+                    </div>
+
+                    <div class="rounded border border-slate-200 bg-white p-2">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Scouting fit
+                        </span>
+                        <span class="mt-1 block text-lg font-black tabular-nums text-slate-900">
+                            ${getCoachRoleFit(staff, 'scouting') ?? '—'}
+                        </span>
+                    </div>
+
+                    <div class="rounded border border-slate-200 bg-white p-2">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Training fit
+                        </span>
+                        <span class="mt-1 block text-lg font-black tabular-nums text-slate-900">
+                            ${getCoachRoleFit(staff, 'training') ?? '—'}
+                        </span>
+                    </div>
+                </div>
+
                 ${isHeadCoach && !hasOpenCoachingSlot ? `
                 <div class="rounded border border-blue-200 bg-blue-50 p-3">
                     <label
@@ -2919,11 +3035,18 @@ export function renderStaffTab(gameState) {
                     <select
                         id="staff-replacement-coach"
                         class="w-full p-2 border border-blue-300 rounded bg-white text-xs font-bold text-slate-800">
-                        ${currentStaffCoaches.map((coach, index) => `
-                            <option value="${coach.id}">
-                                ${coach.name || `Staff Coach ${index + 1}`}
-                            </option>
-                        `).join('')}
+                        ${currentStaffCoaches.map((coach, index) => {
+                            const skillAverage = getCoachSkillAverage(coach);
+                            const generalFit = getCoachRoleFit(coach, 'general');
+
+                            return `
+                                <option value="${coach.id}">
+                                    ${coach.name || `Staff Coach ${index + 1}`}
+                                    — Avg ${skillAverage ?? '—'}
+                                    · Fit ${generalFit ?? '—'}
+                                </option>
+                            `;
+                        }).join('')}
                     </select>
 
                     <p class="text-[10px] text-blue-800 mt-2">
@@ -3010,11 +3133,13 @@ export function renderStaffTab(gameState) {
                 return;
             }
 
-            // The candidate may have been hired or removed while the offer
-            // modal was open. Recheck the market before evaluating the offer.
+            // Read the current game state again because the candidate may
+            // have been hired or removed while the offer modal was open.
+            const latestState = Game.getGameState() || gameState;
+
             const latestMarketMatches = (
-                Array.isArray(gameState.availableStaff)
-                    ? gameState.availableStaff
+                Array.isArray(latestState?.availableStaff)
+                    ? latestState.availableStaff
                     : []
             ).filter(candidate =>
                 candidate?.id != null &&
@@ -3365,13 +3490,75 @@ export function renderStaffTab(gameState) {
                         3 - staffCoaches.length
                     );
 
-                    team.staff.scout = staffCoaches[1] || null;
-                    team.staff.trainer = staffCoaches[2] || null;
-
                     if (replacesLegacyLeadCoach) {
                         team.coach = staff;
                         team.staff.coach = staff;
                     }
+
+                    // Keep legacy staff references aligned with the active
+                    // coaching group and prevent one coach from filling
+                    // multiple roles when enough distinct coaches exist.
+                    const getActiveStaffCoach = member =>
+                        member?.id == null
+                            ? null
+                            : staffCoaches.find(
+                                coach =>
+                                    String(coach.id) === String(member.id)
+                            ) || null;
+
+                    const headCoach =
+                        getActiveStaffCoach(team.staff.coach) ||
+                        getActiveStaffCoach(team.coach) ||
+                        staffCoaches[0] ||
+                        null;
+
+                    team.staff.coach = headCoach;
+                    team.coach = headCoach;
+
+                    const assignedRoleCoachIds = new Set(
+                        headCoach?.id != null
+                            ? [String(headCoach.id)]
+                            : []
+                    );
+
+                    const assignDistinctStaffRole = currentCoach => {
+                        const currentActiveCoach =
+                            getActiveStaffCoach(currentCoach);
+
+                        if (
+                            currentActiveCoach &&
+                            !assignedRoleCoachIds.has(
+                                String(currentActiveCoach.id)
+                            )
+                        ) {
+                            assignedRoleCoachIds.add(
+                                String(currentActiveCoach.id)
+                            );
+                            return currentActiveCoach;
+                        }
+
+                        const replacementCoach = staffCoaches.find(
+                            coach =>
+                                coach?.id != null &&
+                                !assignedRoleCoachIds.has(String(coach.id))
+                        );
+
+                        if (!replacementCoach) return null;
+
+                        assignedRoleCoachIds.add(
+                            String(replacementCoach.id)
+                        );
+
+                        return replacementCoach;
+                    };
+
+                    team.staff.scout = assignDistinctStaffRole(
+                        team.staff.scout
+                    );
+
+                    team.staff.trainer = assignDistinctStaffRole(
+                        team.staff.trainer
+                    );
 
                     const assignments = team.staffWorkPlan?.assignments;
 
@@ -3425,74 +3612,58 @@ export function renderStaffTab(gameState) {
     };
 
     let html = `
-        <div class="mb-4 bg-slate-900 text-white rounded p-4 border border-slate-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shadow-sm">
-            <div>
-                <h3 class="text-lg font-black uppercase tracking-wider text-amber-400">Front Office & Sideline Staff</h3>
-                <p class="text-xs text-slate-300">Staff traits and biases directly warp play-calling, scouting accuracy, and player development.</p>
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-white px-3 py-2">
+            <div class="min-w-0">
+                <h3 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                    Coaching Staff
+                </h3>
+                <p class="text-[10px] text-slate-500">
+                    Compare coaches, monitor development, and manage weekly workloads.
+                </p>
             </div>
-            <div class="text-[11px] font-mono text-slate-400 bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
-                Staff Budget: <b class="text-white">${team.socialProfile?.favorTokens || 3} Favor Tokens</b>
+            <div class="shrink-0 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-mono text-slate-600">
+                Budget: <b class="text-slate-900">${team.socialProfile?.favorTokens ?? 3} Tokens</b>
             </div>
         </div>
 
-        <!-- Optional Automation -->
-        <section class="mb-5 rounded-lg border border-blue-200 bg-blue-50/60 p-4">
-            <div class="mb-3">
-                <div class="flex items-center gap-2">
-                    <h4 class="text-sm font-black uppercase tracking-wider text-slate-900">
-                        Optional Automation
-                    </h4>
-                    <span class="rounded bg-blue-100 px-2 py-0.5 text-[9px] font-bold uppercase text-blue-700">
-                        Your choice
-                    </span>
-                </div>
-                <p class="mt-1 text-xs leading-relaxed text-slate-600">
-                    Let your coaches handle routine weekly decisions, or keep
-                    control yourself. You can change these settings at any time.
-                </p>
+        <!-- Compact Automation Controls -->
+        <section class="mb-3 flex flex-col gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-2">
+                <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-700">
+                    Automation
+                </h4>
+                <span class="text-[10px] text-slate-400">Optional</span>
             </div>
 
-            <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3">
+            <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+                <label
+                    class="inline-flex cursor-pointer items-center gap-2"
+                    title="Let your coaches choose the weekly practice focus.">
                     <input
                         type="checkbox"
-                        class="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+                        class="h-4 w-4 accent-blue-600"
                         ${team.gameplan?.delegatePractice ? 'checked' : ''}
                         onchange="app_setManagementAutomation('delegatePractice', this.checked)"
                     >
-                    <span>
-                        <span class="block text-xs font-bold text-slate-800">
-                            Delegate weekly practice
-                        </span>
-                        <span class="mt-1 block text-[11px] leading-relaxed text-slate-500">
-                            Coaches choose the weekly practice focus for you.
-                        </span>
+                    <span class="text-xs font-semibold text-slate-700">
+                        Delegate practice
                     </span>
                 </label>
 
-                <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                <label
+                    class="inline-flex cursor-pointer items-center gap-2"
+                    title="Let your coaches manage the weekly offensive and defensive game plan.">
                     <input
                         type="checkbox"
-                        class="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+                        class="h-4 w-4 accent-blue-600"
                         ${team.gameplan?.delegateGameplan ? 'checked' : ''}
                         onchange="app_setManagementAutomation('delegateGameplan', this.checked)"
                     >
-                    <span>
-                        <span class="block text-xs font-bold text-slate-800">
-                            Delegate game planning
-                        </span>
-                        <span class="mt-1 block text-[11px] leading-relaxed text-slate-500">
-                            Coaches manage the weekly offensive and defensive game plan.
-                        </span>
+                    <span class="text-xs font-semibold text-slate-700">
+                        Delegate game planning
                     </span>
                 </label>
             </div>
-
-            <p class="mt-3 text-[10px] leading-relaxed text-slate-500">
-                Automation affects these decisions only. Your staff workload
-                assignments and other team-management responsibilities remain
-                under your control.
-            </p>
         </section>
 
         <!-- 1. Current Coaching Group -->
@@ -3742,16 +3913,7 @@ export function renderStaffTab(gameState) {
     `;
 
     html += `
-        <section class="mb-6">
-            <h4 class="font-black text-base uppercase text-slate-900 mb-1">
-                Coaching Staff
-            </h4>
-                        <p class="text-sm text-slate-600 mb-4">
-                Compare strengths and assign weekly responsibilities below.
-            </p>
-
-            ${developmentSummaryHtml}
-
+        <section class="mb-4">
             <div class="overflow-x-auto rounded-lg border border-slate-300 bg-white shadow-sm">
                 <table class="w-full min-w-[900px] text-left text-xs">
                     <thead class="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
@@ -3877,6 +4039,8 @@ export function renderStaffTab(gameState) {
                     </tbody>
                 </table>
             </div>
+
+            ${developmentSummaryHtml}
 
             <details class="mt-3 rounded-lg border border-slate-300 bg-white shadow-sm">
                 <summary class="cursor-pointer list-none px-4 py-3 flex items-center justify-between gap-3">
@@ -4741,6 +4905,8 @@ export function renderStaffTab(gameState) {
                         week: latestState.currentWeek ?? null
                     };
 
+                    staffWorkloadExpanded = true;
+
                     saveGameState();
                     renderStaffTab(latestState);
 
@@ -5022,32 +5188,40 @@ export function renderStaffTab(gameState) {
         );
 
         html += `
-            <section id="staff-workload-assignments" class="mt-6 mb-6 bg-white rounded border border-slate-300 p-4 shadow-sm">
-                <div class="flex flex-col md:flex-row justify-between gap-3 mb-4">
+            <details
+                id="staff-workload-assignments"
+                class="mt-3 mb-4 rounded border border-slate-300 bg-white shadow-sm"
+                ${staffWorkloadExpanded ? 'open' : ''}>
+                <summary class="flex cursor-pointer list-none flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h4 class="font-black text-sm uppercase tracking-wider text-slate-900">
+                        <h4 class="text-xs font-black uppercase tracking-wide text-slate-900">
                             Weekly Staff Workload
                         </h4>
-                        <p class="text-[11px] text-slate-500 mt-1">
-                            Each coach has a personal weekly time budget.
-                            Scouting, development, and preparation compete
-                            for the same limited free time.
+                        <p class="mt-0.5 text-[10px] text-slate-500">
+                            Edit coaching hours and task assignments.
                         </p>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <div class="text-xs font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2">
-                            <b>${totalRequestedHours}</b> hours assigned across
+                    <div class="flex items-center gap-2">
+                        <span class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-mono text-slate-700">
+                            <b>${totalRequestedHours}</b> hrs ·
                             <b>${workCoaches.length}</b> coaches
-                        </div>
+                        </span>
+                        <span class="text-[10px] font-bold text-blue-700">
+                            ${staffWorkloadExpanded ? 'Collapse ↑' : 'Edit workload ↓'}
+                        </span>
+                    </div>
+                </summary>
+
+                <div class="border-t border-slate-200 p-3">
+                    <div class="mb-3 flex justify-end">
                         <button
                             type="button"
-                            class="shrink-0 px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs rounded"
+                            class="shrink-0 rounded bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
                             onclick="app_autoAssignStaffWorkload()"
                             title="Allocate each coach's available hours across scouting, development, and preparation">
                             Auto-assign workload
                         </button>
                     </div>
-                </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 mb-4">
                     ${workCoaches.map(coach => {
@@ -5297,19 +5471,33 @@ export function renderStaffTab(gameState) {
                         + Add Assignment
                     </button>
                 </div>
-            </section>
+                </div>
+            </details>
         `;
     }
 
     // Staff candidates are displayed in the dedicated Staff Carousel pane.
     container.innerHTML = html;
+
+    const workloadDetails = container.querySelector(
+        '#staff-workload-assignments'
+    );
+
+    if (workloadDetails) {
+        workloadDetails.addEventListener('toggle', () => {
+            staffWorkloadExpanded = workloadDetails.open;
+        });
+    }
 }
 
 let staffCarouselSearch = '';
 let staffCarouselSort = 'overall';
 let staffCarouselSortDirection = 'desc';
+let staffCarouselFitRole = 'general';
 
 export function renderStaffCarouselTab(gameState) {
+    gameState = Game.getGameState() || gameState;
+
     const container = document.getElementById('staff-carousel-container');
 
     if (!container || !gameState?.playerTeam) return;
@@ -5319,9 +5507,58 @@ export function renderStaffCarouselTab(gameState) {
     renderStaffTab(gameState);
 
     const team = gameState.playerTeam;
-    const candidates = Array.isArray(gameState.availableStaff)
-        ? gameState.availableStaff
-        : [];
+
+    const employedStaffIds = new Set();
+
+    const teamsToCheck = [
+        ...(Array.isArray(gameState.teams) ? gameState.teams : []),
+        ...(gameState.playerTeam ? [gameState.playerTeam] : [])
+    ];
+
+    teamsToCheck.forEach(teamRecord => {
+        if (!teamRecord) return;
+
+        const coachingGroup = Array.isArray(teamRecord.coaches)
+            ? teamRecord.coaches
+            : [];
+
+        const legacyStaff = [
+            teamRecord.coach,
+            teamRecord.staff?.coach,
+            teamRecord.staff?.scout,
+            teamRecord.staff?.trainer
+        ];
+
+        [...coachingGroup, ...legacyStaff].forEach(member => {
+            if (member?.id != null) {
+                employedStaffIds.add(String(member.id));
+            }
+        });
+    });
+
+    const seenCandidateIds = new Set();
+
+    const candidates = (
+        Array.isArray(gameState.availableStaff)
+            ? gameState.availableStaff
+            : []
+    ).filter(candidate => {
+        if (candidate?.id == null || candidate.teamId != null) {
+            return false;
+        }
+
+        const candidateId = String(candidate.id);
+
+        if (
+            employedStaffIds.has(candidateId) ||
+            seenCandidateIds.has(candidateId)
+        ) {
+            return false;
+        }
+
+        seenCandidateIds.add(candidateId);
+        return true;
+    });
 
     const offseasonPhase = String(
         gameState?.offseasonState?.phase ?? ''
@@ -5372,6 +5609,22 @@ export function renderStaffCarouselTab(gameState) {
         3 - activeNpcCoaches.length
     );
 
+    const reviewState = gameState.offseasonState || {};
+
+    const reviewDayValue = Number(reviewState.staffReviewDay);
+    const reviewDaysValue = Number(reviewState.staffReviewDays);
+
+    const staffReviewDay =
+        Number.isInteger(reviewDayValue) && reviewDayValue > 0
+            ? reviewDayValue
+            : 1;
+
+    const staffReviewDays =
+        Number.isInteger(reviewDaysValue) &&
+        reviewDaysValue >= staffReviewDay
+            ? reviewDaysValue
+            : staffReviewDay;
+
     if (candidates.length === 0) {
         container.innerHTML = `
             <section class="bg-white rounded border border-slate-300 p-6 text-center">
@@ -5386,7 +5639,13 @@ export function renderStaffCarouselTab(gameState) {
     }
 
     const candidateRating = (candidate, key) => {
-        const value = Number(candidate?.ratings?.[key]);
+        const rawValue = candidate?.ratings?.[key];
+
+        if (rawValue == null || rawValue === '') {
+            return null;
+        }
+
+        const value = Number(rawValue);
 
         return Number.isFinite(value)
             ? Math.max(0, Math.min(100, Math.round(value)))
@@ -5405,12 +5664,17 @@ export function renderStaffCarouselTab(gameState) {
     };
 
     const getCandidateRoleFit = (candidate, role) => {
-        if (typeof Game.calculateCoachRoleFit !== 'function') {
-            return null;
-        }
+        const calculateRoleFit =
+            typeof Game.calculateCoachRoleFit === 'function'
+                ? Game.calculateCoachRoleFit
+                : typeof Game.staff?.calculateCoachRoleFit === 'function'
+                    ? Game.staff.calculateCoachRoleFit
+                    : null;
+
+        if (!calculateRoleFit) return null;
 
         const score = Number(
-            Game.calculateCoachRoleFit(candidate, role)
+            calculateRoleFit(candidate, role)
         );
 
         return Number.isFinite(score)
@@ -5441,12 +5705,8 @@ export function renderStaffCarouselTab(gameState) {
         switch (key) {
             case 'name':
                 return String(candidate?.name || '').toLowerCase();
-            case 'generalFit':
-                return getCandidateRoleFit(candidate, 'general');
-            case 'scoutingFit':
-                return getCandidateRoleFit(candidate, 'scouting');
-            case 'trainingFit':
-                return getCandidateRoleFit(candidate, 'training');
+            case 'roleFit':
+                return getCandidateRoleFit(candidate, staffCarouselFitRole);
             case 'offense':
                 return offense;
             case 'defense':
@@ -5528,9 +5788,7 @@ export function renderStaffCarouselTab(gameState) {
         const allowedSorts = new Set([
             'overall',
             'name',
-            'generalFit',
-            'scoutingFit',
-            'trainingFit',
+            'roleFit',
             'offense',
             'defense',
             'scouting',
@@ -5538,6 +5796,20 @@ export function renderStaffCarouselTab(gameState) {
             'gameplan',
             'stipend'
         ]);
+
+    window.app_setStaffCarouselFitRole = role => {
+        const allowedRoles = new Set([
+            'general',
+            'scouting',
+            'training'
+        ]);
+
+        if (!allowedRoles.has(role)) return;
+
+        staffCarouselFitRole = role;
+
+        renderStaffCarouselTab(Game.getGameState() || gameState);
+    };
 
         if (!allowedSorts.has(key)) return;
 
@@ -5565,6 +5837,7 @@ export function renderStaffCarouselTab(gameState) {
 
     window.app_viewStaffCandidate = candidateId => {
         const latestState = Game.getGameState() || gameState;
+        const normalizedCandidateId = String(candidateId);
 
         const candidate = (
             Array.isArray(latestState?.availableStaff)
@@ -5572,11 +5845,40 @@ export function renderStaffCarouselTab(gameState) {
                 : []
         ).find(member =>
             member?.id != null &&
-            String(member.id) === String(candidateId) &&
+            String(member.id) === normalizedCandidateId &&
             member.teamId == null
         );
 
-        if (!candidate) {
+        const teamsToCheck = [
+            ...(Array.isArray(latestState?.teams)
+                ? latestState.teams
+                : []),
+            ...(latestState?.playerTeam
+                ? [latestState.playerTeam]
+                : [])
+        ];
+
+        const isCurrentlyEmployed = teamsToCheck.some(teamRecord => {
+            if (!teamRecord) return false;
+
+            const coachingGroup = Array.isArray(teamRecord.coaches)
+                ? teamRecord.coaches
+                : [];
+
+            const legacyStaff = [
+                teamRecord.coach,
+                teamRecord.staff?.coach,
+                teamRecord.staff?.scout,
+                teamRecord.staff?.trainer
+            ];
+
+            return [...coachingGroup, ...legacyStaff].some(member =>
+                member?.id != null &&
+                String(member.id) === normalizedCandidateId
+            );
+        });
+
+        if (!candidate || isCurrentlyEmployed) {
             showModal(
                 'Candidate Unavailable',
                 'This candidate is no longer available in the staff market. Refresh the carousel before continuing.',
@@ -5616,9 +5918,11 @@ export function renderStaffCarouselTab(gameState) {
                 "'": '&#39;'
             })[char]);
 
+        const currentTeam = latestState.playerTeam || team;
+
         const tendencies =
             typeof Game.previewCoachTendencies === 'function'
-                ? Game.previewCoachTendencies(candidate, team)
+                ? Game.previewCoachTendencies(candidate, currentTeam)
                 : null;
 
         const profileHtml = `
@@ -5817,9 +6121,14 @@ export function renderStaffCarouselTab(gameState) {
                             : 'All three coaching positions are occupied; hiring requires replacing a current coach.'}
                     </p>
                 </div>
-                <span class="text-xs font-mono bg-slate-800 border border-slate-700 rounded px-3 py-2">
-                    ${candidates.length} candidates available
-                </span>
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold bg-amber-500 text-slate-950 rounded px-3 py-2">
+                        STAFF REVIEW · DAY ${staffReviewDay} / ${staffReviewDays}
+                    </span>
+                    <span class="text-xs font-mono bg-slate-800 border border-slate-700 rounded px-3 py-2">
+                        ${displayCandidates.length} matching candidates
+                    </span>
+                </div>
             </div>
         </section>
 
@@ -5861,9 +6170,20 @@ export function renderStaffCarouselTab(gameState) {
                         <option value="teaching" ${staffCarouselSort === 'teaching' ? 'selected' : ''}>Teaching</option>
                         <option value="gameplan" ${staffCarouselSort === 'gameplan' ? 'selected' : ''}>Game planning</option>
                         <option value="stipend" ${staffCarouselSort === 'stipend' ? 'selected' : ''}>Stipend demand</option>
-                        <option value="generalFit" ${staffCarouselSort === 'generalFit' ? 'selected' : ''}>General role fit</option>
-                        <option value="scoutingFit" ${staffCarouselSort === 'scoutingFit' ? 'selected' : ''}>Scouting role fit</option>
-                        <option value="trainingFit" ${staffCarouselSort === 'trainingFit' ? 'selected' : ''}>Training role fit</option>
+                        <option value="roleFit" ${staffCarouselSort === 'roleFit' ? 'selected' : ''}>Selected role fit</option>
+                    </select>
+                </label>
+
+                <label class="block">
+                    <span class="block text-[10px] font-bold uppercase tracking-wide text-slate-600 mb-1">
+                        Fit focus
+                    </span>
+                    <select
+                        class="w-full sm:w-36 rounded border border-slate-300 bg-white px-2 py-2 text-xs"
+                        onchange="app_setStaffCarouselFitRole(this.value)">
+                        <option value="general" ${staffCarouselFitRole === 'general' ? 'selected' : ''}>General</option>
+                        <option value="scouting" ${staffCarouselFitRole === 'scouting' ? 'selected' : ''}>Scouting</option>
+                        <option value="training" ${staffCarouselFitRole === 'training' ? 'selected' : ''}>Training</option>
                     </select>
                 </label>
 
@@ -5893,9 +6213,7 @@ export function renderStaffCarouselTab(gameState) {
                 <thead class="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
                     <tr>
                         <th class="px-3 py-2.5">Candidate</th>
-                        <th class="px-2 py-2.5 text-center">General Fit</th>
-                        <th class="px-2 py-2.5 text-center">Scouting Fit</th>
-                        <th class="px-2 py-2.5 text-center">Training Fit</th>
+                        <th class="px-2 py-2.5 text-center">Role Fit</th>
                         <th class="px-2 py-2.5 text-center">Offense</th>
                         <th class="px-2 py-2.5 text-center">Defense</th>
                         <th class="px-2 py-2.5 text-center">Scouting</th>
@@ -5918,9 +6236,7 @@ export function renderStaffCarouselTab(gameState) {
                             const scouting = biases.scouting || {};
 
                             const overall = getCandidateMetric(s, 'overall');
-                            const generalFit = getCandidateMetric(s, 'generalFit');
-                            const scoutingFit = getCandidateMetric(s, 'scoutingFit');
-                            const trainingFit = getCandidateMetric(s, 'trainingFit');
+                            const roleFit = getCandidateMetric(s, 'roleFit');
                             const offense = getCandidateMetric(s, 'offense');
                             const defense = getCandidateMetric(s, 'defense');
                             const scoutingScore = getCandidateMetric(s, 'scouting');
@@ -5995,9 +6311,7 @@ export function renderStaffCarouselTab(gameState) {
                                     </td>
 
                                     ${scoreCell(overall)}
-                                    ${scoreCell(generalFit)}
-                                    ${scoreCell(scoutingFit)}
-                                    ${scoreCell(trainingFit)}
+                                    ${scoreCell(roleFit)}
                                     ${scoreCell(offense)}
                                     ${scoreCell(defense)}
                                     ${scoreCell(scoutingScore)}
@@ -6029,7 +6343,7 @@ export function renderStaffCarouselTab(gameState) {
                         }).join('')
                         : `
                             <tr>
-                                <td colspan="14" class="px-4 py-8 text-center">
+                                <td colspan="12" class="px-4 py-8 text-center">
                                     <p class="font-bold text-slate-700">
                                         No matching candidates
                                     </p>
