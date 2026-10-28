@@ -11,7 +11,14 @@ import { formatHeight } from './utils.js';
 import {
     getCurrentRosterLimit,
     TEMPORARY_HELP_THRESHOLD,
-    processSeasonStartDues
+    processSeasonStartDues,
+    COACH_CAROUSEL_DAYS,
+    FREE_AGENCY_RECRUITING_DAYS,
+    OFFSEASON_PHASES,
+    getOffseasonState,
+    advanceOffseasonStaffReviewDay,
+    finishOffseasonStaffReviewEarly,
+    transitionOffseasonPhase
 } from './game/season.js';
 import {
     initializeInheritedScoutingReports,
@@ -671,6 +678,237 @@ function promptCoachCreation(teamId) {
     updateCoachSkillBudget();
 }
 
+function prepareLiveOffseasonDraft() {
+    gameState = Game.getGameState();
+
+    if (!gameState?.playerTeam) return false;
+
+    const offseasonState = getOffseasonState(gameState);
+
+    const hasPreparedBoard =
+        offseasonState.draftPrepared === true &&
+        Array.isArray(gameState.draftOrder) &&
+        gameState.draftOrder.length > 0 &&
+        Array.isArray(gameState.draftClass);
+
+    // Preserve the existing board when returning to an already-prepared draft.
+    if (hasPreparedBoard) return true;
+
+    Game.setupDraft();
+    gameState = Game.getGameState();
+
+    if (!gameState?.playerTeam) return false;
+
+    const draftYear = Number.isInteger(gameState.year)
+        ? gameState.year
+        : 5;
+
+    const draftWeek = Number.isInteger(gameState.currentWeek)
+        ? gameState.currentWeek
+        : 0;
+
+    const incomingDraftClass = Array.isArray(gameState.draftClass)
+        ? gameState.draftClass
+        : [];
+
+    // Initialize inherited scouting after staff decisions are complete.
+    for (const draftTeam of gameState.teams) {
+        if (draftTeam.leagueType !== 'main') continue;
+
+        initializeInheritedScoutingReports(
+            draftTeam,
+            incomingDraftClass,
+            draftYear,
+            draftWeek
+        );
+    }
+
+    if (gameState.offseasonState) {
+        gameState.offseasonState.draftPrepared = true;
+    }
+
+    gameState.draftCompleted = false;
+
+    // Initialize diagnostics and the preview after scouting is ready.
+    debugCollector.initDraftReport(gameState);
+    generateDraftPreviewMessage();
+
+    // Mark preparation complete only after all initialization succeeds.
+    getOffseasonState(gameState).draftPrepared = true;
+
+    Game.saveGameState(activeSaveKey);
+
+    return true;
+}
+
+function ensureOffseasonReviewState(gs = Game.getGameState()) {
+    if (!gs) return null;
+
+    const currentYear = Number(gs.year) || null;
+    const existing = gs.offseasonState;
+
+    const sameYear =
+        Number(existing?.seasonYear) === currentYear;
+
+    if (
+        !existing ||
+        typeof existing !== 'object' ||
+        !sameYear ||
+        existing.phase !== OFFSEASON_PHASES.STAFF_REVIEW ||
+        existing.completed
+    ) {
+        gs.offseasonState = {
+            seasonYear: currentYear,
+            completedSeasonYear: currentYear
+                ? currentYear - 1
+                : null,
+            phase: OFFSEASON_PHASES.STAFF_REVIEW,
+            staffReviewDay: 1,
+            staffReviewDays: COACH_CAROUSEL_DAYS,
+            recruitingDay: 0,
+            recruitingDays: FREE_AGENCY_RECRUITING_DAYS,
+            completed: false,
+            draftPrepared: false,
+            staffDepartures: Array.isArray(existing?.staffDepartures)
+                ? existing.staffDepartures
+                : [],
+            staffHappinessChanges: Array.isArray(
+                existing?.staffHappinessChanges
+            )
+                ? existing.staffHappinessChanges
+                : []
+        };
+    }
+
+    const state = getOffseasonState(gs);
+
+    if (state.draftPrepared == null) {
+        state.draftPrepared = false;
+    }
+
+    return state;
+}
+
+function updateOffseasonAdvanceButton(gs = Game.getGameState()) {
+    if (!gs) return;
+
+    const state = getOffseasonState(gs);
+    const advanceButton = document.getElementById('advance-week-btn');
+
+    if (!advanceButton) return;
+
+    const day = state.staffReviewDay || 1;
+
+    advanceButton.innerHTML = day < COACH_CAROUSEL_DAYS
+        ? `<span>Coach Carousel: Day ${day} of ${COACH_CAROUSEL_DAYS} →</span>`
+        : '<span>Continue to Rookie Draft →</span>';
+
+    advanceButton.classList.remove('bg-amber-500');
+    advanceButton.classList.add('bg-green-600');
+
+    advanceButton.title = day < COACH_CAROUSEL_DAYS
+        ? 'Continue staff review or finish early and proceed to the draft.'
+        : 'Finish staff review and proceed to the rookie draft.';
+}
+
+function openOffseasonStaffReview() {
+    gameState = Game.getGameState();
+
+    if (!gameState?.playerTeam) return;
+
+    ensureOffseasonReviewState(gameState);
+    gameState.draftCompleted = false;
+
+    UI.renderDashboard(gameState);
+    UI.switchTab('front-office', gameState);
+
+    const staffMarketButton = Array.from(
+        document.querySelectorAll('.fo-tab')
+    ).find(button =>
+        button.dataset.subTab === 'staff-market'
+    );
+
+    if (staffMarketButton) {
+        staffMarketButton.click();
+    } else {
+        UI.renderStaffMarketTab?.(gameState);
+    }
+
+    updateOffseasonAdvanceButton(gameState);
+
+    UI.showScreen('dashboard-screen');
+    Game.saveGameState(activeSaveKey);
+}
+
+function launchOffseasonDraft({
+    finishEarly = false,
+    phaseAlreadyDraft = false
+} = {}) {
+    gameState = Game.getGameState();
+
+    if (!gameState?.playerTeam) return false;
+
+    let transitionResult = { success: true };
+
+    if (!phaseAlreadyDraft) {
+        transitionResult = finishEarly
+            ? finishOffseasonStaffReviewEarly(gameState)
+            : transitionOffseasonPhase(
+                OFFSEASON_PHASES.DRAFT,
+                gameState
+            );
+    }
+
+    if (!transitionResult.success) {
+        UI.showModal(
+            'Cannot Start Rookie Draft',
+            `<p>${escapeHtml(transitionResult.message || 'Staff review is not complete.')}</p>`
+        );
+        return false;
+    }
+
+    gameState = Game.getGameState();
+
+    const state = getOffseasonState(gameState);
+
+    // Reuse a valid prepared board. Otherwise, run the complete
+    // initialization path, including inherited scouting and the preview.
+    const hasPreparedBoard =
+        state.draftPrepared === true &&
+        Array.isArray(gameState.draftOrder) &&
+        gameState.draftOrder.length > 0 &&
+        Array.isArray(gameState.draftClass);
+
+    if (!hasPreparedBoard) {
+        if (!prepareLiveOffseasonDraft()) return false;
+        gameState = Game.getGameState();
+    }
+
+    gameState.draftCompleted = false;
+
+    UI.resetDraftWatchlist();
+
+    selectedPlayerId = null;
+
+    UI.renderSelectedPlayerCard(null, gameState);
+
+    UI.renderDraftScreen(
+        gameState,
+        handlePlayerSelectInDraft,
+        selectedPlayerId,
+        currentSortColumn,
+        currentSortDirection
+    );
+
+    updateOffseasonAdvanceButton(gameState);
+    Game.saveGameState(activeSaveKey);
+
+    UI.showScreen('draft-screen');
+    runAIDraftPicks();
+
+    return true;
+}
+
 function confirmFranchiseTakeover(teamId, coachDetails) {
     const team = gameState.teams.find(t => t.id === teamId);
     if (!team) return;
@@ -919,39 +1157,10 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
             safeties: 0
         };
     });
-    Game.setupDraft();
-
-    const draftYear = Number.isInteger(gameState.year) ? gameState.year : 5;
-    const draftWeek = Number.isInteger(gameState.currentWeek) ? gameState.currentWeek : 0;
-    const incomingDraftClass = gameState.draftClass || [];
-
-    for (const draftTeam of gameState.teams) {
-        if (draftTeam.leagueType !== 'main') continue;
-
-        initializeInheritedScoutingReports(
-            draftTeam,
-            incomingDraftClass,
-            draftYear,
-            draftWeek
-        );
-    }
-
     gameState.draftCompleted = false;
 
-    // REPORT 3: Initialize First Player Draft report
-    debugCollector.initDraftReport(gameState);
-    generateDraftPreviewMessage();
-
-    const advBtn = document.getElementById('advance-week-btn');
-    if (advBtn) {
-        advBtn.innerHTML = `<span>Start Draft</span>`;
-        advBtn.classList.remove('bg-amber-500');
-        advBtn.classList.add('bg-green-600');
-    }
-
-    UI.renderDashboard(gameState);
-    UI.switchTab('messages', gameState);
-    UI.showScreen('dashboard-screen');
+    // Staff review comes before the live rookie draft.
+    openOffseasonStaffReview();
 }
 
 function generateDraftPreviewMessage() {
@@ -961,7 +1170,12 @@ function generateDraftPreviewMessage() {
         historyBlurb = `\n\n---\n**Recent Highlights (Year ${lastSeason.year})**\n🏆 Champion: ${lastSeason.champion}\n🥈 Runner-Up: ${lastSeason.runnerUp}\n📈 Promoted: ${lastSeason.promoted.join(', ')}\n📉 Relegated: ${lastSeason.relegated.join(', ')}`;
     }
 
-    Game.addMessage("League Office", `Welcome to Backyard GM, Coach! After 4 years of building the franchise, you are now officially in control. Check your veteran roster, scout the incoming rookie class, and click "Start Draft" when you're ready to make your first pick.\n\n**Be sure to check the "History" tab on your dashboard to see the full record of past champions and draft picks before you arrived!**${historyBlurb}`, false, gameState);
+    Game.addMessage(
+        "League Office",
+        `Welcome to Backyard GM, Coach! After four years of building the franchise, you're now officially in control. First, review your coaching staff and consider recruiting replacements during the two-day Coach Carousel. Once staff review is complete, proceed to the rookie draft.\n\n**Check the History tab to revisit previous champions and draft results.**${historyBlurb}`,
+        false,
+        gameState
+    );
 }
 
 function handlePlayerSelectInDraft(playerId) {
@@ -2135,19 +2349,73 @@ async function handleAdvanceWeek() {
         }
     }
 
-    // 1. Initial Draft (Year 1/Year 4 pre-season)
+        // 1. Staff review must finish before the rookie draft can begin.
     if (gameState.currentWeek === 0 && !gameState.draftCompleted) {
-        UI.resetDraftWatchlist();
-        Game.setupDraft();
-        gameState = Game.getGameState();
-        selectedPlayerId = null;
-        UI.renderSelectedPlayerCard(null, gameState);
-        UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
-        UI.showScreen('draft-screen');
-        runAIDraftPicks();
+        const phase = gameState.offseasonState?.phase;
+
+        // Route legacy saves through staff review instead of skipping it.
+        if (!phase) {
+            openOffseasonStaffReview();
+            return;
+        }
+
+        if (phase === OFFSEASON_PHASES.STAFF_REVIEW) {
+            const state = getOffseasonState(gameState);
+
+            if (state.staffReviewDay < COACH_CAROUSEL_DAYS) {
+                UI.showModal(
+                    'Coach Carousel — Day 1 of 2',
+                    `<div class="space-y-3 text-sm">
+                        <p>Review your current coaches, compare available candidates, and make your initial offers.</p>
+                        <p>Continue to Day 2 for final negotiations, or finish early and move straight to the rookie draft.</p>
+                    </div>`,
+                    () => {
+                        const result = advanceOffseasonStaffReviewDay(
+                            gameState
+                        );
+
+                        if (!result.success) {
+                            UI.showModal(
+                                'Staff Review Error',
+                                `<p>${escapeHtml(result.message || 'Could not advance staff review.')}</p>`
+                            );
+                            return;
+                        }
+
+                        gameState = Game.getGameState();
+
+                        updateOffseasonAdvanceButton(gameState);
+                        Game.saveGameState(activeSaveKey);
+                    },
+                    'Continue to Day 2',
+                    () => {
+                        launchOffseasonDraft({
+                            finishEarly: true
+                        });
+                    },
+                    'Finish Early & Draft'
+                );
+
+                return;
+            }
+
+            launchOffseasonDraft();
+            return;
+        }
+
+        if (phase === OFFSEASON_PHASES.DRAFT) {
+            launchOffseasonDraft({
+                phaseAlreadyDraft: true
+            });
+            return;
+        }
+
+        UI.showModal(
+            'Offseason Phase Locked',
+            `<p>The rookie draft cannot begin during the "${escapeHtml(phase)}" phase.</p>`
+        );
         return;
     }
-
     // 2. Advance to Offseason, resolving user-team flight risks first.
     if (gameState.currentWeek >= WEEKS_IN_SEASON) {
         const report = Game.advanceToOffseason();
@@ -3251,17 +3519,14 @@ function handleSetCaptain(playerId) {
 // Make sure going to the next draft resets draftCompleted:
 function handleGoToNextDraft() {
     gameState = Game.getGameState();
-    if (!gameState) return;
 
-    UI.resetDraftWatchlist();
+    if (!gameState?.playerTeam) return;
 
+    gameState.currentWeek = 0;
     gameState.draftCompleted = false;
-    Game.setupDraft();
-    selectedPlayerId = null;
-    UI.renderSelectedPlayerCard(null, gameState);
-    UI.renderDraftScreen(gameState, handlePlayerSelectInDraft, selectedPlayerId, currentSortColumn, currentSortDirection);
-    UI.showScreen('draft-screen');
-    runAIDraftPicks();
+
+    ensureOffseasonReviewState(gameState);
+    openOffseasonStaffReview();
 }
 
 function renderSocialNetworkTab(gameState) {

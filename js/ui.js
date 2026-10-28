@@ -2669,11 +2669,93 @@ export function renderStaffTab(gameState) {
             `Relieve ${roleLabel} of Duties?`,
             modalHtml,
             () => {
+                // Release the coach from the team before returning them
+                // to the shared staff market.
+                const dismissedId = String(member.id);
+
                 member.teamId = null;
-                if (gameState.availableStaff) gameState.availableStaff.push(member);
-                team.staff[roleKey] = null;
-                if (roleKey === 'coach') team.coach = null;
-                renderStaffTab(gameState);
+                member.role = 'coach';
+
+                if (!Array.isArray(gameState.availableStaff)) {
+                    gameState.availableStaff = [];
+                }
+
+                // Avoid duplicate market entries.
+                const alreadyAvailable = gameState.availableStaff.some(
+                    candidate =>
+                        String(candidate?.id) === dismissedId
+                );
+
+                if (!alreadyAvailable) {
+                    gameState.availableStaff.push(member);
+                }
+
+                // Remove the dismissed coach from the active coaching group.
+                if (Array.isArray(team.coaches)) {
+                    team.coaches = team.coaches.filter(
+                        coach =>
+                            coach?.id == null ||
+                            String(coach.id) !== dismissedId
+                    );
+                }
+
+                // Clear every legacy reference to the dismissed coach.
+                if (team.staff && typeof team.staff === 'object') {
+                    for (const key of ['coach', 'scout', 'trainer']) {
+                        if (
+                            String(team.staff[key]?.id ?? '') === dismissedId
+                        ) {
+                            team.staff[key] = null;
+                        }
+                    }
+                }
+
+                if (
+                    String(team.coach?.id ?? '') === dismissedId ||
+                    roleKey === 'coach'
+                ) {
+                    team.coach = null;
+                }
+
+                // Remove obsolete assignments so the dismissed coach
+                // cannot continue receiving workload after leaving.
+                const assignments = team.staffWorkPlan?.assignments;
+
+                if (Array.isArray(assignments)) {
+                    team.staffWorkPlan.assignments = assignments.filter(
+                        assignment =>
+                            String(assignment?.coachId ?? '') !== dismissedId
+                    );
+                }
+
+                // Three NPC staff positions are available, independent
+                // of the user's separate coaching profile.
+                const remainingNpcCoaches = (
+                    Array.isArray(team.coaches) ? team.coaches : []
+                ).filter(coach =>
+                    coach?.id != null && !coach.isUserCoach
+                );
+
+                team.coachingVacancies = Math.max(
+                    0,
+                    3 - remainingNpcCoaches.length
+                );
+
+                // Persist the departure and refresh the relevant screen.
+                saveGameState();
+
+                const marketPane = document.getElementById(
+                    'fo-pane-staff-market'
+                );
+
+                if (
+                    marketPane &&
+                    !marketPane.classList.contains('hidden')
+                ) {
+                    renderStaffMarketTab(gameState);
+                } else {
+                    renderStaffTab(gameState);
+                }
             },
             "Relieve of Duties",
             null,
@@ -2682,8 +2764,57 @@ export function renderStaffTab(gameState) {
     };
 
     window.app_hireStaff = (staffId, roleKey) => {
-        const staff = gameState.availableStaff.find(s => s.id === staffId);
+        const isStaffEmployed = candidateId => {
+            const id = String(candidateId);
+
+            return (gameState.teams || []).some(candidateTeam => {
+                if (!candidateTeam) return false;
+
+                const coachingGroup = Array.isArray(candidateTeam.coaches)
+                    ? candidateTeam.coaches
+                    : [];
+
+                const legacyStaff = [
+                    candidateTeam.staff?.coach,
+                    candidateTeam.staff?.scout,
+                    candidateTeam.staff?.trainer
+                ];
+
+                return [...coachingGroup, ...legacyStaff].some(member =>
+                    member?.id != null &&
+                    String(member.id) === id
+                );
+            });
+        };
+
+        const marketMatches = (
+            Array.isArray(gameState.availableStaff)
+                ? gameState.availableStaff
+                : []
+        ).filter(candidate =>
+            candidate?.id != null &&
+            String(candidate.id) === String(staffId)
+        );
+
+        let staff = marketMatches[0];
+
         if (!staff) return;
+
+        if (
+            staff.teamId != null ||
+            marketMatches.some(candidate => candidate.teamId != null) ||
+            isStaffEmployed(staff.id)
+        ) {
+            showModal(
+                'Staff Member Unavailable',
+                'This coach is already assigned to a team or is no longer available. Refresh the staff market before making another offer.',
+                null,
+                null,
+                null,
+                'Close'
+            );
+            return;
+        }
 
         Game.ensureTeamCoachingStaff?.(team);
 
@@ -2692,6 +2823,10 @@ export function renderStaffTab(gameState) {
         ).filter(coach =>
             coach?.id != null && !coach.isUserCoach
         ).slice(0, 3);
+
+        // The active coaching group determines whether this is a new hire
+        // into an open slot or a replacement for an existing coach.
+        const hasOpenCoachingSlot = currentStaffCoaches.length < 3;
 
         const tokensAvailable = team.socialProfile?.favorTokens || 0;
         const roleLabels = { coach: 'Head Coach', scout: 'Park Scout', trainer: 'Sideline Trainer' };
@@ -2724,10 +2859,40 @@ export function renderStaffTab(gameState) {
                     "${staff.biases.tactical?.desc || staff.biases.personality.desc}"
                 </div>
 
-                ${isHeadCoach ? `
+                ${isHeadCoach && !hasOpenCoachingSlot ? `
                 <div class="rounded border border-blue-200 bg-blue-50 p-3">
                     <label
                         for="staff-replacement-coach"
+                        class="block text-[10px] font-black uppercase tracking-wider text-blue-900 mb-1">
+                        Replace Which Coach?
+                    </label>
+
+                    <select
+                        id="staff-replacement-coach"
+                        class="w-full p-2 border border-blue-300 rounded bg-white text-xs font-bold text-slate-800">
+                        ${currentStaffCoaches.map((coach, index) => `
+                            <option value="${coach.id}">
+                                ${coach.name || `Staff Coach ${index + 1}`}
+                            </option>
+                        `).join('')}
+                    </select>
+
+                    <p class="text-[10px] text-blue-800 mt-2">
+                        The selected coach will return to the free-agent market
+                        if this candidate accepts.
+                    </p>
+                </div>
+                ` : isHeadCoach ? `
+                <div class="rounded border border-emerald-200 bg-emerald-50 p-3">
+                    <h4 class="text-[10px] font-black uppercase tracking-wider text-emerald-900">
+                        Open Coaching Position
+                    </h4>
+                    <p class="text-[11px] text-emerald-800 mt-1">
+                        Your coaching group has an open position. An accepted offer
+                        will fill the vacancy without dismissing a current coach.
+                    </p>
+                </div>
+                ` : ''}
                         class="block text-[10px] font-black uppercase tracking-wider text-blue-900 mb-1">
                         Replace Which Coach?
                     </label>
@@ -2804,6 +2969,40 @@ export function renderStaffTab(gameState) {
         `;
 
         showModal(`Recruit ${roleName}: ${staff.name}`, pitchModalHtml, () => {
+            // The candidate may have been hired or removed while the offer
+            // modal was open. Recheck the market before evaluating the offer.
+            const latestMarketMatches = (
+                Array.isArray(gameState.availableStaff)
+                    ? gameState.availableStaff
+                    : []
+            ).filter(candidate =>
+                candidate?.id != null &&
+                String(candidate.id) === String(staff.id)
+            );
+
+            const candidateStillAvailable =
+                latestMarketMatches.length > 0 &&
+                latestMarketMatches.every(candidate =>
+                    candidate.teamId == null
+                ) &&
+                !isStaffEmployed(staff.id);
+
+            if (!candidateStillAvailable) {
+                showModal(
+                    'Staff Member No Longer Available',
+                    'This coach has already been hired or removed from the market. No offer costs have been charged.',
+                    null,
+                    null,
+                    null,
+                    'Close'
+                );
+                return;
+            }
+
+            // Use the latest market record rather than a potentially stale
+            // object captured when the offer modal was opened.
+            staff = latestMarketMatches[0];
+
             const tokensOffered = parseInt(document.getElementById('staff-pitch-tokens')?.value || '0', 10);
             const cashOffered = parseFloat(document.getElementById('staff-pitch-cash')?.value || '0');
             const schemePromise = document.getElementById('staff-scheme-promise')?.value || 'GM_CHOICE';
@@ -2851,26 +3050,35 @@ export function renderStaffTab(gameState) {
                 let outgoingCoach = null;
 
                 if (roleKey === 'coach') {
-                    replacementCoachSlot = activeCoaches.findIndex(coach =>
-                        coach &&
-                        !coach.isUserCoach &&
-                        replacementCoachId !== '' &&
-                        String(coach.id) === String(replacementCoachId)
+                    const currentNpcCoaches = activeCoaches.filter(
+                        coach => coach?.id != null && !coach.isUserCoach
                     );
 
-                    if (replacementCoachSlot < 0) {
-                        showModal(
-                            'Coach No Longer Available',
-                            'The selected coach could not be found. Close this offer and select a current staff coach.',
-                            null,
-                            null,
-                            null,
-                            'Close'
+                    // Recheck current state when the offer is finalized.
+                    // A vacancy may have opened or another action may have
+                    // changed the coaching group while this modal was open.
+                    if (currentNpcCoaches.length >= 3) {
+                        replacementCoachSlot = activeCoaches.findIndex(coach =>
+                            coach &&
+                            !coach.isUserCoach &&
+                            replacementCoachId !== '' &&
+                            String(coach.id) === String(replacementCoachId)
                         );
-                        return;
-                    }
 
-                    outgoingCoach = activeCoaches[replacementCoachSlot];
+                        if (replacementCoachSlot < 0) {
+                            showModal(
+                                'Coach No Longer Available',
+                                'The selected coach could not be found. Close this offer and select a current staff coach.',
+                                null,
+                                null,
+                                null,
+                                'Close'
+                            );
+                            return;
+                        }
+
+                        outgoingCoach = activeCoaches[replacementCoachSlot];
+                    }
                 }
 
                 if (tokensOffered > 0) {
@@ -2972,12 +3180,23 @@ export function renderStaffTab(gameState) {
                     returnToMarket(oldStaff);
                 }
 
-                const idx = gameState.availableStaff.findIndex(
-                    candidate => String(candidate.id) === String(staffId)
-                );
+                // Remove every duplicate record for this coach ID so a
+                // second market entry cannot offer the same coach again.
+                if (!Array.isArray(gameState.availableStaff)) {
+                    gameState.availableStaff = [];
+                }
 
-                if (idx > -1) {
-                    gameState.availableStaff.splice(idx, 1);
+                for (
+                    let i = gameState.availableStaff.length - 1;
+                    i >= 0;
+                    i--
+                ) {
+                    if (
+                        String(gameState.availableStaff[i]?.id) ===
+                        String(staff.id)
+                    ) {
+                        gameState.availableStaff.splice(i, 1);
+                    }
                 }
 
                 staff.role = roleKey;
@@ -2990,22 +3209,40 @@ export function renderStaffTab(gameState) {
                     team.staff = {};
                 }
 
+                // Determine whether a valid Head Coach reference still
+                // points to a coach in this team's current coaching group.
+                const currentNpcCoachIds = new Set(
+                    activeCoaches
+                        .filter(coach =>
+                            coach?.id != null &&
+                            !coach.isUserCoach
+                        )
+                        .map(coach => String(coach.id))
+                );
+
+                const legacyLeadReferences = [
+                    team.coach,
+                    team.staff?.coach
+                ];
+
+                const hasActiveLegacyLeadCoach =
+                    legacyLeadReferences.some(coach =>
+                        coach?.id != null &&
+                        currentNpcCoachIds.has(String(coach.id))
+                    );
+
+                const outgoingWasLegacyLead =
+                    outgoingCoach?.id != null &&
+                    legacyLeadReferences.some(coach =>
+                        coach?.id != null &&
+                        String(coach.id) === String(outgoingCoach.id)
+                    );
+
                 const replacesLegacyLeadCoach =
                     roleKey === 'coach' &&
                     (
-                        (
-                            !team.coach?.id &&
-                            !team.staff.coach?.id
-                        ) ||
-                        (
-                            outgoingCoach?.id != null &&
-                            (
-                                String(team.coach?.id) ===
-                                    String(outgoingCoach.id) ||
-                                String(team.staff.coach?.id) ===
-                                    String(outgoingCoach.id)
-                            )
-                        )
+                        outgoingWasLegacyLead ||
+                        !hasActiveLegacyLeadCoach
                     );
 
                 if (
@@ -3016,14 +3253,26 @@ export function renderStaffTab(gameState) {
                 }
 
                 if (roleKey === 'coach') {
-                    activeCoaches[replacementCoachSlot] = staff;
+                    if (replacementCoachSlot >= 0) {
+                        // Replace the selected coach.
+                        activeCoaches[replacementCoachSlot] = staff;
+                    } else {
+                        // Fill an open slot without removing retained staff.
+                        activeCoaches.push(staff);
+                    }
+
                     team.coaches = activeCoaches;
 
-                    // Keep legacy Scout and Trainer references aligned
-                    // with the current three-person coaching group.
+                    // Keep the vacancy count synchronized with the active
+                    // three-person NPC coaching group.
                     const staffCoaches = activeCoaches
                         .filter(coach => coach && !coach.isUserCoach)
                         .slice(0, 3);
+
+                    team.coachingVacancies = Math.max(
+                        0,
+                        3 - staffCoaches.length
+                    );
 
                     team.staff.scout = staffCoaches[1] || null;
                     team.staff.trainer = staffCoaches[2] || null;
@@ -3063,6 +3312,11 @@ export function renderStaffTab(gameState) {
                         team.formations.defense = staff.preferredDefense;
                     }
                 }
+
+                // Persist the completed transaction before rendering the UI.
+                // This saves coach ownership, the free-agent pool, offer costs,
+                // staff references, workload assignments, and vacancy count.
+                saveGameState();
 
                 const marketPane = document.getElementById('fo-pane-staff-market');
 

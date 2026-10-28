@@ -1,3 +1,5 @@
+//game/season.js
+
 import { getRandom, getRandomInt } from '../utils.js';
 import { isDebugMode } from './debug_mode.js';
 import {
@@ -19,10 +21,11 @@ import {
 import { simulateYouthMatch } from './youth_simulation.js';
 import {
     initializeTeamStaff, generateStaffPool, checkRetiredPlayerToCoach,
-    aiManageTeamStaff, aiBuildGameplan, aiChooseWeeklyPractice,
+    aiBuildGameplan, aiChooseWeeklyPractice,
     ensureAiStaffWorkPlan, getTeamCoachingSpecialist,
     processWeeklyCoachDevelopment, ensureTeamStaffWorkPlan,
-    getEffectiveStaffWorkHours, processWeeklyStaffPreparation
+    getEffectiveStaffWorkHours, processWeeklyStaffPreparation,
+    processCoachOffseasonRetention, resolveCoachCarousel
 } from './staff.js';
 import {
     evaluatePlayerRetention,
@@ -44,6 +47,285 @@ export const SUMMER_ROSTER_LIMIT = 24;
 export const MIN_HEALTHY_PLAYERS = 8;
 export const TEMPORARY_HELP_THRESHOLD = 12;
 export const SEASON_DUES_PER_PLAYER = 9;
+
+export const COACH_CAROUSEL_DAYS = 2;
+export const FREE_AGENCY_RECRUITING_DAYS = 7;
+
+export const OFFSEASON_PHASES = Object.freeze({
+    STAFF_REVIEW: 'staff_review',
+    DRAFT: 'draft',
+    RECRUITING: 'recruiting',
+    ROSTER_FINALIZATION: 'roster_finalization',
+    REGULAR_SEASON: 'regular_season'
+});
+
+const OFFSEASON_PHASE_TRANSITIONS = Object.freeze({
+    [OFFSEASON_PHASES.STAFF_REVIEW]: [
+        OFFSEASON_PHASES.DRAFT
+    ],
+    [OFFSEASON_PHASES.DRAFT]: [
+        OFFSEASON_PHASES.RECRUITING
+    ],
+    [OFFSEASON_PHASES.RECRUITING]: [
+        OFFSEASON_PHASES.ROSTER_FINALIZATION
+    ],
+    [OFFSEASON_PHASES.ROSTER_FINALIZATION]: [
+        OFFSEASON_PHASES.REGULAR_SEASON
+    ],
+    [OFFSEASON_PHASES.REGULAR_SEASON]: []
+});
+
+/**
+ * Retrieves or initializes persisted offseason phase state.
+ * Missing state is treated as a legacy save entering staff review.
+ */
+export function getOffseasonState(gameState = game) {
+    if (!gameState) return null;
+
+    if (
+        !gameState.offseasonState ||
+        typeof gameState.offseasonState !== 'object'
+    ) {
+        gameState.offseasonState = {
+            seasonYear: Number(gameState.year) || null,
+            completedSeasonYear: null,
+            phase: OFFSEASON_PHASES.STAFF_REVIEW,
+            staffReviewDay: 1,
+            staffReviewDays: COACH_CAROUSEL_DAYS,
+            recruitingDay: 0,
+            recruitingDays: FREE_AGENCY_RECRUITING_DAYS,
+            completed: false
+        };
+    }
+
+    const state = gameState.offseasonState;
+
+    state.staffReviewDays = COACH_CAROUSEL_DAYS;
+    state.recruitingDays = FREE_AGENCY_RECRUITING_DAYS;
+
+    const staffDay = Number(state.staffReviewDay);
+
+    state.staffReviewDay = Math.max(
+        1,
+        Math.min(
+            COACH_CAROUSEL_DAYS,
+            Number.isFinite(staffDay) ? Math.floor(staffDay) : 1
+        )
+    );
+
+    const recruitingDay = Number(state.recruitingDay);
+
+    state.recruitingDay = Math.max(
+        0,
+        Math.min(
+            FREE_AGENCY_RECRUITING_DAYS,
+            Number.isFinite(recruitingDay)
+                ? Math.floor(recruitingDay)
+                : 0
+        )
+    );
+
+    return state;
+}
+
+/**
+ * Moves the offseason forward only along an explicitly permitted transition.
+ *
+ * finishEarly may be used to complete the coach carousel before Day 2 ends.
+ */
+export function transitionOffseasonPhase(
+    nextPhase,
+    gameState = game,
+    options = {}
+) {
+    if (!gameState) {
+        return {
+            success: false,
+            message: 'Game state is unavailable.'
+        };
+    }
+
+    const state = getOffseasonState(gameState);
+    const currentPhase = state.phase;
+
+    if (!Object.values(OFFSEASON_PHASES).includes(nextPhase)) {
+        return {
+            success: false,
+            message: `Unknown offseason phase: ${nextPhase}.`
+        };
+    }
+
+    if (
+        !OFFSEASON_PHASE_TRANSITIONS[currentPhase]?.includes(nextPhase)
+    ) {
+        return {
+            success: false,
+            message: `Cannot move from ${currentPhase} to ${nextPhase}.`
+        };
+    }
+
+    if (
+        currentPhase === OFFSEASON_PHASES.STAFF_REVIEW &&
+        state.staffReviewDay < COACH_CAROUSEL_DAYS &&
+        options.finishEarly !== true
+    ) {
+        return {
+            success: false,
+            message: 'Complete Day 2 of staff review or choose to finish early.'
+        };
+    }
+
+    if (
+        currentPhase === OFFSEASON_PHASES.RECRUITING &&
+        state.recruitingDay < FREE_AGENCY_RECRUITING_DAYS
+    ) {
+        return {
+            success: false,
+            message: 'Complete all seven recruiting days before finalizing the roster.'
+        };
+    }
+
+    // Resolve AI hiring only when the staff carousel closes.
+    // The player gets the existing two-day review window first.
+    if (
+        currentPhase === OFFSEASON_PHASES.STAFF_REVIEW &&
+        nextPhase === OFFSEASON_PHASES.DRAFT
+    ) {
+        const completedSeasonYear = Number(
+            state.completedSeasonYear
+        );
+
+        const carouselYear =
+            Number.isInteger(completedSeasonYear) &&
+            completedSeasonYear > 0
+                ? completedSeasonYear
+                : Number(gameState.year);
+
+        resolveCoachCarousel(gameState, carouselYear);
+    }
+
+    state.phase = nextPhase;
+
+    if (nextPhase === OFFSEASON_PHASES.DRAFT) {
+        gameState.draftCompleted = false;
+    }
+
+    if (nextPhase === OFFSEASON_PHASES.RECRUITING) {
+        state.recruitingDay = 1;
+        state.recruitingDays = FREE_AGENCY_RECRUITING_DAYS;
+        state.completed = false;
+        gameState.offseasonFACompleted = false;
+        gameState._faDay = 1;
+    }
+
+    if (nextPhase === OFFSEASON_PHASES.ROSTER_FINALIZATION) {
+        state.completed = false;
+    }
+
+    if (nextPhase === OFFSEASON_PHASES.REGULAR_SEASON) {
+        state.completed = true;
+        gameState.offseasonFACompleted = true;
+    }
+
+    return {
+        success: true,
+        previousPhase: currentPhase,
+        phase: nextPhase,
+        state
+    };
+}
+
+/**
+ * Advances the two-day coach carousel without forcing an immediate transition
+ * to the rookie draft.
+ */
+export function advanceOffseasonStaffReviewDay(gameState = game) {
+    if (!gameState) {
+        return {
+            success: false,
+            message: 'Game state is unavailable.'
+        };
+    }
+
+    const state = getOffseasonState(gameState);
+
+    if (state.phase !== OFFSEASON_PHASES.STAFF_REVIEW) {
+        return {
+            success: false,
+            message: 'Staff review is not currently active.'
+        };
+    }
+
+    state.staffReviewDay = Math.min(
+        COACH_CAROUSEL_DAYS,
+        state.staffReviewDay + 1
+    );
+
+    return {
+        success: true,
+        day: state.staffReviewDay,
+        days: COACH_CAROUSEL_DAYS,
+        readyForDraft: state.staffReviewDay >= COACH_CAROUSEL_DAYS,
+        state
+    };
+}
+
+/**
+ * Allows the player to skip the remaining carousel day and proceed.
+ */
+export function finishOffseasonStaffReviewEarly(gameState = game) {
+    return transitionOffseasonPhase(
+        OFFSEASON_PHASES.DRAFT,
+        gameState,
+        { finishEarly: true }
+    );
+}
+
+/**
+ * Advances recruiting by one day. After Day 7, the next advance finalizes
+ * recruiting and moves to roster finalization.
+ */
+export function advanceOffseasonRecruitingDay(gameState = game) {
+    if (!gameState) {
+        return {
+            success: false,
+            message: 'Game state is unavailable.'
+        };
+    }
+
+    const state = getOffseasonState(gameState);
+
+    if (state.phase !== OFFSEASON_PHASES.RECRUITING) {
+        return {
+            success: false,
+            message: 'Player recruiting is not currently active.'
+        };
+    }
+
+    if (state.recruitingDay < FREE_AGENCY_RECRUITING_DAYS) {
+        state.recruitingDay++;
+
+        gameState._faDay = state.recruitingDay;
+
+        return {
+            success: true,
+            day: state.recruitingDay,
+            days: FREE_AGENCY_RECRUITING_DAYS,
+            recruitingComplete: false,
+            state
+        };
+    }
+
+    const transitionResult = transitionOffseasonPhase(
+        OFFSEASON_PHASES.ROSTER_FINALIZATION,
+        gameState
+    );
+
+    return {
+        ...transitionResult,
+        recruitingComplete: transitionResult.success
+    };
+}
 
 const createEmptySeasonStats = () => ({
     passYards: 0,
@@ -2221,51 +2503,6 @@ export function processWeeklyPlayerGrowth() {
     });
 }
 
-function getOrInitializeStaffWeeklyWage(staffMember) {
-    if (!staffMember || typeof staffMember !== 'object') {
-        return 0;
-    }
-
-    // Preserve an existing wage, including wages from older saves or contracts.
-    const existingWage = Number(staffMember.weeklyWage);
-
-    if (
-        staffMember.weeklyWage !== undefined &&
-        staffMember.weeklyWage !== null &&
-        Number.isFinite(existingWage) &&
-        existingWage >= 0
-    ) {
-        return Math.round(existingWage * 100) / 100;
-    }
-
-    const ratings = Object.values(staffMember.ratings || {})
-        .map(Number)
-        .filter(value =>
-            Number.isFinite(value) &&
-            value >= 0 &&
-            value <= 100
-        );
-
-    const averageSkill = ratings.length > 0
-        ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length
-        : 50;
-
-    const rawExperience = Number(staffMember.experience);
-    const experience = Number.isFinite(rawExperience)
-        ? Math.max(0, Math.min(10, rawExperience))
-        : 0;
-
-    // Base wage + skill premium + capped experience premium.
-    const weeklyWage = Math.round(
-        (0.75 + averageSkill * 0.018 + experience * 0.03) * 100
-    ) / 100;
-
-    // Store the wage so it does not fluctuate with future rating changes.
-    staffMember.weeklyWage = weeklyWage;
-
-    return weeklyWage;
-}
-
 
 function recordFinanceLedgerEntry(
     team,
@@ -2425,46 +2662,13 @@ export function processEndOfWeek() {
                 const isUser = team.isPlayerControlled;
         const roster = getRosterObjects(team);
 
-        // Staff payroll begins when the user takes over in Year 5.
-        // Keep only the latest payroll marker; do not build an unbounded ledger.
-        const payrollKey = `${Number(game.year)}:${Number(game.currentWeek)}`;
+        // Coaches are volunteers; retaining staff creates no recurring expense.
+        // One-time recruiting gifts will be charged when an offer is accepted.
 
-        if (
-            Number(game.year) >= 5 &&
-            team.finances.staffPayrollKey !== payrollKey
-        ) {
-            // The work-plan system uses team.coaches as the active staff roster.
-            // Deduplicate by ID to avoid charging the same person twice.
-            const activeStaff = new Map();
-
-            for (const staffMember of (
-                Array.isArray(team.coaches) ? team.coaches : []
-            )) {
-                if (staffMember?.id == null) continue;
-
-                activeStaff.set(String(staffMember.id), staffMember);
-            }
-
-            const weeklyPayroll = [...activeStaff.values()].reduce(
-                (total, staffMember) =>
-                    total + getOrInitializeStaffWeeklyWage(staffMember),
-                0
-            );
-
-            const balance = Number(team.finances.balance);
-            team.finances.balance = Math.round(
-                ((Number.isFinite(balance) ? balance : 0) - weeklyPayroll) * 100
-            ) / 100;
-
-            team.finances.staffPayrollKey = payrollKey;
-            team.finances.lastStaffPayroll = Math.round(weeklyPayroll * 100) / 100;
-
-            if (isUser && game.gameLog && weeklyPayroll > 0) {
-                game.gameLog.push(
-                    `👥 Staff Payroll: -$${weeklyPayroll.toFixed(2)} for ${activeStaff.size} staff members.`
-                );
-            }
-        }
+        // Clear obsolete payroll markers from older saves.
+        // These no longer participate in the finance system.
+        delete team.finances.staffPayrollKey;
+        delete team.finances.lastStaffPayroll;
 
         // Weekly community allowance.
         // Player dues are collected only by processSeasonStartDues(),
@@ -2655,23 +2859,6 @@ export function processEndOfWeek() {
             }
         }
 
-        // Record payroll if it was processed for this exact week.
-        //const payrollKey =
-        //    `${Number(game.year)}:${Number(game.currentWeek)}`;
-
-        if (team.finances.staffPayrollKey === payrollKey) {
-            const payroll = Number(team.finances.lastStaffPayroll);
-
-            if (Number.isFinite(payroll) && payroll > 0) {
-                recordFinanceLedgerEntry(
-                    team,
-                    game,
-                    'staffPayroll',
-                    'Staff payroll',
-                    -payroll
-                );
-            }
-        }
     });
 
     // Resolve In-Season Weekly Bids
@@ -5353,7 +5540,37 @@ export function advanceToOffseason() {
             hofInductees: [],
             developmentResults: [],
             leavingPlayers: [],
-            pendingRetentions: []
+            pendingRetentions: [],
+            staffDepartures: [],
+            staffHappinessChanges: []
+        };
+    }
+
+    // The season rollover is only valid after all nine weeks have completed.
+    // This protects aging, development, departures, and other lifecycle work
+    // from being triggered by an accidental early call.
+    const completedWeekCount = Number(game.currentWeek);
+
+    if (
+        !Number.isFinite(completedWeekCount) ||
+        completedWeekCount < 9
+    ) {
+        console.warn(
+            '[Offseason] Rollover blocked: the regular season is not complete.',
+            {
+                year: game.year,
+                currentWeek: game.currentWeek
+            }
+        );
+
+        return {
+            retiredPlayers: [],
+            hofInductees: [],
+            developmentResults: [],
+            leavingPlayers: [],
+            pendingRetentions: [],
+            staffDepartures: [],
+            staffHappinessChanges: []
         };
     }
 
@@ -5384,7 +5601,9 @@ export function advanceToOffseason() {
             hofInductees: [],
             developmentResults: [],
             leavingPlayers: [],
-            pendingRetentions: []
+            pendingRetentions: [],
+            staffDepartures: [],
+            staffHappinessChanges: []
         };
     }
 
@@ -5395,6 +5614,8 @@ export function advanceToOffseason() {
     const leavingPlayers = [];
     const pendingRetentions = [];
     const pendingRetentionIds = new Set();
+    const staffDepartures = [];
+    const staffHappinessChanges = [];
 
     // Persist the queue with the game state so the interview flow can access it.
     game.pendingRetentions = pendingRetentions;
@@ -5567,6 +5788,36 @@ export function advanceToOffseason() {
 
     // Preserve the season being completed before advancing to the next year.
     const completedSeasonYear = game.year;
+
+    // Resolve coach retention before win/loss records are reset.
+    game.teams.forEach(team => {
+        if (!team) return;
+
+        const retentionResult = processCoachOffseasonRetention(
+            team,
+            game,
+            completedSeasonYear
+        );
+
+        if (!retentionResult?.processed) return;
+
+        staffHappinessChanges.push(
+            ...retentionResult.happinessChanges.map(change => ({
+                ...change,
+                teamId: team.id,
+                teamName: team.name
+            }))
+        );
+
+        staffDepartures.push(
+            ...retentionResult.departures.map(departure => ({
+                ...departure,
+                teamId: team.id,
+                teamName: team.name
+            }))
+        );
+    });
+
     game.year++;
 
     const teammateImproveChance = 0.15;
@@ -6311,16 +6562,43 @@ export function advanceToOffseason() {
             { length: prospectPoolSize },
             () => generatePlayer(8, 8, thisYearsClassModifiers)
         )
-            .map(player => ({
-                player,
-                score:
-                    (Number(
-                        calculateOverall(
-                            player,
-                            estimateBestPosition(player)
-                        )
-                    ) || 0) + Math.random() * 0.001
-            }))
+            .map(player => {
+                const bestPosition = estimateBestPosition(player);
+
+                // Current ability measures what the prospect can do today.
+                const currentOverall = Number(
+                    calculateOverall(player, bestPosition)
+                ) || 0;
+
+                // Talent attributes represent the prospect's underlying
+                // ceiling, before age-related development scaling.
+                const ceilingPlayer = player.talentAttributes
+                    ? {
+                        ...player,
+                        attributes: player.talentAttributes
+                    }
+                    : player;
+
+                const rawCeilingOverall = Number(
+                    calculateOverall(ceilingPlayer, bestPosition)
+                );
+
+                const ceilingOverall =
+                    Number.isFinite(rawCeilingOverall) &&
+                    rawCeilingOverall > 0
+                        ? rawCeilingOverall
+                        : currentOverall;
+
+                // Balance immediate ability against long-term upside.
+                const blendedScore =
+                    currentOverall * 0.65 +
+                    ceilingOverall * 0.35;
+
+                return {
+                    player,
+                    score: blendedScore + Math.random() * 0.001
+                };
+            })
             .sort((a, b) => b.score - a.score)
             .map(entry => entry.player);
 
@@ -6412,18 +6690,38 @@ export function advanceToOffseason() {
     game._faDay = 1;
     game._activeFaMarket = new Map();
     game.currentWeek = 0;
-    // AUTONOMOUS AI CAROUSEL: AI GMs manage staff, fire bad coaches, hire legends
-    game.teams.forEach(t => {
-        assignTeamCaptain(t);
-        if (!t.isPlayerControlled) {
-            aiManageTeamStaff(t, game);
-        }
+
+    game.teams.forEach(team => {
+        assignTeamCaptain(team);
     });
 
-    // Mark completion only after all offseason phases have finished.
+    // Start the new offseason with the staff carousel.
+    game.offseasonState = {
+        seasonYear: Number(game.year) || null,
+        completedSeasonYear,
+        phase: OFFSEASON_PHASES.STAFF_REVIEW,
+        staffReviewDay: 1,
+        staffReviewDays: COACH_CAROUSEL_DAYS,
+        recruitingDay: 0,
+        recruitingDays: FREE_AGENCY_RECRUITING_DAYS,
+        completed: false,
+        staffDepartures,
+        staffHappinessChanges
+    };
+
+    // Mark rollover complete; staff review, draft, and recruiting are
+    // separate phases and must not rerun the season lifecycle.
     game._offseasonCompletedYear = completedSeasonYear;
 
-    return { retiredPlayers, hofInductees, developmentResults, leavingPlayers, pendingRetentions };
+    return {
+        retiredPlayers,
+        hofInductees,
+        developmentResults,
+        leavingPlayers,
+        pendingRetentions,
+        staffDepartures,
+        staffHappinessChanges
+    };
 }
 
 export function playerCut(playerId) {

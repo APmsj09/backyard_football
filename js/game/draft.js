@@ -15,9 +15,82 @@ import {
 
 import { isPlayerViableForPosition } from './depth_chart.js';
 import { offenseFormations, defenseFormations } from '../data.js';
-import { addPlayerToTeam, getCurrentRosterLimit } from './season.js';
+import {
+    addPlayerToTeam,
+    getCurrentRosterLimit,
+    OFFSEASON_PHASES,
+    transitionOffseasonPhase
+} from './season.js';
 
 export const DRAFT_ROUNDS_ROOKIE = 3;
+
+const INELIGIBLE_DRAFT_STATUSES = new Set([
+    'retired',
+    'departed',
+    'temporary'
+]);
+
+/**
+ * Authoritative draft eligibility check.
+ *
+ * Year 1 is the inaugural draft and retains its separate eligibility rule.
+ * Year 2 onward requires a documented, completed Pee Wee career.
+ */
+export function isEligibleDraftProspect(prospect, year = game?.year) {
+    if (!prospect || prospect.teamId) return false;
+
+    // Preserve the inaugural-draft rules.
+    if (Number(year) === 1) {
+        return (
+            Number(prospect.age) >= 11 &&
+            prospect.personality?.entersDraft !== false
+        );
+    }
+
+    const prospectAge = Number(prospect.age);
+
+    if (
+        prospect.lifecycle !== 'draft_eligible' ||
+        !Number.isInteger(prospectAge) ||
+        prospectAge < 12 ||
+        prospect.personality?.entersDraft === false ||
+        INELIGIBLE_DRAFT_STATUSES.has(prospect.status?.type)
+    ) {
+        return false;
+    }
+
+    const entryAge = Number(prospect.youthEntryAge);
+    const seasonsPlayed = Number(prospect.youthSeasonsPlayed);
+
+    if (
+        !Number.isInteger(entryAge) ||
+        entryAge < 8 ||
+        entryAge > 11 ||
+        !Number.isInteger(seasonsPlayed) ||
+        seasonsPlayed < 0
+    ) {
+        return false;
+    }
+
+    const requiredSeasons = 12 - entryAge;
+    const youthHistory = Array.isArray(prospect.youthSeasonHistory)
+        ? prospect.youthSeasonHistory
+        : [];
+
+    const documentedSeasonYears = new Set(
+        youthHistory
+            .filter(season =>
+                season?.year != null &&
+                Number.isInteger(Number(season.year))
+            )
+            .map(season => Number(season.year))
+    ).size;
+
+    return (
+        seasonsPlayed >= requiredSeasons &&
+        documentedSeasonYears >= requiredSeasons
+    );
+}
 
 const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const DEFENSIVE_POSITION_FITS = ['DL', 'LB', 'DB'];
@@ -618,7 +691,9 @@ export function setupDraft() {
 
     if (game.year === 1) {
         const sortedTeams = [...mainTeams].sort(() => 0.5 - Math.random());
-        game.draftClass = game.players.filter(p => !p.teamId && p.age >= 11 && p.personality?.entersDraft !== false);
+        game.draftClass = game.players.filter(
+            prospect => isEligibleDraftProspect(prospect, game.year)
+        );
 
         mainTeams.forEach(t => t.draftNeeds = Math.max(0, rosterLimit - (t.roster?.length || 0)));
         const maxNeeds = Math.max(0, ...mainTeams.map(t => t.draftNeeds || 0));
@@ -649,55 +724,9 @@ export function setupDraft() {
             ? game.draftClass
             : [];
 
-        game.draftClass = incomingDraftClass.filter(prospect => {
-            const prospectAge = Number(prospect?.age);
-
-            if (
-                !prospect ||
-                prospect.teamId ||
-                prospect.lifecycle !== 'draft_eligible' ||
-                !Number.isInteger(prospectAge) ||
-                prospectAge < 12 ||
-                prospect.personality?.entersDraft === false ||
-                ['retired', 'departed', 'temporary'].includes(
-                    prospect.status?.type
-                )
-            ) {
-                return false;
-            }
-
-            const entryAge = Number(prospect.youthEntryAge);
-            const seasonsPlayed = Number(prospect.youthSeasonsPlayed);
-            const youthHistory = Array.isArray(prospect.youthSeasonHistory)
-                ? prospect.youthSeasonHistory
-                : [];
-
-            if (
-                !Number.isInteger(entryAge) ||
-                entryAge < 8 ||
-                entryAge > 11 ||
-                !Number.isInteger(seasonsPlayed) ||
-                seasonsPlayed < 0
-            ) {
-                return false;
-            }
-
-            const requiredSeasons = 12 - entryAge;
-
-            const documentedSeasonYears = new Set(
-                youthHistory
-                    .filter(season =>
-                        season?.year != null &&
-                        Number.isInteger(Number(season.year))
-                    )
-                    .map(season => Number(season.year))
-            ).size;
-
-            return (
-                seasonsPlayed >= requiredSeasons &&
-                documentedSeasonYears >= requiredSeasons
-            );
-        });
+        game.draftClass = incomingDraftClass.filter(
+            prospect => isEligibleDraftProspect(prospect, game.year)
+        );
 
         // Unqualified legacy or filler prospects remain in the player pool
         // as free agents rather than being silently admitted to the draft.
@@ -729,7 +758,7 @@ export function simulateAIPick(team) {
     if (!team || !game || (team.roster?.length || 0) >= getCurrentRosterLimit(game)) return null;
 
     const availableProspects = (game.draftClass || []).filter(
-        prospect => prospect && !prospect.teamId
+        prospect => isEligibleDraftProspect(prospect, game.year)
     );
 
     if (availableProspects.length === 0) return null;
@@ -784,7 +813,7 @@ export function simulateHistoricalDraft(yearNum) {
         }
         game.currentPick++;
     }
-    completeDraft();
+    completeDraft({ transitionToRecruiting: false });
 
     if (game.history && game.history.seasons) {
         const season = game.history.seasons.find(s => s.year === yearNum);
@@ -796,7 +825,9 @@ export function simulateHistoricalDraft(yearNum) {
 /**
  * Concludes the draft: undrafted rookies become active street Free Agents.
  */
-export function completeDraft() {
+export function completeDraft({
+    transitionToRecruiting = true
+} = {}) {
     if (!game || !game.draftClass) return;
 
     // Remaining undrafted prospects hit neighborhood free agency
@@ -805,5 +836,27 @@ export function completeDraft() {
             prospect.lifecycle = 'active';
         }
     });
+
     game.draftClass = [];
+
+    // Historical drafts must not advance the live offseason.
+    // A live draft proceeds to the seven-day recruiting event.
+    if (
+        transitionToRecruiting &&
+        game.offseasonState?.phase === OFFSEASON_PHASES.DRAFT
+    ) {
+        const transitionResult = transitionOffseasonPhase(
+            OFFSEASON_PHASES.RECRUITING,
+            game
+        );
+
+        if (!transitionResult.success) {
+            addMessage(
+                'Offseason Transition Error',
+                transitionResult.message,
+                false,
+                game
+            );
+        }
+    }
 }

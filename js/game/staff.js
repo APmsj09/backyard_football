@@ -97,11 +97,58 @@ function createStaffAvailability(role = 'coach') {
 }
 
 /**
+ * Adds persistent personality values used by offseason staff negotiations.
+ * Older staff records receive these once; existing values are preserved.
+ */
+export function ensureStaffNegotiationProfile(staff) {
+    if (!staff || typeof staff !== 'object') return null;
+
+    if (
+        staff.happiness == null ||
+        !Number.isFinite(Number(staff.happiness))
+    ) {
+        staff.happiness = getRandomInt(45, 85);
+    } else {
+        staff.happiness = Math.max(
+            0,
+            Math.min(100, Number(staff.happiness))
+        );
+    }
+
+    if (
+        staff.ego == null ||
+        !Number.isFinite(Number(staff.ego))
+    ) {
+        let ego = getRandomInt(25, 80);
+        const personality = staff.biases?.personality?.name;
+
+        if (personality === "Peaked in '94") {
+            ego += 12;
+        } else if (personality === 'Old-School Disciplinarian') {
+            ego += 5;
+        } else if (personality === "Players' Coach") {
+            ego -= 8;
+        }
+
+        staff.ego = Math.max(15, Math.min(95, ego));
+    } else {
+        staff.ego = Math.max(
+            15,
+            Math.min(95, Number(staff.ego))
+        );
+    }
+
+    return staff;
+}
+
+/**
  * Adds availability to older staff records without overwriting profiles
  * already stored in a save.
  */
 export function ensureStaffAvailability(staff) {
     if (!staff) return null;
+
+    ensureStaffNegotiationProfile(staff);
 
     const existingHours = Number(staff.availability?.weeklyHours);
 
@@ -278,6 +325,20 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
     else if (personality.name === "Players' Coach") stubbornness = 0.58;
     else if (personality.name === "Analytical Savant") stubbornness = 0.70;
 
+    // Persistent traits used by staff recruitment negotiations.
+    const happiness = getRandomInt(45, 85);
+
+    let ego = getRandomInt(25, 80);
+    if (personality.name === "Peaked in '94") {
+        ego += 12;
+    } else if (personality.name === 'Old-School Disciplinarian') {
+        ego += 5;
+    } else if (personality.name === "Players' Coach") {
+        ego -= 8;
+    }
+
+    ego = Math.max(15, Math.min(95, ego));
+
     return {
         id: crypto.randomUUID(),
         name: formerPlayer ? formerPlayer.name : `${firstName} ${lastName}`,
@@ -290,6 +351,10 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
         stipendDemand: 0, // Calculated dynamically by reputation
         weeksUnemployed: 0,
         stubbornness,
+
+        // Personal outlook affecting recruitment negotiations
+        happiness,
+        ego,
 
         // Personal commitment outside the community league
         availability,
@@ -426,12 +491,11 @@ export function ensureCoachDevelopmentProfile(coach) {
     for (const skill of COACH_DEVELOPMENT_SKILLS) {
         const rating = Number(coach.ratings[skill]);
         const current = Number.isFinite(rating)
-            ? Math.max(0, Math.min(99, rating))
+            ? Math.max(0, Math.min(COACH_SKILL_HARD_CAP, rating))
             : 50;
 
-        if (!Number.isFinite(Number(coach.ratings[skill]))) {
-            coach.ratings[skill] = current;
-        }
+        // Normalize existing ratings as well as initializing missing ones.
+        coach.ratings[skill] = current;
 
         const existingCeiling = Number(skillCeilings[skill]);
 
@@ -461,6 +525,18 @@ export function ensureCoachDevelopmentProfile(coach) {
         typeof development.progressBySkill === 'object'
             ? development.progressBySkill
             : {};
+
+    // Preserve valid accumulated progress, including fractional progress.
+    // Reset only invalid or negative values so corrupted state cannot
+    // produce unexpected development results.
+    for (const skill of COACH_DEVELOPMENT_SKILLS) {
+        const progress = Number(development.progressBySkill[skill]);
+
+        development.progressBySkill[skill] =
+            Number.isFinite(progress) && progress >= 0
+                ? progress
+                : 0;
+    }
 
     // Younger coaches generally learn faster; experience will be handled
     // separately by the weekly development resolver.
@@ -657,7 +733,11 @@ export function recordCoachDevelopmentOutcome(
     let pointsAdded = 0;
 
     for (const skill of skills) {
-        const currentRating = Number(coach.ratings?.[skill]) || 50;
+        const ratingValue = Number(coach.ratings?.[skill]);
+        const currentRating = Number.isFinite(ratingValue)
+            ? ratingValue
+            : 50;
+
         const ceiling = Number(
             development.skillCeilings?.[skill]
         );
@@ -774,7 +854,10 @@ function getCoachLearningStyleMultiplier(coach, skill) {
 }
 
 function getCoachMentorMultiplier(coach, skill, coaches, hoursByCoach) {
-    const currentRating = Number(coach.ratings?.[skill]) || 50;
+    const currentRatingValue = Number(coach.ratings?.[skill]);
+    const currentRating = Number.isFinite(currentRatingValue)
+        ? currentRatingValue
+        : 50;
 
     const mentors = coaches.filter(mentor => {
         if (
@@ -784,11 +867,15 @@ function getCoachMentorMultiplier(coach, skill, coaches, hoursByCoach) {
             return false;
         }
 
-        const mentorTeaching =
-            Number(mentor.ratings?.teaching) || 50;
+        const teachingValue = Number(mentor.ratings?.teaching);
+        const mentorTeaching = Number.isFinite(teachingValue)
+            ? teachingValue
+            : 50;
 
-        const mentorSkill =
-            Number(mentor.ratings?.[skill]) || 50;
+        const mentorSkillValue = Number(mentor.ratings?.[skill]);
+        const mentorSkill = Number.isFinite(mentorSkillValue)
+            ? mentorSkillValue
+            : 50;
 
         const mentorWork =
             hoursByCoach.get(String(mentor.id));
@@ -930,8 +1017,10 @@ export function processWeeklyCoachDevelopment(team, year, week) {
             const hoursPerSkill = taskHours / skillKeys.length;
 
             for (const skill of skillKeys) {
-                const currentRating =
-                    Number(coach.ratings?.[skill]) || 50;
+                const ratingValue = Number(coach.ratings?.[skill]);
+                const currentRating = Number.isFinite(ratingValue)
+                    ? ratingValue
+                    : 50;
 
                 const ceiling = Number(
                     development.skillCeilings?.[skill]
@@ -999,8 +1088,10 @@ export function processWeeklyCoachDevelopment(team, year, week) {
                 development.progressBySkill[skill]
             ) || 0;
 
-            const currentRating =
-                Number(coach.ratings?.[skill]) || 50;
+            const ratingValue = Number(coach.ratings?.[skill]);
+            const currentRating = Number.isFinite(ratingValue)
+                ? ratingValue
+                : 50;
 
             const ceiling = Math.min(
                 COACH_SKILL_HARD_CAP,
@@ -1045,7 +1136,7 @@ export function processWeeklyCoachDevelopment(team, year, week) {
                     hours: workload[task]
                 }));
 
-                        const historyEntry = {
+            const historyEntry = {
                 year,
                 week,
                 skill,
@@ -1055,7 +1146,8 @@ export function processWeeklyCoachDevelopment(team, year, week) {
                     0,
                     development.careerGrowthBudget -
                     development.growthPointsUsed
-                )
+                ),
+                contributingTasks
             };
 
             if (!Array.isArray(development.history)) {
@@ -1123,7 +1215,24 @@ export function ensureTeamCoachingStaff(team) {
         if (npcCoaches.length >= 3) break;
     }
 
-    while (npcCoaches.length < 3) {
+    // Preserve intentional vacancies created by the offseason carousel.
+    // Legacy saves without this field continue to fill missing coach slots.
+    const recordedVacancies = Math.max(
+        0,
+        Math.min(
+            3,
+            Math.floor(Number(team.coachingVacancies) || 0)
+        )
+    );
+
+    team.coachingVacancies = Math.min(
+        recordedVacancies,
+        Math.max(0, 3 - npcCoaches.length)
+    );
+
+    const targetNpcCoachCount = 3 - team.coachingVacancies;
+
+    while (npcCoaches.length < targetNpcCoachCount) {
         const coach = generateStaffMember('coach', 30, 55);
         coach.teamId = team.id;
         npcCoaches.push(coach);
@@ -1211,6 +1320,382 @@ export function ensureTeamCoachingStaff(team) {
 
     return team.coaches;
 }
+
+export function processCoachOffseasonRetention(
+    team,
+    gameState,
+    year = gameState?.year,
+    random = Math.random
+) {
+    if (!team) {
+        return {
+            processed: false,
+            happinessChanges: [],
+            departures: []
+        };
+    }
+
+    const seasonYear = Number(year);
+
+    if (!Number.isInteger(seasonYear)) {
+        return {
+            processed: false,
+            happinessChanges: [],
+            departures: []
+        };
+    }
+
+    // Prevent duplicate offseason processing.
+    if (Number(team.coachRetentionResolvedYear) === seasonYear) {
+        return {
+            processed: false,
+            alreadyProcessed: true,
+            happinessChanges: [],
+            departures: []
+        };
+    }
+
+    const coaches = ensureTeamCoachingStaff(team)
+        .filter(coach => coach?.id != null && !coach.isUserCoach);
+
+    const wins = Math.max(0, Number(team.wins) || 0);
+    const losses = Math.max(0, Number(team.losses) || 0);
+    const gamesPlayed = wins + losses;
+
+    const winPct = gamesPlayed > 0
+        ? wins / gamesPlayed
+        : null;
+
+    // Use explicit expectation data when available. Older saves without
+    // expectation fields continue using the established win-percentage model.
+    const expectedWinsCandidates = [
+        team.preseasonExpectedWins,
+        team.expectedWins,
+        team.seasonExpectations?.expectedWins,
+        team.expectations?.expectedWins
+    ];
+
+    const expectedWinsValue = expectedWinsCandidates.find(value =>
+        value !== null &&
+        value !== undefined &&
+        Number.isFinite(Number(value))
+    );
+
+    const expectedWins = expectedWinsValue !== undefined
+        ? Number(expectedWinsValue)
+        : null;
+
+    const expectedWinPctCandidates = [
+        team.preseasonExpectedWinPct,
+        team.expectedWinPct,
+        team.seasonExpectations?.expectedWinPct,
+        team.expectations?.winPct
+    ];
+
+    const expectedWinPctValue = expectedWinPctCandidates.find(value =>
+        value !== null &&
+        value !== undefined &&
+        Number.isFinite(Number(value))
+    );
+
+    const expectedWinPct = expectedWinPctValue !== undefined
+        ? Math.max(0, Math.min(1, Number(expectedWinPctValue)))
+        : null;
+
+    const happinessChanges = [];
+    const departures = [];
+
+    team.coachRetentionResolvedYear = seasonYear;
+
+    for (const coach of coaches) {
+        ensureStaffNegotiationProfile(coach);
+
+        const previousHappiness = Number(coach.happiness) || 0;
+        const ego = Number(coach.ego) || 50;
+
+        let happinessChange = 0;
+
+        // Base adjustment for the team's actual season performance.
+        if (gamesPlayed >= 4 && winPct !== null) {
+            if (winPct >= 0.67) {
+                happinessChange = 5;
+            } else if (winPct >= 0.50) {
+                happinessChange = 3;
+            } else if (winPct >= 0.34) {
+                happinessChange = 1;
+            } else if (winPct >= 0.20) {
+                happinessChange = -4;
+            } else {
+                happinessChange = -7;
+            }
+        }
+
+        // Reward exceeding expectations and penalize falling short.
+        // Keep this adjustment modest so actual performance still matters.
+        let expectationAdjustment = 0;
+
+        if (gamesPlayed >= 4) {
+            if (expectedWins !== null) {
+                const winDifference = wins - expectedWins;
+
+                if (winDifference >= 2) {
+                    expectationAdjustment = 2;
+                } else if (winDifference <= -2) {
+                    expectationAdjustment = -3;
+                } else if (winDifference >= 1) {
+                    expectationAdjustment = 1;
+                } else if (winDifference <= -1) {
+                    expectationAdjustment = -1;
+                }
+            } else if (expectedWinPct !== null && winPct !== null) {
+                const pctDifference = winPct - expectedWinPct;
+
+                if (pctDifference >= 0.15) {
+                    expectationAdjustment = 2;
+                } else if (pctDifference <= -0.15) {
+                    expectationAdjustment = -3;
+                } else if (pctDifference >= 0.05) {
+                    expectationAdjustment = 1;
+                } else if (pctDifference <= -0.05) {
+                    expectationAdjustment = -1;
+                }
+            }
+        }
+
+        // Determine the coach's primary responsibility from actual workload.
+        // If no assignments exist, fall back to the coach's strongest specialty.
+        const roleHours = new Map();
+
+        for (const assignment of team.staffWorkPlan?.assignments || []) {
+            if (
+                String(assignment?.coachId) !== String(coach.id) ||
+                !['scouting', 'training', 'offensePrep', 'defensePrep'].includes(assignment?.task)
+            ) {
+                continue;
+            }
+
+            const hours = Number(assignment.hours);
+
+            roleHours.set(
+                assignment.task,
+                (roleHours.get(assignment.task) || 0) +
+                    (Number.isFinite(hours) ? Math.max(0, hours) : 0)
+            );
+        }
+
+        const roles = [
+            'scouting',
+            'training',
+            'offensePrep',
+            'defensePrep'
+        ];
+
+        let coachRole = null;
+
+        if (roleHours.size > 0) {
+            coachRole = [...roleHours.entries()]
+                .sort((a, b) => b[1] - a[1])[0][0];
+        } else {
+            coachRole = roles
+                .map(role => ({
+                    role,
+                    fit: calculateCoachRoleFit(coach, role)
+                }))
+                .sort((a, b) => b.fit - a.fit)[0].role;
+        }
+
+        const roleFit = calculateCoachRoleFit(coach, coachRole);
+
+        // Role fit should matter, but remain secondary to season results.
+        let roleFitAdjustment = 0;
+
+        if (roleFit >= 80) {
+            roleFitAdjustment = 2;
+        } else if (roleFit < 40) {
+            roleFitAdjustment = -2;
+        }
+
+        happinessChange += expectationAdjustment + roleFitAdjustment;
+
+        coach.happiness = Math.max(
+            0,
+            Math.min(100, previousHappiness + happinessChange)
+        );
+
+        if (coach.happiness !== previousHappiness) {
+            happinessChanges.push({
+                coachId: coach.id,
+                coachName: coach.name,
+                previousHappiness,
+                happiness: coach.happiness,
+                change: coach.happiness - previousHappiness,
+                expectationAdjustment,
+                roleFitAdjustment
+            });
+        }
+
+        // Life events remain rare and independent of team performance.
+        const lifeEvent = random() < 0.005;
+
+        // Dissatisfaction is the primary driver of voluntary departures.
+        const unhappinessRisk = coach.happiness < 55
+            ? (55 - coach.happiness) * 0.006
+            : 0;
+
+        // Poor results are more concerning when the team also falls short
+        // of its stated expectations.
+        let poorSeasonRisk = 0;
+
+        if (gamesPlayed >= 4 && winPct !== null) {
+            const clearlyBelowExpectations =
+                expectedWins !== null
+                    ? wins <= expectedWins - 2
+                    : expectedWinPct !== null
+                        ? winPct <= expectedWinPct - 0.15
+                        : false;
+
+            if (winPct < 0.30) {
+                poorSeasonRisk = clearlyBelowExpectations
+                    ? 0.05
+                    : 0.025;
+            } else if (clearlyBelowExpectations) {
+                poorSeasonRisk = 0.02;
+            }
+        }
+
+        // A high-ego coach is more likely to seek a change when dissatisfied.
+        const ambitionRisk =
+            coach.happiness < 65 && ego >= 80
+                ? 0.02
+                : 0;
+
+        // Poor role fit can contribute to a departure, but only when the
+        // coach is also unhappy or has a strong reason to seek a change.
+        const roleFitDepartureRisk =
+            roleFit < 40 && coach.happiness < 70
+                ? 0.02
+                : 0;
+
+        const voluntaryDepartureRisk = Math.min(
+            0.25,
+            unhappinessRisk +
+            poorSeasonRisk +
+            ambitionRisk +
+            roleFitDepartureRisk
+        );
+
+        const voluntaryDeparture = !lifeEvent &&
+            random() < voluntaryDepartureRisk;
+
+        if (!lifeEvent && !voluntaryDeparture) continue;
+
+        let reason;
+
+        if (lifeEvent) {
+            const lifeEventReasons = [
+                'a family relocation',
+                'family responsibilities',
+                'another volunteer commitment'
+            ];
+
+            const eventIndex = Math.min(
+                lifeEventReasons.length - 1,
+                Math.floor(random() * lifeEventReasons.length)
+            );
+
+            reason = lifeEventReasons[eventIndex];
+        } else if (roleFit < 40) {
+            reason = 'poor fit with the current role';
+        } else if (
+            expectedWins !== null &&
+            gamesPlayed >= 4 &&
+            wins <= expectedWins - 2
+        ) {
+            reason = 'disappointment with the team falling short of expectations';
+        } else {
+            reason = 'dissatisfaction with the current role';
+        }
+
+        const coachId = String(coach.id);
+
+        team.coaches = (Array.isArray(team.coaches)
+            ? team.coaches
+            : []
+        ).filter(member =>
+            String(member?.id) !== coachId
+        );
+
+        team.coachingVacancies = Math.min(
+            3,
+            Math.max(
+                0,
+                Math.floor(Number(team.coachingVacancies) || 0)
+            ) + 1
+        );
+
+        coach.teamId = null;
+        coach.weeksUnemployed = 0;
+        coach.lastOffseasonDeparture = {
+            year: seasonYear,
+            reason
+        };
+
+        if (gameState) {
+            if (!Array.isArray(gameState.availableStaff)) {
+                gameState.availableStaff = [];
+            }
+
+            const alreadyAvailable = gameState.availableStaff.some(
+                candidate =>
+                    String(candidate?.id) === coachId
+            );
+
+            if (!alreadyAvailable) {
+                gameState.availableStaff.push(coach);
+            }
+        }
+
+        // Remove work assignments for the departing coach.
+        if (Array.isArray(team.staffWorkPlan?.assignments)) {
+            team.staffWorkPlan.assignments =
+                team.staffWorkPlan.assignments.filter(assignment =>
+                    String(assignment?.coachId) !== coachId
+                );
+        }
+
+        departures.push({
+            coachId: coach.id,
+            coachName: coach.name,
+            reason,
+            lifeEvent
+        });
+    }
+
+    if (departures.length > 0) {
+        // Do not automatically fill vacancies; staff review handles hiring.
+        const remainingCoaches = team.coaches.filter(
+            coach => coach?.id != null && !coach.isUserCoach
+        );
+
+        if (!team.staff) team.staff = {};
+
+        team.staff.coach = remainingCoaches[0] || null;
+        team.staff.scout = remainingCoaches[1] || null;
+        team.staff.trainer = remainingCoaches[2] || null;
+        team.coach = remainingCoaches[0] || null;
+    }
+
+    return {
+        processed: true,
+        seasonYear,
+        winPct,
+        expectedWins,
+        expectedWinPct,
+        happinessChanges,
+        departures
+    };
+}
+
 
 function buildDefaultAutomatedStaffAssignments(coaches) {
     const tasks = [
@@ -1807,180 +2292,446 @@ export function checkRetiredPlayerToCoach(player) {
  * Autonomous AI Front Office management: fires underperforming coaches,
  * poaches winning assistants, and hires available candidates/retired players.
  */
+/**
+ * Legacy compatibility hook.
+ *
+ * AI staff decisions now belong to the offseason Coach Carousel rather
+ * than automatic firing and replacement during season rollover.
+ *
+ * Voluntary departures remain the responsibility of
+ * processCoachOffseasonRetention(). AI retention, hiring, and poaching
+ * decisions will be resolved during the staff-review phase.
+ */
 export function aiManageTeamStaff(team, gameState) {
     if (!team || team.isPlayerControlled) return;
 
-    const currentCoaches = ensureTeamCoachingStaff(team);
-    if (currentCoaches.length === 0) return;
+    // Intentionally do not automatically fire or hire coaches here.
+    // The Coach Carousel will own AI staffing decisions.
+}
 
-    const coach =
-        currentCoaches.find(member =>
-            member?.id != null &&
-            String(member.id) === String(team.staff?.coach?.id)
-        ) || currentCoaches[0];
 
-    if (!coach) return;
+/**
+ * Rates a coach's suitability for a specific responsibility.
+ * Returns a normalized 0-100 score based on the existing ratings schema.
+ */
+export function calculateCoachRoleFit(coach, role) {
+    if (!coach) return 50;
 
-    if (!team.staff) team.staff = {};
+    const ratings = coach.ratings || {};
 
-    // Maintain the legacy reference while migration is underway.
-    team.staff.coach = coach;
+    const rating = key => {
+        const value = Number(ratings[key]);
 
-    const coachSlot = currentCoaches.findIndex(
-        member => String(member.id) === String(coach.id)
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, value))
+            : 50;
+    };
+
+    const roleSkills = {
+        scouting: [
+            ['evalPhysicals', 1],
+            ['evalTechnique', 1],
+            ['evalCharacter', 1]
+        ],
+        training: [
+            ['teaching', 2],
+            ['practiceDiscipline', 1],
+            ['conditioning', 1]
+        ],
+        offensePrep: [
+            ['offSchemeMastery', 2],
+            ['gameplanInstinct', 1],
+            ['inGameAdjustments', 1]
+        ],
+        defensePrep: [
+            ['defSchemeMastery', 2],
+            ['gameplanInstinct', 1],
+            ['inGameAdjustments', 1]
+        ],
+        general: [
+            ['gameplanInstinct', 1],
+            ['inGameAdjustments', 1],
+            ['teaching', 1]
+        ]
+    };
+
+    const skills = roleSkills[role] || roleSkills.general;
+
+    let weightedTotal = 0;
+    let totalWeight = 0;
+
+    for (const [skill, weight] of skills) {
+        weightedTotal += rating(skill) * weight;
+        totalWeight += weight;
+    }
+
+    return totalWeight > 0
+        ? Math.round(weightedTotal / totalWeight)
+        : 50;
+}
+
+/**
+ * Resolves AI coaching vacancies through a shared offseason market.
+ *
+ * Each candidate can be signed by only one team. Teams evaluate candidates
+ * using staff skills, scheme fit, GM priorities, league tier, and affordability.
+ * Player-controlled teams retain their vacancies for user-directed hiring.
+ */
+export function resolveCoachCarousel(
+    gameState,
+    resolvedYear = gameState?.year
+) {
+    if (
+        !gameState ||
+        !Array.isArray(gameState.teams) ||
+        !Number.isInteger(Number(resolvedYear))
+    ) {
+        return {
+            resolved: false,
+            hires: [],
+            vacanciesRemaining: 0
+        };
+    }
+
+    const year = Number(resolvedYear);
+
+    // Prevent the same offseason carousel from resolving twice.
+    if (Number(gameState.coachCarouselResolvedYear) === year) {
+        return {
+            resolved: false,
+            alreadyResolved: true,
+            hires: [],
+            vacanciesRemaining: 0
+        };
+    }
+
+    if (!Array.isArray(gameState.availableStaff)) {
+        gameState.availableStaff = [];
+    }
+
+    const getNpcCoaches = team =>
+        (Array.isArray(team?.coaches) ? team.coaches : [])
+            .filter(coach => coach?.id != null && !coach.isUserCoach);
+
+    const getVacancies = team => {
+        const stored = Number(team.coachingVacancies);
+
+        if (Number.isFinite(stored)) {
+            return Math.max(0, Math.min(3, Math.floor(stored)));
+        }
+
+        return Math.max(0, 3 - getNpcCoaches(team).length);
+    };
+
+    const teams = gameState.teams
+        .filter(team =>
+            team &&
+            team.leagueType === 'main' &&
+            !team.isPlayerControlled &&
+            getVacancies(team) > 0
+        )
+        // Prioritize teams with the greatest need, then Tier 1 teams.
+        .sort((a, b) =>
+            getVacancies(b) - getVacancies(a) ||
+            (Number(a.tier) || 2) - (Number(b.tier) || 2)
+        );
+
+    const hires = [];
+
+    // Treat team rosters as the source of truth for current employment.
+    // This prevents stale teamId values from making an employed coach
+    // appear available in the shared market.
+    const employedCoachIds = new Set(
+        gameState.teams.flatMap(team =>
+            (Array.isArray(team?.coaches) ? team.coaches : [])
+                .filter(coach =>
+                    coach?.id != null &&
+                    !coach.isUserCoach
+                )
+                .map(coach => String(coach.id))
+        )
     );
 
-    const wins = team.wins || 0;
-    const roster = getRosterObjects(team);
-    const teamOvr = roster.length > 0 ? Math.round(roster.reduce((sum, p) => sum + (calculateOverall(p, p.pos || 'ATH')), 0) / roster.length) : 50;
-    const avgHappiness = roster.length > 0 ? Math.round(roster.reduce((sum, p) => sum + (p.expectations?.happiness || 100), 0) / roster.length) : 100;
-    const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+    const rating = (coach, key) => {
+        const value = Number(coach?.ratings?.[key]);
 
-    let shouldFireCoach = false;
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, value))
+            : 50;
+    };
 
-    // 1. PERFORMANCE VS EXPECTATIONS
-    // Expected wins scale with roster talent (55 OVR expects ~4.5 wins; 65+ OVR expects 6+ wins)
-    const expectedWins = Math.max(2, Math.round((teamOvr - 40) * 0.25));
-    const winDeficit = expectedWins - wins;
+    const getCandidateEvaluation = (team, candidate) => {
+        const rep = Math.round(
+            (
+                rating(candidate, 'offSchemeMastery') +
+                rating(candidate, 'defSchemeMastery') +
+                rating(candidate, 'teaching')
+            ) / 3
+        );
 
-    if (team.tier === 1 && (wins <= 2 || winDeficit >= 3)) {
-        shouldFireCoach = true; // High-expectations failure
-    } else if (team.tier === 2 && wins <= 1 && winDeficit >= 2) {
-        shouldFireCoach = Math.random() < 0.70;
-    }
+        const weeksUnemployed = Math.max(
+            0,
+            Number(candidate.weeksUnemployed) || 0
+        );
 
-    // 2. LOCKER ROOM MORALE REVOLT
-    if (avgHappiness < 42 && wins < 4) {
-        shouldFireCoach = true; // Lost the team
-    }
+        const stubbornness = Math.max(
+            0.1,
+            Math.min(1, Number(candidate.stubbornness) || 0.75)
+        );
 
-    // WIN_NOW GMs have zero patience
-    if (gmDirective === 'WIN_NOW' && wins < 5 && Math.random() < 0.50) {
-        shouldFireCoach = true;
-    }
+        const demandDecay = Math.pow(
+            stubbornness,
+            weeksUnemployed
+        );
 
-    if (shouldFireCoach) {
-        coach.teamId = null;
-        coach.weeksUnemployed = 0;
+        const requiredStipend = Math.max(
+            0,
+            Math.round(Math.max(0, (rep - 52) * 0.45) * demandDecay)
+        );
 
-        if (!Array.isArray(gameState?.availableStaff)) {
-            if (gameState) gameState.availableStaff = [];
+        const requiredTokens =
+            rep >= 75 && weeksUnemployed < 3 ? 1 : 0;
+
+        const teamBalanceValue = Number(team.finances?.balance);
+        const teamBalance = Number.isFinite(teamBalanceValue)
+            ? Math.max(0, teamBalanceValue)
+            : 5;
+
+        const teamTokensValue = Number(team.socialProfile?.favorTokens);
+        const teamTokens = Number.isFinite(teamTokensValue)
+            ? Math.max(0, teamTokensValue)
+            : 0;
+
+        const canAfford =
+            teamBalance >= requiredStipend &&
+            teamTokens >= requiredTokens;
+
+        const roleFit = [
+            calculateCoachRoleFit(candidate, 'scouting'),
+            calculateCoachRoleFit(candidate, 'training'),
+            calculateCoachRoleFit(candidate, 'offensePrep'),
+            calculateCoachRoleFit(candidate, 'defensePrep')
+        ].reduce((sum, value) => sum + value, 0) / 4;
+
+        let fitScore = rep * 0.45 + roleFit * 0.55;
+
+        const tactical = candidate.biases?.tactical?.name;
+        const personality = candidate.biases?.personality?.name;
+        const offense = team.formations?.offense || '';
+
+        if (
+            ['Spread', 'Empty', 'Trips', 'TripsLeft'].includes(offense) &&
+            tactical === 'Air Raid Purist'
+        ) {
+            fitScore += 8;
         }
 
         if (
-            Array.isArray(gameState?.availableStaff) &&
-            !gameState.availableStaff.some(
-                candidate => String(candidate.id) === String(coach.id)
-            )
+            ['Power', 'Jumbo', 'Pistol'].includes(offense) &&
+            tactical === 'Smashmouth Zealot'
         ) {
-            gameState.availableStaff.push(coach);
+            fitScore += 8;
         }
 
-        if (coachSlot >= 0 && Array.isArray(team.coaches)) {
-            team.coaches.splice(coachSlot, 1);
+        const directive =
+            team.aiGmProfile?.strategicDirective ||
+            team.gameplan?.gmDirective ||
+            'COACH_AUTONOMY';
+
+        if (
+            directive === 'WIN_NOW' &&
+            rating(candidate, 'inGameAdjustments') >= 65
+        ) {
+            fitScore += 8;
         }
 
-        team.staff.coach = null;
-
-        if (String(team.coach?.id) === String(coach.id)) {
-            team.coach = null;
+        if (
+            directive === 'DEVELOP_YOUTH' &&
+            rating(candidate, 'teaching') >= 65
+        ) {
+            fitScore += 10;
         }
 
-        // HIRE REPLACEMENT: CONSTRAINED BY BUDGET, SCHEME FIT, TIER, & DIRECTIVES
-        if (gameState?.availableStaff && gameState.availableStaff.length > 0) {
-            const teamBalance = team.finances?.balance || 5.00;
-            const teamTokens = team.socialProfile?.favorTokens || 0;
-            const teamOffForm = team.formations?.offense || 'Balanced';
+        if (
+            directive === 'HARD_CONDITIONING' &&
+            personality === 'Old-School Disciplinarian'
+        ) {
+            fitScore += 8;
+        }
 
-            // Comprehensive, nuanced candidate evaluation
-            const affordableCandidates = gameState.availableStaff
-                .filter(s =>
-                    String(s.id) !== String(coach.id) &&
-                    (s.role === 'coach' || s.formerPlayerBio)
+        if (Number(team.tier) === 1 && rep >= 68) {
+            fitScore += 5;
+        }
+
+        if (
+            Number(team.tier) === 2 &&
+            rating(candidate, 'teaching') >= 60
+        ) {
+            fitScore += 5;
+        }
+
+        // Unemployed coaches with declining demands can become bargains.
+        if (demandDecay < 0.70 && rep > 68) {
+            fitScore += 6;
+        }
+
+        return {
+            candidate,
+            canAfford,
+            requiredStipend,
+            requiredTokens,
+            fitScore
+        };
+    };
+
+    for (const team of teams) {
+        let vacancies = getVacancies(team);
+
+        if (!Array.isArray(team.coaches)) {
+            team.coaches = [];
+        }
+
+        if (!team.staff || typeof team.staff !== 'object') {
+            team.staff = {};
+        }
+
+        while (vacancies > 0) {
+            // Consider each available coach once, and never poach a coach
+            // who is still assigned to another team.
+            const seenCandidateIds = new Set();
+
+            const candidates = gameState.availableStaff
+                .filter(candidate =>
+                    candidate?.id != null &&
+                    candidate.teamId == null &&
+                    !employedCoachIds.has(String(candidate.id)) &&
+                    (
+                        candidate.role === 'coach' ||
+                        candidate.formerPlayerBio
+                    ) &&
+                    !seenCandidateIds.has(String(candidate.id)) &&
+                    seenCandidateIds.add(String(candidate.id))
                 )
-                .map(cand => {
-                    // Reputation & Market Demand calculation
-                    const rep = Math.round(((cand.ratings?.offSchemeMastery || 50) + (cand.ratings?.defSchemeMastery || 50) + (cand.ratings?.teaching || 50)) / 3);
-                    const decay = Math.pow(cand.stubbornness || 0.75, cand.weeksUnemployed || 0);
-                    const requiredStipend = Math.max(0, Math.round(Math.max(0, (rep - 52) * 0.45) * decay));
-                    const requiredTokens = rep >= 75 && (cand.weeksUnemployed || 0) < 3 ? 1 : 0;
-
-                    const canAfford = teamBalance >= requiredStipend && teamTokens >= requiredTokens;
-                    
-                    let fitScore = rep;
-                    const tactical = cand.biases?.tactical?.name;
-                    const personality = cand.biases?.personality?.name;
-
-                    // 1. Scheme Alignment
-                    if (['Spread', 'Empty', 'Trips', 'TripsLeft'].includes(teamOffForm) && tactical === 'Air Raid Purist') fitScore += 25;
-                    if (['Power', 'Jumbo', 'Pistol'].includes(teamOffForm) && tactical === 'Smashmouth Zealot') fitScore += 25;
-
-                    // 2. GM Directive Alignment
-                    if (gmDirective === 'WIN_NOW' && (cand.ratings?.inGameAdjustments || 50) > 65) fitScore += 20;
-                    if (gmDirective === 'DEVELOP_YOUTH' && (cand.ratings?.teaching || 50) > 65) fitScore += 22;
-                    if (gmDirective === 'HARD_CONDITIONING' && personality === 'Old-School Disciplinarian') fitScore += 24;
-
-                    // 3. League Tier Expectations
-                    if (team.tier === 1 && rep >= 68) fitScore += 15; // Premier Parks expect proven tacticians
-                    if (team.tier === 2 && (cand.ratings?.teaching || 50) >= 60) fitScore += 12; // Sandlot Circuit values development
-
-                    // 4. Bargain Pouncing: Smart GMs spot elite coaches whose demands have decayed
-                    if (decay < 0.70 && rep > 68) fitScore += 18;
-
-                    return { cand, canAfford, requiredStipend, fitScore };
-                })
-                .filter(c => c.canAfford)
+                .map(candidate =>
+                    getCandidateEvaluation(team, candidate)
+                )
+                .filter(result => result.canAfford)
                 .sort((a, b) => b.fitScore - a.fitScore);
 
-            let newHire = null;
-            if (affordableCandidates.length > 0) {
-                const chosen = affordableCandidates[0];
-                const idx = gameState.availableStaff.indexOf(chosen.cand);
-                newHire = gameState.availableStaff.splice(idx, 1)[0];
-                if (team.finances) team.finances.balance = Math.max(0, team.finances.balance - chosen.requiredStipend);
-            } else {
-                // Emergency volunteer: If the franchise is completely broke and cannot afford
-                // anyone on the open market, a parent/rec volunteer steps in at $0 stipend
-                newHire = generateStaffMember('coach', 28, 50);
+            // Do not manufacture a replacement when the shared market
+            // has no affordable candidate. Preserve the vacancy instead.
+            if (candidates.length === 0) {
+                break;
             }
 
-            if (newHire) {
-                newHire.teamId = team.id;
-                newHire.role = 'coach';
+            const chosen = candidates[0];
+            const newHire = chosen.candidate;
 
-                if (!Array.isArray(team.coaches)) {
-                    team.coaches = [];
-                }
+            // Remove by ID to prevent duplicate market records from
+            // allowing the same coach to be signed more than once.
+            gameState.availableStaff =
+                gameState.availableStaff.filter(candidate =>
+                    String(candidate?.id) !== String(newHire.id)
+                );
 
-                const insertionIndex = coachSlot >= 0
-                    ? Math.min(coachSlot, team.coaches.length)
-                    : team.coaches.length;
-
-                team.coaches.splice(insertionIndex, 0, newHire);
-
-                // Transfer the outgoing coach's workload.
-                const assignments = team.staffWorkPlan?.assignments;
-
-                if (Array.isArray(assignments) && coach.id != null) {
-                    assignments.forEach(assignment => {
-                        if (
-                            String(assignment.coachId) ===
-                            String(coach.id)
-                        ) {
-                            assignment.coachId = String(newHire.id);
-                        }
-                    });
-                }
-
-                team.staff.coach = newHire;
-                team.coach = newHire;
+            if (team.finances) {
+                team.finances.balance = Math.max(
+                    0,
+                    (Number(team.finances.balance) || 0) -
+                    chosen.requiredStipend
+                );
             }
+
+            if (chosen.requiredTokens > 0 && team.socialProfile) {
+                team.socialProfile.favorTokens = Math.max(
+                    0,
+                    (Number(team.socialProfile.favorTokens) || 0) -
+                    chosen.requiredTokens
+                );
+            }
+
+            newHire.teamId = team.id;
+            newHire.role = 'coach';
+            newHire.weeksUnemployed = 0;
+
+            ensureCoachDevelopmentProfile(newHire);
+
+            if (
+                !team.coaches.some(coach =>
+                    String(coach?.id) === String(newHire.id)
+                )
+            ) {
+                team.coaches.push(newHire);
+            }
+
+            employedCoachIds.add(String(newHire.id));
+
+            vacancies -= 1;
+            team.coachingVacancies = vacancies;
+
+            hires.push({
+                teamId: team.id,
+                teamName: team.name,
+                coachId: newHire.id,
+                coachName: newHire.name,
+                overallFit: Math.round(
+                    [
+                        calculateCoachRoleFit(newHire, 'scouting'),
+                        calculateCoachRoleFit(newHire, 'training'),
+                        calculateCoachRoleFit(newHire, 'offensePrep'),
+                        calculateCoachRoleFit(newHire, 'defensePrep')
+                    ].reduce((sum, value) => sum + value, 0) / 4
+                )
+            });
+        }
+
+        // Restore legacy references only when they no longer point to
+        // an active member of this team's coaching group.
+        const isCurrentCoach = member =>
+            member?.id != null &&
+            team.coaches.some(coach =>
+                String(coach?.id) === String(member.id)
+            );
+
+        const activeCoaches = getNpcCoaches(team);
+
+        if (!isCurrentCoach(team.staff.coach)) {
+            team.staff.coach = activeCoaches[0] || null;
+        }
+
+        if (!isCurrentCoach(team.staff.scout)) {
+            team.staff.scout = activeCoaches[1] || activeCoaches[0] || null;
+        }
+
+        if (!isCurrentCoach(team.staff.trainer)) {
+            team.staff.trainer = activeCoaches[2] ||
+                activeCoaches[0] ||
+                null;
+        }
+
+        if (!isCurrentCoach(team.coach)) {
+            team.coach = team.staff.coach;
         }
     }
 
-    // Maintain the flexible coaching group instead of hiring
-    // separate legacy Scout and Trainer positions.
-    ensureTeamCoachingStaff(team);
+    gameState.coachCarouselResolvedYear = year;
+
+    const vacanciesRemaining = gameState.teams.reduce(
+        (total, team) =>
+            total + (
+                team?.leagueType === 'main'
+                    ? getVacancies(team)
+                    : 0
+            ),
+        0
+    );
+
+    return {
+        resolved: true,
+        year,
+        hires,
+        vacanciesRemaining
+    };
 }
 
 export function getTeamCoachingSpecialist(team, task = 'general') {
@@ -2796,17 +3547,108 @@ export function aiEvaluatePositionChanges(team, gameState) {
 /**
  * Processes weekly market decay for unemployed staff on the market.
  * Stubborn coaches hold out longer; humble coaches drop demands quickly.
+ *
+ * Each coach is processed at most once per call. Coaches who are employed
+ * or represented by stale duplicate market entries are excluded.
  */
 export function processStaffMarketDecay(gameState) {
-    if (!gameState?.availableStaff) return;
+    if (
+        !gameState ||
+        !Array.isArray(gameState.availableStaff)
+    ) {
+        return;
+    }
 
-    gameState.availableStaff.forEach(staff => {
-        staff.weeksUnemployed = (staff.weeksUnemployed || 0) + 1;
-        const rep = Math.round(((staff.ratings?.offSchemeMastery || 50) + (staff.ratings?.defSchemeMastery || 50) + (staff.ratings?.teaching || 50)) / 3);
-        const baseDemand = Math.max(0, Math.round((rep - 52) * 0.50));
+    // Team rosters and legacy staff references are the source of truth
+    // for employment, not just a candidate's teamId field.
+    const employedStaffIds = new Set();
 
-        // Exponential stubbornness curve
-        const decayMultiplier = Math.pow(staff.stubbornness || 0.75, staff.weeksUnemployed);
-        staff.stipendDemand = Math.max(0, Math.round(baseDemand * decayMultiplier));
-    });
+    const registerEmployedStaff = staff => {
+        if (staff?.id != null) {
+            employedStaffIds.add(String(staff.id));
+        }
+    };
+
+    for (const team of gameState.teams || []) {
+        if (!team) continue;
+
+        (Array.isArray(team.coaches) ? team.coaches : [])
+            .forEach(registerEmployedStaff);
+
+        registerEmployedStaff(team.coach);
+
+        for (const role of ['coach', 'scout', 'trainer']) {
+            registerEmployedStaff(team.staff?.[role]);
+        }
+    }
+
+    const seenIds = new Set();
+    const validMarket = [];
+
+    const getRating = value => {
+        const rating = Number(value);
+
+        return Number.isFinite(rating)
+            ? Math.max(0, Math.min(100, rating))
+            : 50;
+    };
+
+    for (const staff of gameState.availableStaff) {
+        if (!staff || staff.id == null) continue;
+
+        const id = String(staff.id);
+
+        // Remove stale employment records and duplicate market entries.
+        if (
+            staff.teamId != null ||
+            employedStaffIds.has(id) ||
+            seenIds.has(id)
+        ) {
+            continue;
+        }
+
+        seenIds.add(id);
+        validMarket.push(staff);
+
+        const previousWeeks = Number(staff.weeksUnemployed);
+        const weeksUnemployed = (
+            Number.isFinite(previousWeeks)
+                ? Math.max(0, Math.floor(previousWeeks))
+                : 0
+        ) + 1;
+
+        staff.weeksUnemployed = weeksUnemployed;
+
+        const rep = Math.round(
+            (
+                getRating(staff.ratings?.offSchemeMastery) +
+                getRating(staff.ratings?.defSchemeMastery) +
+                getRating(staff.ratings?.teaching)
+            ) / 3
+        );
+
+        const baseDemand = Math.max(
+            0,
+            Math.round((rep - 52) * 0.50)
+        );
+
+        // Keep the stubbornness multiplier within a sensible range.
+        const rawStubbornness = Number(staff.stubbornness);
+
+        const stubbornness = Number.isFinite(rawStubbornness)
+            ? Math.max(0.1, Math.min(1, rawStubbornness))
+            : 0.75;
+
+        staff.stipendDemand = Math.max(
+            0,
+            Math.round(
+                baseDemand *
+                Math.pow(stubbornness, weeksUnemployed)
+            )
+        );
+    }
+
+    // Normalize the shared pool so stale and duplicate records cannot
+    // re-enter later market calculations during this save session.
+    gameState.availableStaff = validMarket;
 }
