@@ -1152,6 +1152,45 @@ async function runAIDraftPicks() {
 
     const rosterLimit = getDraftRosterLimit();
 
+    // Debug-only audit: distinguish a small rookie class from a roster limit.
+    if (isDebugMode()) {
+        const draftClass = Array.isArray(gameState.draftClass)
+            ? gameState.draftClass
+            : [];
+
+        const availableProspects = draftClass.filter(
+            prospect => prospect && !prospect.teamId
+        );
+
+        console.info('[Rookie Draft Audit] Draft checkpoint', {
+            year: gameState.year,
+            currentPick: gameState.currentPick,
+            pickOrderLength: gameState.draftOrder?.length || 0,
+            picksRecorded: gameState.pickHistory?.length || 0,
+            draftClassEntries: draftClass.length,
+            availableProspects: availableProspects.length,
+            draftClassByEntryAge: availableProspects.reduce(
+                (counts, prospect) => {
+                    const age = Number(prospect.youthEntryAge);
+                    const key = Number.isInteger(age)
+                        ? String(age)
+                        : 'missing';
+
+                    counts[key] = (counts[key] || 0) + 1;
+                    return counts;
+                },
+                {}
+            ),
+            userRosterSize: gameState.playerTeam?.roster?.length || 0,
+            rosterLimit,
+            userRosterSlotsRemaining: Math.max(
+                0,
+                rosterLimit -
+                    (gameState.playerTeam?.roster?.length || 0)
+            )
+        });
+    }
+
     try {
                 while (true) {
             const pickLimitReached =
@@ -1170,6 +1209,34 @@ async function runAIDraftPicks() {
             );
 
             if (pickLimitReached || noDraftProspectsLeft || allTeamsFull) {
+                if (isDebugMode()) {
+                    const remainingProspects = (
+                        Array.isArray(gameState.draftClass)
+                            ? gameState.draftClass
+                            : []
+                    ).filter(
+                        prospect => prospect && !prospect.teamId
+                    );
+
+                    const endReason = pickLimitReached
+                        ? 'pick_order_exhausted'
+                        : noDraftProspectsLeft
+                            ? 'draft_class_exhausted'
+                            : 'all_teams_full';
+
+                    console.info('[Rookie Draft Audit] Draft ending', {
+                        year: gameState.year,
+                        reason: endReason,
+                        currentPick: gameState.currentPick,
+                        pickOrderLength: gameState.draftOrder?.length || 0,
+                        picksRecorded: gameState.pickHistory?.length || 0,
+                        remainingProspects: remainingProspects.length,
+                        userRosterSize:
+                            gameState.playerTeam?.roster?.length || 0,
+                        rosterLimit
+                    });
+                }
+
                 await handleDraftEnd();
                 break;
             }

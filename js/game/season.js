@@ -633,7 +633,7 @@ export async function initializeLeague(onProgress) {
 
     // Generate enough players for the 20 initial main-team rosters
     // plus a small free-agent pool. Future rookie classes come from Pee Wee.
-    const totalPlayers = 400;
+    const totalPlayers = 425;
     const initialClassModifiers = generateDraftClassModifiers();
 
     for (let i = 0; i < totalPlayers; i++) {
