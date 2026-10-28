@@ -2480,6 +2480,17 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             const ballPos = playState.ballState;
             ballCarrierState = playState.activePlayers.find(p => p.hasBall || p.isBallCarrier) || null;
 
+            // NEW GUARD: Kill zombie plays where the pass failed but the loop kept running
+            if (playState.passAttempted && !ballPos.inAir && !ballPos.isLoose && !playState.turnover && !playState.sack) {
+                const caughtPass = playState.statEvents.some(e => e.type === 'completion') || 
+                                   (ballCarrierState && ballCarrierState.isOffense && ballCarrierState.role !== 'QB');
+                if (!caughtPass) {
+                    playState.incomplete = true;
+                    playState.playIsLive = false;
+                    break;
+                }
+            }
+
             if (ballCarrierState) {
                 for (let i = 0; i < playState.activePlayers.length; i++) {
                     const p = playState.activePlayers[i];

@@ -907,10 +907,19 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
     setupSide(offense, 'offense', offenseFormationData, true);
     setupSide(defense, 'defense', defenseFormationData, false);
 
-// Give the ball to the QB setup/punter, or fallback to the QB1 slot for direct snaps (Wildcat/QB Draws)
+    // Give the ball to the QB setup/punter, or fallback to the QB1 slot for direct snaps (Wildcat/QB Draws)
     let snapTaker = playState.activePlayers.find(p => p.isOffense && (p.assignment?.includes('qb_') || p.assignment === 'punt'));
+
+    // Ultimate Fallback for direct snaps (Wildcat, QB runs): 
+    // If no one is explicitly acting as a QB, snap the ball to the backfield player standing closest to the center.
     if (!snapTaker) {
-        snapTaker = playState.activePlayers.find(p => p.isOffense && p.slot === 'QB1');
+        snapTaker = playState.activePlayers
+            .filter(p => p.isOffense && !p.slot.startsWith('OL'))
+            .sort((a, b) => {
+                const distA = Math.hypot(a.initialX - ballX, a.initialY - playState.lineOfScrimmage);
+                const distB = Math.hypot(b.initialX - ballX, b.initialY - playState.lineOfScrimmage);
+                return distA - distB;
+            })[0];
     }
 
     if (snapTaker) {

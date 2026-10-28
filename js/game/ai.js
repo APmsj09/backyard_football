@@ -2618,7 +2618,9 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
     qbState.hasBall = false;
     qbState.isBallCarrier = false;
     qbState.action = 'idle';
-    qbState.hasCompletedDropback = true; 
+    qbState.hasCompletedDropback = true;
+
+    playState.passAttempted = true;
 
     playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
     playState.statEvents.push({ type: 'target', receiverId: target.id });
