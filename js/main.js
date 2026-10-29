@@ -4186,8 +4186,8 @@ window.app = {
             return;
         }
 
-        const currentDay = Number(state.recruitingDay);
-        const totalDays = Number(state.recruitingDays);
+        //const currentDay = Number(state.recruitingDay);
+        //const totalDays = Number(state.recruitingDays);
 
         if (
             !Number.isInteger(currentDay) ||

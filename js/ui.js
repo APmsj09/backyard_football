@@ -3669,7 +3669,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             <h4 class="font-black text-sm text-white">${staff.name}</h4>
                             <span class="text-[9px] bg-slate-800 text-amber-400 font-bold px-1.5 py-0.5 rounded border border-slate-700">${staff.age}yo</span>
                         </div>
-                        <p class="text-[11px] text-slate-400 mt-0.5 font-sans">${staff.biases.personality.name} • ${staff.biases.tactical?.name || 'Tactician'}</p>
+                        <p class="text-[11px] text-slate-400 mt-0.5 font-sans">${staff.biases?.personality?.displayName || staff.biases?.personality?.name || 'Coach'} • ${staff.biases?.tactical?.displayName || staff.biases?.tactical?.name || 'Tactician'}</p>
                     </div>
                     <span class="text-xs bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded uppercase">
                         ${roleName}
@@ -5092,19 +5092,19 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     <div>
                                         <span class="text-slate-500">Tactical style</span>
                                         <p class="font-bold text-slate-800">
-                                            ${coach.biases?.tactical?.name || 'Balanced'}
+                                            ${coach.biases?.tactical?.displayName || coach.biases?.tactical?.name || 'Adaptive Strategist'}
                                         </p>
                                     </div>
                                     <div>
                                         <span class="text-slate-500">Scouting style</span>
                                         <p class="font-bold text-slate-800">
-                                            ${coach.biases?.scouting?.name || 'Balanced Evaluator'}
+                                            ${coach.biases?.scouting?.displayName || coach.biases?.scouting?.name || 'Balanced Evaluator'}
                                         </p>
                                     </div>
                                     <div>
                                         <span class="text-slate-500">Personality</span>
                                         <p class="font-bold text-slate-800">
-                                            ${coach.biases?.personality?.name || 'Balanced'}
+                                            ${coach.biases?.personality?.displayName || coach.biases?.personality?.name || 'Analytical Planner'}
                                         </p>
                                     </div>
                                 </div>
@@ -5971,7 +5971,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 ${coach.isUserCoach
                                     ? '<p class="mt-1 text-[9px] text-slate-500">Your coaching time</p>'
                                     : `<p class="mt-1 text-[9px] text-slate-500">${
-                                        coach.biases?.scouting?.name || 'Staff coach'
+                                        coach.biases?.scouting?.displayName ||
+                                        coach.biases?.scouting?.name ||
+                                        'Staff coach'
                                     }</p>`}
                             </div>`;
                     }).join('')}
@@ -6514,9 +6516,16 @@ export function renderStaffCarouselTab(
             const searchableText = [
                 candidate?.name,
                 candidate?.age,
+
+                candidate?.biases?.personality?.displayName,
                 candidate?.biases?.personality?.name,
+
+                candidate?.biases?.tactical?.displayName,
                 candidate?.biases?.tactical?.name,
+
+                candidate?.biases?.scouting?.displayName,
                 candidate?.biases?.scouting?.name,
+
                 candidate?.formerPlayerBio
             ].join(' ').toLowerCase();
 
@@ -6705,7 +6714,7 @@ export function renderStaffCarouselTab(
                             </h4>
                             <p class="mt-1 text-xs text-slate-300">
                                 Age ${escapeProfileText(candidate.age ?? '—')}
-                                · ${escapeProfileText(personality.name || 'Unknown personality')}
+                                · ${escapeProfileText(personality.displayName || personality.name || 'Unknown personality')}
                             </p>
                         </div>
                         ${candidate.formerPlayerBio ? `
@@ -6773,7 +6782,7 @@ export function renderStaffCarouselTab(
                             Tactical philosophy
                         </h5>
                         <p class="mt-1 text-sm font-bold text-slate-900">
-                            ${escapeProfileText(tactical.name || 'Balanced')}
+                            ${escapeProfileText(tactical.displayName || tactical.name || 'Adaptive Strategist')}
                         </p>
                         <p class="mt-1 text-xs leading-relaxed text-slate-600">
                             ${escapeProfileText(tactical.desc || 'No tactical notes available.')}
@@ -6785,7 +6794,7 @@ export function renderStaffCarouselTab(
                             Scouting style
                         </h5>
                         <p class="mt-1 text-sm font-bold text-slate-900">
-                            ${escapeProfileText(scouting.name || 'Balanced evaluator')}
+                            ${escapeProfileText(scouting.displayName || scouting.name || 'Balanced Evaluator')}
                         </p>
                         <p class="mt-1 text-xs leading-relaxed text-slate-600">
                             ${escapeProfileText(scouting.desc || 'No scouting notes available.')}
@@ -6797,7 +6806,7 @@ export function renderStaffCarouselTab(
                             Personality
                         </h5>
                         <p class="mt-1 text-sm font-bold text-slate-900">
-                            ${escapeProfileText(personality.name || 'Unknown')}
+                            ${escapeProfileText(personality.displayName || personality.name || 'Analytical Planner')}
                         </p>
                         <p class="mt-1 text-xs leading-relaxed text-slate-600">
                             ${escapeProfileText(personality.desc || 'No personality notes available.')}
@@ -7067,7 +7076,7 @@ export function renderStaffCarouselTab(
 
                                             <p class="mt-0.5 text-[10px] text-slate-500">
                                                 Age ${escapeStaffAttribute(s.age ?? '—')}
-                                                · ${escapeStaffAttribute(personality.name || 'Unknown personality')}
+                                                · ${escapeStaffAttribute(personality.displayName || personality.name || 'Unknown personality')}
                                             </p>
 
                                             <button

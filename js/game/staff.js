@@ -388,13 +388,13 @@ export function ensureStaffNegotiationProfile(staff) {
         !Number.isFinite(Number(staff.ego))
     ) {
         let ego = getRandomInt(25, 80);
-        const personality = staff.biases?.personality?.name;
+        const personalityId = getStaffProfileId(staff, 'personality');
 
-        if (personality === "Peaked in '94") {
+        if (personalityId === 'hard_nosed_competitor') {
             ego += 12;
-        } else if (personality === 'Old-School Disciplinarian') {
+        } else if (personalityId === 'traditionalist') {
             ego += 5;
-        } else if (personality === "Players' Coach") {
+        } else if (personalityId === 'player_centered') {
             ego -= 8;
         }
 
@@ -608,11 +608,12 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
     const happiness = getRandomInt(45, 85);
 
     let ego = getRandomInt(25, 80);
-    if (personality.name === "Peaked in '94") {
+
+    if (personality.id === 'hard_nosed_competitor') {
         ego += 12;
-    } else if (personality.name === 'Old-School Disciplinarian') {
+    } else if (personality.id === 'traditionalist') {
         ego += 5;
-    } else if (personality.name === "Players' Coach") {
+    } else if (personality.id === 'player_centered') {
         ego -= 8;
     }
 
@@ -1075,67 +1076,64 @@ export function recordCoachDevelopmentOutcome(
 }
 
 function getCoachLearningStyleMultiplier(coach, skill) {
-    const personality = coach?.biases?.personality?.name;
+    // Each coach's behavioral tendencies influence how readily they
+    // develop particular skills. Personality provides a baseline, while
+    // individual variation keeps coaches with the same personality distinct.
+    const centeredTendency = tendencyKey => (
+        getStaffBehaviorTendency(coach, tendencyKey) - 50
+    ) / 50;
+
+    let adjustment = 0;
 
     if (
-        personality === 'Analytical Savant' &&
         [
             'evalPhysicals',
             'evalTechnique',
-            'evalCharacter',
+            'evalCharacter'
+        ].includes(skill)
+    ) {
+        // Evaluation improves through adaptability and patient analysis.
+        adjustment =
+            centeredTendency('adaptability') * 0.035 +
+            centeredTendency('patience') * 0.025;
+    } else if (
+        [
             'offSchemeMastery',
             'defSchemeMastery',
             'gameplanInstinct',
             'inGameAdjustments'
         ].includes(skill)
     ) {
-        return 1.15;
-    }
-
-    if (
-        personality === "Players' Coach" &&
+        // Tactical learning rewards adaptability, discipline, and reflection.
+        adjustment =
+            centeredTendency('adaptability') * 0.035 +
+            centeredTendency('discipline') * 0.015 +
+            centeredTendency('patience') * 0.010;
+    } else if (skill === 'teaching') {
+        // Teaching benefits from investment in development and relationships.
+        adjustment =
+            centeredTendency('developmentFocus') * 0.030 +
+            centeredTendency('relationshipOrientation') * 0.020 +
+            centeredTendency('patience') * 0.010;
+    } else if (
         [
-            'teaching',
             'practiceDiscipline',
             'conditioning'
         ].includes(skill)
     ) {
-        return 1.15;
+        // Structured practice rewards discipline and sustained development.
+        adjustment =
+            centeredTendency('discipline') * 0.030 +
+            centeredTendency('developmentFocus') * 0.015 +
+            centeredTendency('patience') * 0.015;
     }
 
-    if (
-        personality === 'Old-School Disciplinarian' &&
-        [
-            'practiceDiscipline',
-            'conditioning',
-            'defSchemeMastery'
-        ].includes(skill)
-    ) {
-        return 1.15;
-    }
-
-    if (
-        personality === "Peaked in '94" &&
-        [
-            'practiceDiscipline',
-            'conditioning',
-            'defSchemeMastery'
-        ].includes(skill)
-    ) {
-        return 1.10;
-    }
-
-    if (
-        personality === 'Analytical Savant' &&
-        [
-            'teaching',
-            'conditioning'
-        ].includes(skill)
-    ) {
-        return 0.95;
-    }
-
-    return 1;
+    // Keep personality effects meaningful but subordinate to actual
+    // coaching ratings, available work hours, motivation, and growth limits.
+    return Math.max(
+        0.94,
+        Math.min(1.06, 1 + adjustment)
+    );
 }
 
 function getCoachMentorMultiplier(coach, skill, coaches, hoursByCoach) {
@@ -1589,12 +1587,45 @@ export function ensureTeamCoachingStaff(team) {
         },
         biases: {
             ...(existingUserCoach.biases || {}),
-            scouting: existingUserCoach.biases?.scouting ||
-                { name: 'Objective Scout' },
-            tactical: existingUserCoach.biases?.tactical ||
-                { name: 'Balanced Tactician' },
-            personality: existingUserCoach.biases?.personality ||
-                { name: 'Analytical Savant' }
+
+            scouting: existingUserCoach.biases?.scouting || {
+                ...scoutingBiases.find(
+                    profile => profile.id === 'balanced_evaluator'
+                )
+            },
+
+            tactical: existingUserCoach.biases?.tactical || {
+                ...tacticalBiases.find(
+                    profile => profile.id === 'adaptive_strategist'
+                )
+            },
+
+            personality: existingUserCoach.biases?.personality || {
+                ...personalityTraits.find(
+                    profile => profile.id === 'analytical_planner'
+                ),
+                tendencies: {
+                    ...personalityTraits.find(
+                        profile => profile.id === 'analytical_planner'
+                    ).tendencies
+                }
+            }
+        },
+
+        profileIds: {
+            ...(existingUserCoach.profileIds || {}),
+
+            scouting:
+                getStaffProfileId(existingUserCoach, 'scouting') ||
+                'balanced_evaluator',
+
+            tactical:
+                getStaffProfileId(existingUserCoach, 'tactical') ||
+                'adaptive_strategist',
+
+            personality:
+                getStaffProfileId(existingUserCoach, 'personality') ||
+                'analytical_planner'
         }
     };
 
@@ -3367,37 +3398,55 @@ export function processAiRecruitingDay(gameState) {
                 }
             ];
 
-            const personality =
-                coach.biases?.personality?.name ||
-                "Players' Coach";
+            // Behavioral tendencies create preferences without making
+            // any recruiting action exclusive to a particular personality.
+            // Neutral values (50) produce no adjustment.
+            const centeredTendency = key =>
+                (getStaffBehaviorTendency(coach, key) - 50) / 10;
 
-            // Personality creates tactical preferences, not guaranteed
-            // outcomes. Every action remains available to every coach.
-            const personalityPreferences = {
-                "Players' Coach": {
-                    teammateConnection: 7,
-                    outreach: 2,
-                    practiceInvitation: 2
-                },
-                'Old-School Disciplinarian': {
-                    practiceInvitation: 7,
-                    roleDiscussion: 2,
-                    teammateConnection: -2
-                },
-                "Peaked in '94": {
-                    roleDiscussion: 5,
-                    outreach: 2,
-                    practiceInvitation: 1
-                },
-                'Analytical Savant': {
-                    roleDiscussion: 5,
-                    outreach: 3,
-                    teammateConnection: -1
+            const getRecruitingActionPreferenceBonus = actionType => {
+                const relationship =
+                    centeredTendency('relationshipOrientation');
+                const discipline = centeredTendency('discipline');
+                const adaptability = centeredTendency('adaptability');
+                const patience = centeredTendency('patience');
+                const development =
+                    centeredTendency('developmentFocus');
+                const riskTolerance =
+                    centeredTendency('riskTolerance');
+
+                switch (actionType) {
+                    case 'outreach':
+                        return (
+                            relationship * 0.45 +
+                            patience * 0.30 +
+                            riskTolerance * 0.25
+                        );
+
+                    case 'teammateConnection':
+                        return (
+                            relationship * 0.75 +
+                            patience * 0.25
+                        );
+
+                    case 'roleDiscussion':
+                        return (
+                            adaptability * 0.45 +
+                            discipline * 0.30 +
+                            patience * 0.25
+                        );
+
+                    case 'practiceInvitation':
+                        return (
+                            development * 0.65 +
+                            relationship * 0.20 +
+                            discipline * 0.15
+                        );
+
+                    default:
+                        return 0;
                 }
             };
-
-            const preferences =
-                personalityPreferences[personality] || {};
 
             // Instinct, evaluation ability, and authority influence the
             // consistency of decisions—not access to hidden prospect data.
@@ -3419,11 +3468,11 @@ export function processAiRecruitingDay(gameState) {
                         0
                     ) / option.skills.length;
 
-                    const personalityPreference =
-                        Number(preferences[option.type]) || 0;
+                    const preferenceBonus =
+                        getRecruitingActionPreferenceBonus(option.type);
 
                     // Noise can cause a coach to choose a less-suited
-                    // tactic, especially when decision quality is poor.
+                    // action, especially when decision quality is poor.
                     const judgmentNoise =
                         (Math.random() * 2 - 1) *
                         decisionNoiseRange;
@@ -3432,7 +3481,7 @@ export function processAiRecruitingDay(gameState) {
                         ...option,
                         score:
                             skillScore +
-                            personalityPreference +
+                            preferenceBonus +
                             judgmentNoise
                     };
                 })
@@ -3469,11 +3518,43 @@ export function processAiRecruitingDay(gameState) {
                     return position && positions.includes(position);
                 });
 
-                const targetCount = positionTargets[position] || 2;
-                const rosterNeed = Math.max(
-                    0,
-                    targetCount - peers.length
-                );
+                const targetCount = positionTargets[position];
+
+                // Unknown position means unknown roster need; don't
+                // invent a positional shortage for an unscouted recruit.
+                const rosterNeed = Number.isInteger(targetCount)
+                    ? Math.max(0, targetCount - peers.length)
+                    : 0;
+
+                // Scheme fit uses this team's recruiting coach's profile.
+                const tacticalId = getStaffProfileId(coach, 'tactical');
+                let schemeBonus = 0;
+
+                if (
+                    tacticalId === 'spread_passing_specialist' &&
+                    ['QB', 'WR', 'TE'].includes(position)
+                ) {
+                    schemeBonus = 5;
+                } else if (
+                    tacticalId === 'power_run_specialist' &&
+                    ['RB', 'OL', 'TE'].includes(position)
+                ) {
+                    schemeBonus = 5;
+                } else if (
+                    tacticalId === 'pressure_oriented_defender' &&
+                    ['DL', 'LB', 'DB'].includes(position)
+                ) {
+                    schemeBonus = 5;
+                }
+
+                const age = Number(player.age);
+                const ageBonus = Number.isFinite(age)
+                    ? age <= 15
+                        ? 3
+                        : age >= 18
+                            ? -2
+                            : 1
+                    : 0;
 
                 const recruitId = String(player.id);
 
@@ -3563,14 +3644,28 @@ export function processAiRecruitingDay(gameState) {
 
                 // Coaching personality changes how the staff reacts to
                 // perceived competition. This is a judgment, not certainty.
-                const recruitingCoach =
-                    team.staff?.coach || team.coach || {};
+                // Individual risk tolerance influences willingness to
+                // compete for a recruit pursued by other teams.
+                // Rival effort is inferred only from previously observed
+                // recruiting activity, not their private interest scores.
+                const riskTolerance = getStaffBehaviorTendency(
+                    coach,
+                    'riskTolerance'
+                );
 
-                const personality =
-                    recruitingCoach.biases?.personality?.name ||
-                    "Players' Coach";
+                const competitionRiskPreference =
+                    (riskTolerance - 50) / 10;
 
-                let competitionAdjustment = 0;
+                const competitionAdjustment = rivalTeamCount > 0
+                    ? Math.max(
+                        -7,
+                        Math.min(
+                            7,
+                            competitionRiskPreference *
+                                (observedCompetitionPressure / 4)
+                        )
+                    )
+                    : 0;
 
                 if (rivalTeamCount > 0) {
                     if (personality === "Peaked in '94") {
@@ -3751,53 +3846,90 @@ function getAiStaffTaskScore(coach, task) {
         ) / 3;
     }
 
-    const personality = coach?.biases?.personality?.name;
+    // Individual tendencies shape task preferences without replacing
+    // the competence represented by the skill ratings above.
+    const centeredTendency = key =>
+        (getStaffBehaviorTendency(coach, key) - 50) / 10;
 
-    // Analytical coaches favor preparation and evaluation.
-    if (personality === 'Analytical Savant') {
-        if (task === 'offensePrep' || task === 'defensePrep') {
-            score += 10;
-        } else if (task === 'scouting') {
-            score += 4;
-        }
+    const adaptability = centeredTendency('adaptability');
+    const riskTolerance = centeredTendency('riskTolerance');
+    const relationshipOrientation =
+        centeredTendency('relationshipOrientation');
+    const discipline = centeredTendency('discipline');
+    const patience = centeredTendency('patience');
+    const developmentFocus = centeredTendency('developmentFocus');
+
+    let behavioralAdjustment = 0;
+
+    if (task === 'scouting') {
+        behavioralAdjustment =
+            adaptability * 0.40 +
+            patience * 0.35 +
+            developmentFocus * 0.20 -
+            relationshipOrientation * 0.20;
+    } else if (task === 'offensePrep' || task === 'defensePrep') {
+        behavioralAdjustment =
+            adaptability * 0.45 +
+            discipline * 0.30 +
+            riskTolerance * 0.15;
+    } else if (task === 'training') {
+        behavioralAdjustment =
+            developmentFocus * 0.45 +
+            discipline * 0.35 +
+            relationshipOrientation * 0.25 +
+            patience * 0.15;
     }
 
-    // Development-oriented personalities favor training time.
-    if (personality === "Players' Coach") {
-        if (task !== 'training') score -= 6;
-    } else if (personality === 'Old-School Disciplinarian') {
-        if (task === 'scouting') score -= 4;
-        if (task === 'offensePrep' || task === 'defensePrep') score -= 4;
-    } else if (personality === "Peaked in '94") {
-        if (task === 'scouting') score -= 2;
-        if (task === 'offensePrep' || task === 'defensePrep') score -= 3;
-    }
+    // Personality should influence allocation, not overwhelm competence.
+    score += Math.max(
+        -5,
+        Math.min(5, behavioralAdjustment)
+    );
 
     return score;
 }
 
 function getAiGmDelegationAdjustment(gm, task) {
-    const personalityPreferences = {
-        'Analytical Savant': {
-            scouting: 3,
-            offensePrep: 3,
-            defensePrep: 3
-        },
-        "Players' Coach": {
-            scouting: -2,
-            offensePrep: -3,
-            defensePrep: -3
-        },
-        'Old-School Disciplinarian': {
-            scouting: -3,
-            offensePrep: -1,
-            defensePrep: 2
-        },
-        "Peaked in '94": {
-            scouting: -2,
-            offensePrep: 2,
-            defensePrep: 2
+    const getBehaviorDelegationAdjustment = (staff, task) => {
+        const centeredTendency = key =>
+            (getStaffBehaviorTendency(staff, key) - 50) / 10;
+
+        const adaptability = centeredTendency('adaptability');
+        const riskTolerance = centeredTendency('riskTolerance');
+        const relationshipOrientation =
+            centeredTendency('relationshipOrientation');
+        const discipline = centeredTendency('discipline');
+        const patience = centeredTendency('patience');
+        const developmentFocus = centeredTendency('developmentFocus');
+
+        if (task === 'scouting') {
+            return (
+                adaptability * 0.45 +
+                patience * 0.35 +
+                developmentFocus * 0.15 -
+                relationshipOrientation * 0.55
+            );
         }
+
+        if (task === 'offensePrep') {
+            return (
+                adaptability * 0.45 +
+                discipline * 0.25 +
+                riskTolerance * 0.20 -
+                relationshipOrientation * 0.35
+            );
+        }
+
+        if (task === 'defensePrep') {
+            return (
+                adaptability * 0.40 +
+                discipline * 0.35 +
+                riskTolerance * 0.15 -
+                relationshipOrientation * 0.35
+            );
+        }
+
+        return 0;
     };
 
     const archetypePreferences = {
@@ -3833,11 +3965,10 @@ function getAiGmDelegationAdjustment(gm, task) {
         }
     };
 
-    const personality = gm?.biases?.personality?.name;
     const archetypeId = gm?.managementArchetypeId;
 
     const personalityAdjustment =
-        personalityPreferences[personality]?.[task] || 0;
+        getBehaviorDelegationAdjustment(gm, task);
 
     const archetypeAdjustment =
         archetypePreferences[archetypeId]?.[task] || 0;
@@ -4049,20 +4180,40 @@ export function ensureAiStaffWorkPlan(
             );
         }
 
-        // Personality changes the balance between specialist work
-        // and player development. Offseason allocations stay intact.
+        // Individual behavioral tendencies influence the balance between
+        // specialist work and player development. Offseason allocations
+        // remain governed by the offseason workload rules above.
         if (!isOffseason && specialtyHours > 0) {
-            const personality = coach.biases?.personality?.name;
+            const centeredTendency = tendencyKey => (
+                getStaffBehaviorTendency(coach, tendencyKey) - 50
+            ) / 50;
 
-            if (personality === 'Analytical Savant') {
-                specialtyHours += 4;
-            } else if (
-                personality === "Players' Coach" ||
-                personality === 'Old-School Disciplinarian' ||
-                personality === "Peaked in '94"
-            ) {
-                specialtyHours -= 4;
+            let specialistPreference = 0;
+
+            if (specialty.task === 'scouting') {
+                specialistPreference =
+                    centeredTendency('adaptability') * 0.40 +
+                    centeredTendency('patience') * 0.30 -
+                    centeredTendency('relationshipOrientation') * 0.15 -
+                    centeredTendency('developmentFocus') * 0.25;
+            } else {
+                specialistPreference =
+                    centeredTendency('adaptability') * 0.35 +
+                    centeredTendency('discipline') * 0.25 +
+                    centeredTendency('riskTolerance') * 0.20 -
+                    centeredTendency('relationshipOrientation') * 0.15 -
+                    centeredTendency('developmentFocus') * 0.25;
             }
+
+            // Keep the personality-driven allocation adjustment modest.
+            const boundedPreference = Math.max(
+                -1,
+                Math.min(1, specialistPreference)
+            );
+
+            specialtyHours += Math.round(
+                boundedPreference * 4
+            );
 
             specialtyHours = Math.max(
                 0,
@@ -4362,20 +4513,23 @@ export function resolveCoachCarousel(
 
         let fitScore = rep * 0.45 + roleFit * 0.55;
 
-        const tactical = candidate.biases?.tactical?.name;
-        const personality = candidate.biases?.personality?.name;
+        const tacticalId = getStaffProfileId(candidate, 'tactical');
+        const disciplineTendency = getStaffBehaviorTendency(
+            candidate,
+            'discipline'
+        );
         const offense = team.formations?.offense || '';
 
         if (
             ['Spread', 'Empty', 'Trips', 'TripsLeft'].includes(offense) &&
-            tactical === 'Air Raid Purist'
+            tacticalId === 'spread_passing_specialist'
         ) {
             fitScore += 8;
         }
 
         if (
             ['Power', 'Jumbo', 'Pistol'].includes(offense) &&
-            tactical === 'Smashmouth Zealot'
+            tacticalId === 'power_run_specialist'
         ) {
             fitScore += 8;
         }
@@ -4401,7 +4555,7 @@ export function resolveCoachCarousel(
 
         if (
             directive === 'HARD_CONDITIONING' &&
-            personality === 'Old-School Disciplinarian'
+            disciplineTendency >= 70
         ) {
             fitScore += 8;
         }
@@ -4749,92 +4903,179 @@ export function calculateSchemeClash(team) {
     if (team.gameplan.situational.playcaller !== 'GM') return 0;
 
     const coach = getTeamCoachingSpecialist(team, 'general');
-    const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
+    const tacticalId =
+        getStaffProfileId(coach, 'tactical') || 'adaptive_strategist';
+
     const sit = team.gameplan.situational;
 
     let expectedRun = 50;
     let expectedDefAggro = 50;
 
-    if (tactical === 'Smashmouth Zealot') expectedRun += 30;
-    if (tactical === 'Air Raid Purist') expectedRun -= 30;
-    if (tactical === 'Blitz Addict') expectedDefAggro += 35;
-    if (tactical === 'Conservative Turtler') expectedDefAggro -= 25;
+    if (tacticalId === 'power_run_specialist') {
+        expectedRun += 30;
+    }
+
+    if (tacticalId === 'spread_passing_specialist') {
+        expectedRun -= 30;
+    }
+
+    if (tacticalId === 'pressure_oriented_defender') {
+        expectedDefAggro += 35;
+    }
+
+    if (tacticalId === 'conservative_game_manager') {
+        expectedDefAggro -= 25;
+    }
 
     const runDiff = Math.abs(sit.earlyDownTendency - expectedRun);
-    const aggroDiff = Math.abs(sit.defenseAggressiveness - expectedDefAggro);
+    const aggroDiff = Math.abs(
+        sit.defenseAggressiveness - expectedDefAggro
+    );
 
     // Minor deviations are ignored. Major philosophical clashes cause confusion.
     const totalClash = (runDiff + aggroDiff) / 2;
-    if (totalClash <= 15) return 0; 
+    if (totalClash <= 15) return 0;
 
-    // Max penalty is around -18 IQ for total philosophical opposites
-    return Math.floor((totalClash - 15) * 0.35); 
+    // Max penalty is around -18 IQ for total philosophical opposites.
+    return Math.floor((totalClash - 15) * 0.35);
 }
 
 export function previewCoachTendencies(coach, team) {
-    const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
-    const personality = coach?.biases?.personality?.name || 'Balanced';
-    const iq = coach?.ratings?.gameplanInstinct || 50;
-    
+    const tacticalId =
+        getStaffProfileId(coach, 'tactical') || 'adaptive_strategist';
+
+    const iqValue = Number(coach?.ratings?.gameplanInstinct);
+    const iq = Number.isFinite(iqValue)
+        ? Math.max(0, Math.min(100, iqValue))
+        : 50;
+
+    const riskTolerance = getStaffBehaviorTendency(
+        coach,
+        'riskTolerance'
+    );
+
+    const discipline = getStaffBehaviorTendency(
+        coach,
+        'discipline'
+    );
+
+    const behavioralAdaptability = getStaffBehaviorTendency(
+        coach,
+        'adaptability'
+    );
+
     const roster = getRosterObjects(team);
-    
-    // Evaluate Offense (Calculate Best OVRs for QB, RB, WR)
-    const qbs = roster.filter(p => isPlayerViableForPosition(p, 'QB')).map(p => calculateOverall(p, 'QB'));
-    const rbs = roster.filter(p => isPlayerViableForPosition(p, 'RB')).map(p => calculateOverall(p, 'RB'));
-    const wrs = roster.filter(p => isPlayerViableForPosition(p, 'WR')).map(p => calculateOverall(p, 'WR'));
-    
-    const qbOvr = qbs.sort((a,b) => b-a)[0] || 50;
-    const rbOvr = rbs.sort((a,b) => b-a)[0] || 50;
-    const wrOvr = wrs.sort((a,b) => b-a)[0] || 50;
-    
+
+    // Evaluate offense using the team's roster.
+    const qbs = roster
+        .filter(p => isPlayerViableForPosition(p, 'QB'))
+        .map(p => calculateOverall(p, 'QB'));
+
+    const rbs = roster
+        .filter(p => isPlayerViableForPosition(p, 'RB'))
+        .map(p => calculateOverall(p, 'RB'));
+
+    const wrs = roster
+        .filter(p => isPlayerViableForPosition(p, 'WR'))
+        .map(p => calculateOverall(p, 'WR'));
+
+    const qbOvr = qbs.sort((a, b) => b - a)[0] || 50;
+    const rbOvr = rbs.sort((a, b) => b - a)[0] || 50;
+    const wrOvr = wrs.sort((a, b) => b - a)[0] || 50;
+
     const passStrength = (qbOvr + wrOvr) / 2;
     const runStrength = rbOvr;
-    const rosterRunPreference = runStrength - passStrength; // Positive = Better at running
-    
-    // Evaluate Defense
-    const dbs = roster.filter(p => isPlayerViableForPosition(p, 'DB')).map(p => calculateOverall(p, 'DB'));
-    const dbOvr = dbs.sort((a,b) => b-a)[0] || 50;
-    const rosterBlitzPreference = dbOvr - 50; // Better DBs = Safer to blitz
-    
-    let earlyDownTendency = 50; // 0 = Heavy Pass, 100 = Heavy Run
-    let thirdLongAggro = 50;    // 0 = Safe/Draws, 100 = Deep Bombs
-    let fourthBravery = 50;     // 0 = Punt Always, 100 = Riverboat Gambler
-    let defAggro = 50;          // 0 = Safe Zone/Prevent, 100 = House Fire Blitz
-    
-    // 1. Tactical Bias
-    if (tactical === 'Smashmouth Zealot') earlyDownTendency += 25;
-    if (tactical === 'Air Raid Purist') earlyDownTendency -= 25;
-    if (tactical === 'Conservative Turtler') {
+    const rosterRunPreference = runStrength - passStrength;
+
+    // Evaluate defensive personnel.
+    const dbs = roster
+        .filter(p => isPlayerViableForPosition(p, 'DB'))
+        .map(p => calculateOverall(p, 'DB'));
+
+    const dbOvr = dbs.sort((a, b) => b - a)[0] || 50;
+    const rosterBlitzPreference = dbOvr - 50;
+
+    let earlyDownTendency = 50;
+    let thirdLongAggro = 50;
+    let fourthBravery = 50;
+    let defAggro = 50;
+
+    // 1. Tactical philosophy.
+    if (tacticalId === 'power_run_specialist') {
+        earlyDownTendency += 25;
+    }
+
+    if (tacticalId === 'spread_passing_specialist') {
+        earlyDownTendency -= 25;
+    }
+
+    if (tacticalId === 'conservative_game_manager') {
         thirdLongAggro -= 30;
         fourthBravery -= 30;
         defAggro -= 20;
     }
-    if (tactical === 'Blitz Addict') {
+
+    if (tacticalId === 'pressure_oriented_defender') {
         defAggro += 35;
         thirdLongAggro += 15;
     }
-    
-    // 2. Personality
-    if (personality === "Peaked in '94") fourthBravery += 20;
-    if (personality === "Old-School Disciplinarian") earlyDownTendency += 10;
-    if (personality === "Analytical Savant") fourthBravery += 15; // Analytics say go for it
-    
-    // 3. Roster Adaptability (Scaled by IQ)
-    const adaptability = iq / 100;
-    const stubbornness = coach?.stubbornness || 0.75;
-    
-    // Blend bias with roster reality
+
+    // 2. Individual behavioral tendencies.
+    // Risk tolerance affects willingness to take aggressive chances.
+    thirdLongAggro += (riskTolerance - 50) * 0.15;
+    fourthBravery += (riskTolerance - 50) * 0.40;
+    defAggro += (riskTolerance - 50) * 0.10;
+
+    // Discipline has a modest influence on the coach's run preference.
+    earlyDownTendency += (discipline - 50) * 0.20;
+
+    // 3. Adapt the game plan to roster strengths.
+    // Coaching judgment matters more than behavioral inclination alone.
+    const adaptability = Math.max(
+        0,
+        Math.min(
+            1,
+            (iq * 0.75 + behavioralAdaptability * 0.25) / 100
+        )
+    );
+
+    const stubbornnessValue = Number(coach?.stubbornness);
+    const stubbornness = Number.isFinite(stubbornnessValue)
+        ? Math.max(0, Math.min(1, stubbornnessValue))
+        : 0.75;
+
     const targetRunTendency = 50 + (rosterRunPreference * 1.5);
-    earlyDownTendency = (earlyDownTendency * stubbornness) + (targetRunTendency * adaptability);
-    
-    const targetDefAggro = 50 + (rosterBlitzPreference * 1.0);
-    defAggro = (defAggro * stubbornness) + (targetDefAggro * adaptability);
+
+    earlyDownTendency =
+        (earlyDownTendency * stubbornness) +
+        (targetRunTendency * adaptability);
+
+    const targetDefAggro = 50 + rosterBlitzPreference;
+
+    defAggro =
+        (defAggro * stubbornness) +
+        (targetDefAggro * adaptability);
 
     return {
-        earlyDownTendency: Math.max(0, Math.min(100, Math.round(earlyDownTendency))),
-        thirdAndLongAggressiveness: Math.max(0, Math.min(100, Math.round(thirdLongAggro))),
-        fourthDownBravery: Math.max(0, Math.min(100, Math.round(fourthBravery))),
-        defenseAggressiveness: Math.max(0, Math.min(100, Math.round(defAggro)))
+        earlyDownTendency: Math.max(
+            0,
+            Math.min(100, Math.round(earlyDownTendency))
+        ),
+
+        thirdAndLongAggressiveness: Math.max(
+            0,
+            Math.min(100, Math.round(thirdLongAggro))
+        ),
+
+        fourthDownBravery: Math.max(
+            0,
+            Math.min(100, Math.round(fourthBravery))
+        ),
+
+        defenseAggressiveness: Math.max(
+            0,
+            Math.min(100, Math.round(defAggro))
+        )
     };
 }
 
@@ -5453,16 +5694,46 @@ export function aiEvaluatePositionChanges(team, gameState) {
             const targetOvr = calculateOverall(kid, targetPos);
             const currentOvr = calculateOverall(kid, currentPos);
 
-            // Personality-driven conversion willingness
+            // Individual coach tendencies influence position-conversion
+            // decisions. They affect willingness, not player ability.
             let threshold = currentOvr - 2;
-            const personality = coach?.biases?.personality?.name;
-            const ethic = kid.personality?.workEthic || 50;
 
-            if (personality === 'Old-School Disciplinarian' && ethic >= 65) {
-                threshold -= 4; // Disciplinarian demands hard workers fill voids even if raw
-            } else if (personality === "Peaked in '94" && ['OL', 'DL'].includes(targetPos)) {
-                const str = kid.attributes?.physical?.strength || 50;
-                if (str >= 55) threshold -= 5; // Loves converting strong kids into linemen
+            const discipline = getStaffBehaviorTendency(
+                coach,
+                'discipline'
+            );
+
+            const riskTolerance = getStaffBehaviorTendency(
+                coach,
+                'riskTolerance'
+            );
+
+            const ethicValue = Number(kid.personality?.workEthic);
+            const ethic = Number.isFinite(ethicValue)
+                ? ethicValue
+                : 50;
+
+            if (discipline >= 70 && ethic >= 65) {
+                // Disciplined coaches are more willing to retrain
+                // dependable young players to address roster shortages.
+                threshold -= 4;
+            } else if (
+                riskTolerance >= 65 &&
+                ['OL', 'DL'].includes(targetPos)
+            ) {
+                // Risk-tolerant coaches are more willing to try a
+                // positional conversion when the physical tools fit.
+                const strengthValue = Number(
+                    kid.attributes?.physical?.strength
+                );
+
+                const strength = Number.isFinite(strengthValue)
+                    ? strengthValue
+                    : 50;
+
+                if (strength >= 55) {
+                    threshold -= 5;
+                }
             }
 
             return isSurplus && isViableAtNew && (targetOvr >= threshold);

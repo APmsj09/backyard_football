@@ -26,7 +26,7 @@ import {
     processWeeklyCoachDevelopment, ensureTeamStaffWorkPlan,
     getEffectiveStaffWorkHours, processWeeklyStaffPreparation,
     processCoachOffseasonRetention, resolveCoachCarousel,
-    processStaffMarketDecay
+    processStaffMarketDecay, getStaffBehaviorTendency
 } from './staff.js';
 import {
     evaluatePlayerRetention,
@@ -2723,12 +2723,24 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
         financeOpeningBalances.set(String(team.id), openingBalance);
 
         const coach = team.staff?.coach || team.coach;
-        const personality = coach?.biases?.personality?.name || 'Balanced Tactician';
+
+        const relationshipOrientation = getStaffBehaviorTendency(
+            coach,
+            'relationshipOrientation'
+        );
+
+        const riskTolerance = getStaffBehaviorTendency(
+            coach,
+            'riskTolerance'
+        );
+
         const rawDiscipline = Number(coach?.ratings?.practiceDiscipline);
         const discipline = Number.isFinite(rawDiscipline)
             ? rawDiscipline
             : 50;
-        const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+
+        const gmDirective =
+            team.gameplan?.gmDirective || 'COACH_AUTONOMY';
                 const isUser = team.isPlayerControlled;
         const roster = getRosterObjects(team);
 
@@ -2854,8 +2866,12 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
             const hasLockerRoomBeef = roster.some(p => p.social?.rivalIds?.some(rId => team.roster.includes(rId)));
 
             // A. PIZZA PARTY ($25) - Morale
-            // Players' Coach buys it instantly if morale dips; Disciplinarians refuse to coddle kids.
-            if (team.finances.balance >= 25.00 && (avgHappiness < 65 || hasLockerRoomBeef) && personality !== 'Old-School Disciplinarian') {
+            // Relationship-oriented coaches place more value on team morale.
+            if (
+                team.finances.balance >= 25.00 &&
+                (avgHappiness < 65 || hasLockerRoomBeef) &&
+                relationshipOrientation >= 60
+            ) {
                 team.finances.balance -= 25.00;
 
                 recordFinanceLedgerEntry(
@@ -2908,9 +2924,13 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
             }
 
             // C. BUYING FAVOR TOKENS ($3) - Recruiting
-            // Analytical/Win-Now coaches hoard money to buy tokens for Free Agency bidding wars
-            const isAggressiveFA = gmDirective === 'WIN_NOW' || personality === 'Analytical Savant';
-            const tokenHoardTarget = isAggressiveFA ? 4 : 2; // Aggressive GMs stock up on tokens
+            // Win-now directives or risk-tolerant coaches favor a larger
+            // reserve for competitive recruiting opportunities.
+            const isAggressiveFA =
+                gmDirective === 'WIN_NOW' ||
+                riskTolerance >= 65;
+
+            const tokenHoardTarget = isAggressiveFA ? 4 : 2;
 
             // If team has leftover cash and needs tokens, buy them!
             if (team.finances.balance >= 3.00 && (team.socialProfile?.favorTokens || 0) < tokenHoardTarget) {
@@ -3240,9 +3260,14 @@ export function processSeasonStartDues(gameState = game) {
         );
 
         const coach = team.staff?.coach || team.coach;
-        const personality =
-            coach?.biases?.personality?.name || 'Balanced Tactician';
+
+        const relationshipOrientation = getStaffBehaviorTendency(
+            coach,
+            'relationshipOrientation'
+        );
+
         const discipline = coach?.ratings?.practiceDiscipline ?? 50;
+
         const isUserTeam =
             team.isPlayerControlled ||
             team.id === gameState.playerTeam?.id;
@@ -3255,7 +3280,7 @@ export function processSeasonStartDues(gameState = game) {
         roster.forEach(player => {
             const isAiWaiver =
                 !isUserTeam &&
-                personality === "Players' Coach" &&
+                relationshipOrientation >= 75 &&
                 (player.expectations?.happiness ?? 100) < 60;
 
             if (waivedIds.has(String(player.id)) || isAiWaiver) {
@@ -3510,41 +3535,107 @@ export function processLockerRoomCulture(team, gameLog = null) {
     const coach = getTeamCoachingSpecialist(team, 'training');
     if (!coach) return;
 
-    const personality =
-        coach.biases?.personality?.name || coach.type;
+    const discipline = getStaffBehaviorTendency(
+        coach,
+        'discipline'
+    );
+
+    const relationshipOrientation = getStaffBehaviorTendency(
+        coach,
+        'relationshipOrientation'
+    );
+
+    const developmentFocus = getStaffBehaviorTendency(
+        coach,
+        'developmentFocus'
+    );
+
     const roster = getRosterObjects(team);
 
     roster.forEach(player => {
-        if (!player.personality) return;
-        const ethic = player.personality.workEthic || 50;
-        const ego = player.personality.ego || 50;
+        if (!player?.personality) return;
 
-        if (!player.expectations) player.expectations = { happiness: 100 };
+        const ethicValue = Number(player.personality.workEthic);
+        const ethic = Number.isFinite(ethicValue)
+            ? ethicValue
+            : 50;
 
-        // 1. Disciplinarian Culture Clash / Growth
-        if (personality === 'Old-School Disciplinarian' || personality === 'The Strict Parent') {
+        const egoValue = Number(player.personality.ego);
+        const ego = Number.isFinite(egoValue)
+            ? egoValue
+            : 50;
+
+        if (!player.expectations) {
+            player.expectations = { happiness: 100 };
+        }
+
+        const currentHappiness = Number(
+            player.expectations.happiness
+        );
+
+        const happiness = Number.isFinite(currentHappiness)
+            ? Math.max(0, Math.min(100, currentHappiness))
+            : 100;
+
+        player.expectations.happiness = happiness;
+
+        // Demanding coaches can clash with high-ego players, while
+        // hardworking players may respond positively to firm standards.
+        if (discipline >= 65) {
             if (ego > 75) {
-                // Divas hate strict authority
-                player.expectations.happiness = Math.max(10, player.expectations.happiness - 4);
-                if (team.id === game?.playerTeam?.id && Math.random() < 0.08) {
-                    gameLog?.push(`⚡ Locker Room Drama: ${player.name} complained to his parents about Coach ${coach.name}'s strict drills.`);
+                player.expectations.happiness = Math.max(
+                    10,
+                    player.expectations.happiness - 4
+                );
+
+                if (
+                    team.id === game?.playerTeam?.id &&
+                    Math.random() < 0.08
+                ) {
+                    gameLog?.push(
+                        `⚡ Locker Room Drama: ${player.name} complained to his parents about Coach ${coach.name}'s strict drills.`
+                    );
                 }
             } else if (ethic > 70) {
-                // Hard-working gym rats thrive
-                player.personality.loyalty = Math.min(99, (player.personality.loyalty || 50) + 1);
+                const currentLoyalty = Number(
+                    player.personality.loyalty
+                );
+
+                const loyalty = Number.isFinite(currentLoyalty)
+                    ? currentLoyalty
+                    : 50;
+
+                player.personality.loyalty = Math.min(
+                    99,
+                    loyalty + 1
+                );
             }
         }
 
-        // 2. Players' Coach High Morale
-        else if (personality === "Players' Coach" || personality === 'The Rec Center Director') {
-            player.expectations.happiness = Math.min(100, player.expectations.happiness + 3);
+        // Relationship-oriented coaches provide additional morale support.
+        // This is independent of discipline, so demanding coaches can
+        // still build positive relationships with the rest of the roster.
+        if (relationshipOrientation >= 65) {
+            player.expectations.happiness = Math.min(
+                100,
+                player.expectations.happiness + 3
+            );
         }
 
-        // 3. Peaked in '94 Toughness
-        else if (personality === "Peaked in '94" || personality === 'The Has-Been Dad') {
-            if (player.attributes?.mental?.toughness && player.attributes.mental.toughness < 90) {
-                if (Math.random() < 0.10) player.attributes.mental.toughness += 1;
-            }
+        // Development-focused coaches occasionally help players improve
+        // mental toughness through their team's training culture.
+        const toughnessValue = Number(
+            player.attributes?.mental?.toughness
+        );
+
+        if (
+            developmentFocus >= 70 &&
+            Number.isFinite(toughnessValue) &&
+            toughnessValue > 0 &&
+            toughnessValue < 90 &&
+            Math.random() < 0.10
+        ) {
+            player.attributes.mental.toughness = toughnessValue + 1;
         }
     });
 }
@@ -3647,21 +3738,57 @@ export function processOffseasonFADay(
         // Rank targets using roster need, market momentum, coach temperament,
         // and a controlled amount of uncertainty.
         const coach = aiTeam.staff?.coach || aiTeam.coach;
-        const coachPersonality =
-            coach?.biases?.personality?.name || "Players' Coach";
-        const tactical =
-            coach?.biases?.tactical?.name || 'Balanced Tactician';
+
+        // Resolve stable IDs first, retaining compatibility with old saves.
+        const legacyPersonalityIds = {
+            "Players' Coach": 'player_centered',
+            'Old-School Disciplinarian': 'traditionalist',
+            "Peaked in '94": 'hard_nosed_competitor',
+            'Analytical Savant': 'analytical_planner'
+        };
+
+        const legacyTacticalIds = {
+            'Smashmouth Zealot': 'power_run_specialist',
+            'Air Raid Purist': 'spread_passing_specialist',
+            'Blitz Addict': 'pressure_oriented_defender',
+            'Conservative Turtler': 'conservative_game_manager',
+            'Balanced Tactician': 'adaptive_strategist'
+        };
+
+        const personalityId =
+            coach?.profileIds?.personality ||
+            coach?.biases?.personality?.id ||
+            legacyPersonalityIds[
+                coach?.biases?.personality?.name
+            ] ||
+            'player_centered';
+
+        const tacticalId =
+            coach?.profileIds?.tactical ||
+            coach?.biases?.tactical?.id ||
+            legacyTacticalIds[
+                coach?.biases?.tactical?.name
+            ] ||
+            'adaptive_strategist';
+
+        const riskTolerance = getStaffBehaviorTendency(
+            coach,
+            'riskTolerance'
+        );
+
         const gmDirective =
             aiTeam.gameplan?.gmDirective || 'COACH_AUTONOMY';
 
         const isAggressiveRecruiter =
-            coachPersonality === "Peaked in '94" ||
-            tactical === 'Blitz Addict' ||
+            personalityId === 'hard_nosed_competitor' ||
+            tacticalId === 'pressure_oriented_defender' ||
+            riskTolerance >= 65 ||
             gmDirective === 'WIN_NOW';
 
         const isConservativeRecruiter =
-            tactical === 'Conservative Turtler' ||
-            coachPersonality === 'Analytical Savant';
+            tacticalId === 'conservative_game_manager' ||
+            personalityId === 'analytical_planner' ||
+            riskTolerance <= 35;
 
         const coachInstinct = Number(
             coach?.ratings?.gameplanInstinct ?? 50
@@ -4457,8 +4584,23 @@ export function executeAICutDowns() {
         const scout = getAssignedCoachForTask(team, 'scouting') ||
             getTeamCoachingSpecialist(team, 'scouting');
 
-        const personality = coach?.biases?.personality?.name;
-        const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+        const discipline = getStaffBehaviorTendency(
+            coach,
+            'discipline'
+        );
+
+        const riskTolerance = getStaffBehaviorTendency(
+            coach,
+            'riskTolerance'
+        );
+
+        const relationshipOrientation = getStaffBehaviorTendency(
+            coach,
+            'relationshipOrientation'
+        );
+
+        const gmDirective =
+            team.gameplan?.gmDirective || 'COACH_AUTONOMY';
 
         // Scouting hours improve the accuracy of roster evaluations.
         const scoutingHours = (
@@ -4497,31 +4639,226 @@ export function executeAICutDowns() {
 
         // Personality-driven roster valuation
         const getCutEvaluationScore = (p) => {
-            const pos = p.pos || estimateBestPosition(p);
-            // Subjective perceived rating (Noise depends on scout quality)
-            const noise = Math.round((Math.sin(p.id.charCodeAt(0) + game.year) * (1.0 - scoutAcc) * 10));
-            let val = calculateOverall(p, pos) + noise;
+            // Build an imperfect player assessment before calculating
+            // overall. The evaluation must not start from the true OVR.
+            const positionOptions = [
+                'QB', 'RB', 'WR', 'TE',
+                'OL', 'DL', 'LB', 'DB'
+            ];
 
-            // Potential value
-            if (p.potential === 'A') val += (gmDirective === 'DEVELOP_YOUTH' ? 15 : 8);
-            else if (p.potential === 'B') val += (gmDirective === 'DEVELOP_YOUTH' ? 8 : 4);
+            const playerId = String(p.id ?? 'unknown');
+            const assessmentUncertainty = Math.max(
+                2,
+                Math.round((1 - scoutAcc) * 12)
+            );
 
-            const ethic = p.personality?.workEthic || 50;
-            const ego = p.personality?.ego || 50;
-            const toughness = p.attributes?.mental?.toughness || 50;
+            const scoutingProfileId =
+                scout?.profileIds?.scouting ||
+                scout?.biases?.scouting?.id ||
+                ({
+                    'Speed Chaser': 'athletic_bias_evaluator',
+                    'Technique Purist': 'technique_first_evaluator',
+                    'Character First': 'character_focused_evaluator',
+                    'Objective Scout': 'balanced_evaluator'
+                }[scout?.biases?.scouting?.name]) ||
+                'balanced_evaluator';
 
-            // Coach bias adjustments on cut-day
-            if (personality === 'Old-School Disciplinarian') {
-                if (ethic < 40) val -= 12; // Disciplinarians cut slackers first
-                if (ego > 75) val -= 10;   // Cuts toxic divas
-                if (toughness > 65) val += 6;
-            } else if (personality === "Peaked in '94") {
-                const str = p.attributes?.physical?.strength || 50;
-                if (str > 60) val += 6;    // Loves raw power
-            } else if (personality === "Players' Coach") {
-                const loyalty = p.personality?.loyalty || 50;
-                if (loyalty > 65) val += 8; // Protects loyal kids
+            // Deterministic noise gives each player a consistent assessment
+            // during this evaluation, rather than reshuffling their rating
+            // every time the sort comparator runs.
+            const assessmentNoise = key => {
+                let hash = 2166136261;
+                const text = String(key);
+
+                for (let i = 0; i < text.length; i++) {
+                    hash ^= text.charCodeAt(i);
+                    hash = Math.imul(hash, 16777619);
+                }
+
+                return ((hash >>> 0) / 4294967295) * 2 - 1;
+            };
+
+            const perceivedAttributes = {};
+
+            for (const [category, attributes] of Object.entries(
+                p.attributes || {}
+            )) {
+                perceivedAttributes[category] = {};
+
+                for (const [attribute, rawValue] of Object.entries(
+                    attributes || {}
+                )) {
+                    if (
+                        typeof rawValue !== 'number' ||
+                        !Number.isFinite(rawValue) ||
+                        ['height', 'weight'].includes(attribute)
+                    ) {
+                        perceivedAttributes[category][attribute] =
+                            rawValue;
+                        continue;
+                    }
+
+                    // Scouting styles can create modest systematic biases.
+                    let scoutingBias = 0;
+
+                    if (
+                        scoutingProfileId === 'athletic_bias_evaluator' &&
+                        category === 'physical'
+                    ) {
+                        scoutingBias = 2;
+                    } else if (
+                        scoutingProfileId === 'technique_first_evaluator' &&
+                        category === 'technical'
+                    ) {
+                        scoutingBias = 2;
+                    } else if (
+                        scoutingProfileId === 'character_focused_evaluator' &&
+                        category === 'mental'
+                    ) {
+                        scoutingBias = 2;
+                    }
+
+                    const noise = assessmentNoise(
+                        `${game.year}:${team.id}:${playerId}:${category}:${attribute}`
+                    ) * assessmentUncertainty;
+
+                    perceivedAttributes[category][attribute] = Math.max(
+                        1,
+                        Math.min(
+                            99,
+                            Math.round(rawValue + noise + scoutingBias)
+                        )
+                    );
+                }
             }
+
+            const perceivedPlayer = {
+                ...p,
+                attributes: perceivedAttributes
+            };
+
+            // Use the listed position when available. If it is missing,
+            // estimate the best position from perceived—not true—attributes.
+            const pos = positionOptions.includes(p.pos)
+                ? p.pos
+                : positionOptions.reduce((best, candidatePosition) => (
+                    calculateOverall(perceivedPlayer, candidatePosition) >
+                    calculateOverall(perceivedPlayer, best)
+                        ? candidatePosition
+                        : best
+                ), 'WR');
+
+            let val = calculateOverall(perceivedPlayer, pos);
+
+            // Development preference must use observable information,
+            // never the player's hidden true potential grade.
+            const playerAge = Number(p.age);
+
+            if (
+                gmDirective === 'DEVELOP_YOUTH' &&
+                Number.isFinite(playerAge)
+            ) {
+                if (playerAge <= 13) {
+                    val += 8;
+                } else if (playerAge <= 15) {
+                    val += 4;
+                }
+            }
+
+            // Personality traits are estimates, not perfect knowledge.
+            // Scouting quality controls the uncertainty in each estimate.
+            const estimateTrait = (rawValue, traitKey) => {
+                const raw = Number(rawValue);
+                const actual = Number.isFinite(raw) ? raw : 50;
+
+                let scoutingBias = 0;
+
+                // Character-focused evaluators may overrate a player's
+                // apparent work ethic and loyalty.
+                if (
+                    scoutingProfileId === 'character_focused_evaluator' &&
+                    ['workEthic', 'loyalty'].includes(traitKey)
+                ) {
+                    scoutingBias = 2;
+                }
+
+                const noise = assessmentNoise(
+                    `${game.year}:${team.id}:${playerId}:trait:${traitKey}`
+                ) * assessmentUncertainty;
+
+                return Math.max(
+                    1,
+                    Math.min(
+                        99,
+                        Math.round(actual + noise + scoutingBias)
+                    )
+                );
+            };
+
+            const ethic = estimateTrait(
+                p.personality?.workEthic,
+                'workEthic'
+            );
+
+            const ego = estimateTrait(
+                p.personality?.ego,
+                'ego'
+            );
+
+            const loyalty = estimateTrait(
+                p.personality?.loyalty,
+                'loyalty'
+            );
+
+            // Physical and mental traits use the previously constructed
+            // imperfect attribute assessment.
+            const toughness = Number(
+                perceivedAttributes.mental?.toughness
+            ) || 50;
+
+            const perceivedStrength = Number(
+                perceivedAttributes.physical?.strength
+            ) || 50;
+
+            // Individual coaching tendencies influence cut-day evaluations.
+            // These are preferences, not guarantees about which player is cut.
+            let coachingBias = 0;
+
+            if (discipline >= 65) {
+                if (ethic < 40) {
+                    coachingBias -= 12;
+                }
+
+                if (ego > 75) {
+                    coachingBias -= 10;
+                }
+
+                if (toughness > 65) {
+                    coachingBias += 6;
+                }
+            }
+
+            if (riskTolerance >= 65) {
+                if (perceivedStrength > 60) {
+                    coachingBias += 6;
+                }
+            }
+
+            if (
+                relationshipOrientation >= 65 &&
+                loyalty > 65
+            ) {
+                coachingBias += 8;
+            }
+
+            // Prevent overlapping tendencies from overwhelming the
+            // player's evaluated value.
+            coachingBias = Math.max(
+                -20,
+                Math.min(12, coachingBias)
+            );
+
+            val += coachingBias;
 
             if (gmDirective === 'WIN_NOW' && p.age >= 16) val += 5; // Prefers experienced players
             return val;
@@ -4549,6 +4886,177 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
     if (!team || !game || !game.players) return 0;
     let added = 0;
     const limit = getCurrentRosterLimit(game);
+
+    const scout =
+        getTeamCoachingSpecialist(team, 'scouting') ||
+        getTeamCoachingSpecialist(team, 'general');
+
+    const getRating = key => {
+        const value = Number(scout?.ratings?.[key]);
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, value))
+            : 50;
+    };
+
+    const scoutingHours = (
+        team.staffWorkPlan?.assignments || []
+    ).reduce((total, assignment) => {
+        if (assignment?.task !== 'scouting') return total;
+
+        const hours = Number(assignment.hours);
+
+        return total + (
+            Number.isFinite(hours) && hours > 0
+                ? hours
+                : 0
+        );
+    }, 0);
+
+    // Scouting quality and actual time invested determine how uncertain
+    // the AI's estimate of an available player's ability will be.
+    const baseScoutAccuracy = (
+        getRating('evalTechnique') +
+        getRating('evalPhysicals')
+    ) / 200;
+
+    const scoutingEffortMultiplier =
+        0.7 + 0.3 * Math.min(1, scoutingHours / 12);
+
+    const scoutingAccuracy = Math.max(
+        0.25,
+        Math.min(0.90, baseScoutAccuracy * scoutingEffortMultiplier)
+    );
+
+    const assessmentUncertainty = Math.max(
+        2,
+        Math.round((1 - scoutingAccuracy) * 12)
+    );
+
+    const legacyScoutingIds = {
+        'Speed Chaser': 'athletic_bias_evaluator',
+        'Technique Purist': 'technique_first_evaluator',
+        'Character First': 'character_focused_evaluator',
+        'Objective Scout': 'balanced_evaluator'
+    };
+
+    const scoutingProfileId =
+        scout?.profileIds?.scouting ||
+        scout?.biases?.scouting?.id ||
+        legacyScoutingIds[scout?.biases?.scouting?.name] ||
+        'balanced_evaluator';
+
+    // Stable noise makes repeated evaluations consistent for the same
+    // team, player, season, and attribute.
+    const assessmentNoise = key => {
+        let hash = 2166136261;
+
+        for (const character of String(key)) {
+            hash ^= character.charCodeAt(0);
+            hash = Math.imul(hash, 16777619);
+        }
+
+        return ((hash >>> 0) / 4294967295) * 2 - 1;
+    };
+
+    const positionOptions = [
+        'QB', 'RB', 'WR', 'TE',
+        'OL', 'DL', 'LB', 'DB'
+    ];
+
+    const assessmentCache = new Map();
+
+    const evaluateWalkOn = player => {
+        const cacheKey = String(player.id ?? player.name ?? '');
+
+        if (assessmentCache.has(cacheKey)) {
+            return assessmentCache.get(cacheKey);
+        }
+
+        const perceivedAttributes = {};
+
+        for (const [category, attributes] of Object.entries(
+            player.attributes || {}
+        )) {
+            perceivedAttributes[category] = {};
+
+            for (const [attribute, rawValue] of Object.entries(
+                attributes || {}
+            )) {
+                if (
+                    typeof rawValue !== 'number' ||
+                    !Number.isFinite(rawValue) ||
+                    ['height', 'weight'].includes(attribute)
+                ) {
+                    perceivedAttributes[category][attribute] = rawValue;
+                    continue;
+                }
+
+                let scoutingBias = 0;
+
+                if (
+                    scoutingProfileId === 'athletic_bias_evaluator' &&
+                    category === 'physical'
+                ) {
+                    scoutingBias = 2;
+                } else if (
+                    scoutingProfileId === 'technique_first_evaluator' &&
+                    category === 'technical'
+                ) {
+                    scoutingBias = 2;
+                } else if (
+                    scoutingProfileId === 'character_focused_evaluator' &&
+                    category === 'mental'
+                ) {
+                    scoutingBias = 2;
+                }
+
+                const noise = assessmentNoise(
+                    `${game.year}:${team.id}:${cacheKey}:${category}:${attribute}`
+                ) * assessmentUncertainty;
+
+                perceivedAttributes[category][attribute] = Math.max(
+                    1,
+                    Math.min(
+                        99,
+                        Math.round(rawValue + noise + scoutingBias)
+                    )
+                );
+            }
+        }
+
+        const perceivedPlayer = {
+            ...player,
+            attributes: perceivedAttributes
+        };
+
+        let bestEstimatedOverall = -Infinity;
+        let estimatedPosition = 'WR';
+
+        for (const position of positionOptions) {
+            const overall = Number(
+                calculateOverall(perceivedPlayer, position)
+            );
+
+            if (
+                Number.isFinite(overall) &&
+                overall > bestEstimatedOverall
+            ) {
+                bestEstimatedOverall = overall;
+                estimatedPosition = position;
+            }
+        }
+
+        const result = {
+            position: estimatedPosition,
+            overall: Number.isFinite(bestEstimatedOverall)
+                ? bestEstimatedOverall
+                : 50
+        };
+
+        assessmentCache.set(cacheKey, result);
+        return result;
+    };
+
     while (team.roster.length < targetSize && team.roster.length < limit) {
         const unassigned = game.players.filter(p =>
             p &&
@@ -4561,11 +5069,18 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
         );
         if (unassigned.length === 0) break;
 
-        // Score players based on team need and overall ability
+        // Rank candidates by the AI's estimated ability, not true OVR.
+        // Stable tie-breaking avoids arbitrary changes in selection order.
         unassigned.sort((a, b) => {
-            const ovrA = calculateOverall(a, estimateBestPosition(a));
-            const ovrB = calculateOverall(b, estimateBestPosition(b));
-            return ovrB - ovrA;
+            const assessmentA = evaluateWalkOn(a);
+            const assessmentB = evaluateWalkOn(b);
+
+            return (
+                assessmentB.overall - assessmentA.overall ||
+                String(a.id ?? a.name ?? '').localeCompare(
+                    String(b.id ?? b.name ?? '')
+                )
+            );
         });
 
         const recruit = unassigned[0];

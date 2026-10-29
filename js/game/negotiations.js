@@ -49,31 +49,62 @@ export function calculateAiTeamNeedAndDesire(
     // Never calculate their true overall from hidden attributes.
     const scoutingReport = getTeamScoutingReport(aiTeam, player.id);
 
+    const rawConfidence = Number(scoutingReport?.confidence);
+
+    const reportConfidence = Number.isFinite(rawConfidence)
+        ? Math.max(
+            0,
+            Math.min(
+                1,
+                rawConfidence > 1
+                    ? rawConfidence / 100
+                    : rawConfidence
+            )
+        )
+        : 0;
+
     const validPositions = [
         'QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'
     ];
 
     const listedPosition = String(player.pos || '').toUpperCase();
 
-    const reportFits = [
-        scoutingReport?.evaluation?.offenseFit,
-        scoutingReport?.evaluation?.defenseFit
-    ]
-        .filter(fit =>
-            validPositions.includes(
-                String(fit?.position || '').toUpperCase()
-            ) &&
-            Number.isFinite(Number(fit.low)) &&
-            Number.isFinite(Number(fit.high))
-        )
-        .map(fit => ({
-            ...fit,
-            position: String(fit.position).toUpperCase(),
-            estimatedOvr: (
-                Number(fit.low) + Number(fit.high)
-            ) / 2
-        }))
-        .sort((a, b) => b.estimatedOvr - a.estimatedOvr);
+    const reportFits = reportConfidence > 0
+        ? [
+            scoutingReport?.evaluation?.offenseFit,
+            scoutingReport?.evaluation?.defenseFit
+        ]
+            .filter(fit =>
+                validPositions.includes(
+                    String(fit?.position || '').toUpperCase()
+                ) &&
+                fit.low != null &&
+                fit.high != null &&
+                Number.isFinite(Number(fit.low)) &&
+                Number.isFinite(Number(fit.high))
+            )
+            .map(fit => {
+                const estimatedOvr = (
+                    Number(fit.low) + Number(fit.high)
+                ) / 2;
+
+                return {
+                    ...fit,
+                    position: String(fit.position).toUpperCase(),
+                    estimatedOvr,
+
+                    // Low-confidence estimates move toward a neutral prior.
+                    positionSelectionScore:
+                        50 +
+                        (estimatedOvr - 50) * reportConfidence
+                };
+            })
+            .sort(
+                (a, b) =>
+                    b.positionSelectionScore -
+                    a.positionSelectionScore
+            )
+        : [];
 
     // Prefer a team-specific scouting fit. If the player is unscouted,
     // fall back only to the publicly listed position.
@@ -98,20 +129,6 @@ export function calculateAiTeamNeedAndDesire(
         fit => fit.position === bestPos
     );
 
-    const rawConfidence = Number(scoutingReport?.confidence);
-
-    const reportConfidence = Number.isFinite(rawConfidence)
-        ? Math.max(
-            0,
-            Math.min(
-                1,
-                rawConfidence > 1
-                    ? rawConfidence / 100
-                    : rawConfidence
-            )
-        )
-        : 0;
-
     // Unknown talent starts at a neutral prior, not the player's true OVR.
     // Lower-confidence reports pull estimates closer to neutral.
     const estimatedOvr = Number.isFinite(selectedFit?.estimatedOvr)
@@ -123,15 +140,27 @@ export function calculateAiTeamNeedAndDesire(
     );
 
     // Only use physical estimates present in the team's own scouting report.
+    // Shrink uncertain estimates toward a neutral prior rather than treating
+    // every reported midpoint as equally reliable.
     const speedRange =
         scoutingReport?.attributeRanges?.physical?.speed;
 
-    const speed = (
-        Number.isFinite(Number(speedRange?.low)) &&
-        Number.isFinite(Number(speedRange?.high))
-    )
-        ? (Number(speedRange.low) + Number(speedRange.high)) / 2
+    const hasSpeedEstimate =
+        speedRange?.low != null &&
+        speedRange?.high != null &&
+        Number.isFinite(Number(speedRange.low)) &&
+        Number.isFinite(Number(speedRange.high));
+
+    const reportedSpeed = hasSpeedEstimate
+        ? (
+            Number(speedRange.low) +
+            Number(speedRange.high)
+        ) / 2
         : null;
+
+    const speed = reportedSpeed == null
+        ? null
+        : 50 + (reportedSpeed - 50) * reportConfidence;
 
     // Personality traits are unknown unless this team has received
     // a character assessment in its scouting report.
@@ -165,12 +194,87 @@ export function calculateAiTeamNeedAndDesire(
         ? Number(player.age)
         : 14;
 
-    const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
-    const personality = coach?.biases?.personality?.name || "Players' Coach";
-    const scoutingBias = aiTeam.staff?.scout?.biases?.scouting?.name || 'Objective Scout';
-    const gmDirective = aiTeam.gameplan?.gmDirective || 'COACH_AUTONOMY';
-    const coachInstinct = coach?.ratings?.gameplanInstinct || 50;
-    const evalSkill = Math.round(((coach?.ratings?.evalTechnique || 50) + (coach?.ratings?.evalPhysicals || 50)) / 2);
+    // Resolve stable profile IDs while retaining support for legacy saves.
+    const legacyProfileIds = {
+        tactical: {
+            'Smashmouth Zealot': 'power_run_specialist',
+            'Air Raid Purist': 'spread_passing_specialist',
+            'Blitz Addict': 'pressure_oriented_defender',
+            'Conservative Turtler': 'conservative_game_manager',
+            'Balanced Tactician': 'adaptive_strategist'
+        },
+        personality: {
+            "Players' Coach": 'player_centered',
+            'Old-School Disciplinarian': 'traditionalist',
+            "Peaked in '94": 'hard_nosed_competitor',
+            'Analytical Savant': 'analytical_planner'
+        },
+        scouting: {
+            'Speed Chaser': 'athletic_bias_evaluator',
+            'Technique Purist': 'technique_first_evaluator',
+            'Character First': 'character_focused_evaluator',
+            'Objective Scout': 'balanced_evaluator'
+        }
+    };
+
+    const resolveProfileId = (
+        staffMember,
+        category,
+        fallbackId
+    ) => (
+        staffMember?.profileIds?.[category] ||
+        staffMember?.biases?.[category]?.id ||
+        legacyProfileIds[category]?.[
+            staffMember?.biases?.[category]?.name
+        ] ||
+        fallbackId
+    );
+
+    const tacticalId = resolveProfileId(
+        coach,
+        'tactical',
+        'adaptive_strategist'
+    );
+
+    const personalityId = resolveProfileId(
+        coach,
+        'personality',
+        'player_centered'
+    );
+
+    const scoutingCoach = aiTeam.staff?.scout || coach;
+
+    const scoutingId = resolveProfileId(
+        scoutingCoach,
+        'scouting',
+        'balanced_evaluator'
+    );
+
+    // Older saves without behavior profiles receive neutral tendencies.
+    const getTendency = key => {
+        const value = Number(
+            coach?.behaviorProfile?.tendencies?.[key]
+        );
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, value))
+            : 50;
+    };
+
+    const riskTolerance = getTendency('riskTolerance');
+    const discipline = getTendency('discipline');
+
+    const gmDirective =
+        aiTeam.gameplan?.gmDirective || 'COACH_AUTONOMY';
+
+    const coachInstinct = Number(
+        coach?.ratings?.gameplanInstinct
+    ) || 50;
+
+    const evalSkill = Math.round((
+        (Number(coachingScout?.ratings?.evalTechnique) || 50) +
+        (Number(coachingScout?.ratings?.evalPhysicals) || 50)
+    ) / 2);
 
     // 1. GM DIRECTIVE POLICY FILTER
     if (gmDirective === 'DEVELOP_YOUTH' && age >= 16) {
@@ -181,10 +285,21 @@ export function calculateAiTeamNeedAndDesire(
     }
 
     // 2. CHARACTER & LOCKER ROOM CULTURE COMPATIBILITY
-    if ((personality === 'Old-School Disciplinarian' || scoutingBias === 'Character First') && ego > 72) {
-        return { shouldBid: false, desireScore: 0, offer: null, reason: 'Coach refuses to recruit high-ego divas' };
+    if (
+        (
+            discipline >= 70 ||
+            scoutingId === 'character_focused_evaluator'
+        ) &&
+        ego !== null &&
+        ego > 72
+    ) {
+        return {
+            shouldBid: false,
+            desireScore: 0,
+            offer: null,
+            reason: 'Coach refuses to recruit high-ego prospects'
+        };
     }
-
     // 3. VALUE OVER REPLACEMENT (VOR), STARTER GAPS & ROSTER DEPTH
     const allPositions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
 
@@ -338,28 +453,82 @@ export function calculateAiTeamNeedAndDesire(
     }
 
     // 4. SCHEME & TACTICAL BIAS ALIGNMENT
-    if (tactical === 'Air Raid Purist') {
-        if (['WR', 'TE'].includes(bestPos) || bestPos === 'QB') desireScore += 22;
-    } else if (tactical === 'Smashmouth Zealot') {
-        if (['OL', 'RB', 'TE'].includes(bestPos)) desireScore += 22;
-        if (bestPos === 'WR') desireScore -= 14;
-    } else if (tactical === 'Blitz Addict') {
-        if (['DL', 'LB', 'DB'].includes(bestPos) && speed > 60) desireScore += 18;
+    if (tacticalId === 'spread_passing_specialist') {
+        if (['WR', 'TE', 'QB'].includes(bestPos)) {
+            desireScore += 22;
+        }
+    } else if (tacticalId === 'power_run_specialist') {
+        if (['OL', 'RB', 'TE'].includes(bestPos)) {
+            desireScore += 22;
+        }
+
+        if (bestPos === 'WR') {
+            desireScore -= 14;
+        }
+    } else if (tacticalId === 'pressure_oriented_defender') {
+        if (
+            ['DL', 'LB', 'DB'].includes(bestPos) &&
+            speed !== null &&
+            speed > 60
+        ) {
+            desireScore += 18;
+        }
     }
 
     // 5. SCOUTING BIAS TASTES
-    if (scoutingBias === 'Speed Chaser') {
-        if (speed >= 68) desireScore += 20;
-        else if (speed < 46) desireScore -= 22;
-    } else if (scoutingBias === 'Character First') {
-        if (ethic >= 72) desireScore += 18;
+    if (scoutingId === 'athletic_bias_evaluator') {
+        if (speed !== null && speed >= 68) {
+            desireScore += 20;
+        } else if (speed !== null && speed < 46) {
+            desireScore -= 22;
+        }
+    } else if (
+        scoutingId === 'character_focused_evaluator' &&
+        ethic !== null &&
+        ethic >= 72
+    ) {
+        desireScore += 18;
+    }
+    // 6. SOCIAL NETWORK & SQUAD ANCHORS
+    // Only use social information explicitly recorded in this team's
+    // scouting report. Never inspect the prospect's private social graph.
+    //
+    // The current scouting-report schema does not yet persist verified
+    // teammate friendship or rivalry observations, so these bonuses remain
+    // inactive until that evidence is explicitly recorded.
+    const networkEvidence = scoutingReport?.networkEvidence;
+
+    const knownFriendIds = Array.isArray(
+        networkEvidence?.knownTeammateFriendIds
+    )
+        ? networkEvidence.knownTeammateFriendIds.map(String)
+        : [];
+
+    const knownRivalIds = Array.isArray(
+        networkEvidence?.knownTeammateRivalIds
+    )
+        ? networkEvidence.knownTeammateRivalIds.map(String)
+        : [];
+
+    const rosterIds = new Set(
+        roster.map(member => String(member.id))
+    );
+
+    const hasKnownFriend = knownFriendIds.some(
+        id => rosterIds.has(id)
+    );
+
+    const hasKnownRival = knownRivalIds.some(
+        id => rosterIds.has(id)
+    );
+
+    if (hasKnownFriend) {
+        desireScore += 24;
     }
 
-    // 6. SOCIAL NETWORK & SQUAD ANCHORS
-    const hasBFF = player.social?.bestFriendId && roster.some(r => r.id === player.social.bestFriendId);
-    if (hasBFF) desireScore += 24;
-    const hasRival = roster.some(r => player.social?.rivalIds?.includes(r.id));
-    if (hasRival) desireScore -= 45;
+    if (hasKnownRival) {
+        desireScore -= 45;
+    }
 
     if (desireScore < 45) {
         return { shouldBid: false, desireScore, offer: null, reason: 'Insufficient situational desire' };
@@ -367,17 +536,28 @@ export function calculateAiTeamNeedAndDesire(
 
     // 7. ROLE & TOKEN BUDGETING (Intelligent Market Escalation & Counter-Bidding)
     const isAggressiveCoach =
-        personality === "Peaked in '94" ||
-        tactical === 'Blitz Addict' ||
+        personalityId === 'hard_nosed_competitor' ||
+        tacticalId === 'pressure_oriented_defender' ||
+        riskTolerance >= 65 ||
         gmDirective === 'WIN_NOW';
-    const isConservativeCoach = tactical === 'Conservative Turtler' || personality === 'Analytical Savant';
+
+    const isConservativeCoach =
+        tacticalId === 'conservative_game_manager' ||
+        personalityId === 'analytical_planner' ||
+        riskTolerance <= 35;
 
     // Base pitch determination
     let role = (upgradeDelta >= 2 || isDesperateVoid)
         ? 'STARTER'
         : (playerOvr >= 46 ? 'ROTATION' : 'BENCH');
 
-    const retentionOptions = getRetentionPitchOptions(player);
+    // Use the position established from this team's scouting report
+    // or the prospect's public listing. Do not let the helper infer
+    // a hidden position from the prospect's true attributes.
+    const retentionOptions = getRetentionPitchOptions({
+        ...player,
+        pos: bestPos
+    });
 
     let promiseTouches = (
         ego > 65 &&
