@@ -2334,6 +2334,18 @@ export function renderOffseasonFAScreen(gameState) {
 
     const state = gameState.offseasonState || {};
     const progress = state.recruitingProgress || {};
+
+    const normalizedPhase = String(state.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    const isRosterFinalization =
+        normalizedPhase === 'rosterfinalization';
+
+    const isFinalizationRecovery =
+        normalizedPhase === 'recruiting' &&
+        progress.completed === true;
+
     const currentDay = Math.max(
         1,
         Math.floor(Number(state.recruitingDay) || 1)
@@ -2353,9 +2365,17 @@ export function renderOffseasonFAScreen(gameState) {
     const rosterLimit = Game.getCurrentRosterLimit?.(gameState) || 18;
 
     if (roundIndicator) {
-        roundIndicator.textContent =
-            `Recruiting · Day ${currentDay} of ${totalDays}` +
-            (currentDay === totalDays ? ' · Final Day' : '');
+        if (isRosterFinalization) {
+            roundIndicator.textContent =
+                'Recruiting Complete · Roster Finalization';
+        } else if (isFinalizationRecovery) {
+            roundIndicator.textContent =
+                'Recruiting Resolved · Finalization Retry';
+        } else {
+            roundIndicator.textContent =
+                `Recruiting · Day ${currentDay} of ${totalDays}` +
+                (currentDay === totalDays ? ' · Final Day' : '');
+        }
     }
 
     if (userTokensEl) {
@@ -2371,12 +2391,22 @@ export function renderOffseasonFAScreen(gameState) {
             'bg-emerald-700 hover:bg-emerald-800 text-white font-bold ' +
             'px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition';
 
-        advanceBtn.textContent = currentDay >= totalDays
-            ? 'Resolve Final Day & Review Roster →'
-            : `Resolve Day ${currentDay} & Continue →`;
+        if (isRosterFinalization) {
+            advanceBtn.textContent = 'Review Final Roster →';
+            advanceBtn.onclick = () =>
+                window.app.finishOffseasonFAMinigame();
+        } else if (isFinalizationRecovery) {
+            advanceBtn.textContent = 'Retry Finalization →';
+            advanceBtn.onclick = () =>
+                window.app.advanceOffseasonFADay();
+        } else {
+            advanceBtn.textContent = currentDay >= totalDays
+                ? 'Resolve Final Day & Review Roster →'
+                : `Resolve Day ${currentDay} & Continue →`;
 
-        advanceBtn.onclick = () =>
-            window.app.advanceOffseasonFADay();
+            advanceBtn.onclick = () =>
+                window.app.advanceOffseasonFADay();
+        }
     }
 
     renderOffseasonFAPool(gameState);
@@ -2561,13 +2591,73 @@ export function renderOffseasonFAPool(gameState) {
     const container = document.getElementById('fa-minigame-pool-tbody');
     if (!container || !gameState) return;
 
-    const filterPos = document.getElementById('fa-minigame-filter-pos')?.value || '';
-    let pool = (gameState.players || []).filter(p =>
-        p && !p.teamId &&
-        p.status?.type !== 'retired' &&
-        p.status?.type !== 'departed' &&
-        p.age >= 12 && p.age <= 18
+    const state = gameState.offseasonState || {};
+    const progress = state.recruitingProgress || {};
+
+    const normalizedPhase = String(state.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    const recruitingActive =
+        normalizedPhase === 'recruiting' &&
+        progress.initialized === true &&
+        progress.completed !== true &&
+        Number(progress.seasonYear) === Number(gameState.year);
+
+    if (!recruitingActive) {
+        container.innerHTML = `
+            <div class="p-8 text-center text-slate-400 italic text-xs">
+                Recruiting is closed. Review your roster before the new season begins.
+            </div>
+        `;
+        return;
+    }
+
+    const filterPos =
+        document.getElementById('fa-minigame-filter-pos')?.value || '';
+
+    const protectedDraftIds = new Set(
+        (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
+            .filter(prospect => prospect?.id != null)
+            .map(prospect => String(prospect.id))
     );
+
+    let pool = (Array.isArray(gameState.players) ? gameState.players : [])
+        .filter(player => {
+            if (!player || player.id == null || player.teamId != null) {
+                return false;
+            }
+
+            const record = progress.recruits?.[String(player.id)];
+            const age = Number(player.age);
+
+            const statusType = String(
+                player.status?.type || ''
+            ).toLowerCase();
+
+            const lifecycle = String(
+                player.lifecycle || ''
+            ).toLowerCase();
+
+            const lifecycleStatus = String(
+                player.lifecycleStatus || player.lifecycle?.status || ''
+            ).toLowerCase();
+
+            return (
+                record?.status === 'available' &&
+                record.committedTeamId == null &&
+                Number.isFinite(age) &&
+                age >= 12 &&
+                age <= 18 &&
+                !protectedDraftIds.has(String(player.id)) &&
+                lifecycle !== 'draft_eligible' &&
+                lifecycleStatus !== 'draft_eligible' &&
+                !['retired', 'departed', 'temporary'].includes(statusType) &&
+                !['retired', 'departed', 'temporary'].includes(lifecycleStatus) &&
+                !(Number(player.status?.duration) > 0) &&
+                !(Number(player.injury?.duration || player.injuryDuration || 0) > 0)
+            );
+        });
 
     if (filterPos) {
         pool = pool.filter(p =>

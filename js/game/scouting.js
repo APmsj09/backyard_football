@@ -1,4 +1,4 @@
-import { getTeamScoutingReport, setTeamScoutingReport } from './state.js';
+import { getTeamScoutingReport, setTeamScoutingReport, } from './state.js';
 import { calculateOverall, positionOverallWeights } from './player.js';
 import { isPlayerViableForPosition } from './depth_chart.js';
 import {
@@ -217,15 +217,26 @@ function getBestPositionFit(center, lowPlayer, highPlayer, positions) {
 function estimatePotential(team, player, evaluator, level, ranges) {
     const age = Number(player?.age);
 
-    // Pee Wee potential must be inferred from the scout's estimated
-    // attributes, not read directly from the player's hidden potential.
-    if (Number.isInteger(age) && age >= 8 && age <= 11) {
-        const youthProgress = Math.max(0, Math.min(1, (age - 8) / 3));
+    // Potential must be inferred from estimated attributes for every
+    // prospect age. Never use the hidden player.potential grade directly.
+    if (!Number.isInteger(age) || age < 8 || age > 18) {
+        return null;
+    }
 
-        const developmentScale = {
-            physical: 0.52 + (youthProgress * 0.18),
-            mental: 0.48 + (youthProgress * 0.18),
-            technical: 0.45 + (youthProgress * 0.20)
+    const ageProgress = age <= 11
+        ? clamp((age - 8) / 3, 0, 1)
+        : clamp((age - 11) / 7, 0, 1);
+
+    const developmentScale = age <= 11
+        ? {
+            physical: 0.52 + (ageProgress * 0.18),
+            mental: 0.48 + (ageProgress * 0.18),
+            technical: 0.45 + (ageProgress * 0.20)
+        }
+        : {
+            physical: 0.70 + (ageProgress * 0.28),
+            mental: 0.66 + (ageProgress * 0.32),
+            technical: 0.65 + (ageProgress * 0.33)
         };
 
         const inferredTalent = [];
@@ -306,9 +317,9 @@ function estimatePotential(team, player, evaluator, level, ranges) {
         };
     }
 
-    // Preserve the existing behavior for non-youth prospects for now.
-    const actualIndex = GRADES.indexOf(player?.potential);
-    if (actualIndex < 0) return null;
+    // Never reveal a hidden potential grade when no valid estimate
+    // can be produced from the available scouting evidence.
+    return null;
 
     const seed = [
         team.id,

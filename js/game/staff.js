@@ -8,32 +8,212 @@ import {
     defensivePlaybook,
     gmArchetypes
 } from '../data.js';
-import { getRosterObjects } from './state.js';
+import {
+    getRosterObjects,
+    getTeamScoutingReport
+} from './state.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
 import { evaluateStaffNegotiation } from './negotiations.js';
 import { isPlayerViableForPosition, rebuildDepthChartFromOrder } from './depth_chart.js';
 
+const LEGACY_STAFF_PROFILE_IDS = {
+    tactical: {
+        'Smashmouth Zealot': 'power_run_specialist',
+        'Air Raid Purist': 'spread_passing_specialist',
+        'Blitz Addict': 'pressure_oriented_defender',
+        'Conservative Turtler': 'conservative_game_manager',
+        'Balanced Tactician': 'adaptive_strategist'
+    },
+    scouting: {
+        'Speed Chaser': 'athletic_bias_evaluator',
+        'Technique Purist': 'technique_first_evaluator',
+        'Character First': 'character_focused_evaluator',
+        'Objective Scout': 'balanced_evaluator'
+    },
+    personality: {
+        "Players' Coach": 'player_centered',
+        'Old-School Disciplinarian': 'traditionalist',
+        "Peaked in '94": 'hard_nosed_competitor',
+        'Analytical Savant': 'analytical_planner'
+    }
+};
+
+function getStaffProfileId(staff, category) {
+    const profileId =
+        staff?.profileIds?.[category] ||
+        staff?.biases?.[category]?.id;
+
+    if (typeof profileId === 'string' && profileId.length > 0) {
+        return profileId;
+    }
+
+    const legacyName = staff?.biases?.[category]?.name;
+
+    return LEGACY_STAFF_PROFILE_IDS[category]?.[legacyName] || null;
+}
+
 export const tacticalBiases = [
-    { name: 'Smashmouth Zealot', desc: 'Runs the ball heavily; boosts OL/DL development.', runModifier: 0.20, passModifier: -0.20 },
-    { name: 'Air Raid Purist', desc: 'Loves passing and spread formations; boosts WR development.', runModifier: -0.20, passModifier: 0.25 },
-    { name: 'Blitz Addict', desc: 'Calls extra pressure on defense; high sack and turnover rate.', blitzModifier: 0.30 },
-    { name: 'Conservative Turtler', desc: 'Punts on 4th & short past midfield; protects possession.', riskModifier: -0.30 },
-    { name: 'Balanced Tactician', desc: 'Adjusts gameplan smoothly based on game flow.', runModifier: 0, passModifier: 0 }
+    {
+        id: 'power_run_specialist',
+        name: 'Smashmouth Zealot',
+        displayName: 'Power-Run Specialist',
+        desc: 'Favors a physical running game and run-oriented personnel; may underuse the passing game.',
+        runModifier: 0.20,
+        passModifier: -0.20
+    },
+    {
+        id: 'spread_passing_specialist',
+        name: 'Air Raid Purist',
+        displayName: 'Spread-Passing Specialist',
+        desc: 'Favors spread formations and passing concepts; may become too pass-heavy.',
+        runModifier: -0.20,
+        passModifier: 0.25
+    },
+    {
+        id: 'pressure_oriented_defender',
+        name: 'Blitz Addict',
+        displayName: 'Pressure-Oriented Defender',
+        desc: 'Favors aggressive pressure packages, accepting greater risk in coverage.',
+        blitzModifier: 0.30
+    },
+    {
+        id: 'conservative_game_manager',
+        name: 'Conservative Turtler',
+        displayName: 'Conservative Game Manager',
+        desc: 'Prioritizes possession and lower-variance decisions, sometimes passing up worthwhile risks.',
+        riskModifier: -0.30
+    },
+    {
+        id: 'adaptive_strategist',
+        name: 'Balanced Tactician',
+        displayName: 'Adaptive Strategist',
+        desc: 'Favors balanced preparation and adapting the plan to the situation.',
+        runModifier: 0,
+        passModifier: 0
+    }
 ];
 
 export const scoutingBiases = [
-    { name: 'Speed Chaser', desc: 'Overrates raw 40-times; prone to missing technique flaws.' },
-    { name: 'Technique Purist', desc: 'Prioritizes hands and blocking over raw athleticism.' },
-    { name: 'Character First', desc: 'Uncovers Ego, Work Ethic, and Cliques with ease.' },
-    { name: 'Objective Scout', desc: 'Gives balanced, steady prospect evaluations.' }
+    {
+        id: 'athletic_bias_evaluator',
+        name: 'Speed Chaser',
+        displayName: 'Athletic-Bias Evaluator',
+        desc: 'Emphasizes athletic traits and may undervalue technique or decision-making.'
+    },
+    {
+        id: 'technique_first_evaluator',
+        name: 'Technique Purist',
+        displayName: 'Technique-First Evaluator',
+        desc: 'Emphasizes technical execution and may overlook exceptional athletic upside.'
+    },
+    {
+        id: 'character_focused_evaluator',
+        name: 'Character First',
+        displayName: 'Character-Focused Evaluator',
+        desc: 'Places extra weight on leadership, work habits, and interpersonal fit.'
+    },
+    {
+        id: 'balanced_evaluator',
+        name: 'Objective Scout',
+        displayName: 'Balanced Evaluator',
+        desc: 'Attempts to weigh available evidence evenly, while remaining vulnerable to uncertainty.'
+    }
 ];
 
 export const personalityTraits = [
-    { name: "Players' Coach", desc: 'Boosts team happiness; prevents transfer walkouts.' },
-    { name: 'Old-School Disciplinarian', desc: 'Rigorous conditioning; increases stamina, but clashes with high-ego stars.' },
-    { name: "Peaked in '94", desc: 'Extremely stubborn; boosts player toughness.' },
-    { name: 'Analytical Savant', desc: 'Sharp in-game adjustments, but quiet on the sideline.' }
+    {
+        id: 'player_centered',
+        name: "Players' Coach",
+        displayName: 'Player-Centered',
+        desc: 'Prioritizes player relationships, communication, and maintaining morale.',
+        tendencies: {
+            riskTolerance: 48,
+            adaptability: 62,
+            relationshipOrientation: 90,
+            discipline: 48,
+            patience: 72,
+            developmentFocus: 78
+        }
+    },
+    {
+        id: 'traditionalist',
+        name: 'Old-School Disciplinarian',
+        displayName: 'Traditionalist',
+        desc: 'Values structure, discipline, and established methods; may resist unfamiliar approaches.',
+        tendencies: {
+            riskTolerance: 38,
+            adaptability: 35,
+            relationshipOrientation: 45,
+            discipline: 86,
+            patience: 52,
+            developmentFocus: 55
+        }
+    },
+    {
+        id: 'hard_nosed_competitor',
+        name: "Peaked in '94",
+        displayName: 'Hard-Nosed Competitor',
+        desc: 'Values toughness and persistence; may become stubborn when a plan is failing.',
+        tendencies: {
+            riskTolerance: 72,
+            adaptability: 42,
+            relationshipOrientation: 40,
+            discipline: 82,
+            patience: 38,
+            developmentFocus: 45
+        }
+    },
+    {
+        id: 'analytical_planner',
+        name: 'Analytical Savant',
+        displayName: 'Analytical Planner',
+        desc: 'Prefers evidence-driven decisions and structured preparation, but may communicate less intuitively.',
+        tendencies: {
+            riskTolerance: 50,
+            adaptability: 86,
+            relationshipOrientation: 42,
+            discipline: 68,
+            patience: 72,
+            developmentFocus: 68
+        }
+    }
 ];
+
+function buildStaffBehaviorProfile(personality) {
+    const tendencyKeys = [
+        'riskTolerance',
+        'adaptability',
+        'relationshipOrientation',
+        'discipline',
+        'patience',
+        'developmentFocus'
+    ];
+
+    const tendencies = {};
+
+    for (const key of tendencyKeys) {
+        const baseline = Number(personality?.tendencies?.[key]);
+        const target = Number.isFinite(baseline)
+            ? baseline
+            : 50;
+
+        // Personality establishes the general disposition, while
+        // individual variation prevents every coach of one type
+        // from behaving identically.
+        const variation = getRandomInt(-8, 8);
+
+        tendencies[key] = Math.max(
+            0,
+            Math.min(100, target + variation)
+        );
+    }
+
+    return {
+        version: 1,
+        personalityId: personality?.id || null,
+        tendencies
+    };
+}
 
 const STAFF_SCHEDULES = [
     {
@@ -95,6 +275,93 @@ function createStaffAvailability(role = 'coach') {
         timeWindow: schedule.timeWindow,
         reliability: getRandomInt(55, 95)
     };
+}
+
+const STAFF_BEHAVIOR_TENDENCY_KEYS = [
+    'riskTolerance',
+    'adaptability',
+    'relationshipOrientation',
+    'discipline',
+    'patience',
+    'developmentFocus'
+];
+
+/**
+ * Ensures a staff member has a complete, persistent behavioral profile.
+ *
+ * Existing valid tendencies are preserved. Missing profiles are initialized
+ * from the staff member's personality, with bounded individual variation.
+ */
+export function ensureStaffBehaviorProfile(staff) {
+    if (!staff || typeof staff !== 'object') {
+        return null;
+    }
+
+    const personalityId = getStaffProfileId(staff, 'personality');
+    const personality = personalityTraits.find(
+        trait => trait.id === personalityId
+    ) || null;
+
+    const expectedPersonalityId = personality?.id || null;
+    const existingProfile = staff.behaviorProfile;
+
+    const profileMatchesPersonality =
+        existingProfile &&
+        typeof existingProfile === 'object' &&
+        existingProfile.personalityId === expectedPersonalityId &&
+        existingProfile.tendencies &&
+        typeof existingProfile.tendencies === 'object';
+
+    if (!profileMatchesPersonality) {
+        staff.behaviorProfile = buildStaffBehaviorProfile(personality);
+    } else {
+        // Preserve valid saved values and initialize only missing fields.
+        for (const key of STAFF_BEHAVIOR_TENDENCY_KEYS) {
+            const value = Number(existingProfile.tendencies[key]);
+
+            if (Number.isFinite(value)) {
+                existingProfile.tendencies[key] = Math.max(
+                    0,
+                    Math.min(100, value)
+                );
+                continue;
+            }
+
+            const baseline = Number(personality?.tendencies?.[key]);
+            const target = Number.isFinite(baseline)
+                ? baseline
+                : 50;
+
+            existingProfile.tendencies[key] = Math.max(
+                0,
+                Math.min(100, target + getRandomInt(-8, 8))
+            );
+        }
+
+        existingProfile.version = 1;
+        staff.behaviorProfile = existingProfile;
+    }
+
+    return staff.behaviorProfile;
+}
+
+/**
+ * Returns a validated behavioral tendency on a 0–100 scale.
+ * Unrecognized tendency keys safely return the neutral value of 50.
+ */
+export function getStaffBehaviorTendency(staff, tendencyKey) {
+    if (!STAFF_BEHAVIOR_TENDENCY_KEYS.includes(tendencyKey)) {
+        return 50;
+    }
+
+    const profile = ensureStaffBehaviorProfile(staff);
+    const value = Number(profile?.tendencies?.[tendencyKey]);
+
+    if (!Number.isFinite(value)) {
+        return 50;
+    }
+
+    return Math.max(0, Math.min(100, value));
 }
 
 /**
@@ -320,11 +587,22 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
     const tactical = getRandom(tacticalBiases);
     const scouting = getRandom(scoutingBiases);
 
-    // Personality dictates market stubbornness
+    // Generate persistent individual tendencies from the personality.
+    const behaviorProfile = buildStaffBehaviorProfile(personality);
+
+    // Personality influences market stubbornness through a stable profile ID.
     let stubbornness = 0.75;
-    if (personality.name === "Peaked in '94" || personality.name === "Old-School Disciplinarian") stubbornness = 0.92;
-    else if (personality.name === "Players' Coach") stubbornness = 0.58;
-    else if (personality.name === "Analytical Savant") stubbornness = 0.70;
+
+    if (
+        personality.id === 'hard_nosed_competitor' ||
+        personality.id === 'traditionalist'
+    ) {
+        stubbornness = 0.92;
+    } else if (personality.id === 'player_centered') {
+        stubbornness = 0.58;
+    } else if (personality.id === 'analytical_planner') {
+        stubbornness = 0.70;
+    }
 
     // Persistent traits used by staff recruitment negotiations.
     const happiness = getRandomInt(45, 85);
@@ -378,11 +656,17 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
             conditioning: baseVal(),
             authority: formerPlayer ? 45 : getRandomInt(50, 80)
         },
+        profileIds: {
+            tactical: tactical.id,
+            scouting: scouting.id,
+            personality: personality.id
+        },
         biases: {
             tactical,
             scouting,
             personality
         },
+        behaviorProfile,
         experience: 0
     };
 }
@@ -1946,6 +2230,21 @@ export function recordRecruitingStaffAssignment(
         };
     }
 
+    const recruitingDay = Number(state.recruitingDay);
+    const recruitingDays = Number(state.recruitingDays);
+
+    if (
+        !Number.isInteger(recruitingDay) ||
+        !Number.isInteger(recruitingDays) ||
+        recruitingDay < 1 ||
+        recruitingDay > recruitingDays
+    ) {
+        return {
+            success: false,
+            message: 'The current recruiting day is invalid.'
+        };
+    }
+
     const progress = offseason.recruitingProgress;
 
     if (
@@ -1987,18 +2286,20 @@ export function recordRecruitingStaffAssignment(
     }
 
     const recruitKey = String(playerId);
-    const coachKey = String(coachId);
-    const recruitRecord = progress.recruits?.[recruitKey];
+    const teamKey = String(teamId);
+    const record = progress.recruits?.[recruitKey];
 
-    const player = gameState.players.find(
-        candidate => String(candidate?.id) === recruitKey
-    );
-
-    const draftClassIds = new Set(
+    const protectedDraftIds = new Set(
         (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
             .filter(prospect => prospect?.id != null)
             .map(prospect => String(prospect.id))
     );
+
+    const age = Number(player?.age);
+
+    const statusType = String(
+        player?.status?.type || ''
+    ).toLowerCase();
 
     const lifecycle = String(
         player?.lifecycle || ''
@@ -2008,25 +2309,24 @@ export function recordRecruitingStaffAssignment(
         player?.lifecycleStatus || player?.lifecycle?.status || ''
     ).toLowerCase();
 
-    const statusType = String(
-        player?.status?.type || ''
-    ).toLowerCase();
-
     if (
+        !team ||
+        team.leagueType !== 'main' ||
         !player ||
         player.teamId != null ||
-        !recruitRecord ||
-        recruitRecord.status !== 'available' ||
-        recruitRecord.committedTeamId != null ||
-        draftClassIds.has(recruitKey) ||
+        !record ||
+        record.status !== 'available' ||
+        record.committedTeamId != null ||
+        !Number.isFinite(age) ||
+        age < 12 ||
+        age > 18 ||
+        protectedDraftIds.has(String(player.id)) ||
         lifecycle === 'draft_eligible' ||
         lifecycleStatus === 'draft_eligible' ||
-        ['retired', 'departed', 'temporary'].includes(statusType) ||
+        ['retired', 'departed', 'temporary', 'injured'].includes(statusType) ||
+        ['retired', 'departed', 'temporary', 'injured'].includes(lifecycleStatus) ||
         Number(player.status?.duration) > 0 ||
-        Number(player.injury?.duration || player.injuryDuration || 0) > 0 ||
-        !Number.isFinite(Number(player.age)) ||
-        Number(player.age) < 12 ||
-        Number(player.age) > 18
+        Number(player.injury?.duration || player.injuryDuration || 0) > 0
     ) {
         return {
             success: false,
@@ -2227,11 +2527,25 @@ export function executeRecruitingAction(
     const state = gameState?.offseasonState;
     const progress = state?.recruitingProgress;
 
+    const normalizedPhase = String(state?.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    const recruitingDay = Number(state?.recruitingDay);
+    const recruitingDays = Number(state?.recruitingDays);
+
     if (
+        !Array.isArray(gameState?.teams) ||
+        !Array.isArray(gameState?.players) ||
+        normalizedPhase !== 'recruiting' ||
         !progress ||
         progress.initialized !== true ||
         progress.completed === true ||
-        Number(progress.seasonYear) !== Number(gameState.year)
+        Number(progress.seasonYear) !== Number(gameState.year) ||
+        !Number.isInteger(recruitingDay) ||
+        !Number.isInteger(recruitingDays) ||
+        recruitingDay < 1 ||
+        recruitingDay > recruitingDays
     ) {
         return {
             success: false,
@@ -2342,52 +2656,89 @@ export function executeRecruitingAction(
 
     let contextBonus = 0;
     const roster = getRosterObjects(team);
-    const rosterIds = new Set(
-        roster.map(member => String(member.id))
-    );
+    const recruitId = String(player.id);
 
     if (actionType === 'teammateConnection') {
-        const bestFriendId = player.social?.bestFriendId;
+        // Use relationship information known by our own players.
+        // Do not inspect the prospect's hidden social graph.
+        const hasKnownBestFriend = roster.some(member =>
+            String(member?.social?.bestFriendId ?? '') === recruitId
+        );
 
-        if (
-            bestFriendId != null &&
-            rosterIds.has(String(bestFriendId))
-        ) {
+        if (hasKnownBestFriend) {
             contextBonus += 5;
         }
 
-        const goodFriendCount = (
-            player.social?.goodFriendIds || []
-        ).filter(id => rosterIds.has(String(id))).length;
+        const knownGoodFriendCount = roster.filter(member =>
+            (
+                Array.isArray(member?.social?.goodFriendIds)
+                    ? member.social.goodFriendIds
+                    : []
+            ).some(id => String(id) === recruitId)
+        ).length;
 
-        contextBonus += Math.min(5, goodFriendCount * 2);
-
-        const rivalOnRoster = roster.some(member =>
-            (player.social?.rivalIds || []).some(
-                id => String(id) === String(member.id)
-            )
+        contextBonus += Math.min(
+            5,
+            knownGoodFriendCount * 2
         );
 
-        if (rivalOnRoster) {
+        const knownRivalOnRoster = roster.some(member =>
+            (
+                Array.isArray(member?.social?.rivalIds)
+                    ? member.social.rivalIds
+                    : []
+            ).some(id => String(id) === recruitId)
+        );
+
+        if (knownRivalOnRoster) {
             contextBonus -= 5;
         }
     }
 
     if (actionType === 'roleDiscussion') {
-        const position = player.pos || estimateBestPosition(player);
-
-        const positionalPeers = roster.filter(member =>
-            member.pos === position ||
-            member.favoriteOffensivePosition === position ||
-            member.favoriteDefensivePosition === position
+        // Public listed position is safe to use. If missing, use this
+        // team's scouting estimate rather than the player's hidden traits.
+        const scoutingReport = getTeamScoutingReport(
+            team,
+            player.id
         );
 
-        // A clearer opportunity at the recruit's position makes a role
-        // discussion more persuasive.
-        if (positionalPeers.length === 0) {
-            contextBonus += 4;
-        } else if (positionalPeers.length >= 4) {
-            contextBonus -= 3;
+        const reportedFits = [
+            scoutingReport?.evaluation?.offenseFit,
+            scoutingReport?.evaluation?.defenseFit
+        ]
+            .filter(fit =>
+                fit?.position &&
+                Number.isFinite(Number(fit.low)) &&
+                Number.isFinite(Number(fit.high))
+            )
+            .sort((a, b) =>
+                (
+                    Number(b.low) + Number(b.high)
+                ) / 2 - (
+                    Number(a.low) + Number(a.high)
+                ) / 2
+            );
+
+        const position =
+            player.pos ||
+            reportedFits[0]?.position ||
+            null;
+
+        // If we don't know the recruit's position, we shouldn't pretend
+        // to know the available role at that position either.
+        if (position) {
+            const positionalPeers = roster.filter(member =>
+                member.pos === position ||
+                member.favoriteOffensivePosition === position ||
+                member.favoriteDefensivePosition === position
+            );
+
+            if (positionalPeers.length === 0) {
+                contextBonus += 4;
+            } else if (positionalPeers.length >= 4) {
+                contextBonus -= 3;
+            }
         }
     }
 
@@ -2421,7 +2772,7 @@ export function executeRecruitingAction(
     const activity = {
         type: 'recruiting_action',
         year: Number(gameState.year),
-        day: Number(state.recruitingDay),
+        day: recruitingDay,
         teamId: team.id,
         teamName: team.name,
         coachId: String(coach.id),
@@ -2722,15 +3073,15 @@ export function applyRecruitingSweetener(
         }
 
         const transactionKey =
-            `${gameState.year}:recruiting:${state.recruitingDay}:` +
+            `${gameState.year}:recruiting:${recruitingDay}:` +
             `${teamKey}:${recruitKey}:${category}:` +
-            `${team.finances.ledger.length}`;
+            `${progress.dailyActivity.length}`;
 
         team.finances.ledger.push({
             key: transactionKey,
             year: Number(gameState.year),
             week: Number(gameState.currentWeek) || 0,
-            recruitingDay: Number(state.recruitingDay),
+            recruitingDay,
             category,
             label: `${label}: ${player.name}`,
             amount: -cost,
@@ -2813,12 +3164,41 @@ export function processAiRecruitingDay(gameState) {
         DB: 3
     };
 
-    const getPlayerPosition = player =>
-        player?.pos ||
-        player?.bestPosition ||
-        player?.favoriteOffensivePosition ||
-        player?.favoriteDefensivePosition ||
-        null;
+    const getPlayerPosition = (player, team) => {
+        // Listed position is public information.
+        const listedPosition = String(player?.pos || '').toUpperCase();
+
+        if (positionTargets[listedPosition]) {
+            return listedPosition;
+        }
+
+        // If the listed position is unavailable, use only this team's
+        // scouting report—not the prospect's hidden position preferences.
+        const report = player?.id != null
+            ? getTeamScoutingReport(team, player.id)
+            : null;
+
+        const fits = [
+            report?.evaluation?.offenseFit,
+            report?.evaluation?.defenseFit
+        ].filter(fit =>
+            positionTargets[fit?.position] &&
+            Number.isFinite(Number(fit.low)) &&
+            Number.isFinite(Number(fit.high))
+        );
+
+        if (fits.length === 0) return null;
+
+        fits.sort((a, b) =>
+            (
+                (Number(b.low) + Number(b.high)) / 2
+            ) - (
+                (Number(a.low) + Number(a.high)) / 2
+            )
+        );
+
+        return fits[0].position;
+    };
 
     const draftClassIds = new Set(
         (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
@@ -2987,26 +3367,78 @@ export function processAiRecruitingDay(gameState) {
                 }
             ];
 
+            const personality =
+                coach.biases?.personality?.name ||
+                "Players' Coach";
+
+            // Personality creates tactical preferences, not guaranteed
+            // outcomes. Every action remains available to every coach.
+            const personalityPreferences = {
+                "Players' Coach": {
+                    teammateConnection: 7,
+                    outreach: 2,
+                    practiceInvitation: 2
+                },
+                'Old-School Disciplinarian': {
+                    practiceInvitation: 7,
+                    roleDiscussion: 2,
+                    teammateConnection: -2
+                },
+                "Peaked in '94": {
+                    roleDiscussion: 5,
+                    outreach: 2,
+                    practiceInvitation: 1
+                },
+                'Analytical Savant': {
+                    roleDiscussion: 5,
+                    outreach: 3,
+                    teammateConnection: -1
+                }
+            };
+
+            const preferences =
+                personalityPreferences[personality] || {};
+
+            // Instinct, evaluation ability, and authority influence the
+            // consistency of decisions—not access to hidden prospect data.
+            const decisionQuality = (
+                skillValue('gameplanInstinct') +
+                skillValue('evalCharacter') +
+                skillValue('authority')
+            ) / 3;
+
+            // Less decisive coaches are more susceptible to bad tactical
+            // choices. Even excellent coaches retain some uncertainty.
+            const decisionNoiseRange =
+                2 + ((100 - decisionQuality) / 100) * 8;
+
             const rankedActions = actionOptions
-                .map(option => ({
-                    ...option,
-                    score: option.skills.reduce(
+                .map(option => {
+                    const skillScore = option.skills.reduce(
                         (sum, skill) => sum + skillValue(skill),
                         0
-                    ) / option.skills.length
-                }))
+                    ) / option.skills.length;
+
+                    const personalityPreference =
+                        Number(preferences[option.type]) || 0;
+
+                    // Noise can cause a coach to choose a less-suited
+                    // tactic, especially when decision quality is poor.
+                    const judgmentNoise =
+                        (Math.random() * 2 - 1) *
+                        decisionNoiseRange;
+
+                    return {
+                        ...option,
+                        score:
+                            skillScore +
+                            personalityPreference +
+                            judgmentNoise
+                    };
+                })
                 .sort((a, b) => b.score - a.score);
 
-            // Break ties reproducibly within this invocation rather than
-            // always giving every coach the same action.
-            const bestActionScore = rankedActions[0]?.score ?? 50;
-            const bestActions = rankedActions.filter(option =>
-                option.score >= bestActionScore - 4
-            );
-
-            const selectedAction = bestActions[
-                Math.floor(Math.random() * bestActions.length)
-            ] || rankedActions[0];
+            const selectedAction = rankedActions[0] || null;
 
             if (!selectedAction) continue;
 
@@ -3025,7 +3457,7 @@ export function processAiRecruitingDay(gameState) {
                     return null;
                 }
 
-                const position = getPlayerPosition(player);
+                const position = getPlayerPosition(player, team);
                 const peers = roster.filter(member => {
                     const positions = [
                         member?.pos,
@@ -3043,70 +3475,182 @@ export function processAiRecruitingDay(gameState) {
                     targetCount - peers.length
                 );
 
-                const rosterIds = new Set(
-                    roster.map(member => String(member.id))
+                const recruitId = String(player.id);
+
+                // Infer relationships only from information held by our
+                // own roster. Do not inspect the recruit's hidden social graph.
+                const hasBestFriend = roster.some(member =>
+                    String(member?.social?.bestFriendId) === recruitId
                 );
 
-                const bestFriendId = player.social?.bestFriendId;
-
-                const hasBestFriend =
-                    bestFriendId != null &&
-                    rosterIds.has(String(bestFriendId));
-
-                const goodFriendCount = (
-                    player.social?.goodFriendIds || []
-                ).filter(id => rosterIds.has(String(id))).length;
+                const goodFriendCount = roster.filter(member =>
+                    (
+                        Array.isArray(member?.social?.goodFriendIds)
+                            ? member.social.goodFriendIds
+                            : []
+                    ).some(id => String(id) === recruitId)
+                ).length;
 
                 const hasRival = roster.some(member =>
-                    (player.social?.rivalIds || []).some(
-                        id => String(id) === String(member.id)
-                    )
+                    (
+                        Array.isArray(member?.social?.rivalIds)
+                            ? member.social.rivalIds
+                            : []
+                    ).some(id => String(id) === recruitId)
                 );
 
                 const ownInterest = Math.max(
                     0,
-                    Number(record.interestByTeam?.[teamKey]) || 0
+                    Math.min(
+                        100,
+                        Number(record.interestByTeam?.[teamKey]) || 0
+                    )
                 );
 
-                const competingInterest = Object.entries(
-                    record.interestByTeam || {}
-                )
-                    .filter(([otherTeamId]) => otherTeamId !== teamKey)
-                    .reduce(
-                        (highest, [, interest]) =>
-                            Math.max(highest, Number(interest) || 0),
-                        0
-                    );
-
-                let schemeBonus = 0;
-                const tactical =
-                    team.staff?.coach?.biases?.tactical?.name ||
-                    team.coach?.biases?.tactical?.name;
-
-                if (
-                    tactical === 'Air Raid Purist' &&
-                    ['QB', 'WR', 'TE'].includes(position)
-                ) {
-                    schemeBonus += 5;
-                } else if (
-                    tactical === 'Smashmouth Zealot' &&
-                    ['RB', 'OL', 'TE'].includes(position)
-                ) {
-                    schemeBonus += 5;
-                } else if (
-                    tactical === 'Blitz Addict' &&
-                    ['DL', 'LB', 'DB'].includes(position)
-                ) {
-                    schemeBonus += 5;
+                // Don't waste an attempt on a recruit whose interest is
+                // already maxed out for this team.
+                if (ownInterest >= 100) {
+                    return null;
                 }
 
-                const age = Number(player.age) || 14;
+                // Rival interest values are hidden information. Estimate
+                // competition from recruiting activity observed on previous
+                // days instead of reading other teams' exact interest scores.
+                const observedRivalActivity = (
+                    Array.isArray(progress.dailyActivity)
+                        ? progress.dailyActivity
+                        : []
+                ).filter(activity =>
+                    String(activity?.playerId) === recruitId &&
+                    activity?.teamId != null &&
+                    String(activity.teamId) !== teamKey &&
+                    Number(activity.day) < day &&
+                    [
+                        'recruiting_action',
+                        'recruiting_sweetener'
+                    ].includes(activity.type)
+                );
 
-                const ageBonus = age <= 15
-                    ? 3
-                    : age >= 18
-                        ? -2
-                        : 1;
+                const observedRivalTeams = new Set(
+                    observedRivalActivity.map(activity =>
+                        String(activity.teamId)
+                    )
+                );
+
+                const rivalTeamCount = observedRivalTeams.size;
+
+                const rivalEffort = observedRivalActivity.reduce(
+                    (total, activity) => {
+                        if (activity.type === 'recruiting_sweetener') {
+                            return total + 1.5;
+                        }
+
+                        const hours = Math.max(
+                            1,
+                            Number(activity.hours) || 1
+                        );
+
+                        return total + Math.min(2.5, hours / 2);
+                    },
+                    0
+                );
+
+                const observedCompetitionPressure = Math.min(
+                    8,
+                    rivalTeamCount * 2 +
+                        Math.max(0, rivalEffort - rivalTeamCount) * 0.75
+                );
+
+                // Coaching personality changes how the staff reacts to
+                // perceived competition. This is a judgment, not certainty.
+                const recruitingCoach =
+                    team.staff?.coach || team.coach || {};
+
+                const personality =
+                    recruitingCoach.biases?.personality?.name ||
+                    "Players' Coach";
+
+                let competitionAdjustment = 0;
+
+                if (rivalTeamCount > 0) {
+                    if (personality === "Peaked in '94") {
+                        // A stubborn, aggressive coach is more willing
+                        // to challenge rivals for a coveted prospect.
+                        competitionAdjustment = Math.min(
+                            7,
+                            2 + observedCompetitionPressure * 0.65
+                        );
+                    } else if (personality === 'Analytical Savant') {
+                        // A cautious evaluator is more likely to redirect
+                        // effort when several teams visibly pursue the recruit.
+                        competitionAdjustment = -Math.min(
+                            7,
+                            observedCompetitionPressure * 0.7
+                        );
+                    } else if (
+                        personality === 'Old-School Disciplinarian'
+                    ) {
+                        competitionAdjustment = -Math.min(
+                            4,
+                            observedCompetitionPressure * 0.4
+                        );
+                    } else {
+                        competitionAdjustment = Math.min(
+                            3,
+                            rivalTeamCount * 0.75
+                        );
+                    }
+                }
+
+                // Use this team's estimated prospect fits, if available.
+                // No report means the AI does not know the player's true OVR.
+                const scoutingReport = getTeamScoutingReport(
+                    team,
+                    player.id
+                );
+
+                const reportedFits = [
+                    scoutingReport?.evaluation?.offenseFit,
+                    scoutingReport?.evaluation?.defenseFit
+                ].filter(fit =>
+                    Number.isFinite(Number(fit?.low)) &&
+                    Number.isFinite(Number(fit?.high))
+                );
+
+                const perceivedFit = reportedFits.length > 0
+                    ? Math.max(
+                        ...reportedFits.map(fit =>
+                            (
+                                Number(fit.low) +
+                                Number(fit.high)
+                            ) / 2
+                        )
+                    )
+                    : null;
+
+                const rawConfidence = Number(
+                    scoutingReport?.confidence
+                );
+
+                // Support older reports that may store confidence as 0–100.
+                const reportConfidence = Number.isFinite(rawConfidence)
+                    ? Math.max(
+                        0,
+                        Math.min(
+                            1,
+                            rawConfidence > 1
+                                ? rawConfidence / 100
+                                : rawConfidence
+                        )
+                    )
+                    : 0;
+
+                const scoutingAdjustment = perceivedFit === null
+                    ? 0
+                    : Math.max(
+                        -5,
+                        Math.min(5, (perceivedFit - 60) * 0.25)
+                    ) * reportConfidence;
 
                 const score =
                     rosterNeed * 7 +
@@ -3116,10 +3660,8 @@ export function processAiRecruitingDay(gameState) {
                     schemeBonus +
                     ageBonus +
                     ownInterest * 0.20 +
-                    Math.min(
-                        8,
-                        Math.max(0, competingInterest - ownInterest) * 0.10
-                    ) +
+                    scoutingAdjustment +
+                    competitionAdjustment +
                     Math.random() * 2;
 
                 return {
@@ -4317,10 +4859,12 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
     const offenseCoach = getTeamCoachingSpecialist(team, 'offensePrep');
     const defenseCoach = getTeamCoachingSpecialist(team, 'defensePrep');
 
-    const offenseTactical =
-        offenseCoach?.biases?.tactical?.name || 'Balanced Tactician';
-    const defenseTactical =
-        defenseCoach?.biases?.tactical?.name || 'Balanced Tactician';
+    const offenseTacticalId =
+        getStaffProfileId(offenseCoach, 'tactical') ||
+        'adaptive_strategist';
+    const defenseTacticalId =
+        getStaffProfileId(defenseCoach, 'tactical') ||
+        'adaptive_strategist';
 
     const offenseInstinct =
         offenseCoach?.ratings?.gameplanInstinct || 50;
@@ -4412,8 +4956,19 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         const play = offensivePlaybook[key];
         let score = 50;
 
-        if (offenseTactical === 'Air Raid Purist' && play.type === 'pass') score += 25;
-        if (offenseTactical === 'Smashmouth Zealot' && play.type === 'run') score += 25;
+        if (
+            offenseTacticalId === 'spread_passing_specialist' &&
+            play.type === 'pass'
+        ) {
+            score += 25;
+        }
+
+        if (
+            offenseTacticalId === 'power_run_specialist' &&
+            play.type === 'run'
+        ) {
+            score += 25;
+        }
         if (play.tags?.includes('pa') || play.tags?.includes('trick')) {
             score += offenseInstinct > 65 ? 15 : 5;
         }
@@ -4434,8 +4989,19 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         const play = defensivePlaybook[key];
         let score = 50;
 
-        if (defenseTactical === 'Blitz Addict' && play.blitz) score += 30;
-        if (defenseTactical === 'Conservative Turtler' && !play.blitz) score += 20;
+        if (
+            defenseTacticalId === 'pressure_oriented_defender' &&
+            play.blitz
+        ) {
+            score += 30;
+        }
+
+        if (
+            defenseTacticalId === 'conservative_game_manager' &&
+            !play.blitz
+        ) {
+            score += 20;
+        }
 
         if (gmDirective === 'WIN_NOW' && opponent) {
             const oppOff = opponent.formations?.offense || '';
@@ -4702,7 +5268,7 @@ export function aiChooseWeeklyPractice(
     if (!team || !team.gameplan) return 'chalk_talk';
 
     const coach = getTeamCoachingSpecialist(team, 'training');
-    const personality = coach?.biases?.personality?.name;
+    const personalityId = getStaffProfileId(coach, 'personality');
     const balance = Number(team.finances?.balance) || 0;
     const tokens = Number(team.socialProfile?.favorTokens) || 0;
 
@@ -4808,7 +5374,7 @@ export function aiChooseWeeklyPractice(
 
     // Coach Autonomy: personality influences the preferred approach,
     // but should not cause avoidable physical overload.
-    if (personality === 'Old-School Disciplinarian') {
+    if (personalityId === 'traditionalist') {
         if (averageFatigue >= 35) {
             return scrimmageCanRecover
                 ? 'scrimmage'
@@ -4818,7 +5384,7 @@ export function aiChooseWeeklyPractice(
         return 'conditioning';
     }
 
-    if (personality === 'Analytical Savant') {
+    if (personalityId === 'analytical_planner') {
         if (balance < 6.00) return 'hustle';
 
         return hasUpcomingOpponent
@@ -4826,11 +5392,11 @@ export function aiChooseWeeklyPractice(
             : 'chalk_talk';
     }
 
-    if (personality === "Players' Coach") {
+    if (personalityId === 'player_centered') {
         return 'scrimmage';
     }
 
-    if (personality === "Peaked in '94") {
+    if (personalityId === 'hard_nosed_competitor') {
         if (averageFatigue >= 35) {
             return scrimmageCanRecover
                 ? 'scrimmage'

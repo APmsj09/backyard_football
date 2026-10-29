@@ -1,6 +1,12 @@
 // js/game/negotiations.js - Player & Staff Contract Negotiations & Retention
 
-import { game, getRelationshipLevel, getPlayer, getRosterObjects } from './state.js';
+import {
+    game,
+    getRelationshipLevel,
+    getPlayer,
+    getRosterObjects,
+    getTeamScoutingReport
+} from './state.js';
 import { relationshipLevels } from '../data.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
 import { isPlayerNaturalForPosition, isPlayerViableForPosition } from './depth_chart.js';
@@ -39,12 +45,125 @@ export function calculateAiTeamNeedAndDesire(
     const roster = getRosterObjects(aiTeam);
     const tokensAvailable = aiTeam.socialProfile?.favorTokens || 0;
 
-    const bestPos = player.pos || estimateBestPosition(player);
-    const playerOvr = calculateOverall(player, bestPos);
-    const ego = player.personality?.ego || 50;
-    const ethic = player.personality?.workEthic || 50;
-    const speed = player.attributes?.physical?.speed || 50;
-    const age = player.age || 14;
+    // Evaluate external prospects using this team's scouting report.
+    // Never calculate their true overall from hidden attributes.
+    const scoutingReport = getTeamScoutingReport(aiTeam, player.id);
+
+    const validPositions = [
+        'QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'
+    ];
+
+    const listedPosition = String(player.pos || '').toUpperCase();
+
+    const reportFits = [
+        scoutingReport?.evaluation?.offenseFit,
+        scoutingReport?.evaluation?.defenseFit
+    ]
+        .filter(fit =>
+            validPositions.includes(
+                String(fit?.position || '').toUpperCase()
+            ) &&
+            Number.isFinite(Number(fit.low)) &&
+            Number.isFinite(Number(fit.high))
+        )
+        .map(fit => ({
+            ...fit,
+            position: String(fit.position).toUpperCase(),
+            estimatedOvr: (
+                Number(fit.low) + Number(fit.high)
+            ) / 2
+        }))
+        .sort((a, b) => b.estimatedOvr - a.estimatedOvr);
+
+    // Prefer a team-specific scouting fit. If the player is unscouted,
+    // fall back only to the publicly listed position.
+    const bestReportedFit = reportFits[0] || null;
+
+    const bestPos =
+        bestReportedFit?.position ||
+        (validPositions.includes(listedPosition)
+            ? listedPosition
+            : null);
+
+    if (!bestPos) {
+        return {
+            shouldBid: false,
+            desireScore: 0,
+            offer: null,
+            reason: 'Insufficient positional information'
+        };
+    }
+
+    const selectedFit = reportFits.find(
+        fit => fit.position === bestPos
+    );
+
+    const rawConfidence = Number(scoutingReport?.confidence);
+
+    const reportConfidence = Number.isFinite(rawConfidence)
+        ? Math.max(
+            0,
+            Math.min(
+                1,
+                rawConfidence > 1
+                    ? rawConfidence / 100
+                    : rawConfidence
+            )
+        )
+        : 0;
+
+    // Unknown talent starts at a neutral prior, not the player's true OVR.
+    // Lower-confidence reports pull estimates closer to neutral.
+    const estimatedOvr = Number.isFinite(selectedFit?.estimatedOvr)
+        ? selectedFit.estimatedOvr
+        : 50;
+
+    const playerOvr = Math.round(
+        50 + (estimatedOvr - 50) * reportConfidence
+    );
+
+    // Only use physical estimates present in the team's own scouting report.
+    const speedRange =
+        scoutingReport?.attributeRanges?.physical?.speed;
+
+    const speed = (
+        Number.isFinite(Number(speedRange?.low)) &&
+        Number.isFinite(Number(speedRange?.high))
+    )
+        ? (Number(speedRange.low) + Number(speedRange.high)) / 2
+        : null;
+
+    // Personality traits are unknown unless this team has received
+    // a character assessment in its scouting report.
+    const characterSummary = String(
+        scoutingReport?.evaluation?.characterSummary || ''
+    ).toLowerCase();
+
+    const ego = characterSummary.includes(
+        'confident, assertive presence'
+    )
+        ? 76
+        : characterSummary.includes('moderately assertive')
+            ? 55
+            : characterSummary.includes('quieter competitive presence')
+                ? 35
+                : null;
+
+    const ethic = characterSummary.includes(
+        'strong effort/reliability signals'
+    )
+        ? 78
+        : characterSummary.includes('generally steady effort')
+            ? 58
+            : characterSummary.includes(
+                'effort/reliability need closer review'
+            )
+                ? 38
+                : null;
+
+    const age = Number.isFinite(Number(player.age))
+        ? Number(player.age)
+        : 14;
 
     const tactical = coach?.biases?.tactical?.name || 'Balanced Tactician';
     const personality = coach?.biases?.personality?.name || "Players' Coach";
@@ -135,18 +254,29 @@ export function calculateAiTeamNeedAndDesire(
         );
 
     // Reward genuine versatility when another position also lacks coverage.
+    const reportedFitByPosition = new Map(
+        reportFits.map(fit => [
+            fit.position,
+            50 + (fit.estimatedOvr - 50) * reportConfidence
+        ])
+    );
+
     const additionalFits = allPositions.filter(position => {
-        if (
-            position === bestPos ||
-            !isPlayerNaturalForPosition(player, position)
-        ) {
+        if (position === bestPos) {
             return false;
         }
 
-        const alternativeOvr = calculateOverall(player, position);
+        // Versatility is recognized only when this team has scouting
+        // evidence supporting another positional fit.
+        const alternativeOvr = reportedFitByPosition.get(position);
 
-        // Ignore positions at which the player is substantially worse.
-        if (alternativeOvr < playerOvr - 8) return false;
+        if (!Number.isFinite(alternativeOvr)) {
+            return false;
+        }
+
+        if (alternativeOvr < playerOvr - 8) {
+            return false;
+        }
 
         const room = roster.filter(
             p => isPlayerNaturalForPosition(p, position)
@@ -210,7 +340,6 @@ export function calculateAiTeamNeedAndDesire(
     // 4. SCHEME & TACTICAL BIAS ALIGNMENT
     if (tactical === 'Air Raid Purist') {
         if (['WR', 'TE'].includes(bestPos) || bestPos === 'QB') desireScore += 22;
-        if (bestPos === 'RB' && player.archetypeName?.includes('Power')) desireScore -= 18;
     } else if (tactical === 'Smashmouth Zealot') {
         if (['OL', 'RB', 'TE'].includes(bestPos)) desireScore += 22;
         if (bestPos === 'WR') desireScore -= 14;
