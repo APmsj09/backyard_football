@@ -215,6 +215,66 @@ export function transitionOffseasonPhase(
         state.recruitingDay = 1;
         state.recruitingDays = FREE_AGENCY_RECRUITING_DAYS;
         state.completed = false;
+
+        const recruitingTeams = gameState.teams.filter(
+            team => team && team.leagueType === 'main'
+        );
+
+        // Do not let recruiting consume prospects still reserved for a draft.
+        const protectedDraftProspectIds = new Set(
+            (gameState.draftClass || [])
+                .filter(prospect => prospect?.id != null)
+                .map(prospect => String(prospect.id))
+        );
+
+        const eligibleRecruits = (gameState.players || []).filter(player => {
+            if (!player || player.id == null || player.teamId != null) {
+                return false;
+            }
+
+            const age = Number(player.age);
+            const status = player.status || {};
+
+            return (
+                age >= 12 &&
+                age <= 18 &&
+                !['retired', 'departed', 'temporary'].includes(status.type) &&
+                !(Number(status.duration) > 0) &&
+                player.lifecycle !== 'draft_eligible' &&
+                !protectedDraftProspectIds.has(String(player.id))
+            );
+        });
+
+        const recruits = Object.fromEntries(
+            eligibleRecruits.map(player => [
+                String(player.id),
+                {
+                    playerId: player.id,
+                    interestByTeam: Object.fromEntries(
+                        recruitingTeams.map(team => [
+                            String(team.id),
+                            0
+                        ])
+                    ),
+                    history: [],
+                    status: 'available',
+                    committedTeamId: null
+                }
+            ])
+        );
+
+        // Plain serializable data persists safely in normal game saves.
+        state.recruitingProgress = {
+            version: 1,
+            seasonYear: Number(gameState.year) || null,
+            initialized: true,
+            recruits,
+            teamDailyWork: {},
+            dailyActivity: [],
+            commitments: [],
+            completed: false
+        };
+
         gameState.offseasonFACompleted = false;
         gameState._faDay = 1;
     }
@@ -1786,6 +1846,10 @@ export function simulateHistoricalSeason(yearNum, gameInstance) {
     gameInstance.currentWeek = 0;
     generateSchedule();
 
+    // Collect season-start dues for all main teams during historical
+    // simulation. seasonDuesYear prevents duplicate charges.
+    processSeasonStartDues(gameInstance);
+
     const numWeeks = 9;
     const gamesPerWeek = gameInstance.teams.length / 2;
 
@@ -1799,6 +1863,11 @@ export function simulateHistoricalSeason(yearNum, gameInstance) {
                 simulateHistoricalMatch(match.home, match.away);
             }
         });
+
+        // Run the normal postgame systems for this historical week:
+        // finances, AI preparation, practice, scouting, events, and growth.
+        processEndOfWeek();
+
         gameInstance.currentWeek++;
     }
 
@@ -2634,7 +2703,7 @@ function recordFinanceWeeklySummary(
 }
 
 
-export function processEndOfWeek() {
+export function processEndOfWeek({ financesOnly = false } = {}) {
     if (!game) return;
 
     // === PROCESS FINANCES & SNACK FUND (UNIVERSAL AI & PLAYER) ===
@@ -2862,6 +2931,12 @@ export function processEndOfWeek() {
 
     });
 
+    // Historical simulation can reuse the established finance rules without
+    // running live-week bidding, events, practice, scouting, or other systems.
+    if (financesOnly) {
+        return;
+    }
+
     // Resolve In-Season Weekly Bids
     if (game.weeklyBids && game.weeklyBids.length > 0) {
         const processedPlayers = new Set();
@@ -3013,13 +3088,13 @@ export function processEndOfWeek() {
         }
 
         // New staff-preparation mechanics begin when the user takes over.
-        if (Number(game.year) >= 5) {
-            processWeeklyStaffPreparation(
-                t,
-                game.year,
-                game.currentWeek
-            );
-        }
+        // Staff preparation runs during historical seasons too, allowing
+        // AI teams to benefit from their coaches before the user arrives.
+        processWeeklyStaffPreparation(
+            t,
+            game.year,
+            game.currentWeek
+        );
 
         processWeeklyPractice(t, game.gameLog);
         // Apply effective staff capacity to scouting for this resolution
@@ -3073,14 +3148,13 @@ export function processEndOfWeek() {
             });
         }
 
-        // Coaching development begins when the user takes over in Year 5.
-        if (Number(game.year) >= 5) {
-            processWeeklyCoachDevelopment(
-                t,
-                game.year,
-                game.currentWeek
-            );
-        }
+        // Develop coaching staffs during historical seasons too, so
+        // AI teams enter Year 5 with coaching histories of their own.
+        processWeeklyCoachDevelopment(
+            t,
+            game.year,
+            game.currentWeek
+        );
     });
 
     // Record closing balances after weekly practice and scouting work.
@@ -3475,7 +3549,11 @@ export function processLockerRoomCulture(team, gameLog = null) {
     });
 }
 
-export function processOffseasonFADay(gameState, userBids = []) {
+export function processOffseasonFADay(
+    gameState,
+    userBids = [],
+    { finalDay = 3 } = {}
+) {
     if (!gameState || !gameState.players) return { daySignings: [], rejectedBids: [], userBidResults: [], activeNegotiations: [] };
 
     const activeTeams = gameState.teams.filter(t => t.leagueType === 'main');
@@ -3486,18 +3564,31 @@ export function processOffseasonFADay(gameState, userBids = []) {
     const playerBidsMap = new Map();
 
     const currentDay = gameState._faDay || 1;
+    const finalRecruitingDay = Math.max(
+        1,
+        Math.floor(Number(finalDay) || 3)
+    );
+
     gameState._activeFaMarket = gameState._activeFaMarket || new Map();
 
     // 1. REGISTER USER BIDS
+    // Historical simulation runs without a user-controlled team.
     const seenUserPlayerIds = new Set();
-    userBids.forEach(ub => {
-        if (seenUserPlayerIds.has(ub.playerId)) return;
-        seenUserPlayerIds.add(ub.playerId);
 
-        const pList = playerBidsMap.get(ub.playerId) || [];
-        pList.push({ team: gameState.playerTeam, teamId: gameState.playerTeam.id, offer: ub.offer });
-        playerBidsMap.set(ub.playerId, pList);
-    });
+    if (gameState.playerTeam && Array.isArray(userBids)) {
+        userBids.forEach(ub => {
+            if (seenUserPlayerIds.has(ub.playerId)) return;
+            seenUserPlayerIds.add(ub.playerId);
+
+            const pList = playerBidsMap.get(ub.playerId) || [];
+            pList.push({
+                team: gameState.playerTeam,
+                teamId: gameState.playerTeam.id,
+                offer: ub.offer
+            });
+            playerBidsMap.set(ub.playerId, pList);
+        });
+    }
 
     // 2. SMART AI BIDDING & COUNTER-BIDDING
     // AI coaches recruit up to the current phase's roster limit.
@@ -3535,8 +3626,22 @@ export function processOffseasonFADay(gameState, userBids = []) {
             return;
         }
 
+        // Players on the incoming draft board must remain available
+        // for the rookie draft, especially during the Year 5 takeover.
+        const protectedDraftProspectIds = new Set(
+            (gameState.draftClass || [])
+                .filter(prospect => prospect?.id != null)
+                .map(prospect => String(prospect.id))
+        );
+
         const availableProspects = gameState.players.filter(p =>
-            !p.teamId && p.status?.type !== 'retired' && p.status?.type !== 'departed' && p.age >= 12 && p.age <= 18
+            p &&
+            !p.teamId &&
+            !protectedDraftProspectIds.has(String(p.id)) &&
+            p.status?.type !== 'retired' &&
+            p.status?.type !== 'departed' &&
+            p.age >= 12 &&
+            p.age <= 18
         );
 
         // Rank targets using roster need, market momentum, coach temperament,
@@ -3805,7 +3910,12 @@ export function processOffseasonFADay(gameState, userBids = []) {
         if (!player || player.teamId) return;
 
         const resolution = resolvePlayerBiddingWar(player, bids);
-        const userBidOnThisPlayer = bids.find(b => b.teamId === gameState.playerTeam.id);
+        const userTeamId = gameState.playerTeam?.id;
+        const userBidOnThisPlayer = userTeamId == null
+            ? null
+            : bids.find(
+                b => String(b.teamId) === String(userTeamId)
+            );
 
         if (!resolution?.winner) {
             const reason = resolution?.rejectedReason || "Offers failed to satisfy player caliber.";
@@ -3826,7 +3936,10 @@ export function processOffseasonFADay(gameState, userBids = []) {
         // Determine if player finalizes today or remains in negotiation for counter-offers
         const isBlowaway = win.offer.tokensOffered >= 2 && win.offer.role === 'STARTER' && win.evaluation.interestScore >= 82;
         const isLowTierUncontested = bids.length === 1 && playerOvr < 48;
-        const shouldFinalizeNow = currentDay >= 3 || isBlowaway || isLowTierUncontested;
+        const shouldFinalizeNow =
+            currentDay >= finalRecruitingDay ||
+            isBlowaway ||
+            isLowTierUncontested;
 
         if (shouldFinalizeNow) {
             // FINALIZE CONTRACT
@@ -3974,6 +4087,357 @@ export function processOffseasonFADay(gameState, userBids = []) {
         userBidResults,
         activeNegotiations,
         aiBidAudit
+    };
+}
+
+/**
+ * Resolves recruiting commitments for the current day.
+ *
+ * Days 2–6 can produce early commitments when a player has strong interest
+ * in a leading team. Day 7 resolves all remaining players who have at least
+ * one serious contender. Players without sufficient interest remain free
+ * agents.
+ */
+export function resolveRecruitingDay(gameState = game) {
+    const state = gameState?.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    if (
+        !gameState?.teams ||
+        !gameState?.players ||
+        String(state?.phase || '').toLowerCase().replace(/[^a-z]/g, '') !== 'recruiting' ||
+        !progress ||
+        progress.initialized !== true ||
+        progress.completed === true ||
+        Number(progress.seasonYear) !== Number(gameState.year)
+    ) {
+        return {
+            success: false,
+            message: 'The recruiting week is not active.',
+            earlyCommitments: [],
+            finalCommitments: []
+        };
+    }
+
+    const day = Number(state.recruitingDay);
+    const totalDays = Number(state.recruitingDays);
+
+    if (
+        !Number.isInteger(day) ||
+        !Number.isInteger(totalDays) ||
+        day < 1 ||
+        day > totalDays
+    ) {
+        return {
+            success: false,
+            message: 'The current recruiting day is invalid.',
+            earlyCommitments: [],
+            finalCommitments: []
+        };
+    }
+
+    if (!Array.isArray(progress.resolvedDays)) {
+        progress.resolvedDays = [];
+    }
+
+    if (progress.resolvedDays.some(
+        resolvedDay => Number(resolvedDay) === day
+    )) {
+        return {
+            success: false,
+            alreadyResolved: true,
+            message: `Recruiting Day ${day} has already been resolved.`,
+            earlyCommitments: [],
+            finalCommitments: []
+        };
+    }
+
+    const finalDay = day >= totalDays;
+    const seriousInterestThreshold = 30;
+    const earlyCommitments = [];
+    const finalCommitments = [];
+
+    const teamsById = new Map(
+        gameState.teams
+            .filter(team => team?.id != null)
+            .map(team => [String(team.id), team])
+    );
+
+    const getEligibleTeam = teamId => {
+        const team = teamsById.get(String(teamId));
+
+        if (!team || team.leagueType !== 'main') return null;
+
+        const rosterSize = getRosterObjects(team).length;
+        const rosterLimit = getCurrentRosterLimit(gameState);
+
+        return rosterSize < rosterLimit ? team : null;
+    };
+
+    const protectedDraftIds = new Set(
+        (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
+            .filter(prospect => prospect?.id != null)
+            .map(prospect => String(prospect.id))
+    );
+
+    const getAvailablePlayer = playerId => {
+        const player = gameState.players.find(
+            candidate => String(candidate?.id) === String(playerId)
+        );
+
+        if (!player || player.teamId != null) {
+            return null;
+        }
+
+        const age = Number(player.age);
+
+        const statusType = String(
+            player.status?.type || ''
+        ).toLowerCase();
+
+        const lifecycle = String(
+            player.lifecycle || ''
+        ).toLowerCase();
+
+        const lifecycleStatus = String(
+            player.lifecycleStatus || player.lifecycle?.status || ''
+        ).toLowerCase();
+
+        if (
+            !Number.isFinite(age) ||
+            age < 12 ||
+            age > 18 ||
+            protectedDraftIds.has(String(player.id)) ||
+            lifecycle === 'draft_eligible' ||
+            lifecycleStatus === 'draft_eligible' ||
+            ['retired', 'departed', 'temporary'].includes(statusType) ||
+            ['retired', 'departed', 'temporary'].includes(lifecycleStatus) ||
+            Number(player.status?.duration) > 0 ||
+            Number(player.injury?.duration || player.injuryDuration || 0) > 0
+        ) {
+            return null;
+        }
+
+        return player;
+    };
+
+    const getInterest = (record, teamId) => {
+        const value = Number(
+            record?.interestByTeam?.[String(teamId)]
+        );
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, value))
+            : 0;
+    };
+
+    const commitPlayer = (player, record, team, interest) => {
+        if (!player || !record || !team || player.teamId != null) {
+            return null;
+        }
+
+        // Use the established roster-assignment pipeline so roster IDs,
+        // player.teamId, and related team state remain consistent.
+        if (!addPlayerToTeam(player, team)) {
+            return null;
+        }
+
+        player.lifecycle = 'active';
+
+        player.status = {
+            type: 'healthy',
+            description: '',
+            duration: 0
+        };
+
+        record.status = 'committed';
+        record.committedTeamId = team.id;
+        record.committedDay = day;
+
+        const commitment = {
+            playerId: player.id,
+            playerName: player.name,
+            teamId: team.id,
+            teamName: team.name,
+            day,
+            interestAtCommit: interest,
+            decisionType: finalDay
+                ? 'end_of_week'
+                : 'early_commitment'
+        };
+
+        progress.commitments = Array.isArray(progress.commitments)
+            ? progress.commitments
+            : [];
+
+        progress.commitments.push(commitment);
+
+        record.history = Array.isArray(record.history)
+            ? record.history
+            : [];
+
+        const recordEvent = {
+            type: 'commitment',
+            ...commitment
+        };
+
+        record.history.push(recordEvent);
+
+        progress.dailyActivity = Array.isArray(progress.dailyActivity)
+            ? progress.dailyActivity
+            : [];
+
+        progress.dailyActivity.push(recordEvent);
+
+        aiSetDepthChart(team);
+
+        return commitment;
+    };
+
+    const chooseWeightedCandidate = candidates => {
+        if (candidates.length === 0) return null;
+
+        // Interest above the serious-contender threshold determines the
+        // odds. A leader is favored, but the result isn't guaranteed.
+        const weighted = candidates.map(candidate => ({
+            ...candidate,
+            weight: Math.pow(
+                Math.max(
+                    1,
+                    candidate.interest - seriousInterestThreshold
+                ),
+                1.6
+            )
+        }));
+
+        const totalWeight = weighted.reduce(
+            (sum, candidate) => sum + candidate.weight,
+            0
+        );
+
+        if (totalWeight <= 0) return null;
+
+        let draw = Math.random() * totalWeight;
+
+        for (const candidate of weighted) {
+            draw -= candidate.weight;
+
+            if (draw <= 0) return candidate;
+        }
+
+        return weighted[weighted.length - 1] || null;
+    };
+
+    for (const [playerId, record] of Object.entries(
+        progress.recruits || {}
+    )) {
+        if (
+            record?.status !== 'available' ||
+            record.committedTeamId != null
+        ) {
+            continue;
+        }
+
+        const player = getAvailablePlayer(playerId);
+
+        if (!player) continue;
+
+        const contenders = Object.entries(
+            record.interestByTeam || {}
+        )
+            .map(([teamId, rawInterest]) => ({
+                team: getEligibleTeam(teamId),
+                interest: Number(rawInterest) || 0
+            }))
+            .filter(candidate =>
+                candidate.team &&
+                candidate.interest >= seriousInterestThreshold
+            )
+            .sort((a, b) => b.interest - a.interest);
+
+        if (contenders.length === 0) {
+            continue;
+        }
+
+        let winner = null;
+
+        // Day 2 onward, a strong leader may earn an early commitment.
+        // Closely contested players are more likely to wait until Day 7.
+        if (!finalDay && day >= 2) {
+            const leader = contenders[0];
+            const runnerUp = contenders[1] || null;
+
+            const leadMargin = leader.interest -
+                (runnerUp?.interest || 0);
+
+            const hasFewAlternatives = contenders.length === 1;
+            const strongLead = leadMargin >= 18;
+
+            if (
+                leader.interest >= 82 &&
+                (hasFewAlternatives || strongLead)
+            ) {
+                const earlyCommitChance = Math.min(
+                    0.85,
+                    0.35 +
+                        (leader.interest - 80) * 0.02 +
+                        leadMargin * 0.006
+                );
+
+                if (Math.random() < earlyCommitChance) {
+                    winner = leader;
+                }
+            }
+        }
+
+        // End-of-week decisions consider all eligible serious contenders.
+        if (finalDay && contenders.length > 0) {
+            winner = chooseWeightedCandidate(contenders);
+        }
+
+        if (!winner) continue;
+
+        const commitment = commitPlayer(
+            player,
+            record,
+            winner.team,
+            winner.interest
+        );
+
+        if (!commitment) continue;
+
+        if (finalDay) {
+            finalCommitments.push(commitment);
+        } else {
+            earlyCommitments.push(commitment);
+        }
+    }
+
+    // Record the day's resolution so revisiting or reloading the phase
+    // cannot process the same day's commitments a second time.
+    progress.resolvedDays.push(day);
+
+    if (finalDay) {
+        progress.completed = true;
+        progress.completedDay = day;
+        state.recruitingCompleted = true;
+    }
+
+    const remainingRecruits = Object.values(
+        progress.recruits || {}
+    ).filter(record =>
+        record?.status === 'available' &&
+        record.committedTeamId == null
+    ).length;
+
+    return {
+        success: true,
+        day,
+        finalDay,
+        earlyCommitments,
+        finalCommitments,
+        remainingRecruits,
+        completed: progress.completed === true
     };
 }
 

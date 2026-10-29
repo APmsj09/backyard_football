@@ -2149,12 +2149,60 @@ export function renderFreeAgentsTab(gameState) {
     if (!container || !gameState) return;
 
     const posFilter = document.getElementById('fa-filter-pos')?.value || '';
-    let pool = (gameState.players || []).filter(p =>
-        p && !p.teamId &&
-        p.status?.type !== 'retired' &&
-        p.status?.type !== 'departed' &&
-        p.age >= 12 && p.age <= 18
+    const recruitingProgress =
+        gameState.offseasonState?.recruitingProgress;
+
+    const recruitingRecords = recruitingProgress?.recruits || {};
+
+    const draftClassIds = new Set(
+        (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
+            .filter(player => player?.id != null)
+            .map(player => String(player.id))
     );
+
+    let pool = (gameState.players || []).filter(p => {
+        if (!p || p.id == null || p.teamId != null) {
+            return false;
+        }
+
+        const age = Number(p.age);
+
+        if (!Number.isFinite(age) || age < 12 || age > 18) {
+            return false;
+        }
+
+        const statusType = String(p.status?.type || '').toLowerCase();
+        const lifecycleStatus = String(
+            p.lifecycleStatus || p.lifecycle?.status || ''
+        ).toLowerCase();
+
+        if (
+            ['retired', 'departed', 'temporary'].includes(statusType) ||
+            ['retired', 'departed', 'temporary'].includes(lifecycleStatus)
+        ) {
+            return false;
+        }
+
+        if (
+            Number(p.injury?.duration || p.injuryDuration || 0) > 0
+        ) {
+            return false;
+        }
+
+        // Keep draft prospects out of the recruiting pool.
+        if (draftClassIds.has(String(p.id))) {
+            return false;
+        }
+
+        const record = recruitingRecords[String(p.id)];
+
+        // Only display players eligible for this recruiting period.
+        return (
+            recruitingProgress?.initialized === true &&
+            record?.status === 'available' &&
+            record?.committedTeamId == null
+        );
+    });
 
     if (posFilter) {
         pool = pool.filter(p =>
@@ -2284,29 +2332,228 @@ export function renderOffseasonFAScreen(gameState) {
     const userRosterEl = document.getElementById('fa-user-roster-count');
     const advanceBtn = document.getElementById('fa-advance-day-btn');
 
-    const totalTokens = gameState.playerTeam.socialProfile?.favorTokens || 0;
-    const committedTokens = offseasonFABids.reduce((s, b) => s + (b.offer.tokensOffered || 0), 0);
-    const availableTokens = Math.max(0, totalTokens - committedTokens);
+    const state = gameState.offseasonState || {};
+    const progress = state.recruitingProgress || {};
+    const currentDay = Math.max(
+        1,
+        Math.floor(Number(state.recruitingDay) || 1)
+    );
+    const totalDays = Math.max(
+        1,
+        Math.floor(Number(state.recruitingDays) || 7)
+    );
+
+    const team = gameState.playerTeam;
+    const totalTokens = Math.max(
+        0,
+        Math.floor(Number(team.socialProfile?.favorTokens) || 0)
+    );
+
+    const rosterSize = Game.getRosterObjects(team).length;
+    const rosterLimit = Game.getCurrentRosterLimit?.(gameState) || 18;
 
     if (roundIndicator) {
-        roundIndicator.textContent = offseasonFADay >= 3 ? "Day 3 of 3 (Final Day)" : `Day ${offseasonFADay} of 3`;
+        roundIndicator.textContent =
+            `Recruiting · Day ${currentDay} of ${totalDays}` +
+            (currentDay === totalDays ? ' · Final Day' : '');
     }
+
     if (userTokensEl) {
-        userTokensEl.textContent = `${availableTokens} (${committedTokens} committed)`;
+        userTokensEl.textContent = `${totalTokens} available`;
     }
+
     if (userRosterEl) {
-        userRosterEl.textContent = `${gameState.playerTeam.roster.length}/18`;
+        userRosterEl.textContent = `${rosterSize}/${rosterLimit}`;
     }
+
     if (advanceBtn) {
-        advanceBtn.className = "bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition";
-        advanceBtn.onclick = () => window.app.advanceOffseasonFADay();
-        advanceBtn.textContent = offseasonFADay >= 3 
-            ? "Submit Final Bids & Resolve Day 3 →" 
-            : `Submit Bids & Advance to Day ${offseasonFADay + 1} →`;
+        advanceBtn.className =
+            'bg-emerald-700 hover:bg-emerald-800 text-white font-bold ' +
+            'px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition';
+
+        advanceBtn.textContent = currentDay >= totalDays
+            ? 'Resolve Final Day & Review Roster →'
+            : `Resolve Day ${currentDay} & Continue →`;
+
+        advanceBtn.onclick = () =>
+            window.app.advanceOffseasonFADay();
     }
 
     renderOffseasonFAPool(gameState);
-    renderPendingBidsList(gameState);
+    renderRecruitingActivityPanel(gameState);
+}
+
+function renderRecruitingActivityPanel(gameState) {
+    const activityEl = document.getElementById('fa-pending-bids-list');
+    const countEl = document.getElementById('fa-bids-count');
+
+    if (!activityEl) return;
+
+    const state = gameState?.offseasonState;
+    const progress = state?.recruitingProgress;
+    const team = gameState?.teams?.find(
+        t => String(t.id) === String(gameState.playerTeam?.id)
+    );
+
+    if (!team || !progress?.initialized) {
+        activityEl.innerHTML = `
+            <div class="text-sm text-gray-400">
+                Recruiting activity will appear here once recruiting begins.
+            </div>
+        `;
+
+        if (countEl) countEl.textContent = '0 Today';
+        return;
+    }
+
+    const teamId = String(team.id);
+    const day = Math.max(1, Number(state.recruitingDay) || 1);
+
+    const escapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    const teamWork = progress.teamDailyWork?.[teamId] || {};
+    const assignments = Object.values(teamWork).flatMap(
+        dailyAssignments => Array.isArray(dailyAssignments)
+            ? dailyAssignments
+            : []
+    );
+
+    const budget = Game.getRecruitingStaffHourBudget?.(team);
+    const coaches = Array.isArray(budget) ? budget : [];
+
+    const coachRows = coaches.map(entry => {
+        const coach = entry?.coach || entry;
+        const coachId = String(entry?.coachId ?? coach?.id ?? '');
+        const coachName = entry?.coachName
+            || entry?.name
+            || [coach?.firstName, coach?.lastName].filter(Boolean).join(' ')
+            || 'Staff member';
+
+        const weeklyHours = Math.max(
+            0,
+            Number(entry?.weeklyHours ?? entry?.hours ?? entry?.availableHours) || 0
+        );
+
+        const usedHours = assignments.reduce((total, assignment) => {
+            if (String(assignment?.coachId) !== coachId) return total;
+            return total + Math.max(0, Number(assignment?.hours) || 0);
+        }, 0);
+
+        const remainingHours = Math.max(0, weeklyHours - usedHours);
+
+        return `
+            <div class="flex items-center justify-between gap-3 py-2 border-b border-gray-700/50">
+                <div class="min-w-0">
+                    <div class="text-sm text-gray-200 truncate">
+                        ${escapeHtml(coachName)}
+                    </div>
+                    <div class="text-xs text-gray-500">
+                        ${escapeHtml(entry?.role ?? coach?.role ?? 'Staff')}
+                    </div>
+                </div>
+                <div class="text-sm text-right whitespace-nowrap">
+                    <span class="text-gray-300">${usedHours}</span>
+                    <span class="text-gray-500">/ ${weeklyHours} hrs</span>
+                    <div class="text-xs ${remainingHours > 0 ? 'text-emerald-400' : 'text-amber-400'}">
+                        ${remainingHours} remaining
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    const visibleActivity = (Array.isArray(progress.dailyActivity)
+        ? progress.dailyActivity
+        : []
+    ).filter(activity =>
+        String(activity?.teamId) === teamId &&
+        Number(activity?.day) === day &&
+        [
+            'recruiting_action',
+            'recruiting_sweetener',
+            'commitment'
+        ].includes(activity?.type)
+    );
+
+    if (countEl) {
+        countEl.textContent = `${visibleActivity.length} Today`;
+    }
+
+    const activityRows = visibleActivity
+        .slice()
+        .reverse()
+        .slice(0, 8)
+        .map(activity => {
+            const playerId = String(activity?.playerId ?? '');
+            const recruit = progress.recruits?.[playerId];
+            const player = gameState.players?.find(
+                p => String(p.id) === playerId
+            );
+
+            const playerName = activity?.playerName
+                || recruit?.name
+                || (player
+                    ? `${player.firstName || ''} ${player.lastName || ''}`.trim()
+                    : '')
+                || 'Recruit';
+
+            const description = activity?.description
+                || activity?.actionLabel
+                || activity?.action
+                || activity?.type?.replace(/_/g, ' ')
+                || 'Recruiting activity';
+
+            return `
+                <div class="py-2 border-b border-gray-700/50">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="text-sm text-gray-200">
+                            ${escapeHtml(playerName)}
+                        </div>
+                        <div class="text-xs text-gray-500 whitespace-nowrap">
+                            Day ${day}
+                        </div>
+                    </div>
+                    <div class="text-xs text-gray-400 mt-1">
+                        ${escapeHtml(description)}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    activityEl.innerHTML = `
+        <div class="space-y-4">
+            <section>
+                <div class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">
+                    Weekly Staff Hours
+                </div>
+                ${coachRows || `
+                    <div class="text-sm text-gray-500 py-2">
+                        No recruiting staff hours are available.
+                    </div>
+                `}
+            </section>
+
+            <section>
+                <div class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">
+                    Day ${day} Activity
+                </div>
+                ${activityRows || `
+                    <div class="text-sm text-gray-500 py-2">
+                        No recruiting actions recorded today.
+                    </div>
+                `}
+            </section>
+        </div>
+    `;
 }
 
 
@@ -2368,23 +2615,35 @@ export function renderOffseasonFAPool(gameState) {
                         gameState.playerTeam,
                         p
                     );
-                    const userBid = offseasonFABids.find(b => b.playerId === p.id);
+                    const recruitingRecord =
+                        gameState.offseasonState?.recruitingProgress
+                            ?.recruits?.[String(p.id)];
+
+                    const userInterest = Math.max(
+                        0,
+                        Math.min(
+                            100,
+                            Number(
+                                recruitingRecord?.interestByTeam?.[
+                                    String(gameState.playerTeam.id)
+                                ]
+                            ) || 0
+                        )
+                    );
+
                     const intel = Game.getPlayerMarketIntel(p, gameState);
 
-                    // Check active multi-day negotiation state
-                    const marketState = gameState._activeFaMarket?.get(p.id);
-                    let marketStatusHtml = '';
+                    const interestColor = userInterest >= 70
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : userInterest >= 35
+                            ? 'bg-amber-100 text-amber-900 border-amber-300'
+                            : 'bg-slate-100 text-slate-600 border-slate-200';
 
-                    if (marketState) {
-                        const isUserLeading = marketState.leaderTeamId === gameState.playerTeam.id;
-                        marketStatusHtml = isUserLeading
-                            ? `<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 font-black px-1.5 py-0.5 rounded text-[9px] animate-pulse">👑 You Lead (${marketState.leaderOffer.role}, ${marketState.leaderOffer.tokensOffered}🪙)</span>`
-                            : `<span class="bg-rose-100 text-rose-800 border border-rose-300 font-black px-1.5 py-0.5 rounded text-[9px]">⚠️ ${marketState.leaderTeamName} Leads (${marketState.leaderOffer.tokensOffered}🪙)</span>`;
-                    } else if (intel.heat === 'HOT') {
-                        marketStatusHtml = `<span class="bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded text-[9px]">🔥 Hot (${intel.suitorNames.map(n => n.replace('The ', '')).join(', ')})</span>`;
-                    } else {
-                        marketStatusHtml = `<span class="bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded text-[9px]">💤 Uncontested</span>`;
-                    }
+                    const marketStatusHtml = `
+                        <span class="border ${interestColor} font-black px-1.5 py-0.5 rounded text-[9px]">
+                            Your Interest: ${userInterest}/100
+                        </span>
+                    `;
 
                     return `
                     <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
@@ -2434,15 +2693,11 @@ export function renderOffseasonFAPool(gameState) {
                             </div>
                         </td>
                         <td class="text-right py-2 px-3 font-sans" onclick="event.stopPropagation()">
-                            ${userBid ? `
-                            <button class="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-2 py-1 rounded text-[10px] uppercase tracking-tight flex items-center gap-1 shadow-sm transition" onclick="app.openBidModal('${p.id}')" title="Counter-bid or modify terms">
-                                <span>Bid: ${userBid.offer.role}</span>
-                                <span class="text-amber-700 font-mono">(${userBid.offer.tokensOffered}🪙)</span>
-                                <span>✏️</span>
-                            </button>` : `
-                            <button class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition shadow-sm" onclick="app.openBidModal('${p.id}')">
-                                ${marketState ? 'Counter' : 'Bid'}
-                            </button>`}
+                            <button
+                                class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition shadow-sm"
+                                onclick="window.app_openRecruitingActionModal('${p.id}')">
+                                Recruit
+                            </button>
                         </td>
                     </tr>`;
                 }).join('')}
@@ -2522,6 +2777,327 @@ export function removeOffseasonFABid(idx) { offseasonFABids.splice(idx, 1); }
 export function getOffseasonFADay() { return offseasonFADay; }
 export function incrementOffseasonFADay() { offseasonFADay++; }
 export function clearOffseasonFABids() { offseasonFABids = []; }
+
+window.app_openRecruitingActionModal = function(playerId) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+
+    if (!team) return;
+
+    const state = gs.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    if (
+        String(state?.phase || '').toLowerCase().replace(/[^a-z]/g, '') !== 'recruiting' ||
+        !progress ||
+        progress.initialized !== true ||
+        progress.completed === true
+    ) {
+        showModal(
+            'Recruiting Unavailable',
+            '<p>The seven-day recruiting week is not active.</p>'
+        );
+        return;
+    }
+
+    const player = Game.getPlayer(playerId) ||
+        gs.players?.find(p => String(p?.id) === String(playerId));
+
+    const record = progress.recruits?.[String(playerId)];
+
+    if (
+        !player ||
+        !record ||
+        record.status !== 'available' ||
+        player.teamId != null
+    ) {
+        showModal(
+            'Recruit Unavailable',
+            '<p>This player is no longer available to recruit.</p>'
+        );
+        return;
+    }
+
+    const budget = Game.getRecruitingStaffHourBudget?.(team) || [];
+
+    const teamWork =
+        progress.teamDailyWork?.[String(team.id)] || {};
+
+    const previousAssignments = Object.values(teamWork).flatMap(
+        assignments => Array.isArray(assignments) ? assignments : []
+    );
+
+    const coaches = budget.map(coach => {
+        const usedHours = previousAssignments
+            .filter(assignment =>
+                String(assignment.coachId) === String(coach.coachId)
+            )
+            .reduce(
+                (total, assignment) =>
+                    total + Math.max(
+                        0,
+                        Number(assignment.hours) || 0
+                    ),
+                0
+            );
+
+        return {
+            ...coach,
+            remainingHours: Math.max(
+                0,
+                coach.weeklyHours - usedHours
+            )
+        };
+    }).filter(coach => coach.remainingHours > 0);
+
+    if (coaches.length === 0) {
+        showModal(
+            'No Recruiting Hours Available',
+            '<p>Your staff has no recruiting hours remaining this week.</p>'
+        );
+        return;
+    }
+
+    const position = getFreeAgentDisplayPosition(team, player);
+    const scouting = getFreeAgentScoutingView(team, player);
+
+    const interest = Math.max(
+        0,
+        Math.min(
+            100,
+            Number(
+                record.interestByTeam?.[String(team.id)]
+            ) || 0
+        )
+    );
+
+    const escapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    const coachOptions = coaches.map(coach => `
+        <option value="${escapeHtml(coach.coachId)}">
+            ${escapeHtml(coach.coachName)}
+            · ${coach.remainingHours} hrs left
+        </option>
+    `).join('');
+
+    const actionOptions = [
+        ['outreach', 'Personal outreach'],
+        ['teammateConnection', 'Teammate connection'],
+        ['roleDiscussion', 'Role discussion'],
+        ['practiceInvitation', 'Pickup practice invitation']
+    ].map(([value, label]) => `
+        <option value="${value}">${label}</option>
+    `).join('');
+
+    const initialHours = Math.min(
+        4,
+        Math.max(...coaches.map(coach => coach.remainingHours))
+    );
+
+    const modalHtml = `
+        <div class="space-y-4 text-left text-xs">
+            <div class="rounded bg-slate-900 p-3 text-white">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <h4 class="font-black text-sm">
+                            ${escapeHtml(player.name)}
+                        </h4>
+                        <p class="mt-1 text-slate-300">
+                            Age ${Number(player.age) || '—'} ·
+                            ${escapeHtml(position)}
+                        </p>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-[9px] uppercase tracking-wider text-slate-400">
+                            Scouting Estimate
+                        </div>
+                        <div class="mt-1 font-bold text-amber-300">
+                            OFF ${escapeHtml(formatFreeAgentScoutingFit(scouting.offense))}
+                        </div>
+                        <div class="font-bold text-amber-300">
+                            DEF ${escapeHtml(formatFreeAgentScoutingFit(scouting.defense))}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <div class="flex justify-between text-[10px]">
+                        <span>Your recruiting interest</span>
+                        <b>${interest}/100</b>
+                    </div>
+                    <div class="mt-1 h-2 overflow-hidden rounded bg-slate-700">
+                        <div
+                            class="h-full rounded bg-emerald-400"
+                            style="width:${interest}%">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <label for="recruiting-action-coach"
+                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                    Assign Coach
+                </label>
+                <select id="recruiting-action-coach"
+                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
+                    ${coachOptions}
+                </select>
+            </div>
+
+            <div>
+                <label for="recruiting-action-type"
+                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                    Recruiting Action
+                </label>
+                <select id="recruiting-action-type"
+                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
+                    ${actionOptions}
+                </select>
+                <p class="mt-1 text-[10px] text-slate-500">
+                    The coach's relevant skills affect how much interest the action generates.
+                    Repeating an action becomes less effective.
+                </p>
+            </div>
+
+            <div>
+                <label for="recruiting-action-hours"
+                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                    Staff Hours
+                </label>
+                <select id="recruiting-action-hours"
+                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
+                    ${Array.from(
+                        { length: initialHours },
+                        (_, index) => index + 1
+                    ).map(hours => `
+                        <option value="${hours}" ${hours === Math.min(2, initialHours) ? 'selected' : ''}>
+                            ${hours} hour${hours === 1 ? '' : 's'}
+                        </option>
+                    `).join('')}
+                </select>
+            </div>
+
+            <p class="text-[10px] text-slate-500">
+                Staff hours are limited across the entire recruiting week.
+                Assigned hours cannot be reused on another day.
+            </p>
+        </div>
+    `;
+
+    showModal(
+        `Recruit ${player.name}`,
+        modalHtml,
+        () => {
+            const coachId = document.getElementById(
+                'recruiting-action-coach'
+            )?.value;
+
+            const actionType = document.getElementById(
+                'recruiting-action-type'
+            )?.value;
+
+            const hours = Number(
+                document.getElementById(
+                    'recruiting-action-hours'
+                )?.value
+            );
+
+            // Refresh state because the modal may have been open while
+            // recruiting progress or staff availability changed.
+            const currentState = getGameState();
+            const currentTeam = currentState?.playerTeam;
+            const currentOffseason = currentState?.offseasonState;
+            const currentProgress =
+                currentOffseason?.recruitingProgress;
+
+            const currentPhase = String(
+                currentOffseason?.phase || ''
+            ).toLowerCase().replace(/[^a-z]/g, '');
+
+            const currentRecord =
+                currentProgress?.recruits?.[String(player.id)];
+
+            const currentPlayer = currentState?.players?.find(
+                p => String(p?.id) === String(player.id)
+            );
+
+            if (
+                currentPhase !== 'recruiting' ||
+                !currentProgress?.initialized ||
+                currentProgress.completed === true ||
+                !currentTeam ||
+                !currentRecord ||
+                currentRecord.status !== 'available' ||
+                currentRecord.committedTeamId != null ||
+                !currentPlayer ||
+                currentPlayer.teamId != null
+            ) {
+                showModal(
+                    'Recruiting Action Unavailable',
+                    '<p>This recruit is no longer available, or the recruiting period has ended. Refresh the recruiting screen and try again.</p>'
+                );
+                return;
+            }
+
+            if (
+                !coachId ||
+                !['outreach', 'teammateConnection', 'roleDiscussion', 'practiceInvitation']
+                    .includes(actionType) ||
+                !Number.isInteger(hours) ||
+                hours < 1
+            ) {
+                showModal(
+                    'Invalid Recruiting Action',
+                    '<p>Choose a valid coach, recruiting action, and number of hours.</p>'
+                );
+                return;
+            }
+
+            const result = Game.executeRecruitingAction(
+                currentState,
+                currentTeam.id,
+                coachId,
+                currentPlayer.id,
+                actionType,
+                hours
+            );
+
+            if (!result?.success) {
+                showModal(
+                    'Recruiting Action Failed',
+                    `<p>${escapeHtml(
+                        result?.message || 'The recruiting action could not be completed.'
+                    )}</p>`
+                );
+                return;
+            }
+
+            Game.saveGameState?.('backyardFootballGameState');
+
+            renderOffseasonFAScreen(getGameState());
+
+            showModal(
+                'Recruiting Action Complete',
+                `<p>${escapeHtml(
+                    result.message || 'Your staff completed the recruiting action.'
+                )}</p>`,
+                null,
+                'Continue'
+            );
+        },
+        'Perform Recruiting Action'
+    );
+};
 
 window.app_openBidModal = function(playerId) {
     const gs = getGameState();

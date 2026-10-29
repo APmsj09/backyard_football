@@ -204,6 +204,25 @@ async function startNewGame() {
             startupStage = `advancing offseason after Season ${y}`;
             const offseasonReport = Game.advanceToOffseason();
 
+            // Refresh state after rollover, then resolve AI staffing
+            // against the season that just finished. This uses the same
+            // year key as the live Coach Carousel transition.
+            gameState = Game.getGameState();
+
+            const completedSeasonYear = Number(
+                gameState.offseasonState?.completedSeasonYear
+            );
+
+            const carouselYear =
+                Number.isInteger(completedSeasonYear) &&
+                completedSeasonYear > 0
+                    ? completedSeasonYear
+                    : Number(gameState.year) - 1;
+
+            Game.resolveCoachCarousel(
+                gameState,
+                carouselYear
+            );
             // Preserve the Year 5 rookie class for the user's takeover draft.
             // Historical drafts run for Years 1-3; Year 4's graduates remain
             // available for the first user-controlled draft in Year 5.
@@ -228,13 +247,17 @@ async function startNewGame() {
                 draftResults
             });
 
-            // Replenish rosters after each historical draft so teams don't bleed out
-            gameState.teams.forEach(team => {
-                if (team && team.leagueType === 'main') {
-                    Game.autoFillTeamWalkOns(team, 13);
-                    Game.aiSetDepthChart(team);
-                }
-            });
+            // Replenish rosters only after a completed historical draft.
+            // Year 4's graduating prospects must remain available for the
+            // user's Year 5 rookie draft.
+            if (y < 4) {
+                gameState.teams.forEach(team => {
+                    if (team && team.leagueType === 'main') {
+                        Game.autoFillTeamWalkOns(team, 13);
+                        Game.aiSetDepthChart(team);
+                    }
+                });
+            }
         }
 
         UI.stopLoadingMessages();
@@ -2707,6 +2730,34 @@ async function handleAdvanceWeek() {
         return;
     }
 
+    // Complete roster finalization before starting the regular season.
+    // The roster-limit guard above ensures the user has finished cutting.
+    if (
+        gameState.currentWeek === 0 &&
+        gameState.draftCompleted &&
+        gameState.offseasonState?.phase ===
+            OFFSEASON_PHASES.ROSTER_FINALIZATION
+    ) {
+        const transitionResult = Game.transitionOffseasonPhase(
+            OFFSEASON_PHASES.REGULAR_SEASON,
+            gameState
+        );
+
+        if (!transitionResult?.success) {
+            UI.showModal(
+                'Offseason Phase Locked',
+                `<p>${escapeHtml(
+                    transitionResult?.message ||
+                    'Roster finalization could not be completed.'
+                )}</p>`
+            );
+            return;
+        }
+
+        gameState = Game.getGameState() || gameState;
+        Game.saveGameState(activeSaveKey);
+    }
+
     // Collect seasonal player dues when the new season is ready to begin.
     // The roster-limit guard above ensures the user's roster cuts are complete.
     if (gameState.currentWeek === 0 && gameState.draftCompleted) {
@@ -4078,74 +4129,405 @@ window.app = {
         }
     },
 
-    advanceOffseasonFADay: () => {
-        const currentDay = UI.getOffseasonFADay();
-        const userBids = UI.getOffseasonFABids();
-        const result = Game.processOffseasonFADay(gameState, userBids);
-        const { daySignings, userBidResults, rejectedBids } = result;
+        advanceOffseasonFADay: () => {
+        gameState = Game.getGameState() || gameState;
 
-        // REPORT 4: Record Day Activity (Contested vs Uncontested signings, tokens spent)
-        debugCollector.recordOffseasonDay(currentDay, result);
-        const wireList = document.getElementById('fa-daily-wire-list');
-        if (wireList) {
-            let feedbackHtml = '';
+        const state = gameState?.offseasonState;
+        const progress = state?.recruitingProgress;
 
-            // 1. Highlight user bid outcomes prominently
-            if (userBidResults && userBidResults.length > 0) {
-                feedbackHtml += `
-                    <div class="mb-2 p-2 rounded bg-amber-50 border border-amber-300 space-y-1">
-                        <span class="text-[9px] font-black uppercase text-amber-900 block tracking-wider">Your Offer Results (Day ${currentDay}):</span>
-                        ${userBidResults.map(r => `
-                            <div class="text-[11px] font-bold ${r.won ? 'text-emerald-700' : 'text-rose-700'}">
-                                ${r.message}
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-            }
+        const normalizedPhase = String(state?.phase || '')
+            .toLowerCase()
+            .replace(/[^a-z]/g, '');
 
-            // 2. League-wide signings for this day
-            const signingsHtml = daySignings.map(s => `
-                <div class="bg-slate-50 border p-1.5 rounded text-[11px] ${s.userWon ? 'border-emerald-300 bg-emerald-50/50 font-bold' : ''}">
-                    <span class="font-bold text-slate-900">${s.player.name}</span> signed with <b class="text-blue-700">${s.team.name}</b>
-                    ${s.tokens > 0 ? `<span class="text-[9px] text-amber-600 font-mono">(${s.tokens}🪙)</span>` : ''}
-                    ${s.runnerUp ? `<span class="text-slate-400 block text-[9px] font-normal">(Chose over ${s.runnerUp.name})</span>` : ''}
-                </div>
-            `).join('') || '<p class="text-slate-400 italic text-[11px]">No signings reached consensus today.</p>';
+        const currentDay = Number(state?.recruitingDay);
+        const totalDays = Number(state?.recruitingDays);
 
-            wireList.innerHTML = `<div class="font-bold text-[10px] text-slate-700 border-b pb-0.5 mb-1 uppercase tracking-wider">Day ${currentDay} Signings & Wire</div>` + feedbackHtml + signingsHtml;
+        // Recover if Day 7 was already resolved but the phase transition
+        // into roster finalization failed.
+        const isFinalizationRecovery = Boolean(
+            normalizedPhase === 'recruiting' &&
+            progress?.initialized === true &&
+            progress.completed === true &&
+            Number(progress.seasonYear) === Number(gameState?.year) &&
+            Number.isInteger(currentDay) &&
+            Number.isInteger(totalDays) &&
+            currentDay >= totalDays &&
+            Array.isArray(progress.resolvedDays) &&
+            progress.resolvedDays.some(
+                resolvedDay => Number(resolvedDay) === currentDay
+            )
+        );
+
+        if (
+            !gameState?.playerTeam ||
+            normalizedPhase !== 'recruiting' ||
+            !progress ||
+            progress.initialized !== true ||
+            (progress.completed === true && !isFinalizationRecovery)
+        ) {
+            UI.showModal(
+                'Recruiting Unavailable',
+                '<p>The seven-day recruiting week is not active.</p>'
+            );
+            return;
         }
 
-        if (currentDay >= 3) {
-            // Day 3 concluded: Update button and display recap modal
-            const advanceBtn = document.getElementById('fa-advance-day-btn');
-            if (advanceBtn) {
-                advanceBtn.textContent = "🏆 Proceed to Season Kickoff (Week 1) →";
-                advanceBtn.className = "bg-blue-700 hover:bg-blue-800 text-white font-black px-4 py-2 rounded text-xs uppercase tracking-wider shadow-md animate-pulse";
-                advanceBtn.onclick = () => window.app.finishOffseasonFAMinigame();
+        if (
+            !gameState?.playerTeam ||
+            normalizedPhase !== 'recruiting' ||
+            !progress ||
+            progress.initialized !== true ||
+            progress.completed === true
+        ) {
+            UI.showModal(
+                'Recruiting Unavailable',
+                '<p>The seven-day recruiting week is not active.</p>'
+            );
+            return;
+        }
+
+        const currentDay = Number(state.recruitingDay);
+        const totalDays = Number(state.recruitingDays);
+
+        if (
+            !Number.isInteger(currentDay) ||
+            !Number.isInteger(totalDays) ||
+            currentDay < 1 ||
+            currentDay > totalDays
+        ) {
+            UI.showModal(
+                'Recruiting Error',
+                '<p>The current recruiting day is invalid.</p>'
+            );
+            return;
+        }
+
+        // Do not resolve a day twice if the user clicks again after
+        // a save/load or a delayed screen refresh.
+        if (
+            !isFinalizationRecovery &&
+            Array.isArray(progress.resolvedDays) &&
+            progress.resolvedDays.some(
+                resolvedDay => Number(resolvedDay) === currentDay
+            )
+        ) {
+            UI.showModal(
+                'Day Already Resolved',
+                `<p>Recruiting Day ${currentDay} has already been resolved. Reload the recruiting screen before continuing.</p>`
+            );
+            return;
+        }
+
+        let result;
+
+        if (isFinalizationRecovery) {
+            // Recruiting and commitments already resolved successfully.
+            // Do not replay them; retry only the phase transition below.
+            result = {
+                success: true,
+                day: currentDay,
+                finalDay: true,
+                earlyCommitments: [],
+                finalCommitments: [],
+                completed: true
+            };
+        } else {
+            // Rival teams use their available coaches to recruit first.
+            const aiResult = Game.processAiRecruitingDay(gameState);
+
+            if (!aiResult?.success) {
+                UI.showModal(
+                    'Recruiting Error',
+                    `<p>${String(
+                        aiResult?.message || 'AI recruiting could not run.'
+                    )}</p>`
+                );
+                return;
             }
 
-            const mySignings = (daySignings || []).filter(s => s.userWon);
-            const recapHtml = `
-                <div class="space-y-3 text-left text-xs">
-                    <p class="text-slate-700 leading-relaxed">
-                        Free Agency has concluded! Your front office has finished recruitment before Week 1.
+            // Resolve commitments only after every team's recruiting effort.
+            result = Game.resolveRecruitingDay(gameState);
+
+            if (!result?.success) {
+                UI.showModal(
+                    'Recruiting Error',
+                    `<p>${String(
+                        result?.message ||
+                        'Recruiting decisions could not be resolved.'
+                    )}</p>`
+                );
+                return;
+            }
+        }
+
+        const escapeHtml = value => String(value ?? '').replace(
+            /[&<>"']/g,
+            character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[character]
+        );
+
+        const dailyWire = document.getElementById(
+            'fa-daily-wire-list'
+        );
+
+        if (dailyWire) {
+            const dailyActivity = (
+                Array.isArray(progress.dailyActivity)
+                    ? progress.dailyActivity
+                    : []
+            ).filter(activity =>
+                Number(activity?.day) === currentDay
+            );
+
+            const activityHtml = dailyActivity.length > 0
+                ? dailyActivity.map(activity => {
+                    const teamName = escapeHtml(
+                        activity.teamName || 'Team'
+                    );
+
+                    const playerName = escapeHtml(
+                        activity.playerName || 'Recruit'
+                    );
+
+                    const actionLabel = escapeHtml(
+                        activity.label ||
+                        activity.action ||
+                        activity.type ||
+                        'Recruiting activity'
+                    );
+
+                    const hours = Number(activity.hours) || 0;
+                    const interestGain =
+                        Number(activity.interestGain) || 0;
+
+                    const detailParts = [];
+
+                    if (hours > 0) {
+                        detailParts.push(`${hours} staff hour(s)`);
+                    }
+
+                    if (interestGain > 0) {
+                        detailParts.push(`+${interestGain} interest`);
+                    }
+
+                    if (Number(activity.cashSpent) > 0) {
+                        detailParts.push(
+                            `-$${Number(activity.cashSpent).toFixed(2)}`
+                        );
+                    }
+
+                    if (Number(activity.tokensSpent) > 0) {
+                        detailParts.push(
+                            `${Number(activity.tokensSpent)} Favor Token(s)`
+                        );
+                    }
+
+                    return `
+                        <div class="rounded border border-slate-200 bg-white p-2 text-[11px]">
+                            <div class="font-bold text-slate-800">
+                                ${teamName} · ${playerName}
+                            </div>
+                            <div class="text-slate-600">
+                                ${actionLabel}
+                            </div>
+                            ${
+                                detailParts.length > 0
+                                    ? `<div class="mt-0.5 text-slate-500">${escapeHtml(detailParts.join(' · '))}</div>`
+                                    : ''
+                            }
+                        </div>
+                    `;
+                }).join('')
+                : `
+                    <p class="text-[11px] italic text-slate-500">
+                        No recruiting actions were recorded today.
                     </p>
-                    <div class="p-3 bg-slate-50 border border-slate-200 rounded space-y-1">
-                        <span class="font-black text-slate-900 block text-xs uppercase">Your Final Roster Count</span>
-                        <p class="font-bold text-emerald-700 text-sm">${gameState.playerTeam.roster.length} / 18 Players Under Contract</p>
-                        <p class="text-[11px] text-slate-500 font-mono">Favor Tokens Remaining: ${gameState.playerTeam.socialProfile?.favorTokens || 0}</p>
+                `;
+
+            const commitmentHtml = [
+                ...(result.earlyCommitments || []),
+                ...(result.finalCommitments || [])
+            ].map(commitment => `
+                <div class="rounded border border-emerald-200 bg-emerald-50 p-2 text-[11px]">
+                    <b>${escapeHtml(commitment.playerName)}</b>
+                    committed to
+                    <b>${escapeHtml(commitment.teamName)}</b>.
+                </div>
+            `).join('');
+
+            dailyWire.innerHTML = `
+                <div class="mb-2 border-b border-slate-200 pb-1">
+                    <div class="font-black text-[10px] uppercase tracking-wider text-slate-800">
+                        Recruiting Day ${currentDay} Activity
                     </div>
+                    <div class="mt-1 text-[10px] text-slate-500">
+                        ${dailyActivity.length} activity record(s) ·
+                        ${(result.earlyCommitments || []).length +
+                            (result.finalCommitments || []).length}
+                        commitment(s)
+                    </div>
+                </div>
+                <div class="space-y-1.5">
+                    ${activityHtml}
+                    ${commitmentHtml}
                 </div>
             `;
-            UI.showModal("Free Agency Concluded", recapHtml, () => {
-                window.app.finishOffseasonFAMinigame();
-            }, "Proceed to Kickoff");
-        } else {
-            UI.incrementOffseasonFADay();
-            UI.clearOffseasonFABids();
-            UI.renderOffseasonFAScreen(gameState);
         }
+
+        // Clear any pending records from the retired bidding interface.
+        // Recruiting actions are now saved directly to recruitingProgress.
+        UI.clearOffseasonFABids();
+
+        const roundIndicator = document.getElementById(
+            'fa-round-indicator'
+        );
+
+        const advanceButton = document.getElementById(
+            'fa-advance-day-btn'
+        );
+
+        if (currentDay < totalDays) {
+            // Persist the next day only after today's resolution succeeds.
+            state.recruitingDay = currentDay + 1;
+
+            Game.saveGameState(activeSaveKey);
+
+            UI.renderOffseasonFAScreen(gameState);
+
+            if (roundIndicator) {
+                roundIndicator.textContent =
+                    `Day ${state.recruitingDay} of ${totalDays}`;
+            }
+
+            if (advanceButton) {
+                advanceButton.textContent =
+                    `Resolve Day ${state.recruitingDay} →`;
+                advanceButton.onclick = () =>
+                    window.app.advanceOffseasonFADay();
+            }
+
+            return;
+        }
+
+        // Day 7 is complete. Move through the existing phase controller
+        // into roster finalization rather than starting Week 1 immediately.
+        const transitionResult = Game.transitionOffseasonPhase(
+            OFFSEASON_PHASES.ROSTER_FINALIZATION,
+            gameState
+        );
+
+        if (!transitionResult?.success) {
+            Game.saveGameState(activeSaveKey);
+
+            UI.showModal(
+                'Roster Finalization Error',
+                `<p>${escapeHtml(
+                    transitionResult?.message ||
+                    'Could not transition to roster finalization.'
+                )}</p>`
+            );
+            return;
+        }
+
+        Game.saveGameState(activeSaveKey);
+
+        if (roundIndicator) {
+            roundIndicator.textContent =
+                `Recruiting Complete · ${totalDays} Days`;
+        }
+
+        if (advanceButton) {
+            advanceButton.textContent =
+                'Review Final Roster →';
+
+            advanceButton.onclick = () => {
+                window.app.finishOffseasonFAMinigame();
+            };
+        }
+
+        const userCommitments = (
+            progress.commitments || []
+        ).filter(commitment =>
+            String(commitment.teamId) ===
+            String(gameState.playerTeam.id)
+        );
+
+        const recapHtml = `
+            <div class="space-y-3 text-left text-sm">
+                <p class="text-slate-700">
+                    The seven-day recruiting period has concluded.
+                    Review your roster before the new season begins.
+                </p>
+
+                <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                    <div class="text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Your Recruiting Results
+                    </div>
+                    <div class="mt-1 text-xl font-black text-slate-900">
+                        ${userCommitments.length} player commitment(s)
+                    </div>
+                    <div class="mt-1 text-xs text-slate-600">
+                        Current roster:
+                        ${Game.getRosterObjects(gameState.playerTeam).length}
+                        players
+                    </div>
+                    <div class="text-xs text-slate-600">
+                        Team funds:
+                        $${(
+                            Number(gameState.playerTeam.finances?.balance) || 0
+                        ).toFixed(2)}
+                    </div>
+                    <div class="text-xs text-slate-600">
+                        Favor Tokens:
+                        ${Math.max(
+                            0,
+                            Math.floor(
+                                Number(
+                                    gameState.playerTeam.socialProfile?.favorTokens
+                                ) || 0
+                            )
+                        )}
+                    </div>
+                </div>
+
+                ${
+                    userCommitments.length > 0
+                        ? `
+                            <div>
+                                <div class="mb-1 text-xs font-bold uppercase tracking-wide text-slate-600">
+                                    Players Who Committed
+                                </div>
+                                <div class="space-y-1">
+                                    ${userCommitments.map(commitment => `
+                                        <div class="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs">
+                                            <b>${escapeHtml(commitment.playerName)}</b>
+                                            · Day ${commitment.day}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `
+                        : `
+                            <p class="text-xs text-slate-500">
+                                No players committed to your team this week.
+                                Your existing roster remains in place for review.
+                            </p>
+                        `
+                }
+            </div>
+        `;
+
+        UI.showModal(
+            'Recruiting Week Complete',
+            recapHtml,
+            () => window.app.finishOffseasonFAMinigame(),
+            'Review Final Roster'
+        );
     },
 
     setSnackPlan: (planKey) => {
