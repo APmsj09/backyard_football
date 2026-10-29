@@ -2419,8 +2419,7 @@ export function recordRecruitingStaffAssignment(
         progress.teamDailyWork = {};
     }
 
-    const teamKey = String(team.id);
-
+    // Reuse teamKey declared earlier in executeRecruitingAction().
     if (!progress.teamDailyWork[teamKey]) {
         progress.teamDailyWork[teamKey] = {};
     }
