@@ -307,34 +307,6 @@ function estimatePotential(team, player, evaluator, level, ranges) {
                         ? 3
                         : 4;
 
-        const radius = level <= 2 ? 2 : 1;
-
-        return {
-            bestPossible: GRADES[Math.max(0, estimatedIndex - radius)],
-            worstPossible: GRADES[
-                Math.min(GRADES.length - 1, estimatedIndex + radius)
-            ]
-        };
-    }
-
-    // Never reveal a hidden potential grade when no valid estimate
-    // can be produced from the available scouting evidence.
-    return null;
-
-    const seed = [
-        team.id,
-        player.id,
-        evaluator?.id || evaluator?.name || 'staff',
-        level,
-        'potential'
-    ].join('|');
-
-    const estimatedIndex = clamp(
-        actualIndex + Math.round(stableNoise(seed) * (level === 1 ? 2 : 1)),
-        0,
-        GRADES.length - 1
-    );
-
     const radius = level <= 2 ? 2 : 1;
 
     return {
