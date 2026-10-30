@@ -166,6 +166,17 @@ export function transitionOffseasonPhase(
     }
 
     if (
+        currentPhase === OFFSEASON_PHASES.DRAFT &&
+        nextPhase === OFFSEASON_PHASES.RECRUITING &&
+        gameState.draftCompleted !== true
+    ) {
+        return {
+            success: false,
+            message: 'Complete the rookie draft before beginning free-agent recruiting.'
+        };
+    }
+
+    if (
         currentPhase === OFFSEASON_PHASES.STAFF_REVIEW &&
         state.staffReviewDay < COACH_CAROUSEL_DAYS &&
         options.finishEarly !== true
@@ -184,6 +195,62 @@ export function transitionOffseasonPhase(
             success: false,
             message: 'Complete all seven recruiting days before finalizing the roster.'
         };
+    }
+
+    if (
+        currentPhase === OFFSEASON_PHASES.RECRUITING &&
+        nextPhase === OFFSEASON_PHASES.ROSTER_FINALIZATION
+    ) {
+        const recruitingProgress = state.recruitingProgress;
+
+        const finalDayResolved = Array.isArray(
+            recruitingProgress?.resolvedDays
+        ) && recruitingProgress.resolvedDays.some(
+            resolvedDay =>
+                Number(resolvedDay) === FREE_AGENCY_RECRUITING_DAYS
+        );
+
+        if (
+            recruitingProgress?.completed !== true ||
+            Number(recruitingProgress.completedDay) !==
+                FREE_AGENCY_RECRUITING_DAYS ||
+            Number(recruitingProgress.seasonYear) !==
+                Number(gameState.year) ||
+            !finalDayResolved
+        ) {
+            return {
+                success: false,
+                message: 'Resolve Recruiting Day 7 before finalizing the roster.'
+            };
+        }
+    }
+
+    if (
+        currentPhase === OFFSEASON_PHASES.ROSTER_FINALIZATION &&
+        nextPhase === OFFSEASON_PHASES.REGULAR_SEASON
+    ) {
+        if (
+            gameState.draftCompleted !== true ||
+            gameState.offseasonFACompleted !== true
+        ) {
+            return {
+                success: false,
+                message: 'Complete roster finalization before starting the regular season.'
+            };
+        }
+
+        const playerRosterSize = Array.isArray(
+            gameState.playerTeam?.roster
+        )
+            ? gameState.playerTeam.roster.length
+            : 0;
+
+        if (playerRosterSize > REGULAR_SEASON_ROSTER_LIMIT) {
+            return {
+                success: false,
+                message: `Your roster must be reduced to ${REGULAR_SEASON_ROSTER_LIMIT} players before the regular season begins.`
+            };
+        }
     }
 
     // Resolve AI hiring only when the staff carousel closes.
@@ -360,6 +427,30 @@ export function advanceOffseasonRecruitingDay(gameState = game) {
         return {
             success: false,
             message: 'Player recruiting is not currently active.'
+        };
+    }
+
+    const currentDay = Number(state.recruitingDay);
+    const recruitingProgress = state.recruitingProgress;
+
+    const currentDayResolved =
+        recruitingProgress?.initialized === true &&
+        Number(recruitingProgress.seasonYear) ===
+            Number(gameState.year) &&
+        Array.isArray(recruitingProgress.resolvedDays) &&
+        recruitingProgress.resolvedDays.some(
+            resolvedDay => Number(resolvedDay) === currentDay
+        );
+
+    if (
+        !Number.isInteger(currentDay) ||
+        currentDay < 1 ||
+        currentDay > FREE_AGENCY_RECRUITING_DAYS ||
+        !currentDayResolved
+    ) {
+        return {
+            success: false,
+            message: 'Resolve the current recruiting day before advancing.'
         };
     }
 
@@ -3051,48 +3142,56 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
         const isDelegated = t.isPlayerControlled &&
             (t.gameplan.delegatePractice || t.gameplan.delegateGameplan);
 
+        // Identify the upcoming opponent for every team, including
+        // player-controlled teams managing their own preparation.
+        const nextPracticeWeekIndex =
+            Number(game.currentWeek) + 1;
+
+        const gamesPerWeek = Math.max(
+            1,
+            Math.floor(game.teams.length / 2)
+        );
+
+        const hasNextPracticeWeek =
+            Number.isInteger(nextPracticeWeekIndex) &&
+            nextPracticeWeekIndex >= 0 &&
+            nextPracticeWeekIndex < 9;
+
+        const upcomingWeekGames =
+            hasNextPracticeWeek &&
+            Array.isArray(game.schedule)
+                ? game.schedule.slice(
+                    nextPracticeWeekIndex * gamesPerWeek,
+                    (nextPracticeWeekIndex + 1) * gamesPerWeek
+                )
+                : [];
+
+        const upcomingMatch = upcomingWeekGames.find(match =>
+            match?.home?.id != null &&
+            match?.away?.id != null &&
+            (
+                String(match.home.id) === String(t.id) ||
+                String(match.away.id) === String(t.id)
+            )
+        );
+
+        const upcomingOpponent = !upcomingMatch
+            ? null
+            : String(upcomingMatch.home.id) === String(t.id)
+                ? upcomingMatch.away
+                : upcomingMatch.home;
+
+        // Resolve this week's staff work before the AI builds its next
+        // gameplan, so its decisions can use the intelligence gathered.
+        processWeeklyStaffPreparation(
+            t,
+            game.year,
+            game.currentWeek,
+            upcomingOpponent
+        );
+
         if (!t.isPlayerControlled || isDelegated) {
             const directive = t.gameplan?.gmDirective || 'COACH_AUTONOMY';
-
-            // Weekly practice runs after the current game has resolved.
-            // Find the next scheduled matchup, rather than preparing for
-            // an opponent the team has already played.
-            const nextPracticeWeekIndex =
-                Number(game.currentWeek) + 1;
-
-            const gamesPerWeek = Math.max(
-                1,
-                Math.floor(game.teams.length / 2)
-            );
-
-            const hasNextPracticeWeek =
-                Number.isInteger(nextPracticeWeekIndex) &&
-                nextPracticeWeekIndex >= 0 &&
-                nextPracticeWeekIndex < 9;
-
-            const upcomingWeekGames =
-                hasNextPracticeWeek &&
-                Array.isArray(game.schedule)
-                    ? game.schedule.slice(
-                        nextPracticeWeekIndex * gamesPerWeek,
-                        (nextPracticeWeekIndex + 1) * gamesPerWeek
-                    )
-                    : [];
-
-            const upcomingMatch = upcomingWeekGames.find(match =>
-                match?.home?.id != null &&
-                match?.away?.id != null &&
-                (
-                    String(match.home.id) === String(t.id) ||
-                    String(match.away.id) === String(t.id)
-                )
-            );
-
-            const upcomingOpponent = !upcomingMatch
-                ? null
-                : String(upcomingMatch.home.id) === String(t.id)
-                    ? upcomingMatch.away
-                    : upcomingMatch.home;
 
             if (!t.isPlayerControlled || t.gameplan?.delegateGameplan) {
                 aiBuildGameplan(t, upcomingOpponent, directive);
@@ -3106,15 +3205,6 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
                 );
             }
         }
-
-        // New staff-preparation mechanics begin when the user takes over.
-        // Staff preparation runs during historical seasons too, allowing
-        // AI teams to benefit from their coaches before the user arrives.
-        processWeeklyStaffPreparation(
-            t,
-            game.year,
-            game.currentWeek
-        );
 
         processWeeklyPractice(t, game.gameLog);
         // Apply effective staff capacity to scouting for this resolution
@@ -3720,9 +3810,14 @@ export function processOffseasonFADay(
         // Players on the incoming draft board must remain available
         // for the rookie draft, especially during the Year 5 takeover.
         const protectedDraftProspectIds = new Set(
-            (gameState.draftClass || [])
-                .filter(prospect => prospect?.id != null)
-                .map(prospect => String(prospect.id))
+            (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
+                .map(prospect =>
+                    prospect && typeof prospect === 'object'
+                        ? prospect.id
+                        : prospect
+                )
+                .filter(id => id != null)
+                .map(id => String(id))
         );
 
         const availableProspects = gameState.players.filter(p =>
@@ -4303,8 +4398,13 @@ export function resolveRecruitingDay(gameState = game) {
 
     const protectedDraftIds = new Set(
         (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
-            .filter(prospect => prospect?.id != null)
-            .map(prospect => String(prospect.id))
+            .map(prospect =>
+                prospect && typeof prospect === 'object'
+                    ? prospect.id
+                    : prospect
+            )
+            .filter(id => id != null)
+            .map(id => String(id))
     );
 
     const getAvailablePlayer = playerId => {
@@ -6558,7 +6658,6 @@ export function advanceToOffseason() {
     const lastCompletedOffseasonYear = Number(game._offseasonCompletedYear);
 
     const seasonHasActivity =
-        (Number(game.currentWeek) || 0) > 0 ||
         (Array.isArray(game.gameResults) && game.gameResults.length > 0) ||
         game.teams.some(team =>
             (Number(team.wins) || 0) > 0 ||

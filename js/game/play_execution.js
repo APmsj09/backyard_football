@@ -366,9 +366,32 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 ? getAssignment(slot, assignments, formationMapping, true)
                 : defAssignments[slot];
 
+            if (isOffense) {
+                for (const [role, mappedSlot] of Object.entries(formationMapping)) {
+                    if (mappedSlot === slot || (Array.isArray(mappedSlot) && mappedSlot.includes(slot))) {
+                        assignedPlayerSlot = role;
+                        break;
+                    }
+                }
+            }
+
+            const mappedQuarterbackSlot =
+                typeof formationMapping.QB === 'string'
+                    ? formationMapping.QB
+                    : Array.isArray(formationMapping.QB)
+                        ? formationMapping.QB[0]
+                        : 'QB1';
+
+            const isMappedQuarterback =
+                isOffense &&
+                (
+                    assignedPlayerSlot === 'QB' ||
+                    (!assignedPlayerSlot && slot.startsWith('QB'))
+                );
+
             const isBackfieldPlayer =
-                slot.startsWith('RB') ||
-                slot === 'FB';
+                (slot.startsWith('RB') || slot === 'FB') &&
+                !isMappedQuarterback;
 
             const backNeedsDropbackClearance =
                 isOffense &&
@@ -400,7 +423,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 }
 
                 const qbInitialState = initialOffenseStates.find(
-                    player => player.slot?.startsWith('QB')
+                    player => player.slot === mappedQuarterbackSlot
                 );
 
                 if (
@@ -437,15 +460,8 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     }
                 }
             }
-
             if (isOffense) {
-                for (const [role, mappedSlot] of Object.entries(formationMapping)) {
-                    if (mappedSlot === slot || (Array.isArray(mappedSlot) && mappedSlot.includes(slot))) {
-                        assignedPlayerSlot = role;
-                        break;
-                    }
-                }
-                if (slot.startsWith('QB')) {
+                if (isMappedQuarterback) {
                     if (play.type === 'punt') {
                         assignment = 'punt'; action = 'punt_kick'; targetY = startY - 5;
                     } else {
@@ -834,7 +850,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
             let reactionTicks = 0;
 
-            if (slot !== 'QB1' && slot !== 'OL2' && !isSweepRunner) {
+            if (!isMappedQuarterback && slot !== 'OL2' && !isSweepRunner) {
                 reactionTicks = Math.max(1, 10 - Math.floor(playerIQ / 10)) + Math.floor(Math.random() * 3);
                 if (!isOffense) reactionTicks += 2;
             }
@@ -868,6 +884,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 primaryColor: team.primaryColor,
                 secondaryColor: team.secondaryColor,
                 isOffense, slot,
+                formationRole: assignedPlayerSlot,
                 personality: player.personality || null,
                 decisionMaking: player.attributes?.mental?.decisionMaking ??
                     player.attributes?.mental?.playbookIQ ?? 50,
@@ -993,7 +1010,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         }
     });
 
-    const qbState = offenseStates.find(p => p.slot?.startsWith('QB'));
+    const qbState =
+        offenseStates.find(p => p.formationRole === 'QB') ||
+        offenseStates.find(p => p.slot?.startsWith('QB'));
     const isBallInAir = playState.ballState.inAir;
     const ballPos = playState.ballState;
     const LOS = playState.lineOfScrimmage;
@@ -1010,7 +1029,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             p.routePath?.length > 0
         ) ||
         offenseStates.find(p =>
-            p.role === 'RB' &&
+            (
+                p.formationRole === 'RB' ||
+                (!p.formationRole && p.role === 'RB')
+            ) &&
             p.assignment?.startsWith('run_') &&
             p.routePath?.length > 0
         ) ||
@@ -1180,7 +1202,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             // PASS PROTECTION: Only rushers, blitzers, or defenders penetrating near the pocket
             if (d.assignment?.includes('rush') || d.assignment?.includes('blitz') || d.action === 'pass_rush') return true;
             if (d.role === 'DL') return true;
-            const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+            const qb = qbState;
             if (qb && getDistance(d, qb) < 5.5 && d.y < LOS + 2.0) return true;
             return false;
         }
@@ -1399,7 +1421,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
         const blockerProfile = getDecisionProfile(blocker, playState.tick);
         const blockerIQ = blockerProfile?.awareness ?? (blocker.playbookIQ || blocker.iq || 50);
-        const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+        const qb = qbState;
 
         let sortedThreats = validThreats.sort((a, b) => {
             const laneDiffA = Math.abs(a.x - blocker.initialX);
@@ -1579,7 +1601,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             }
 
             if (isPassPlay && !isPassCompleted) {
-                const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+                const qb = qbState;
                 if (qb) {
                     const dx = qb.x - target.x;
                     const dy = qb.y - target.y;
@@ -1665,7 +1687,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.4);
             } else {
                 // In pass pro with no rusher, anchor the pocket front
-                const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+                const qb = qbState;
                 blocker.targetX = blocker.initialX;
                 blocker.targetY = qb ? Math.max(LOS - 2.5, qb.y + 2.0) : (LOS - 1.5);
                 setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.35);
@@ -2109,7 +2131,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 
 
                 case 'check_release': {
-                    const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+                    const qb = qbState;
                     const qbY = qb ? qb.y : pState.initialY;
 
                     // 1. SCAN FOR BLITZERS: Check for unblocked threats penetrating the pocket
@@ -3603,7 +3625,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             if (needsNewDrift) {
                 pState.zoneDriftTick = playState.tick;
                 let driftX = zoneCenter.x;
-                const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+                const qb = qbState;
                 
                 // Zone defenders cleanly track the side of the field the QB is standing on
                 if (qb) {
@@ -3650,8 +3672,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
     } else if (assignment === 'spy_QB') {
         const target = ballCarrierState && ballCarrierState.y < LOS + 1
             ? ballCarrierState
-            : offenseStates.find(p => p.slot === 'QB1');
-
+            : qbState;
         if (target) {
             pState.targetX = target.x;
             pState.targetY = Math.max(LOS + 3.0, pState.y);
@@ -3687,7 +3708,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 0.4
             );
         } else {
-            const qb = offenseStates.find(p => p.slot.startsWith('QB'));
+            const qb = qbState;
             if (qb) {
                 const isEdgeRusher = Math.abs(pState.initialX - qb.initialX) >= 3.5;
                 if (isEdgeRusher) {

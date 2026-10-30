@@ -1899,7 +1899,24 @@ async function handleDraftEnd() {
     gameState = Game.getGameState();
     gameState.draftCompleted = true;
 
-    // Give the staff a scouting window before free-agent bidding begins.
+    // Initialize the persisted seven-day recruiting phase before
+    // opening the recruiting screen.
+    const recruitingTransition = transitionOffseasonPhase(
+        OFFSEASON_PHASES.RECRUITING,
+        gameState
+    );
+
+    if (!recruitingTransition?.success) {
+        UI.showModal(
+            'Could Not Start Free-Agent Recruiting',
+            `<p>${recruitingTransition?.message || 'The recruiting phase could not be initialized.'}</p>`
+        );
+
+        Game.saveGameState(activeSaveKey);
+        return;
+    }
+
+    // Give the staff a scouting window before recruiting actions begin.
     const scoutingResult = resolveOffseasonFreeAgentScouting();
 
     gameState = Game.getGameState();
@@ -1921,6 +1938,29 @@ async function handleDraftEnd() {
 }
 
 function finishOffseasonFAMinigame() {
+    gameState = Game.getGameState() || gameState;
+
+    // Ignore repeated calls after roster finalization has already run.
+    if (gameState?.offseasonFACompleted === true) return;
+
+    const normalizedPhase = String(
+        gameState?.offseasonState?.phase || ''
+    )
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    if (
+        !gameState?.playerTeam ||
+        normalizedPhase !== 'rosterfinalization' ||
+        gameState.draftCompleted !== true
+    ) {
+        UI.showModal(
+            'Roster Finalization Unavailable',
+            '<p>Complete the rookie draft and seven-day recruiting period before finalizing the roster.</p>'
+        );
+        return;
+    }
+
     // Mark summer FA complete so the hard 18-player limit activates
     gameState.offseasonFACompleted = true;
 
@@ -1937,6 +1977,10 @@ function finishOffseasonFAMinigame() {
 
     // REPORT 4: Finalize Offseason Report (Roster health verification)
     if (typeof debugCollector !== 'undefined') debugCollector.finalizeOffseasonReport(gameState);
+
+    // Persist the completed roster work before returning to the dashboard.
+    gameState = Game.getGameState() || gameState;
+    Game.saveGameState(activeSaveKey);
 
     UI.renderDashboard(gameState);
     UI.switchTab('my-team', gameState);
@@ -4171,23 +4215,6 @@ window.app = {
             );
             return;
         }
-
-        if (
-            !gameState?.playerTeam ||
-            normalizedPhase !== 'recruiting' ||
-            !progress ||
-            progress.initialized !== true ||
-            progress.completed === true
-        ) {
-            UI.showModal(
-                'Recruiting Unavailable',
-                '<p>The seven-day recruiting week is not active.</p>'
-            );
-            return;
-        }
-
-        //const currentDay = Number(state.recruitingDay);
-        //const totalDays = Number(state.recruitingDays);
 
         if (
             !Number.isInteger(currentDay) ||

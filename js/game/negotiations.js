@@ -31,6 +31,30 @@ export function calculateAiTeamNeedAndDesire(
         return { shouldBid: false, desireScore: 0, offer: null, reason: 'Ineligible' };
     }
 
+    const age =
+        player.age == null || player.age === ''
+            ? NaN
+            : Number(player.age);
+
+    const candidateStatus = String(
+        player.status?.type || ''
+    ).toLowerCase();
+
+    if (
+        player.teamId != null ||
+        !Number.isInteger(age) ||
+        age < 12 ||
+        age > 18 ||
+        ['retired', 'departed', 'temporary'].includes(candidateStatus)
+    ) {
+        return {
+            shouldBid: false,
+            desireScore: 0,
+            offer: null,
+            reason: 'Player is not eligible for free agency'
+        };
+    }
+
     const refusedTeamIds = Array.isArray(player.refusedTeamIds)
         ? player.refusedTeamIds.map(String)
         : [];
@@ -45,7 +69,7 @@ export function calculateAiTeamNeedAndDesire(
     }
 
     const coach = aiTeam.staff?.coach || aiTeam.coach;
-    const gm = aiTeam.staff?.gm;
+    const gm = aiTeam.aiGmProfile || aiTeam.staff?.gm || null;
     const roster = getRosterObjects(aiTeam);
     const tokensAvailable = aiTeam.socialProfile?.favorTokens || 0;
 
@@ -88,19 +112,29 @@ export function calculateAiTeamNeedAndDesire(
                 Number.isFinite(Number(fit.high))
             )
             .map(fit => {
-                const estimatedOvr = (
-                    Number(fit.low) + Number(fit.high)
-                ) / 2;
+                const low = Math.min(
+                    Number(fit.low),
+                    Number(fit.high)
+                );
+
+                const high = Math.max(
+                    Number(fit.low),
+                    Number(fit.high)
+                );
+
+                const estimatedOvr = (low + high) / 2;
 
                 return {
                     ...fit,
                     position: String(fit.position).toUpperCase(),
                     estimatedOvr,
 
-                    // Low-confidence estimates move toward a neutral prior.
+                    // Start at the lower end of the reported range.
+                    // Higher scouting confidence moves the estimate
+                    // toward the midpoint.
                     positionSelectionScore:
-                        50 +
-                        (estimatedOvr - 50) * reportConfidence
+                        low +
+                        (estimatedOvr - low) * reportConfidence
                 };
             })
             .sort(
@@ -194,9 +228,7 @@ export function calculateAiTeamNeedAndDesire(
                 ? 38
                 : null;
 
-    const age = Number.isFinite(Number(player.age))
-        ? Number(player.age)
-        : 14;
+    // Age was validated at the beginning of the evaluator.
 
     // Resolve stable profile IDs while retaining support for legacy saves.
     const legacyProfileIds = {
@@ -269,7 +301,9 @@ export function calculateAiTeamNeedAndDesire(
     const discipline = getTendency('discipline');
 
     const gmDirective =
-        aiTeam.gameplan?.gmDirective || 'COACH_AUTONOMY';
+        gm?.strategicDirective ||
+        aiTeam.gameplan?.gmDirective ||
+        'COACH_AUTONOMY';
 
     const coachInstinct = Number(
         coach?.ratings?.gameplanInstinct

@@ -12,7 +12,7 @@ import {
     getRosterObjects,
     getTeamScoutingReport
 } from './state.js';
-import { calculateOverall, estimateBestPosition } from './player.js';
+import { calculateOverall } from './player.js';
 import { evaluateStaffNegotiation } from './negotiations.js';
 import { isPlayerViableForPosition, rebuildDepthChartFromOrder } from './depth_chart.js';
 
@@ -1303,13 +1303,27 @@ export function processWeeklyCoachDevelopment(team, year, week) {
             continue;
         }
 
+        // Development reflects work the coach could realistically deliver,
+        // not merely the hours assigned on paper.
+        const effectiveHours = getEffectiveStaffWorkHours(
+            team,
+            assignment
+        );
+
+        if (
+            !Number.isFinite(effectiveHours) ||
+            effectiveHours <= 0
+        ) {
+            continue;
+        }
+
         const availableHours = Math.max(
             0,
             WEEKLY_COACH_HOURS - workload.total
         );
 
         const allocatedHours = Math.min(
-            requestedHours,
+            effectiveHours,
             availableHours
         );
 
@@ -2325,8 +2339,8 @@ export function recordRecruitingStaffAssignment(
         };
     }
 
-    const recruitingDay = Number(state.recruitingDay);
-    const recruitingDays = Number(state.recruitingDays);
+    const recruitingDay = Number(offseason.recruitingDay);
+    const recruitingDays = Number(offseason.recruitingDays);
 
     if (
         !Number.isInteger(recruitingDay) ||
@@ -2382,6 +2396,12 @@ export function recordRecruitingStaffAssignment(
 
     const recruitKey = String(playerId);
     const teamKey = String(teamId);
+    const coachKey = String(coachId);
+
+    const player = gameState.players.find(
+        candidate => String(candidate?.id) === recruitKey
+    );
+
     const record = progress.recruits?.[recruitKey];
 
     const protectedDraftIds = new Set(
@@ -2544,11 +2564,11 @@ export function recordRecruitingStaffAssignment(
 
     teamWork[dayKey].push(assignment);
 
-    recruitRecord.history = Array.isArray(recruitRecord.history)
-        ? recruitRecord.history
+    record.history = Array.isArray(record.history)
+        ? record.history
         : [];
 
-    recruitRecord.history.push({
+    record.history.push({
         type: 'staff_assignment',
         year: assignment.year,
         day,
@@ -3019,6 +3039,8 @@ export function applyRecruitingSweetener(
 ) {
     const state = gameState?.offseasonState;
     const progress = state?.recruitingProgress;
+    const recruitingDay = Number(state?.recruitingDay);
+    const recruitingDays = Number(state?.recruitingDays);
 
     if (
         !gameState?.teams ||
@@ -3026,6 +3048,10 @@ export function applyRecruitingSweetener(
         !progress ||
         progress.initialized !== true ||
         progress.completed === true ||
+        !Number.isInteger(recruitingDay) ||
+        !Number.isInteger(recruitingDays) ||
+        recruitingDay < 1 ||
+        recruitingDay > recruitingDays ||
         Number(progress.seasonYear) !== Number(gameState.year) ||
         String(state.phase || '').toLowerCase().replace(/[^a-z]/g, '') !== 'recruiting'
     ) {
@@ -3047,6 +3073,31 @@ export function applyRecruitingSweetener(
     const teamKey = String(teamId);
     const record = progress.recruits?.[recruitKey];
 
+    const age = Number(player?.age);
+
+    const statusType = String(
+        player?.status?.type || ''
+    ).toLowerCase();
+
+    const lifecycle = String(
+        player?.lifecycle || ''
+    ).toLowerCase();
+
+    const lifecycleStatus = String(
+        player?.lifecycleStatus || player?.lifecycle?.status || ''
+    ).toLowerCase();
+
+    const protectedDraftIds = new Set(
+        (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
+            .filter(prospect => prospect?.id != null)
+            .map(prospect => String(prospect.id))
+    );
+
+    const hasRefusedTeam = (
+        Array.isArray(player?.refusedTeamIds) &&
+        player.refusedTeamIds.some(id => String(id) === teamKey)
+    );
+
     if (
         !team ||
         team.leagueType !== 'main' ||
@@ -3055,11 +3106,17 @@ export function applyRecruitingSweetener(
         !record ||
         record.status !== 'available' ||
         record.committedTeamId != null ||
-        player.lifecycle === 'draft_eligible' ||
-        ['retired', 'departed', 'temporary'].includes(
-            player.status?.type
-        ) ||
-        Number(player.status?.duration) > 0
+        hasRefusedTeam ||
+        !Number.isFinite(age) ||
+        age < 12 ||
+        age > 18 ||
+        protectedDraftIds.has(String(player.id)) ||
+        lifecycle === 'draft_eligible' ||
+        lifecycleStatus === 'draft_eligible' ||
+        ['retired', 'departed', 'temporary', 'injured'].includes(statusType) ||
+        ['retired', 'departed', 'temporary', 'injured'].includes(lifecycleStatus) ||
+        Number(player.status?.duration) > 0 ||
+        Number(player.injury?.duration || player.injuryDuration || 0) > 0
     ) {
         return {
             success: false,
@@ -3701,8 +3758,16 @@ export function processAiRecruitingDay(gameState) {
                         String(candidate?.id) === String(recruitKey)
                 );
 
+                const hasRefusedThisTeam =
+                    Array.isArray(player?.refusedTeamIds) &&
+                    player.refusedTeamIds.some(
+                        refusedTeamId =>
+                            String(refusedTeamId) === teamKey
+                    );
+
                 if (
                     !getRecruitEligibility(player, record) ||
+                    hasRefusedThisTeam ||
                     targetedToday.has(String(player.id))
                 ) {
                     return null;
@@ -4358,9 +4423,7 @@ function getAiGmDelegationAdjustment(gm, task) {
 }
 
 function getAiTrainingFocus(team) {
-    const roster = getRosterObjects(team).filter(
-        player => player?.attributes
-    );
+    const roster = getRosterObjects(team);
 
     const offensePositions = new Set(['QB', 'RB', 'WR', 'TE', 'OL']);
     const defensePositions = new Set(['DL', 'LB', 'DB']);
@@ -4371,51 +4434,104 @@ function getAiTrainingFocus(team) {
     let defenseCount = 0;
 
     for (const player of roster) {
-        const positions = [...new Set([
-            player.pos,
-            player.favoriteOffensivePosition,
-            player.favoriteDefensivePosition
-        ].filter(position =>
-            offensePositions.has(position) ||
-            defensePositions.has(position)
-        ))];
+        if (player?.id == null) continue;
 
-        const offenseFits = positions.filter(
-            position => offensePositions.has(position)
-        );
-        const defenseFits = positions.filter(
-            position => defensePositions.has(position)
-        );
+        const report = getTeamScoutingReport(team, player.id);
 
-        if (offenseFits.length > 0) {
-            offenseTotal += Math.max(
-                ...offenseFits.map(position =>
-                    calculateOverall(player, position)
+        const rawConfidence = Number(report?.confidence);
+
+        const confidence = Number.isFinite(rawConfidence)
+            ? Math.max(
+                0,
+                Math.min(
+                    1,
+                    rawConfidence > 1
+                        ? rawConfidence / 100
+                        : rawConfidence
                 )
-            );
-            offenseCount++;
-        }
+            )
+            : 0;
 
-        if (defenseFits.length > 0) {
-            defenseTotal += Math.max(
-                ...defenseFits.map(position =>
-                    calculateOverall(player, position)
-                )
-            );
-            defenseCount++;
+        // Coaches need at least moderate scouting evidence to use
+        // positional estimates when setting development priorities.
+        if (confidence < 0.50) continue;
+
+        const fits = [
+            report?.evaluation?.offenseFit,
+            report?.evaluation?.defenseFit
+        ];
+
+        for (const fit of fits) {
+            const position = String(
+                fit?.position || ''
+            ).toUpperCase();
+
+            const low = Number(fit?.low);
+            const high = Number(fit?.high);
+
+            if (
+                fit?.low == null ||
+                fit?.high == null ||
+                !Number.isFinite(low) ||
+                !Number.isFinite(high) ||
+                high < low
+            ) {
+                continue;
+            }
+
+            // Use a conservative estimate within the reported range.
+            // Lower scouting confidence keeps the estimate closer to
+            // the bottom of that range.
+            const estimate =
+                low + ((high - low) / 2) * confidence;
+
+            if (offensePositions.has(position)) {
+                offenseTotal += estimate;
+                offenseCount++;
+            } else if (defensePositions.has(position)) {
+                defenseTotal += estimate;
+                defenseCount++;
+            }
         }
     }
 
-    // Do not assign training to a side with no eligible players.
-    if (offenseCount === 0) return 'defense';
-    if (defenseCount === 0) return 'offense';
+    // When scouting evidence is incomplete, fall back to public roster
+    // composition rather than inspecting actual player ratings.
+    if (offenseCount === 0 || defenseCount === 0) {
+        const offenseRosterCount = roster.filter(player =>
+            offensePositions.has(
+                String(player?.pos || '').toUpperCase()
+            )
+        ).length;
+
+        const defenseRosterCount = roster.filter(player =>
+            defensePositions.has(
+                String(player?.pos || '').toUpperCase()
+            )
+        ).length;
+
+        if (offenseCount === 0 && defenseCount === 0) {
+            if (offenseRosterCount === 0) return 'defense';
+            if (defenseRosterCount === 0) return 'offense';
+
+            return offenseRosterCount <= defenseRosterCount
+                ? 'offense'
+                : 'defense';
+        }
+
+        if (offenseCount === 0) return 'offense';
+        if (defenseCount === 0) return 'defense';
+    }
 
     const offenseScore =
-        offenseTotal / offenseCount + Math.min(offenseCount, 4) * 4;
-    const defenseScore =
-        defenseTotal / defenseCount + Math.min(defenseCount, 4) * 4;
+        offenseTotal / offenseCount;
 
-    return offenseScore <= defenseScore ? 'offense' : 'defense';
+    const defenseScore =
+        defenseTotal / defenseCount;
+
+    return offenseScore <= defenseScore
+        ? 'offense'
+        : 'defense';
 }
 
 /**
@@ -5329,33 +5445,73 @@ export function previewCoachTendencies(coach, team) {
 
     const roster = getRosterObjects(team);
 
-    // Evaluate offense using the team's roster.
-    const qbs = roster
-        .filter(p => isPlayerViableForPosition(p, 'QB'))
-        .map(p => calculateOverall(p, 'QB'));
+    // Coaches evaluate roster strengths using their own scouting reports.
+    // Missing or insufficient reports produce a neutral estimate rather
+    // than exposing a player's actual positional ratings.
+    const getBestReportedPositionEstimate = position => {
+        const estimates = roster
+            .filter(player => player?.id != null)
+            .map(player => {
+                const report = getTeamScoutingReport(
+                    team,
+                    player.id
+                );
 
-    const rbs = roster
-        .filter(p => isPlayerViableForPosition(p, 'RB'))
-        .map(p => calculateOverall(p, 'RB'));
+                const rawConfidence = Number(report?.confidence);
 
-    const wrs = roster
-        .filter(p => isPlayerViableForPosition(p, 'WR'))
-        .map(p => calculateOverall(p, 'WR'));
+                const confidence = Number.isFinite(rawConfidence)
+                    ? Math.max(
+                        0,
+                        Math.min(
+                            1,
+                            rawConfidence > 1
+                                ? rawConfidence / 100
+                                : rawConfidence
+                        )
+                    )
+                    : 0;
 
-    const qbOvr = qbs.sort((a, b) => b - a)[0] || 50;
-    const rbOvr = rbs.sort((a, b) => b - a)[0] || 50;
-    const wrOvr = wrs.sort((a, b) => b - a)[0] || 50;
+                if (confidence < 0.50) return null;
+
+                const fit = [
+                    report?.evaluation?.offenseFit,
+                    report?.evaluation?.defenseFit
+                ].find(candidate =>
+                    String(candidate?.position || '').toUpperCase() ===
+                        position &&
+                    candidate.low != null &&
+                    candidate.high != null &&
+                    Number.isFinite(Number(candidate.low)) &&
+                    Number.isFinite(Number(candidate.high)) &&
+                    Number(candidate.high) >= Number(candidate.low)
+                );
+
+                if (!fit) return null;
+
+                const low = Number(fit.low);
+                const midpoint = (
+                    low + Number(fit.high)
+                ) / 2;
+
+                return low + (midpoint - low) * confidence;
+            })
+            .filter(Number.isFinite);
+
+        return estimates.length > 0
+            ? Math.max(...estimates)
+            : 50;
+    };
+
+    const qbOvr = getBestReportedPositionEstimate('QB');
+    const rbOvr = getBestReportedPositionEstimate('RB');
+    const wrOvr = getBestReportedPositionEstimate('WR');
 
     const passStrength = (qbOvr + wrOvr) / 2;
     const runStrength = rbOvr;
     const rosterRunPreference = runStrength - passStrength;
 
-    // Evaluate defensive personnel.
-    const dbs = roster
-        .filter(p => isPlayerViableForPosition(p, 'DB'))
-        .map(p => calculateOverall(p, 'DB'));
-
-    const dbOvr = dbs.sort((a, b) => b - a)[0] || 50;
+    // Defensive personnel are evaluated through the same scouting limits.
+    const dbOvr = getBestReportedPositionEstimate('DB');
     const rosterBlitzPreference = dbOvr - 50;
 
     let earlyDownTendency = 50;
@@ -5622,8 +5778,17 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
     team.gameplan.installedDefense = scoredDef.slice(0, 4).map(s => s.key);
 }
 
-export function processWeeklyStaffPreparation(team, year, week) {
+export function processWeeklyStaffPreparation(
+    team,
+    year,
+    week,
+    upcomingOpponent = null
+) {
     if (!team || !team.gameplan) return null;
+
+    const scheduledOpponentId = upcomingOpponent?.id == null
+        ? ''
+        : String(upcomingOpponent.id).trim();
 
     const assignments = Array.isArray(team.staffWorkPlan?.assignments)
         ? team.staffWorkPlan.assignments
@@ -5686,10 +5851,15 @@ export function processWeeklyStaffPreparation(team, year, week) {
     };
 
     let offensePoints = 0;
+    let generalOffensePoints = 0;
     let generalDefensePoints = 0;
 
     const offensePointsByPlay = {};
+    const generalOffensePointsByPlay = {};
     const generalDefensePointsByPlay = {};
+
+    const specificOffensePoints = new Map();
+    const specificOffensePointsByOpponent = new Map();
 
     const specificDefensePoints = new Map();
     const specificDefensePointsByOpponent = new Map();
@@ -5769,12 +5939,58 @@ export function processWeeklyStaffPreparation(team, year, week) {
                 )
             );
 
+            const assignedOpponentId =
+                assignment.opponentTeamId == null
+                    ? ''
+                    : String(assignment.opponentTeamId).trim();
+
+            const opponentId =
+                assignedOpponentId || scheduledOpponentId;
+
+            if (!opponentId) {
+                generalOffensePoints += points;
+
+                targetedKeys.forEach(key =>
+                    addPlayPoints(
+                        generalOffensePointsByPlay,
+                        key,
+                        pointsPerPlay
+                    )
+                );
+
+                continue;
+            }
+
+            specificOffensePoints.set(
+                opponentId,
+                (specificOffensePoints.get(opponentId) || 0) + points
+            );
+
+            if (!specificOffensePointsByOpponent.has(opponentId)) {
+                specificOffensePointsByOpponent.set(opponentId, {});
+            }
+
+            const opponentPlayPoints =
+                specificOffensePointsByOpponent.get(opponentId);
+
+            targetedKeys.forEach(key =>
+                addPlayPoints(
+                    opponentPlayPoints,
+                    key,
+                    pointsPerPlay
+                )
+            );
+
             continue;
         }
 
-        const opponentId = assignment.opponentTeamId == null
-            ? ''
-            : String(assignment.opponentTeamId).trim();
+        const assignedOpponentId =
+            assignment.opponentTeamId == null
+                ? ''
+                : String(assignment.opponentTeamId).trim();
+
+        const opponentId =
+            assignedOpponentId || scheduledOpponentId;
 
         if (!opponentId) {
             generalDefensePoints += points;
@@ -5819,6 +6035,34 @@ export function processWeeklyStaffPreparation(team, year, week) {
             ])
         );
 
+    const offenseByOpponent = {
+        '*': {
+            points: clampPoints(generalOffensePoints),
+            byPlay: clampPlayPoints(generalOffensePointsByPlay)
+        }
+    };
+
+    for (const [opponentId, points] of specificOffensePoints) {
+        const combinedByPlay = {
+            ...generalOffensePointsByPlay
+        };
+
+        const opponentPlayPoints =
+            specificOffensePointsByOpponent.get(opponentId) || {};
+
+        for (const [playKey, playPoints] of Object.entries(
+            opponentPlayPoints
+        )) {
+            combinedByPlay[playKey] =
+                (combinedByPlay[playKey] || 0) + playPoints;
+        }
+
+        offenseByOpponent[opponentId] = {
+            points: clampPoints(generalOffensePoints + points),
+            byPlay: clampPlayPoints(combinedByPlay)
+        };
+    }
+
     const defenseByOpponent = {
         '*': {
             points: clampPoints(generalDefensePoints),
@@ -5854,6 +6098,7 @@ export function processWeeklyStaffPreparation(team, year, week) {
         preparedForWeek: Number(week),
         offensePoints: clampPoints(offensePoints),
         offenseByPlay: clampPlayPoints(offensePointsByPlay),
+        offenseByOpponent,
         defenseByOpponent
     };
 
@@ -6032,30 +6277,113 @@ export function aiEvaluatePositionChanges(team, gameState) {
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
     const idealCounts = { QB: 1, RB: 2, WR: 3, TE: 1, OL: 3, DL: 3, LB: 2, DB: 3 };
 
-    // Find major surplus positions and deficit positions
+    // Estimate positional depth using publicly listed positions.
+    // Do not use true player attributes to identify hidden positional
+    // versatility when calculating roster surpluses and deficits.
     const counts = {};
+
     positions.forEach(pos => {
-        counts[pos] = roster.filter(p => isPlayerViableForPosition(p, pos)).length;
+        counts[pos] = roster.filter(player =>
+            String(player?.pos || '').toUpperCase() === pos
+        ).length;
     });
 
     const deficits = positions.filter(pos => counts[pos] < idealCounts[pos]);
     if (deficits.length === 0) return; // Roster is balanced
 
     // Candidate pool: only young kids (age <= 15) who haven't changed positions recently
-    const eligibleKids = roster.filter(p => 
-        p.age <= 15 && 
-        (!p.positionChangedYear || (gameState.year - p.positionChangedYear) >= 2) &&
-        (p.personality?.ego || 50) < 70 // High ego divas refuse conversions
+    const eligibleKids = roster.filter(p =>
+        p.age <= 15 &&
+        (
+            !p.positionChangedYear ||
+            (gameState.year - p.positionChangedYear) >= 2
+        )
     );
 
     for (const targetPos of deficits) {
         // Find candidate from a surplus position who is viable at targetPos
         const bestCandidate = eligibleKids.find(kid => {
-            const currentPos = kid.pos || estimateBestPosition(kid);
+            const currentPos = String(
+                kid.pos || ''
+            ).toUpperCase();
+
+            if (!positions.includes(currentPos)) {
+                return false;
+            }
+
             const isSurplus = counts[currentPos] > idealCounts[currentPos];
-            const isViableAtNew = isPlayerViableForPosition(kid, targetPos);
-            const targetOvr = calculateOverall(kid, targetPos);
-            const currentOvr = calculateOverall(kid, currentPos);
+
+            // Position changes must be evaluated using this team's
+            // scouting estimates, never the player's hidden true ratings.
+            const positionReport = getTeamScoutingReport(
+                team,
+                kid.id
+            );
+
+            const rawPositionConfidence = Number(
+                positionReport?.confidence
+            );
+
+            const positionConfidence = Number.isFinite(
+                rawPositionConfidence
+            )
+                ? Math.max(
+                    0,
+                    Math.min(
+                        1,
+                        rawPositionConfidence > 1
+                            ? rawPositionConfidence / 100
+                            : rawPositionConfidence
+                    )
+                )
+                : 0;
+
+            const getReportedPositionOvr = position => {
+                if (positionConfidence < 0.50) return null;
+
+                const fit = [
+                    positionReport?.evaluation?.offenseFit,
+                    positionReport?.evaluation?.defenseFit
+                ].find(candidate => {
+                    const fitPosition = String(
+                        candidate?.position || ''
+                    ).toUpperCase();
+
+                    const low = Number(candidate?.low);
+                    const high = Number(candidate?.high);
+
+                    return (
+                        fitPosition === position &&
+                        candidate.low != null &&
+                        candidate.high != null &&
+                        Number.isFinite(low) &&
+                        Number.isFinite(high) &&
+                        high >= low
+                    );
+                });
+
+                if (!fit) return null;
+
+                const low = Number(fit.low);
+                const high = Number(fit.high);
+                const midpoint = (low + high) / 2;
+
+                // Lower-confidence reports lean toward the lower
+                // end of the estimated range.
+                return low +
+                    (midpoint - low) * positionConfidence;
+            };
+
+            const targetOvr = getReportedPositionOvr(targetPos);
+            const currentOvr = getReportedPositionOvr(currentPos);
+
+            const isViableAtNew =
+                targetOvr !== null &&
+                currentOvr !== null;
+
+            // Without estimates for both positions, the AI cannot
+            // reliably judge whether the conversion is worthwhile.
+            if (!isViableAtNew) return false;
 
             // Individual coach tendencies influence position-conversion
             // decisions. They affect willingness, not player ability.
@@ -6071,14 +6399,23 @@ export function aiEvaluatePositionChanges(team, gameState) {
                 'riskTolerance'
             );
 
-            const ethicValue = Number(kid.personality?.workEthic);
-            const ethic = Number.isFinite(ethicValue)
-                ? ethicValue
-                : 50;
+            const scoutingReport = getTeamScoutingReport(
+                team,
+                kid.id
+            );
 
-            if (discipline >= 70 && ethic >= 65) {
+            const characterSummary = String(
+                scoutingReport?.evaluation?.characterSummary || ''
+            ).toLowerCase();
+
+            const hasKnownReliabilityEvidence =
+                characterSummary.includes(
+                    'strong effort/reliability signals'
+                );
+
+            if (discipline >= 70 && hasKnownReliabilityEvidence) {
                 // Disciplined coaches are more willing to retrain
-                // dependable young players to address roster shortages.
+                // players whose dependability is supported by scouting.
                 threshold -= 4;
             } else if (
                 riskTolerance >= 65 &&
@@ -6086,16 +6423,43 @@ export function aiEvaluatePositionChanges(team, gameState) {
             ) {
                 // Risk-tolerant coaches are more willing to try a
                 // positional conversion when the physical tools fit.
-                const strengthValue = Number(
-                    kid.attributes?.physical?.strength
+                const strengthRange =
+                    scoutingReport?.attributeRanges?.physical?.strength;
+
+                const rawScoutingConfidence = Number(
+                    scoutingReport?.confidence
                 );
 
-                const strength = Number.isFinite(strengthValue)
-                    ? strengthValue
-                    : 50;
+                const scoutingConfidence =
+                    Number.isFinite(rawScoutingConfidence)
+                        ? Math.max(
+                            0,
+                            Math.min(
+                                1,
+                                rawScoutingConfidence > 1
+                                    ? rawScoutingConfidence / 100
+                                    : rawScoutingConfidence
+                            )
+                        )
+                        : 0;
 
-                if (strength >= 55) {
-                    threshold -= 5;
+                if (
+                    scoutingConfidence >= 0.50 &&
+                    strengthRange?.low != null &&
+                    strengthRange?.high != null &&
+                    Number.isFinite(Number(strengthRange.low)) &&
+                    Number.isFinite(Number(strengthRange.high))
+                ) {
+                    const lowStrength = Number(strengthRange.low);
+                    const estimatedStrength =
+                        lowStrength +
+                        (
+                            (Number(strengthRange.high) - lowStrength) / 2
+                        ) * scoutingConfidence;
+
+                    if (estimatedStrength >= 55) {
+                        threshold -= 5;
+                    }
                 }
             }
 
@@ -6103,7 +6467,10 @@ export function aiEvaluatePositionChanges(team, gameState) {
         });
 
         if (bestCandidate) {
-            const oldPos = bestCandidate.pos || estimateBestPosition(bestCandidate);
+            const oldPos = String(
+                bestCandidate.pos || ''
+            ).toUpperCase();
+
             const isOff = ['QB', 'RB', 'WR', 'TE', 'OL'].includes(targetPos);
 
             bestCandidate.pos = targetPos;
