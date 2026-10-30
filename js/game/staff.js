@@ -418,19 +418,83 @@ export function ensureStaffAvailability(staff) {
 
     ensureStaffNegotiationProfile(staff);
 
-    const existingHours = Number(staff.availability?.weeklyHours);
-
     if (
-        staff.availability &&
-        Number.isFinite(existingHours) &&
-        existingHours >= 0
+        !staff.availability ||
+        typeof staff.availability !== 'object' ||
+        Array.isArray(staff.availability)
     ) {
+        staff.availability = createStaffAvailability(staff.role);
         return staff.availability;
     }
 
-    staff.availability = createStaffAvailability(staff.role);
+    const availability = staff.availability;
+    const existingHours = Number(availability.weeklyHours);
 
-    return staff.availability;
+    if (
+        !Number.isFinite(existingHours) ||
+        existingHours < 0
+    ) {
+        availability.weeklyHours =
+            createStaffAvailability(staff.role).weeklyHours;
+    } else {
+        availability.weeklyHours = Math.min(
+            40,
+            Math.floor(existingHours)
+        );
+    }
+
+    const validScheduleType = STAFF_SCHEDULES.some(
+        schedule => schedule.type === availability.scheduleType
+    );
+
+    const validAvailableDays =
+        Array.isArray(availability.availableDays) &&
+        availability.availableDays.some(
+            day =>
+                typeof day === 'string' &&
+                day.trim().length > 0
+        );
+
+    const validTimeWindow = [
+        'evening',
+        'daytime',
+        'mixed',
+        'flexible'
+    ].includes(availability.timeWindow);
+
+    if (
+        !validScheduleType ||
+        !validAvailableDays ||
+        !validTimeWindow
+    ) {
+        // Older records without a complete schedule receive a flexible
+        // schedule rather than an arbitrary restriction.
+        availability.scheduleType = 'flexible';
+        availability.scheduleLabel = 'Flexible schedule';
+        availability.availableDays = ['Flexible'];
+        availability.timeWindow = 'flexible';
+    } else {
+        availability.availableDays =
+            availability.availableDays.filter(
+                day =>
+                    typeof day === 'string' &&
+                    day.trim().length > 0
+            );
+    }
+
+    if (
+        availability.reliability == null ||
+        !Number.isFinite(Number(availability.reliability))
+    ) {
+        availability.reliability = 80;
+    } else {
+        availability.reliability = Math.max(
+            0,
+            Math.min(100, Number(availability.reliability))
+        );
+    }
+
+    return availability;
 }
 
 /**
@@ -2345,6 +2409,12 @@ export function recordRecruitingStaffAssignment(
         team.leagueType !== 'main' ||
         !player ||
         player.teamId != null ||
+        (
+            Array.isArray(player.refusedTeamIds) &&
+            player.refusedTeamIds.some(
+                refusedTeamId => String(refusedTeamId) === teamKey
+            )
+        ) ||
         !record ||
         record.status !== 'available' ||
         record.committedTeamId != null ||
@@ -2625,6 +2695,32 @@ export function executeRecruitingAction(
         };
     }
 
+    const hasRefusedThisTeam =
+        Array.isArray(player.refusedTeamIds) &&
+        player.refusedTeamIds.some(
+            refusedTeamId => String(refusedTeamId) === teamKey
+        );
+
+    if (hasRefusedThisTeam) {
+        return {
+            success: false,
+            message: 'This recruit has refused to return to your team.'
+        };
+    }
+
+    const recruitAge = Number(player.age);
+
+    if (
+        !Number.isFinite(recruitAge) ||
+        recruitAge < 12 ||
+        recruitAge > 18
+    ) {
+        return {
+            success: false,
+            message: 'This player is not eligible for recruiting.'
+        };
+    }
+
     const currentInterest = Math.max(
         0,
         Math.min(
@@ -2689,80 +2785,147 @@ export function executeRecruitingAction(
     const recruitId = String(player.id);
 
     if (actionType === 'teammateConnection') {
-        // Use relationship information known by our own players.
-        // Do not inspect the prospect's hidden social graph.
-        const hasKnownBestFriend = roster.some(member =>
-            String(member?.social?.bestFriendId ?? '') === recruitId
+        // Relationship bonuses require evidence recorded in this team's
+        // scouting report. Do not inspect private player social profiles.
+        const relationshipReport = getTeamScoutingReport(
+            team,
+            player.id
         );
 
-        if (hasKnownBestFriend) {
+        const networkEvidence = relationshipReport?.networkEvidence;
+
+        const knownFriendIds = Array.isArray(
+            networkEvidence?.knownTeammateFriendIds
+        )
+            ? networkEvidence.knownTeammateFriendIds.map(String)
+            : [];
+
+        const knownRivalIds = Array.isArray(
+            networkEvidence?.knownTeammateRivalIds
+        )
+            ? networkEvidence.knownTeammateRivalIds.map(String)
+            : [];
+
+        const rosterIds = new Set(
+            roster
+                .filter(member => member?.id != null)
+                .map(member => String(member.id))
+        );
+
+        const knownFriendCount = new Set(
+            knownFriendIds.filter(id => rosterIds.has(id))
+        ).size;
+
+        const hasKnownRival = knownRivalIds.some(
+            id => rosterIds.has(id)
+        );
+
+        if (knownFriendCount > 0) {
             contextBonus += 5;
+
+            contextBonus += Math.min(
+                5,
+                Math.max(0, knownFriendCount - 1) * 2
+            );
         }
 
-        const knownGoodFriendCount = roster.filter(member =>
-            (
-                Array.isArray(member?.social?.goodFriendIds)
-                    ? member.social.goodFriendIds
-                    : []
-            ).some(id => String(id) === recruitId)
-        ).length;
-
-        contextBonus += Math.min(
-            5,
-            knownGoodFriendCount * 2
-        );
-
-        const knownRivalOnRoster = roster.some(member =>
-            (
-                Array.isArray(member?.social?.rivalIds)
-                    ? member.social.rivalIds
-                    : []
-            ).some(id => String(id) === recruitId)
-        );
-
-        if (knownRivalOnRoster) {
+        if (hasKnownRival) {
             contextBonus -= 5;
         }
     }
 
     if (actionType === 'roleDiscussion') {
-        // Public listed position is safe to use. If missing, use this
-        // team's scouting estimate rather than the player's hidden traits.
-        const scoutingReport = getTeamScoutingReport(
-            team,
-            player.id
-        );
+        // Public listed position is safe to use.
+        // Alternative positions require sufficient team-specific scouting.
+        const validPositions = [
+            'QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'
+        ];
 
-        const reportedFits = [
-            scoutingReport?.evaluation?.offenseFit,
-            scoutingReport?.evaluation?.defenseFit
-        ]
-            .filter(fit =>
-                fit?.position &&
-                Number.isFinite(Number(fit.low)) &&
-                Number.isFinite(Number(fit.high))
-            )
-            .sort((a, b) =>
-                (
-                    Number(b.low) + Number(b.high)
-                ) / 2 - (
-                    Number(a.low) + Number(a.high)
-                ) / 2
+        const listedPosition = String(
+            player.pos || ''
+        ).toUpperCase();
+
+        let position = validPositions.includes(listedPosition)
+            ? listedPosition
+            : null;
+
+        if (!position) {
+            const scoutingReport = getTeamScoutingReport(
+                team,
+                player.id
             );
 
-        const position =
-            player.pos ||
-            reportedFits[0]?.position ||
-            null;
+            const rawConfidence = Number(
+                scoutingReport?.confidence
+            );
 
-        // If we don't know the recruit's position, we shouldn't pretend
-        // to know the available role at that position either.
+            const reportConfidence = Number.isFinite(rawConfidence)
+                ? Math.max(
+                    0,
+                    Math.min(
+                        1,
+                        rawConfidence > 1
+                            ? rawConfidence / 100
+                            : rawConfidence
+                    )
+                )
+                : 0;
+
+            if (reportConfidence >= 0.50) {
+                const reportedFits = [
+                    scoutingReport?.evaluation?.offenseFit,
+                    scoutingReport?.evaluation?.defenseFit
+                ]
+                    .filter(fit => {
+                        const fitPosition = String(
+                            fit?.position || ''
+                        ).toUpperCase();
+
+                        return (
+                            validPositions.includes(fitPosition) &&
+                            fit.low != null &&
+                            fit.high != null &&
+                            Number.isFinite(Number(fit.low)) &&
+                            Number.isFinite(Number(fit.high))
+                        );
+                    })
+                    .map(fit => {
+                        const low = Number(fit.low);
+                        const high = Number(fit.high);
+                        const midpoint = (low + high) / 2;
+
+                        return {
+                            position: String(
+                                fit.position
+                            ).toUpperCase(),
+
+                            selectionScore:
+                                low + (midpoint - low) * reportConfidence
+                        };
+                    })
+                    .sort(
+                        (a, b) =>
+                            b.selectionScore - a.selectionScore
+                    );
+
+                position = reportedFits[0]?.position || null;
+            }
+        }
+
+        // Do not promise a specific positional role when the team
+        // lacks sufficient information to identify that position.
         if (position) {
-            const positionalPeers = roster.filter(member =>
-                member.pos === position ||
-                member.favoriteOffensivePosition === position ||
-                member.favoriteDefensivePosition === position
-            );
+            const positionalPeers = roster.filter(member => {
+                const memberPositions = [
+                    member?.pos,
+                    member?.favoriteOffensivePosition,
+                    member?.favoriteDefensivePosition
+                ].map(value =>
+                    String(value || '').toUpperCase()
+                );
+
+                return memberPositions.includes(position);
+            });
 
             if (positionalPeers.length === 0) {
                 contextBonus += 4;
@@ -3208,26 +3371,66 @@ export function processAiRecruitingDay(gameState) {
             ? getTeamScoutingReport(team, player.id)
             : null;
 
+        const rawConfidence = Number(report?.confidence);
+
+        const confidence = Number.isFinite(rawConfidence)
+            ? Math.max(
+                0,
+                Math.min(
+                    1,
+                    rawConfidence > 1
+                        ? rawConfidence / 100
+                        : rawConfidence
+                )
+            )
+            : 0;
+
+        // A preliminary report is not sufficient to assign an alternative
+        // position when the player's public listing is unavailable.
+        // Require at least moderate scouting confidence.
+        if (confidence < 0.50) return null;
+
         const fits = [
             report?.evaluation?.offenseFit,
             report?.evaluation?.defenseFit
-        ].filter(fit =>
-            positionTargets[fit?.position] &&
-            Number.isFinite(Number(fit.low)) &&
-            Number.isFinite(Number(fit.high))
-        );
+        ]
+            .filter(fit => {
+                const fitPosition = String(
+                    fit?.position || ''
+                ).toUpperCase();
 
-        if (fits.length === 0) return null;
+                return (
+                    positionTargets[fitPosition] &&
+                    fit.low != null &&
+                    fit.high != null &&
+                    Number.isFinite(Number(fit.low)) &&
+                    Number.isFinite(Number(fit.high))
+                );
+            })
+            .map(fit => {
+                const lowEstimate = Number(fit.low);
+                const highEstimate = Number(fit.high);
 
-        fits.sort((a, b) =>
-            (
-                (Number(b.low) + Number(b.high)) / 2
-            ) - (
-                (Number(a.low) + Number(a.high)) / 2
-            )
-        );
+                const estimatedOvr = (
+                    lowEstimate + highEstimate
+                ) / 2;
 
-        return fits[0].position;
+                // Lower-confidence reports lean toward the lower end
+                // of each positional estimate range.
+                const selectionScore =
+                    lowEstimate +
+                    (estimatedOvr - lowEstimate) * confidence;
+
+                return {
+                    position: String(fit.position).toUpperCase(),
+                    selectionScore
+                };
+            })
+            .sort(
+                (a, b) => b.selectionScore - a.selectionScore
+            );
+
+        return fits[0]?.position || null;
     };
 
     const draftClassIds = new Set(
@@ -3262,8 +3465,8 @@ export function processAiRecruitingDay(gameState) {
         const age = Number(player.age);
 
         if (
-            ['retired', 'departed', 'temporary'].includes(statusType) ||
-            ['retired', 'departed', 'temporary'].includes(lifecycleStatus) ||
+            ['retired', 'departed', 'temporary', 'injured'].includes(statusType) ||
+            ['retired', 'departed', 'temporary', 'injured'].includes(lifecycleStatus) ||
             lifecycle === 'draft_eligible' ||
             lifecycleStatus === 'draft_eligible' ||
             draftClassIds.has(String(player.id)) ||
@@ -3547,7 +3750,26 @@ export function processAiRecruitingDay(gameState) {
                 }
 
                 const age = Number(player.age);
-                const ageBonus = Number.isFinite(age)
+
+                const developmentFocus = getStaffBehaviorTendency(
+                    coach,
+                    'developmentFocus'
+                );
+
+                const recruitingPatience = getStaffBehaviorTendency(
+                    coach,
+                    'patience'
+                );
+
+                const agePreferenceWeight = Number.isFinite(age)
+                    ? age <= 15
+                        ? 1
+                        : age >= 18
+                            ? -1
+                            : 0.25
+                    : 0;
+
+                const baselineAgeBonus = Number.isFinite(age)
                     ? age <= 15
                         ? 3
                         : age >= 18
@@ -3555,28 +3777,51 @@ export function processAiRecruitingDay(gameState) {
                             : 1
                     : 0;
 
+                const ageBonus = Number.isFinite(age)
+                    ? baselineAgeBonus +
+                        (
+                            ((developmentFocus - 50) / 50) * 3 +
+                            ((recruitingPatience - 50) / 50) * 2
+                        ) * agePreferenceWeight
+                    : 0;
+
                 const recruitId = String(player.id);
 
-                // Infer relationships only from information held by our
-                // own roster. Do not inspect the recruit's hidden social graph.
-                const hasBestFriend = roster.some(member =>
-                    String(member?.social?.bestFriendId) === recruitId
+                // Social connections may only influence AI recruiting when
+                // explicitly documented in this team's scouting report.
+                const scoutingReport = getTeamScoutingReport(
+                    team,
+                    player.id
                 );
 
-                const goodFriendCount = roster.filter(member =>
-                    (
-                        Array.isArray(member?.social?.goodFriendIds)
-                            ? member.social.goodFriendIds
-                            : []
-                    ).some(id => String(id) === recruitId)
+                const networkEvidence = scoutingReport?.networkEvidence;
+
+                const knownFriendIds = Array.isArray(
+                    networkEvidence?.knownTeammateFriendIds
+                )
+                    ? networkEvidence.knownTeammateFriendIds.map(String)
+                    : [];
+
+                const knownRivalIds = Array.isArray(
+                    networkEvidence?.knownTeammateRivalIds
+                )
+                    ? networkEvidence.knownTeammateRivalIds.map(String)
+                    : [];
+
+                const rosterIds = new Set(
+                    roster
+                        .filter(member => member?.id != null)
+                        .map(member => String(member.id))
+                );
+
+                const knownFriendCount = knownFriendIds.filter(
+                    id => rosterIds.has(id)
                 ).length;
 
-                const hasRival = roster.some(member =>
-                    (
-                        Array.isArray(member?.social?.rivalIds)
-                            ? member.social.rivalIds
-                            : []
-                    ).some(id => String(id) === recruitId)
+                const hasKnownFriend = knownFriendCount > 0;
+
+                const hasKnownRival = knownRivalIds.some(
+                    id => rosterIds.has(id)
                 );
 
                 const ownInterest = Math.max(
@@ -3641,85 +3886,85 @@ export function processAiRecruitingDay(gameState) {
                         Math.max(0, rivalEffort - rivalTeamCount) * 0.75
                 );
 
-                // Coaching personality changes how the staff reacts to
-                // perceived competition. This is a judgment, not certainty.
-                // Individual risk tolerance influences willingness to
-                // compete for a recruit pursued by other teams.
-                // Rival effort is inferred only from previously observed
-                // recruiting activity, not their private interest scores.
+                // Coaches interpret visible recruiting competition through
+                // their individual behavioral tendencies, not rigid personality
+                // labels. Rival effort is inferred only from observed activity.
                 const riskTolerance = getStaffBehaviorTendency(
                     coach,
                     'riskTolerance'
                 );
 
-                const competitionRiskPreference =
-                    (riskTolerance - 50) / 10;
+                const patience = getStaffBehaviorTendency(
+                    coach,
+                    'patience'
+                );
 
-                const competitionAdjustment = rivalTeamCount > 0
-                    ? Math.max(
+                const discipline = getStaffBehaviorTendency(
+                    coach,
+                    'discipline'
+                );
+
+                let competitionAdjustment = 0;
+
+                if (rivalTeamCount > 0) {
+                    const riskResponse =
+                        ((riskTolerance - 50) / 50) * 6;
+
+                    const impatienceResponse =
+                        ((50 - patience) / 50) * 2;
+
+                    const disciplineResponse =
+                        ((50 - discipline) / 50) * 1;
+
+                    const pressureFactor = Math.min(
+                        1,
+                        observedCompetitionPressure / 6
+                    );
+
+                    competitionAdjustment = Math.max(
                         -7,
                         Math.min(
                             7,
-                            competitionRiskPreference *
-                                (observedCompetitionPressure / 4)
+                            riskResponse +
+                            impatienceResponse +
+                            disciplineResponse
                         )
-                    )
-                    : 0;
-
-                if (rivalTeamCount > 0) {
-                    if (personality === "Peaked in '94") {
-                        // A stubborn, aggressive coach is more willing
-                        // to challenge rivals for a coveted prospect.
-                        competitionAdjustment = Math.min(
-                            7,
-                            2 + observedCompetitionPressure * 0.65
-                        );
-                    } else if (personality === 'Analytical Savant') {
-                        // A cautious evaluator is more likely to redirect
-                        // effort when several teams visibly pursue the recruit.
-                        competitionAdjustment = -Math.min(
-                            7,
-                            observedCompetitionPressure * 0.7
-                        );
-                    } else if (
-                        personality === 'Old-School Disciplinarian'
-                    ) {
-                        competitionAdjustment = -Math.min(
-                            4,
-                            observedCompetitionPressure * 0.4
-                        );
-                    } else {
-                        competitionAdjustment = Math.min(
-                            3,
-                            rivalTeamCount * 0.75
-                        );
-                    }
+                    ) * pressureFactor;
                 }
 
                 // Use this team's estimated prospect fits, if available.
                 // No report means the AI does not know the player's true OVR.
-                const scoutingReport = getTeamScoutingReport(
-                    team,
-                    player.id
-                );
-
                 const reportedFits = [
                     scoutingReport?.evaluation?.offenseFit,
                     scoutingReport?.evaluation?.defenseFit
-                ].filter(fit =>
-                    Number.isFinite(Number(fit?.low)) &&
-                    Number.isFinite(Number(fit?.high))
+                ].filter(fit => {
+                    const fitPosition = String(
+                        fit?.position || ''
+                    ).toUpperCase();
+
+                    return (
+                        positionTargets[fitPosition] &&
+                        fit.low != null &&
+                        fit.high != null &&
+                        String(fit.low).trim() !== '' &&
+                        String(fit.high).trim() !== '' &&
+                        Number.isFinite(Number(fit.low)) &&
+                        Number.isFinite(Number(fit.high))
+                    );
+                });
+
+                // Only evaluate the prospect using the fit corresponding
+                // to the position this team is considering recruiting.
+                const relevantFit = reportedFits.find(
+                    fit =>
+                        String(fit.position).toUpperCase() === position
                 );
 
-                const perceivedFit = reportedFits.length > 0
-                    ? Math.max(
-                        ...reportedFits.map(fit =>
-                            (
-                                Number(fit.low) +
-                                Number(fit.high)
-                            ) / 2
-                        )
-                    )
+                const perceivedFit = relevantFit
+                    ? (
+                        Number(relevantFit.low) +
+                        Number(relevantFit.high)
+                    ) / 2
                     : null;
 
                 const rawConfidence = Number(
@@ -3746,17 +3991,136 @@ export function processAiRecruitingDay(gameState) {
                         Math.min(5, (perceivedFit - 60) * 0.25)
                     ) * reportConfidence;
 
+                // Individual scouting philosophies influence which
+                // prospects the recruiting staff finds attractive.
+                // These preferences only use the team's recorded estimates.
+                const scoutingId = getStaffProfileId(
+                    coach,
+                    'scouting'
+                );
+
+                let scoutingPreferenceAdjustment = 0;
+
+                if (reportConfidence > 0) {
+                    if (
+                        scoutingId === 'athletic_bias_evaluator'
+                    ) {
+                        const speedRange =
+                            scoutingReport?.attributeRanges
+                                ?.physical?.speed;
+
+                        if (
+                            speedRange?.low != null &&
+                            speedRange?.high != null &&
+                            Number.isFinite(Number(speedRange.low)) &&
+                            Number.isFinite(Number(speedRange.high))
+                        ) {
+                            const estimatedSpeed = (
+                                Number(speedRange.low) +
+                                Number(speedRange.high)
+                            ) / 2;
+
+                            scoutingPreferenceAdjustment = Math.max(
+                                -4,
+                                Math.min(
+                                    4,
+                                    (estimatedSpeed - 60) * 0.15
+                                )
+                            ) * reportConfidence;
+                        }
+                    } else if (
+                        scoutingId === 'technique_first_evaluator'
+                    ) {
+                        const technicalRanges = Object.values(
+                            scoutingReport?.attributeRanges?.technical || {}
+                        );
+
+                        const technicalEstimates = technicalRanges
+                            .filter(range =>
+                                range?.low != null &&
+                                range?.high != null &&
+                                Number.isFinite(Number(range.low)) &&
+                                Number.isFinite(Number(range.high))
+                            )
+                            .map(range =>
+                                (
+                                    Number(range.low) +
+                                    Number(range.high)
+                                ) / 2
+                            );
+
+                        if (technicalEstimates.length > 0) {
+                            const estimatedTechnique =
+                                technicalEstimates.reduce(
+                                    (total, value) => total + value,
+                                    0
+                                ) / technicalEstimates.length;
+
+                            scoutingPreferenceAdjustment = Math.max(
+                                -3,
+                                Math.min(
+                                    3,
+                                    (estimatedTechnique - 60) * 0.10
+                                )
+                            ) * reportConfidence;
+                        }
+                    } else if (
+                        scoutingId === 'character_focused_evaluator'
+                    ) {
+                        const characterSummary = String(
+                            scoutingReport?.evaluation?.characterSummary || ''
+                        ).toLowerCase();
+
+                        if (
+                            characterSummary.includes(
+                                'strong effort/reliability signals'
+                            )
+                        ) {
+                            scoutingPreferenceAdjustment =
+                                3 * reportConfidence;
+                        } else if (
+                            characterSummary.includes(
+                                'effort/reliability need closer review'
+                            )
+                        ) {
+                            scoutingPreferenceAdjustment =
+                                -3 * reportConfidence;
+                        }
+                    }
+                }
+
+                // Prospect evaluation depends on actual scouting ability,
+                // not tactical instinct or organizational authority.
+                const targetEvaluationQuality = (
+                    skillValue('evalPhysicals') +
+                    skillValue('evalTechnique') +
+                    skillValue('evalCharacter')
+                ) / 3;
+
+                // Strong evaluators are more consistent, but never infallible.
+                const targetJudgmentNoiseRange =
+                    0.5 +
+                    ((100 - targetEvaluationQuality) / 100) * 3;
+
+                const targetJudgmentNoise =
+                    (Math.random() * 2 - 1) *
+                    targetJudgmentNoiseRange;
+
                 const score =
                     rosterNeed * 7 +
-                    (hasBestFriend ? 16 : 0) +
-                    Math.min(8, goodFriendCount * 3) +
-                    (hasRival ? -25 : 0) +
+                    (hasKnownFriend ? 16 : 0) +
+                    Math.min(
+                        8,
+                        Math.max(0, knownFriendCount - 1) * 3
+                    ) +
+                    (hasKnownRival ? -25 : 0) +
                     schemeBonus +
                     ageBonus +
                     ownInterest * 0.20 +
                     scoutingAdjustment +
+                    scoutingPreferenceAdjustment +
                     competitionAdjustment +
-                    Math.random() * 2;
+                    targetJudgmentNoise;
 
                 return {
                     player,

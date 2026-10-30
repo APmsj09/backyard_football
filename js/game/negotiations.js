@@ -31,7 +31,11 @@ export function calculateAiTeamNeedAndDesire(
         return { shouldBid: false, desireScore: 0, offer: null, reason: 'Ineligible' };
     }
 
-    if (player.refusedTeamIds?.includes(aiTeam.id)) {
+    const refusedTeamIds = Array.isArray(player.refusedTeamIds)
+        ? player.refusedTeamIds.map(String)
+        : [];
+
+    if (refusedTeamIds.includes(String(aiTeam.id))) {
         return {
             shouldBid: false,
             desireScore: 0,
@@ -272,8 +276,8 @@ export function calculateAiTeamNeedAndDesire(
     ) || 50;
 
     const evalSkill = Math.round((
-        (Number(coachingScout?.ratings?.evalTechnique) || 50) +
-        (Number(coachingScout?.ratings?.evalPhysicals) || 50)
+        (Number(scoutingCoach?.ratings?.evalTechnique) || 50) +
+        (Number(scoutingCoach?.ratings?.evalPhysicals) || 50)
     ) / 2);
 
     // 1. GM DIRECTIVE POLICY FILTER
