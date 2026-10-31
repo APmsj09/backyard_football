@@ -149,6 +149,13 @@ export function transitionOffseasonPhase(
     const state = getOffseasonState(gameState);
     const currentPhase = state.phase;
 
+    if (!Object.values(OFFSEASON_PHASES).includes(currentPhase)) {
+        return {
+            success: false,
+            message: 'The saved offseason phase is missing or invalid. The game has not advanced to prevent repeating offseason actions.'
+        };
+    }
+
     if (!Object.values(OFFSEASON_PHASES).includes(nextPhase)) {
         return {
             success: false,
@@ -269,7 +276,20 @@ export function transitionOffseasonPhase(
                 ? completedSeasonYear
                 : Number(gameState.year);
 
-        resolveCoachCarousel(gameState, carouselYear);
+        const carouselResult = resolveCoachCarousel(
+            gameState,
+            carouselYear
+        );
+
+        if (
+            carouselResult?.resolved !== true &&
+            carouselResult?.alreadyResolved !== true
+        ) {
+            return {
+                success: false,
+                message: 'The coach carousel could not be completed. The offseason remains in staff review.'
+            };
+        }
     }
 
     state.phase = nextPhase;
@@ -289,9 +309,14 @@ export function transitionOffseasonPhase(
 
         // Do not let recruiting consume prospects still reserved for a draft.
         const protectedDraftProspectIds = new Set(
-            (gameState.draftClass || [])
-                .filter(prospect => prospect?.id != null)
-                .map(prospect => String(prospect.id))
+            (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
+                .map(prospect =>
+                    prospect && typeof prospect === 'object'
+                        ? prospect.id
+                        : prospect
+                )
+                .filter(id => id != null)
+                .map(id => String(id))
         );
 
         const eligibleRecruits = (gameState.players || []).filter(player => {
@@ -1055,6 +1080,9 @@ export async function initializeLeague(onProgress) {
         currentWeek: 0, draftOrder: [], currentPick: 0, hallOfFame: [],
         gameResults: [], messages: [], relationships: new Map(),
         pickHistory: [], history: { seasons: [] },
+        availableStaff: generateStaffPool(6),
+        coachCareerArchive: [],
+        coachMarketArchive: [],
         records: {
             game: {},
             season: {},
@@ -6612,6 +6640,266 @@ export function processWeeklyPractice(team, gameLog = null) {
     }
 }
 
+
+/**
+ * Ages coaching staff once per completed season and archives retirees.
+ *
+ * The archive preserves career history without retaining the full coach
+ * profile, ratings, development records, or negotiation data.
+ */
+function processCoachCareerRetirement(
+    gameState,
+    completedSeasonYear,
+    random = Math.random
+) {
+    if (
+        !gameState ||
+        !Array.isArray(gameState.teams) ||
+        !Number.isInteger(Number(completedSeasonYear))
+    ) {
+        return [];
+    }
+
+    const seasonYear = Number(completedSeasonYear);
+
+    const teams = [...gameState.teams];
+
+    if (
+        gameState.playerTeam &&
+        !teams.some(team =>
+            String(team.id) === String(gameState.playerTeam.id)
+        )
+    ) {
+        teams.push(gameState.playerTeam);
+    }
+
+    // Prefer active team objects over potentially stale market copies.
+    const candidatesById = new Map();
+
+    const registerCoach = (coach, team = null) => {
+        if (
+            !coach ||
+            coach.id == null ||
+            coach.isUserCoach
+        ) {
+            return;
+        }
+
+        const id = String(coach.id);
+        const existing = candidatesById.get(id);
+
+        if (!existing || (!existing.team && team)) {
+            candidatesById.set(id, { coach, team });
+        }
+    };
+
+    for (const team of teams) {
+        if (!team) continue;
+
+        (Array.isArray(team.coaches) ? team.coaches : [])
+            .forEach(coach => registerCoach(coach, team));
+
+        registerCoach(team.coach, team);
+        registerCoach(team.staff?.coach, team);
+        registerCoach(team.staff?.scout, team);
+        registerCoach(team.staff?.trainer, team);
+    }
+
+    (Array.isArray(gameState.availableStaff)
+        ? gameState.availableStaff
+        : []
+    ).forEach(coach => registerCoach(coach));
+
+    if (!Array.isArray(gameState.coachCareerArchive)) {
+        gameState.coachCareerArchive = [];
+    }
+
+    const retiredIds = new Set();
+    const retirements = [];
+
+    for (const [id, record] of candidatesById) {
+        const { coach, team } = record;
+
+        // Each coach ages once per completed season, even if this
+        // lifecycle function is accidentally invoked again.
+        if (Number(coach.lastCareerAgedYear) !== seasonYear) {
+            const rawAge = Number(coach.age);
+
+            const currentAge =
+                Number.isFinite(rawAge) && rawAge >= 18
+                    ? Math.floor(rawAge)
+                    : 45;
+
+            coach.age = currentAge + 1;
+            coach.lastCareerAgedYear = seasonYear;
+        }
+
+        const age = Math.max(18, Math.floor(Number(coach.age) || 45));
+
+        if (age < 60) continue;
+
+        const weeksUnemployed = Math.max(
+            0,
+            Number(coach.weeksUnemployed) || 0
+        );
+
+        // Retirement becomes increasingly likely with age.
+        // Long-term unemployment contributes a modest additional risk.
+        const unemploymentPressure = Math.min(
+            0.06,
+            (weeksUnemployed / 52) * 0.015
+        );
+
+        const retirementChance = age >= 75
+            ? 1
+            : Math.min(
+                0.45,
+                0.01 + (age - 60) * 0.03 + unemploymentPressure
+            );
+
+        if (random() >= retirementChance) continue;
+
+        const careerHistory = Array.isArray(coach.careerHistory)
+            ? coach.careerHistory
+                .filter(entry =>
+                    entry && typeof entry === 'object'
+                )
+                .map(entry => ({
+                    ...entry,
+                    milestones: Array.isArray(entry.milestones)
+                        ? [...entry.milestones]
+                        : []
+                }))
+            : [];
+
+        const archiveEntry = {
+            id: coach.id,
+            name: coach.name || 'Unnamed Coach',
+            retiredYear: seasonYear,
+            retiredAge: age,
+            retirementReason: age >= 75
+                ? 'maximum_age'
+                : weeksUnemployed >= 104
+                    ? 'age_and_long_unemployment'
+                    : 'age',
+            lastTeamName:
+                team?.name ||
+                careerHistory[careerHistory.length - 1]?.teamName ||
+                null,
+            careerHistory
+        };
+
+        // Replace an existing archive entry rather than creating duplicates.
+        const existingArchiveIndex =
+            gameState.coachCareerArchive.findIndex(entry =>
+                String(entry?.id) === id
+            );
+
+        if (existingArchiveIndex >= 0) {
+            gameState.coachCareerArchive[existingArchiveIndex] =
+                archiveEntry;
+        } else {
+            gameState.coachCareerArchive.push(archiveEntry);
+        }
+
+        coach.teamId = null;
+        retiredIds.add(id);
+
+        retirements.push({
+            coachId: coach.id,
+            coachName: archiveEntry.name,
+            teamId: team?.id ?? null,
+            teamName: archiveEntry.lastTeamName,
+            age,
+            retiredYear: seasonYear
+        });
+    }
+
+    if (retiredIds.size === 0) {
+        return retirements;
+    }
+
+    // Permanently remove retirees from the active staff market.
+    gameState.availableStaff = (
+        Array.isArray(gameState.availableStaff)
+            ? gameState.availableStaff
+            : []
+    ).filter(coach =>
+        coach?.id == null ||
+        !retiredIds.has(String(coach.id))
+    );
+
+    // Remove retired coaches from active teams and legacy references.
+    for (const team of teams) {
+        if (!team) continue;
+
+        const teamHasRetiree = [
+            ...(Array.isArray(team.coaches) ? team.coaches : []),
+            team.coach,
+            team.staff?.coach,
+            team.staff?.scout,
+            team.staff?.trainer
+        ].some(coach =>
+            coach?.id != null &&
+            retiredIds.has(String(coach.id))
+        );
+
+        if (!teamHasRetiree) continue;
+
+        team.coaches = (
+            Array.isArray(team.coaches) ? team.coaches : []
+        ).filter(coach =>
+            coach?.id == null ||
+            !retiredIds.has(String(coach.id))
+        );
+
+        if (!team.staff || typeof team.staff !== 'object') {
+            team.staff = {};
+        }
+
+        for (const role of ['coach', 'scout', 'trainer']) {
+            if (
+                team.staff[role]?.id != null &&
+                retiredIds.has(String(team.staff[role].id))
+            ) {
+                team.staff[role] = null;
+            }
+        }
+
+        if (
+            team.coach?.id != null &&
+            retiredIds.has(String(team.coach.id))
+        ) {
+            team.coach = null;
+        }
+
+        const assignments = team.staffWorkPlan?.assignments;
+
+        if (Array.isArray(assignments)) {
+            team.staffWorkPlan.assignments = assignments.filter(
+                assignment =>
+                    !retiredIds.has(String(assignment?.coachId ?? ''))
+            );
+        }
+
+        const activeNpcCount = team.coaches.filter(coach =>
+            coach?.id != null && !coach.isUserCoach
+        ).length;
+
+        team.coachingVacancies = Math.max(
+            0,
+            Math.min(3, 3 - activeNpcCount)
+        );
+
+        // Reconcile legacy references without automatically filling
+        // intentional vacancies.
+        ensureTeamCoachingStaff(team);
+    }
+
+    return retirements;
+}
+
+
 export function advanceToOffseason() {
     if (!game || !game.teams || !game.players) {
         return {
@@ -6712,6 +7000,10 @@ export function advanceToOffseason() {
     const relegated = tier1.slice(-2);
     const promoted = tier2.slice(0, 2);
 
+    const promotionRelegationApplied =
+        tier1.length > 2 &&
+        tier2.length > 2;
+
     // Capture reverse standings for next draft before wins/losses reset
     const mainTeams = game.teams.filter(t => t.leagueType === 'main');
     game.nextDraftOrder = [...mainTeams].sort((a, b) =>
@@ -6719,7 +7011,7 @@ export function advanceToOffseason() {
     ).map(t => t.id);
 
     let proRelMsg = "League Tiers hold steady this year.";
-    if (tier1.length > 2 && tier2.length > 2) {
+    if (promotionRelegationApplied) {
         relegated.forEach(t => { t.tier = 2; t.socialProfile.streetCred -= 20; });
         promoted.forEach(t => { t.tier = 1; t.socialProfile.streetCred += 20; });
         proRelMsg = `**PROMOTED:** ${promoted[0].name}, ${promoted[1].name}\n**RELEGATED:** ${relegated[0].name}, ${relegated[1].name}`;
@@ -6867,14 +7159,59 @@ export function advanceToOffseason() {
     // Preserve the season being completed before advancing to the next year.
     const completedSeasonYear = game.year;
 
-    // Resolve coach retention before win/loss records are reset.
+    // Resolve coach retention and record career achievements before
+    // win/loss records are reset.
     game.teams.forEach(team => {
         if (!team) return;
+
+        const teamId = String(team.id);
+        const careerMilestones = [];
+
+        if (
+            tier1[0] &&
+            String(tier1[0].id) === teamId
+        ) {
+            careerMilestones.push('Premier Champion');
+        }
+
+        if (
+            tier2[0] &&
+            String(tier2[0].id) === teamId
+        ) {
+            careerMilestones.push('Sandlot Champion');
+        }
+
+        if (
+            youthT[0] &&
+            String(youthT[0].id) === teamId
+        ) {
+            careerMilestones.push('Youth Champion');
+        }
+
+        if (
+            promotionRelegationApplied &&
+            promoted.some(
+                candidate => String(candidate.id) === teamId
+            )
+        ) {
+            careerMilestones.push('Promoted to Premier');
+        }
+
+        if (
+            promotionRelegationApplied &&
+            relegated.some(
+                candidate => String(candidate.id) === teamId
+            )
+        ) {
+            careerMilestones.push('Relegated to Sandlot');
+        }
 
         const retentionResult = processCoachOffseasonRetention(
             team,
             game,
-            completedSeasonYear
+            completedSeasonYear,
+            Math.random,
+            { careerMilestones }
         );
 
         if (!retentionResult?.processed) return;
@@ -6895,6 +7232,29 @@ export function advanceToOffseason() {
             }))
         );
     });
+
+    // Age all existing coaches after completed-season career records
+    // have been captured, including coaches who entered the market
+    // through this year's retention decisions.
+    const staffRetirements = processCoachCareerRetirement(
+        game,
+        completedSeasonYear
+    );
+
+    // Notify the user when a member of their staff retires.
+    staffRetirements
+        .filter(retirement =>
+            String(retirement.teamId) ===
+            String(game.playerTeam?.id)
+        )
+        .forEach(retirement => {
+            addMessage(
+                'Coach Retirement',
+                `${retirement.coachName} has retired at age ${retirement.age}. Their coaching career history has been preserved.`,
+                false,
+                game
+            );
+        });
 
     game.year++;
 
@@ -7067,8 +7427,29 @@ export function advanceToOffseason() {
                 addMessage("Player Retires", `${player.name} graduated and hung up his cleats.`);
             }
 
-            // Former Legend to Coach Pipeline (SPAM SUPPRESSED DURING HISTORICAL PRE-SIM)
-            const newCoach = checkRetiredPlayerToCoach(player);
+            // Former Legend to Coach Pipeline.
+            // Keep the local coaching market limited rather than generating
+            // an unlimited supply of candidates as players graduate.
+            const availableCoachIds = new Set(
+                (
+                    Array.isArray(game.availableStaff)
+                        ? game.availableStaff
+                        : []
+                )
+                    .filter(candidate =>
+                        candidate?.id != null &&
+                        candidate.role === 'coach' &&
+                        candidate.teamId == null
+                    )
+                    .map(candidate => String(candidate.id))
+            );
+
+            const hasMarketRoom = availableCoachIds.size < 18;
+
+            const newCoach = hasMarketRoom
+                ? checkRetiredPlayerToCoach(player)
+                : null;
+
             if (newCoach) {
                 if (!game.availableStaff) game.availableStaff = [];
                 game.availableStaff.unshift(newCoach);

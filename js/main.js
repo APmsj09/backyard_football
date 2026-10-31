@@ -3291,6 +3291,910 @@ function buildPlayerCardScoutingContext(sourcePlayer, gameState) {
     };
 }
 
+export function openCoachCard(coachId) {
+    const gs = Game.getGameState();
+    if (!gs || coachId == null) return;
+
+    const teams = [
+        ...(Array.isArray(gs.teams) ? gs.teams : [])
+    ];
+
+    if (
+        gs.playerTeam &&
+        !teams.some(team =>
+            String(team.id) === String(gs.playerTeam.id)
+        )
+    ) {
+        teams.push(gs.playerTeam);
+    }
+
+    let coach = null;
+    let team = null;
+
+    // Prefer the canonical team.coaches record.
+    for (const candidateTeam of teams) {
+        const match = candidateTeam?.coaches?.find(
+            member =>
+                member?.id != null &&
+                String(member.id) === String(coachId)
+        );
+
+        if (match) {
+            coach = match;
+            team = candidateTeam;
+            break;
+        }
+    }
+
+    // Include unemployed staff-market candidates.
+    if (!coach) {
+        coach = (gs.availableStaff || []).find(
+            member =>
+                member?.id != null &&
+                String(member.id) === String(coachId)
+        );
+    }
+
+    if (!coach) return;
+
+    const escapeCoachText = value =>
+        String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]);
+
+    const ratings = coach.ratings || {};
+    const development = coach.development || {};
+
+    // Build career totals from recorded coaching seasons only.
+    const careerHistory = Array.isArray(coach.careerHistory)
+        ? coach.careerHistory.filter(
+            entry => entry && typeof entry === 'object'
+        )
+        : [];
+
+    const careerTotals = careerHistory.reduce(
+        (totals, entry) => {
+            totals.wins += Math.max(0, Number(entry.wins) || 0);
+            totals.losses += Math.max(0, Number(entry.losses) || 0);
+            totals.ties += Math.max(0, Number(entry.ties) || 0);
+            return totals;
+        },
+        { wins: 0, losses: 0, ties: 0 }
+    );
+
+    const careerGames =
+        careerTotals.wins +
+        careerTotals.losses +
+        careerTotals.ties;
+
+    const careerWinPercentage = careerGames > 0
+        ? `${Math.round(
+            (
+                careerTotals.wins +
+                careerTotals.ties * 0.5
+            ) / careerGames * 100
+        )}%`
+        : '—';
+
+    const careerTeamCount = new Set(
+        careerHistory.map(entry =>
+            String(entry.teamId ?? entry.teamName ?? '')
+        ).filter(Boolean)
+    ).size;
+
+    const careerSeasonCount = new Set(
+        careerHistory.map(entry => Number(entry.year))
+            .filter(Number.isFinite)
+    ).size;
+
+    const careerChampionshipCount = careerHistory.filter(entry =>
+        Array.isArray(entry.milestones) &&
+        entry.milestones.some(milestone =>
+            milestone === 'Premier Champion' ||
+            milestone === 'Sandlot Champion' ||
+            milestone === 'Youth Champion'
+        )
+    ).length;
+
+    const careerPromotionCount = careerHistory.filter(entry =>
+        Array.isArray(entry.milestones) &&
+        entry.milestones.includes('Promoted to Premier')
+    ).length;
+
+    const careerRelegationCount = careerHistory.filter(entry =>
+        Array.isArray(entry.milestones) &&
+        entry.milestones.includes('Relegated to Sandlot')
+    ).length;
+
+    // Longest consecutive run with the same team.
+    // A change of coaching role does not break team tenure.
+    const tenureEntries = [...careerHistory]
+        .filter(entry =>
+            Number.isFinite(Number(entry.year)) &&
+            (entry.teamId != null || entry.teamName)
+        )
+        .sort((a, b) =>
+            Number(a.year) - Number(b.year) ||
+            String(a.teamName || '').localeCompare(
+                String(b.teamName || '')
+            )
+        );
+
+    let longestTeamTenure = 0;
+    let currentTeamTenure = 0;
+    let previousTeamKey = null;
+    let previousSeasonYear = null;
+
+    for (const entry of tenureEntries) {
+        const teamKey = String(entry.teamId ?? entry.teamName);
+        const seasonYear = Number(entry.year);
+
+        if (
+            teamKey === previousTeamKey &&
+            seasonYear === previousSeasonYear + 1
+        ) {
+            currentTeamTenure++;
+        } else {
+            currentTeamTenure = 1;
+        }
+
+        longestTeamTenure = Math.max(
+            longestTeamTenure,
+            currentTeamTenure
+        );
+
+        previousTeamKey = teamKey;
+        previousSeasonYear = seasonYear;
+    }
+
+    const careerHistoryRowsHtml = [...careerHistory]
+        .sort((a, b) =>
+            (Number(b.year) || 0) - (Number(a.year) || 0) ||
+            String(a.teamName || '').localeCompare(
+                String(b.teamName || '')
+            )
+        )
+        .map(entry => {
+            const wins = Math.max(0, Number(entry.wins) || 0);
+            const losses = Math.max(0, Number(entry.losses) || 0);
+            const ties = Math.max(0, Number(entry.ties) || 0);
+            const games = wins + losses + ties;
+
+            const winPct = games > 0
+                ? `${Math.round(
+                    (wins + ties * 0.5) / games * 100
+                )}%`
+                : '—';
+
+            const milestoneStyles = {
+                'Premier Champion': 'bg-amber-100 text-amber-900 border-amber-300',
+                'Sandlot Champion': 'bg-yellow-50 text-yellow-800 border-yellow-200',
+                'Youth Champion': 'bg-blue-50 text-blue-800 border-blue-200',
+                'Promoted to Premier': 'bg-emerald-50 text-emerald-800 border-emerald-200',
+                'Relegated to Sandlot': 'bg-rose-50 text-rose-800 border-rose-200'
+            };
+
+            const milestonesHtml = Array.isArray(entry.milestones)
+                ? [...new Set(entry.milestones)]
+                    .filter(milestone =>
+                        Object.prototype.hasOwnProperty.call(
+                            milestoneStyles,
+                            milestone
+                        )
+                    )
+                    .map(milestone => `
+                        <span class="inline-flex rounded border px-2 py-1 text-[9px] font-bold ${milestoneStyles[milestone]}">
+                            ${escapeCoachText(milestone)}
+                        </span>
+                    `)
+                    .join('')
+                : '';
+
+            return `
+                <div class="rounded border border-slate-200 bg-white p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <span class="text-[10px] font-black uppercase tracking-wide text-blue-700">
+                                Year ${escapeCoachText(entry.year ?? '—')}
+                            </span>
+                            <h6 class="text-sm font-black text-slate-900">
+                                ${escapeCoachText(entry.teamName || 'Unknown Team')}
+                            </h6>
+                        </div>
+
+                        <span class="rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">
+                            ${escapeCoachText(entry.role || 'Coaching Staff')}
+                        </span>
+                    </div>
+
+                    <div class="mt-3 grid grid-cols-4 gap-2">
+                        <div>
+                            <span class="block text-[9px] uppercase text-slate-400">Wins</span>
+                            <b class="text-sm text-slate-900">${wins}</b>
+                        </div>
+                        <div>
+                            <span class="block text-[9px] uppercase text-slate-400">Losses</span>
+                            <b class="text-sm text-slate-900">${losses}</b>
+                        </div>
+                        <div>
+                            <span class="block text-[9px] uppercase text-slate-400">Ties</span>
+                            <b class="text-sm text-slate-900">${ties}</b>
+                        </div>
+                        <div>
+                            <span class="block text-[9px] uppercase text-slate-400">Win %</span>
+                            <b class="text-sm text-slate-900">${winPct}</b>
+                        </div>
+                    </div>
+
+                    <div class="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
+                        ${entry.tier != null
+                            ? `Tier ${escapeCoachText(entry.tier)}`
+                            : ''}
+                        ${entry.leagueType
+                            ? ` · ${escapeCoachText(entry.leagueType)}`
+                            : ''}
+                    </div>
+
+                    ${milestonesHtml
+                        ? `<div class="mt-2 flex flex-wrap gap-1">${milestonesHtml}</div>`
+                        : ''}
+                </div>
+            `;
+        })
+        .join('');
+
+    const readRating = key => {
+        const value = Number(ratings[key]);
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, Math.round(value)))
+            : null;
+    };
+
+    const average = values => {
+        const valid = values.filter(value => value !== null);
+
+        return valid.length
+            ? Math.round(
+                valid.reduce((sum, value) => sum + value, 0) /
+                valid.length
+            )
+            : null;
+    };
+
+    const skillGroups = [
+        {
+            label: 'Offense',
+            skills: [
+                ['Offensive Scheme Mastery', 'offSchemeMastery'],
+                ['Game Planning', 'gameplanInstinct']
+            ]
+        },
+        {
+            label: 'Defense',
+            skills: [
+                ['Defensive Scheme Mastery', 'defSchemeMastery'],
+                ['In-Game Adjustments', 'inGameAdjustments']
+            ]
+        },
+        {
+            label: 'Evaluation',
+            skills: [
+                ['Physical Evaluation', 'evalPhysicals'],
+                ['Technical Evaluation', 'evalTechnique'],
+                ['Character Evaluation', 'evalCharacter']
+            ]
+        },
+        {
+            label: 'Player Development',
+            skills: [
+                ['Teaching', 'teaching']
+            ]
+        },
+        {
+            label: 'Practice',
+            skills: [
+                ['Practice Discipline', 'practiceDiscipline'],
+                ['Conditioning', 'conditioning']
+            ]
+        }
+    ];
+
+    const allRatings = skillGroups.flatMap(group =>
+        group.skills.map(([, key]) => readRating(key))
+    );
+
+    const overall = average(allRatings);
+
+    const currentCoachId = String(coach.id);
+
+    const isHeadCoach = [
+        team?.coach,
+        team?.staff?.coach
+    ].some(member =>
+        member?.id != null &&
+        String(member.id) === currentCoachId
+    );
+
+    const isScout =
+        team?.staff?.scout?.id != null &&
+        String(team.staff.scout.id) === currentCoachId;
+
+    const isTrainer =
+        team?.staff?.trainer?.id != null &&
+        String(team.staff.trainer.id) === currentCoachId;
+
+    let roleLabel = 'Assistant Coach';
+
+    if (coach.isUserCoach) {
+        roleLabel = 'GM / User Coach';
+    } else if (isHeadCoach) {
+        roleLabel = 'Head Coach';
+    } else if (isScout) {
+        roleLabel = 'Assistant Coach · Scout';
+    } else if (isTrainer) {
+        roleLabel = 'Assistant Coach · Trainer';
+    }
+
+    const teamName = team?.name ||
+        (coach.teamId != null ? 'Unknown Team' : 'Free Agent');
+
+    const record = {
+        wins: Math.max(0, Number(team?.wins) || 0),
+        losses: Math.max(0, Number(team?.losses) || 0),
+        ties: Math.max(0, Number(team?.ties) || 0)
+    };
+
+    const gamesPlayed =
+        record.wins + record.losses + record.ties;
+
+    const winPercentage = gamesPlayed > 0
+        ? `${Math.round(
+            (record.wins + record.ties * 0.5) /
+            gamesPlayed * 100
+        )}%`
+        : '—';
+
+    const availability = coach.availability || {};
+
+    const weeklyHoursRaw = Number(availability.weeklyHours);
+    const weeklyHours = Number.isFinite(weeklyHoursRaw)
+        ? Math.max(0, Math.min(40, Math.floor(weeklyHoursRaw)))
+        : null;
+
+    const personality = coach.biases?.personality;
+    const tactical = coach.biases?.tactical;
+    const scouting = coach.biases?.scouting;
+
+    const experienceWeeks = Math.max(
+        0,
+        Math.floor(Number(development.experienceWeeks) || 0)
+    );
+
+    const remainingGrowth = Number(
+        development.remainingGrowthPoints
+    );
+
+    const careerGrowthBudget = Number(
+        development.careerGrowthBudget
+    );
+
+    const growthSkillLabels = {
+        offSchemeMastery: 'Offense Scheme',
+        defSchemeMastery: 'Defense Scheme',
+        evalPhysicals: 'Physical Evaluation',
+        evalTechnique: 'Technical Evaluation',
+        evalCharacter: 'Character Evaluation',
+        teaching: 'Teaching',
+        gameplanInstinct: 'Game Planning',
+        inGameAdjustments: 'In-Game Adjustments',
+        practiceDiscipline: 'Practice Discipline',
+        conditioning: 'Conditioning'
+    };
+
+    const renderSkillRow = (label, key) => {
+        const value = readRating(key);
+        const ceiling = Number(
+            development.skillCeilings?.[key]
+        );
+
+        const progress = Math.max(
+            0,
+            Number(development.progressBySkill?.[key]) || 0
+        );
+
+        return `
+            <div class="py-2 border-b border-slate-100 last:border-0">
+                <div class="flex justify-between items-center gap-2">
+                    <span class="text-xs font-semibold text-slate-700">
+                        ${label}
+                    </span>
+                    <span class="text-xs font-black font-mono text-slate-900">
+                        ${value ?? '—'}
+                        ${Number.isFinite(ceiling)
+                            ? `<span class="text-[10px] text-slate-400"> / ${Math.min(95, ceiling)}</span>`
+                            : ''}
+                    </span>
+                </div>
+                <div class="mt-1.5 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                    <div
+                        class="h-full rounded-full bg-blue-600"
+                        style="width:${value ?? 0}%">
+                    </div>
+                </div>
+                ${progress > 0 && value !== null && Number.isFinite(ceiling) && value < ceiling
+                    ? `
+                        <p class="mt-1 text-[9px] text-slate-500">
+                            Development progress: ${Math.floor(progress)}/100
+                        </p>
+                    `
+                    : ''}
+            </div>
+        `;
+    };
+
+    let activeCardTab = 'overview';
+
+    window.app_switchCoachCardTab = tab => {
+        activeCardTab = tab;
+
+        document.querySelectorAll('.ccard-tab-btn').forEach(button => {
+            const active = button.dataset.ctab === tab;
+
+            button.className =
+                `ccard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition ${
+                    active
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 bg-slate-100'
+                }`;
+        });
+
+        document.querySelectorAll('.ccard-pane').forEach(pane =>
+            pane.classList.add('hidden')
+        );
+
+        document.getElementById(
+            `ccard-pane-${tab}`
+        )?.classList.remove('hidden');
+    };
+
+    const modalHtml = `
+        <div class="flex flex-col gap-3">
+
+            <!-- Coach Identity -->
+            <div class="bg-slate-900 text-white p-4 rounded shadow-sm">
+                <div class="flex justify-between items-start gap-3">
+                    <div class="min-w-0">
+                        <h3 class="text-xl font-black uppercase tracking-wide">
+                            ${escapeCoachText(coach.name || 'Unnamed Coach')}
+                        </h3>
+                        <p class="mt-1 text-xs text-slate-300">
+                            ${escapeCoachText(teamName)}
+                        </p>
+                        <span class="mt-2 inline-block rounded bg-slate-800 border border-slate-600 px-2 py-1 text-[10px] font-bold uppercase text-amber-300">
+                            ${escapeCoachText(roleLabel)}
+                        </span>
+                    </div>
+
+                    <div class="shrink-0 text-right">
+                        <span class="block text-[9px] uppercase tracking-widest text-slate-400">
+                            Skill Average
+                        </span>
+                        <span class="block text-3xl font-black text-white">
+                            ${overall ?? '—'}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 mt-4">
+                    <div class="bg-slate-800 rounded p-2">
+                        <span class="block text-[9px] uppercase text-slate-400">
+                            Team Wins
+                        </span>
+                        <b class="text-lg">${record.wins}</b>
+                    </div>
+                    <div class="bg-slate-800 rounded p-2">
+                        <span class="block text-[9px] uppercase text-slate-400">
+                            Team Losses
+                        </span>
+                        <b class="text-lg">${record.losses}</b>
+                    </div>
+                    <div class="bg-slate-800 rounded p-2">
+                        <span class="block text-[9px] uppercase text-slate-400">
+                            Win %
+                        </span>
+                        <b class="text-lg">${winPercentage}</b>
+                    </div>
+                </div>
+                <p class="mt-2 text-[9px] text-slate-400">
+                    Current team season record, not yet an individual career record.
+                </p>
+            </div>
+
+            <!-- Profile Navigation -->
+            <div class="flex flex-wrap gap-1 bg-slate-100 p-1 rounded border border-slate-200">
+                <button
+                    class="ccard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider bg-slate-900 text-white shadow-sm"
+                    data-ctab="overview"
+                    onclick="app_switchCoachCardTab('overview')">
+                    Overview
+                </button>
+                <button
+                    class="ccard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider text-slate-500 bg-slate-100"
+                    data-ctab="skills"
+                    onclick="app_switchCoachCardTab('skills')">
+                    Skills
+                </button>
+                <button
+                    class="ccard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider text-slate-500 bg-slate-100"
+                    data-ctab="development"
+                    onclick="app_switchCoachCardTab('development')">
+                    Development
+                </button>
+                <button
+                    class="ccard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider text-slate-500 bg-slate-100"
+                    data-ctab="career"
+                    onclick="app_switchCoachCardTab('career')">
+                    Career
+                </button>
+            </div>
+
+            <!-- OVERVIEW -->
+            <div id="ccard-pane-overview" class="ccard-pane space-y-3">
+
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div class="bg-slate-50 p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Personality
+                        </span>
+                        <b class="text-slate-800">
+                            ${escapeCoachText(personality?.displayName || personality?.name || 'Unknown')}
+                        </b>
+                    </div>
+
+                    <div class="bg-slate-50 p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Tactical Style
+                        </span>
+                        <b class="text-slate-800">
+                            ${escapeCoachText(tactical?.displayName || tactical?.name || 'Unknown')}
+                        </b>
+                    </div>
+
+                    <div class="bg-slate-50 p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Scouting Style
+                        </span>
+                        <b class="text-slate-800">
+                            ${escapeCoachText(scouting?.displayName || scouting?.name || 'Unknown')}
+                        </b>
+                    </div>
+
+                    <div class="bg-slate-50 p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Weekly Availability
+                        </span>
+                        <b class="text-slate-800">
+                            ${weeklyHours === null ? 'Not specified' : `${weeklyHours} hours`}
+                        </b>
+                    </div>
+
+                    <div class="bg-slate-50 p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Happiness
+                        </span>
+                        <b class="text-slate-800">
+                            ${Number.isFinite(Number(coach.happiness))
+                                ? `${Math.round(coach.happiness)}/100`
+                                : 'Not recorded'}
+                        </b>
+                    </div>
+
+                    <div class="bg-slate-50 p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Experience
+                        </span>
+                        <b class="text-slate-800">
+                            ${experienceWeeks} weeks
+                        </b>
+                    </div>
+                </div>
+
+                ${coach.formerPlayerBio ? `
+                    <div class="rounded border border-amber-200 bg-amber-50 p-3">
+                        <span class="block text-[9px] font-black uppercase text-amber-800 mb-1">
+                            Playing Background
+                        </span>
+                        <p class="text-xs text-amber-950">
+                            ${escapeCoachText(coach.formerPlayerBio)}
+                        </p>
+                    </div>
+                ` : ''}
+
+                ${coach.bio ? `
+                    <div class="rounded border border-slate-200 bg-white p-3">
+                        <span class="block text-[9px] font-black uppercase text-slate-500 mb-1">
+                            Coach Background
+                        </span>
+                        <p class="text-xs text-slate-700">
+                            ${escapeCoachText(coach.bio)}
+                        </p>
+                    </div>
+                ` : ''}
+            </div>
+
+            <!-- SKILLS -->
+            <div id="ccard-pane-skills" class="ccard-pane hidden space-y-3">
+                ${skillGroups.map(group => `
+                    <section class="rounded border border-slate-200 bg-white p-3">
+                        <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-2">
+                            ${group.label}
+                        </h5>
+                        ${group.skills.map(([label, key]) =>
+                            renderSkillRow(label, key)
+                        ).join('')}
+                    </section>
+                `).join('')}
+            </div>
+
+            <!-- DEVELOPMENT -->
+            <div id="ccard-pane-development" class="ccard-pane hidden space-y-3">
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-slate-50 border border-slate-200 rounded p-3">
+                        <span class="block text-[9px] uppercase text-slate-500">
+                            Lifetime Growth Budget
+                        </span>
+                        <b class="text-xl text-slate-900">
+                            ${Number.isFinite(careerGrowthBudget)
+                                ? careerGrowthBudget
+                                : '—'}
+                        </b>
+                    </div>
+
+                    <div class="bg-slate-50 border border-slate-200 rounded p-3">
+                        <span class="block text-[9px] uppercase text-slate-500">
+                            Remaining Growth
+                        </span>
+                        <b class="text-xl text-slate-900">
+                            ${Number.isFinite(remainingGrowth)
+                                ? remainingGrowth
+                                : '—'}
+                        </b>
+                    </div>
+
+                    <div class="bg-slate-50 border border-slate-200 rounded p-3">
+                        <span class="block text-[9px] uppercase text-slate-500">
+                            Learning Rate
+                        </span>
+                        <b class="text-lg text-slate-900">
+                            ${Number.isFinite(Number(development.learningRate))
+                                ? Number(development.learningRate).toFixed(2)
+                                : '—'}
+                        </b>
+                    </div>
+
+                    <div class="bg-slate-50 border border-slate-200 rounded p-3">
+                        <span class="block text-[9px] uppercase text-slate-500">
+                            Motivation
+                        </span>
+                        <b class="text-lg text-slate-900">
+                            ${Number.isFinite(Number(development.motivation))
+                                ? `${Math.round(Number(development.motivation) * 100)}%`
+                                : '—'}
+                        </b>
+                    </div>
+                </div>
+
+                <section class="rounded border border-slate-200 bg-white p-3">
+                    <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-2">
+                        Skill Development Potential
+                    </h5>
+
+                    ${Object.entries(growthSkillLabels).map(([key, label]) => {
+                        const rating = readRating(key);
+                        const ceiling = Number(
+                            development.skillCeilings?.[key]
+                        );
+
+                        if (rating === null) return '';
+
+                        return `
+                            <div class="flex justify-between items-center py-1.5 border-b border-slate-100 last:border-0 text-xs">
+                                <span class="text-slate-700">${label}</span>
+                                <span class="font-mono font-bold text-slate-900">
+                                    ${rating}
+                                    <span class="text-slate-400">
+                                        / ${Number.isFinite(ceiling)
+                                            ? Math.min(95, ceiling)
+                                            : '—'}
+                                    </span>
+                                </span>
+                            </div>
+                        `;
+                    }).join('')}
+                </section>
+
+                <p class="text-[10px] text-slate-500">
+                    Development depends on assigned work, learning ability,
+                    motivation, coaching experience and remaining growth potential.
+                </p>
+            </div>
+
+            <!-- CAREER -->
+            <div id="ccard-pane-career" class="ccard-pane hidden space-y-3">
+
+                <section class="rounded border border-slate-200 bg-white p-3">
+                    <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-3">
+                        Current Assignment
+                    </h5>
+
+                    <div class="flex justify-between items-center gap-3 py-2 border-b border-slate-100">
+                        <span class="text-xs text-slate-500">Team</span>
+                        <b class="text-xs text-slate-900">
+                            ${escapeCoachText(teamName)}
+                        </b>
+                    </div>
+
+                    <div class="flex justify-between items-center gap-3 py-2 border-b border-slate-100">
+                        <span class="text-xs text-slate-500">Role</span>
+                        <b class="text-xs text-slate-900">
+                            ${escapeCoachText(roleLabel)}
+                        </b>
+                    </div>
+
+                    <div class="flex justify-between items-center gap-3 py-2 border-b border-slate-100">
+                        <span class="text-xs text-slate-500">Season</span>
+                        <b class="text-xs text-slate-900">
+                            ${team ? escapeCoachText(gs.year ?? '—') : '—'}
+                        </b>
+                    </div>
+
+                    <div class="flex justify-between items-center gap-3 py-2 border-b border-slate-100">
+                        <span class="text-xs text-slate-500">Team Record</span>
+                        <b class="text-xs font-mono text-slate-900">
+                            ${team
+                                ? `${record.wins}-${record.losses}-${record.ties}`
+                                : '—'}
+                        </b>
+                    </div>
+
+                    <div class="flex justify-between items-center gap-3 py-2">
+                        <span class="text-xs text-slate-500">Team Win Percentage</span>
+                        <b class="text-xs text-slate-900">
+                            ${team ? winPercentage : '—'}
+                        </b>
+                    </div>
+                </section>
+
+                <section class="rounded border border-slate-200 bg-white p-3">
+                    <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-3">
+                        Career Summary
+                    </h5>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div class="rounded bg-slate-50 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Career W-L-T
+                            </span>
+                            <b class="text-lg font-black text-slate-900">
+                                ${careerTotals.wins}-${careerTotals.losses}-${careerTotals.ties}
+                            </b>
+                        </div>
+
+                        <div class="rounded bg-slate-50 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Win Percentage
+                            </span>
+                            <b class="text-lg font-black text-slate-900">
+                                ${careerWinPercentage}
+                            </b>
+                        </div>
+
+                        <div class="rounded bg-slate-50 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Teams
+                            </span>
+                            <b class="text-lg font-black text-slate-900">
+                                ${careerTeamCount}
+                            </b>
+                        </div>
+
+                        <div class="rounded bg-slate-50 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Seasons
+                            </span>
+                            <b class="text-lg font-black text-slate-900">
+                                ${careerSeasonCount}
+                            </b>
+                        </div>
+                    </div>
+
+                    <p class="mt-2 text-[9px] text-slate-500">
+                        Combined team records across recorded coaching appointments.
+                    </p>
+                </section>
+
+                <section class="rounded border border-slate-200 bg-white p-3">
+                    <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-3">
+                        Career Milestones
+                    </h5>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div class="rounded bg-slate-50 border border-slate-200 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Championships
+                            </span>
+                            <b class="text-xl font-black text-slate-900">
+                                ${careerChampionshipCount}
+                            </b>
+                        </div>
+
+                        <div class="rounded bg-slate-50 border border-slate-200 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Promotions
+                            </span>
+                            <b class="text-xl font-black text-slate-900">
+                                ${careerPromotionCount}
+                            </b>
+                        </div>
+
+                        <div class="rounded bg-slate-50 border border-slate-200 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Relegations
+                            </span>
+                            <b class="text-xl font-black text-slate-900">
+                                ${careerRelegationCount}
+                            </b>
+                        </div>
+
+                        <div class="rounded bg-slate-50 border border-slate-200 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Longest Tenure
+                            </span>
+                            <b class="text-xl font-black text-slate-900">
+                                ${longestTeamTenure}
+                            </b>
+                            <span class="block text-[9px] text-slate-500">
+                                ${longestTeamTenure === 1 ? 'Season' : 'Seasons'}
+                            </span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="rounded border border-slate-200 bg-white p-3">
+                    <div class="flex items-center justify-between gap-2 mb-3">
+                        <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                            Season-by-Season History
+                        </h5>
+                        <span class="text-[10px] text-slate-400">
+                            ${careerHistory.length} records
+                        </span>
+                    </div>
+
+                    ${careerHistoryRowsHtml
+                        ? `<div class="space-y-2">${careerHistoryRowsHtml}</div>`
+                        : `
+                            <div class="rounded border border-dashed border-slate-300 bg-slate-50 p-4 text-center">
+                                <p class="text-xs font-bold text-slate-700">
+                                    No coaching history recorded yet.
+                                </p>
+                                <p class="mt-1 text-[10px] text-slate-500">
+                                    Completed seasons will appear here as career records accumulate.
+                                </p>
+                            </div>
+                        `}
+                </section>
+            </div>
+        </div>
+    `;
+
+    UI.showModal('Coach Profile', modalHtml);
+}
+
 export function openPlayerCard(playerId) {
     const gs = Game.getGameState();
     if (!gs) return;
@@ -3884,6 +4788,7 @@ window.app = {
     startNewGame,
     handleLoadGame,
     handleLoadTestRoster,
+    openCoachCard,
     renderSocialNetworkTab: () => {
         if (gameState) {
             renderSocialNetworkTab(gameState);

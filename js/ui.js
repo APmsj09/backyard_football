@@ -3321,13 +3321,6 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         team.coach = team.staff.coach;
     }
 
-    const roles = [
-        { key: 'gm', title: 'General Manager (You)', icon: '👑', desc: 'Oversees the program, hires staff, and builds team culture.' },
-        { key: 'coach', title: 'Head Coach (Sideline Boss)', icon: ' whistle', desc: 'Calls plays, sets offensive/defensive schemes, and manages timeouts.' },
-        { key: 'scout', title: 'Park Informant (Scout)', icon: '🚲', desc: 'Drives draft board fog-of-war and detects character red flags.' },
-        { key: 'trainer', title: 'Sideline Anchor (Trainer)', icon: '🧊', desc: 'Controls fatigue dissipation, conditioning, and injury rehabilitation.' }
-    ];
-
     const isStaffChangeWindowOpen = () => {
         const currentState = Game.getGameState() || gameState;
 
@@ -3348,157 +3341,6 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             currentState?.offseasonState?.completed !== true &&
             currentState?.offseasonState?.staffCarouselOpened === true &&
             isCarouselVisible
-        );
-    };
-
-    window.app_fireStaff = (roleKey) => {
-        if (!isStaffChangeWindowOpen()) {
-            showModal(
-                'Staff Changes Closed',
-                'Coaching staff changes are only available during the offseason. You can still manage your current coaches and adjust their weekly workload during the season.',
-                null,
-                null,
-                null,
-                'Close'
-            );
-            return;
-        }
-        const member = team.staff[roleKey];
-        if (!member) return;
-        const roleLabels = {
-            coach: 'Coach',
-            scout: 'Park Scout',
-            trainer: 'Sideline Trainer'
-        };
-        const roleLabel = roleLabels[roleKey] || roleKey.toUpperCase();
-
-        const modalHtml = `
-            <div class="space-y-3 text-left text-xs">
-                <p class="text-slate-700 leading-relaxed">
-                    Are you sure you want to relieve <b>${member.name}</b> (${roleLabel}) of their duties?
-                </p>
-                <div class="bg-amber-50 border border-amber-200 p-2.5 rounded text-amber-900 text-[11px]">
-                    They will pack up their clipboard and return to the neighborhood sideline market. Your ${roleLabel} position will be vacant until you hire a replacement.
-                </div>
-            </div>
-        `;
-
-        showModal(
-            `Relieve ${roleLabel} of Duties?`,
-            modalHtml,
-            () => {
-                if (!isStaffChangeWindowOpen()) {
-                    showModal(
-                        'Staff Changes Closed',
-                        'The offseason staff-change window has closed. No coach has been dismissed.',
-                        null,
-                        null,
-                        null,
-                        'Close'
-                    );
-                    return;
-                }
-
-                // Release the coach from the team before returning them
-                // to the shared staff market.
-                const dismissedId = String(member.id);
-
-                member.teamId = null;
-                member.role = 'coach';
-
-                if (!Array.isArray(gameState.availableStaff)) {
-                    gameState.availableStaff = [];
-                }
-
-                // Avoid duplicate market entries.
-                const alreadyAvailable = gameState.availableStaff.some(
-                    candidate =>
-                        String(candidate?.id) === dismissedId
-                );
-
-                if (!alreadyAvailable) {
-                    gameState.availableStaff.push(member);
-                }
-
-                // Remove the dismissed coach from the active coaching group.
-                if (Array.isArray(team.coaches)) {
-                    team.coaches = team.coaches.filter(
-                        coach =>
-                            coach?.id == null ||
-                            String(coach.id) !== dismissedId
-                    );
-                }
-
-                // Clear every legacy reference to the dismissed coach.
-                if (team.staff && typeof team.staff === 'object') {
-                    for (const key of ['coach', 'scout', 'trainer']) {
-                        if (
-                            String(team.staff[key]?.id ?? '') === dismissedId
-                        ) {
-                            team.staff[key] = null;
-                        }
-                    }
-                }
-
-                if (String(team.coach?.id ?? '') === dismissedId) {
-                    team.coach = null;
-                }
-
-                // Remove obsolete assignments so the dismissed coach
-                // cannot continue receiving workload after leaving.
-                const assignments = team.staffWorkPlan?.assignments;
-
-                if (Array.isArray(assignments)) {
-                    team.staffWorkPlan.assignments = assignments.filter(
-                        assignment =>
-                            String(assignment?.coachId ?? '') !== dismissedId
-                    );
-                }
-
-                // Three NPC staff positions are available, independent
-                // of the user's separate coaching profile.
-                const remainingNpcCoaches = (
-                    Array.isArray(team.coaches) ? team.coaches : []
-                ).filter(coach =>
-                    coach?.id != null && !coach.isUserCoach
-                );
-
-                team.coachingVacancies = Math.max(
-                    0,
-                    3 - remainingNpcCoaches.length
-                );
-
-                // Persist the departure and refresh the relevant screen.
-                saveGameState();
-
-                const carouselScreen = document.getElementById(
-                    'staff-carousel-screen'
-                );
-
-                const marketPane = document.getElementById(
-                    'fo-pane-staff-carousel'
-                );
-
-                if (
-                    carouselScreen &&
-                    !carouselScreen.classList.contains('hidden')
-                ) {
-                    renderStaffTab(
-                        gameState,
-                        'staff-carousel-staff-container'
-                    );
-                } else if (
-                    marketPane &&
-                    !marketPane.classList.contains('hidden')
-                ) {
-                    renderStaffCarouselTab(gameState);
-                } else {
-                    renderStaffTab(gameState);
-                }
-            },
-            "Relieve of Duties",
-            null,
-            "Keep on Staff"
         );
     };
 
@@ -4068,14 +3910,16 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         gameState.availableStaff = [];
                     }
 
-                    const alreadyAvailable = gameState.availableStaff.some(
-                        candidate =>
-                            String(candidate.id) === String(outgoingStaff.id)
-                    );
+                    // Replace stale market copies with the actual outgoing
+                    // coach object so career history and development data
+                    // remain intact.
+                    gameState.availableStaff =
+                        gameState.availableStaff.filter(candidate =>
+                            String(candidate?.id) !==
+                            String(outgoingStaff.id)
+                        );
 
-                    if (!alreadyAvailable) {
-                        gameState.availableStaff.push(outgoingStaff);
-                    }
+                    gameState.availableStaff.push(outgoingStaff);
                 };
 
                 if (roleKey === 'coach') {
@@ -4291,6 +4135,61 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     }
                 }
 
+                // Scout and Trainer hires also belong to the canonical
+                // three-person coaching group. Replace the coach currently
+                // assigned to that role rather than creating an orphaned hire.
+                if (roleKey !== 'coach') {
+                    const replacedRoleCoachSlot = activeCoaches.findIndex(
+                        coach =>
+                            coach?.id != null &&
+                            oldStaff?.id != null &&
+                            String(coach.id) === String(oldStaff.id)
+                    );
+
+                    if (replacedRoleCoachSlot >= 0) {
+                        activeCoaches[replacedRoleCoachSlot] = staff;
+                    } else {
+                        const currentNpcCount = activeCoaches.filter(
+                            coach => coach?.id != null && !coach.isUserCoach
+                        ).length;
+
+                        if (currentNpcCount < 3) {
+                            activeCoaches.push(staff);
+                        }
+                    }
+
+                    team.coaches = activeCoaches;
+
+                    const activeNpcCoaches = activeCoaches.filter(
+                        coach => coach?.id != null && !coach.isUserCoach
+                    );
+
+                    team.coachingVacancies = Math.max(
+                        0,
+                        3 - activeNpcCoaches.length
+                    );
+
+                    // Transfer the outgoing coach's assigned workload.
+                    const assignments = team.staffWorkPlan?.assignments;
+
+                    if (
+                        Array.isArray(assignments) &&
+                        oldStaff?.id != null
+                    ) {
+                        assignments.forEach(assignment => {
+                            if (
+                                String(assignment.coachId) ===
+                                String(oldStaff.id)
+                            ) {
+                                assignment.coachId = String(staff.id);
+                            }
+                        });
+                    }
+
+                    // Reconcile legacy role references with the updated group.
+                    Game.ensureTeamCoachingStaff?.(team);
+                }
+
                 // Persist the completed transaction before rendering the UI.
                 // This saves coach ownership, the free-agent pool, offer costs,
                 // staff references, workload assignments, and vacancy count.
@@ -4344,7 +4243,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         </div>
 
         <!-- Compact Automation Controls -->
-        <section class="mb-3 flex flex-col gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <section id="staff-hub-automation" class="mb-3 hidden flex flex-col gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
             <div class="flex items-center gap-2">
                 <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-700">
                     Automation
@@ -4388,51 +4287,22 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
     Game.ensureTeamCoachingStaff?.(team);
 
-    // Migrate older staff records before their cards render.
-    Game.ensureTeamStaffWorkPlan?.(team);
+    // Migrate older staff records once before rendering staff panes.
+    const developmentWorkPlan = Game.ensureTeamStaffWorkPlan?.(team);
 
     const currentCoaches = Array.isArray(team.coaches)
         ? team.coaches.filter(Boolean)
         : [];
 
-    const staffSkill = value => {
-        if (value == null || value === '') return null;
-        const number = Number(value);
-        return Number.isFinite(number)
-            ? Math.max(0, Math.min(100, Math.round(number)))
-            : null;
-    };
 
-        const staffAverage = (...values) => {
-        const valid = values.map(staffSkill)
-            .filter(value => value !== null);
 
-        return valid.length
-            ? Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length)
-            : null;
-    };
-
-    const developmentWorkPlan = Game.ensureTeamStaffWorkPlan?.(team);
     const developmentAssignments = Array.isArray(
         developmentWorkPlan?.assignments
     )
         ? developmentWorkPlan.assignments
         : [];
 
-    const currentYear = Number(gameState.year);
-    const currentWeek = Number(gameState.currentWeek);
-
     const developmentRows = currentCoaches.map(coach => {
-        const development = coach.development || {};
-        const history = Array.isArray(development.history)
-            ? development.history
-            : [];
-
-        const latest = [...history].sort((a, b) =>
-            (Number(b.year) - Number(a.year)) ||
-            (Number(b.week) - Number(a.week))
-        )[0] || null;
-
         const assignedHours = developmentAssignments.reduce(
             (sum, assignment) =>
                 String(assignment.coachId) === String(coach.id)
@@ -4441,746 +4311,912 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             0
         );
 
-        const progressBySkill = development.progressBySkill || {};
-        const skillCeilings = development.skillCeilings || {};
-        const ratings = coach.ratings || {};
-
-        const hasAccumulatedProgress = Object.entries(
-            progressBySkill
-        ).some(([skill, progress]) => {
-            const ceiling = Number(skillCeilings[skill]);
-            const rating = Number(ratings[skill]);
-
-            return Number(progress) > 0 &&
-                (
-                    !Number.isFinite(ceiling) ||
-                    !Number.isFinite(rating) ||
-                    rating < ceiling
-                );
-        });
-
-        const remainingGrowth = Number(
-            development.remainingGrowthPoints
-        );
-
-        let weeksSinceImprovement = null;
-        if (
-            latest &&
-            Number(latest.year) === currentYear &&
-            Number.isFinite(currentWeek) &&
-            Number.isFinite(Number(latest.week))
-        ) {
-            weeksSinceImprovement = Math.max(
-                0,
-                currentWeek - Number(latest.week)
-            );
-        }
-
-        let status = 'No recorded skill increase yet';
-
-        if (
-            Number.isFinite(remainingGrowth) &&
-            remainingGrowth <= 0
-        ) {
-            status = 'Career growth budget exhausted';
-        } else if (hasAccumulatedProgress) {
-            status = 'Progress accumulating';
-        }
-
-        if (
-            Number.isFinite(remainingGrowth) &&
-            remainingGrowth > 0 &&
-            latest &&
-            Number.isFinite(currentYear) &&
-            Number(latest.year) < currentYear
-        ) {
-            status = 'No increase recorded this season';
-        } else if (weeksSinceImprovement !== null) {
-            if (weeksSinceImprovement >= 6) {
-                status = `No increase in ${weeksSinceImprovement} weeks`;
-            } else if (weeksSinceImprovement <= 4) {
-                status = weeksSinceImprovement === 0
-                    ? 'Improved this week'
-                    : `Improved ${weeksSinceImprovement} week${weeksSinceImprovement === 1 ? '' : 's'} ago`;
-            } else {
-                status = 'Awaiting next increase';
-            }
-        }
-
         return {
             id: coach.id,
-            name: coach.name || 'Unnamed Coach',
-            improvements: history.length,
-            latest,
-            assignedHours,
-            status,
-            weeksSinceImprovement
+            assignedHours
         };
     });
 
-    const totalRecordedImprovements = developmentRows.reduce(
-        (sum, row) => sum + row.improvements,
+    let activeStaffHubTab =
+        container.querySelector(
+            '.staff-hub-tab-btn.bg-slate-900'
+        )?.dataset.staffTab || 'overview';
+
+    window.app_switchStaffTab = tab => {
+        const allowedTabs = [
+            'overview',
+            'workload',
+            'history'
+        ];
+
+        if (!allowedTabs.includes(tab)) return;
+
+        activeStaffHubTab = tab;
+
+        container.querySelectorAll('.staff-hub-tab-btn').forEach(button => {
+            const active = button.dataset.staffTab === tab;
+
+            button.className =
+                `staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide transition ${
+                    active
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800'
+                }`;
+        });
+
+        container.querySelectorAll('.staff-hub-pane').forEach(pane => {
+            pane.classList.toggle(
+                'hidden',
+                pane.dataset.staffPane !== tab
+            );
+        });
+
+        container.querySelector('#staff-hub-automation')?.classList.toggle(
+            'hidden',
+            tab !== 'workload'
+        );
+    };
+
+    html += `
+        <nav class="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1"
+            aria-label="Staff management sections">
+
+            <button
+                type="button"
+                class="staff-hub-tab-btn flex-1 rounded bg-slate-900 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-sm"
+                data-staff-tab="overview"
+                onclick="app_switchStaffTab('overview')">
+                Overview
+            </button>
+
+            <button
+                type="button"
+                class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
+                data-staff-tab="workload"
+                onclick="app_switchStaffTab('workload')">
+                Workload
+            </button>
+
+            <button
+                type="button"
+                class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
+                data-staff-tab="history"
+                onclick="app_switchStaffTab('history')">
+                History
+            </button>
+        </nav>
+
+        <div
+            class="staff-hub-pane"
+            data-staff-pane="overview">
+
+    `;
+
+    // Compact coaching overview. Detailed information lives in coach cards.
+    const overviewEscape = value =>
+        String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]);
+
+    const overviewSkillAverage = values => {
+        const valid = values.filter(value => value !== null);
+
+        return valid.length
+            ? Math.round(
+                valid.reduce((sum, value) => sum + value, 0) /
+                valid.length
+            )
+            : null;
+    };
+
+    const overviewCoaches = currentCoaches.map(coach => {
+        const ratings = coach.ratings || {};
+
+        const readSkill = key => {
+            const value = Number(ratings[key]);
+
+            return Number.isFinite(value)
+                ? Math.max(0, Math.min(100, value))
+                : null;
+        };
+
+        const skillAverage = values => {
+            const valid = values.filter(value => value !== null);
+
+            return valid.length
+                ? Math.round(
+                    valid.reduce((sum, value) => sum + value, 0) /
+                    valid.length
+                )
+                : null;
+        };
+
+        const specialties = [
+            {
+                name: 'Offense',
+                value: readSkill('offSchemeMastery')
+            },
+            {
+                name: 'Defense',
+                value: readSkill('defSchemeMastery')
+            },
+            {
+                name: 'Scouting',
+                value: skillAverage([
+                    readSkill('evalPhysicals'),
+                    readSkill('evalTechnique'),
+                    readSkill('evalCharacter')
+                ])
+            },
+            {
+                name: 'Teaching',
+                value: readSkill('teaching')
+            },
+            {
+                name: 'Game Planning',
+                value: skillAverage([
+                    readSkill('gameplanInstinct'),
+                    readSkill('inGameAdjustments')
+                ])
+            },
+            {
+                name: 'Practice',
+                value: skillAverage([
+                    readSkill('practiceDiscipline'),
+                    readSkill('conditioning')
+                ])
+            }
+        ];
+
+        const overall = skillAverage(
+            specialties.map(item => item.value)
+        );
+
+        const strongest = [...specialties]
+            .filter(item => item.value !== null)
+            .sort((a, b) => b.value - a.value)[0];
+
+        const coachId = String(coach.id ?? '').replace(
+            /\\/g,
+            '\\\\'
+        ).replace(/'/g, "\\'");
+
+        const isHeadCoach = [
+            team.coach,
+            team.staff?.coach
+        ].some(member =>
+            member?.id != null &&
+            String(member.id) === String(coach.id)
+        );
+
+        const isScout =
+            String(team.staff?.scout?.id ?? '') ===
+            String(coach.id);
+
+        const isTrainer =
+            String(team.staff?.trainer?.id ?? '') ===
+            String(coach.id);
+
+        const role = coach.isUserCoach
+            ? 'GM / Your Coaching Profile'
+            : isHeadCoach
+                ? 'Head Coach'
+                : isScout
+                    ? 'Assistant · Scouting'
+                    : isTrainer
+                        ? 'Assistant · Training'
+                        : 'Assistant Coach';
+
+        const workload = developmentRows.find(
+            row => String(row.id) === String(coach.id)
+        )?.assignedHours ?? 0;
+
+        const availableHours = Number(
+            coach.availability?.weeklyHours
+        );
+
+        const availability = Number.isFinite(availableHours)
+            ? `${Math.max(0, Math.min(40, Math.floor(availableHours)))} hrs available`
+            : 'Availability not set';
+
+        const ratingsSummary = [
+            strongest
+                ? `${strongest.name} ${strongest.value}`
+                : 'Ratings unavailable',
+            `Workload ${workload} hrs`,
+            availability
+        ];
+
+        return {
+            coach,
+            coachId,
+            role,
+            overall,
+            ratingsSummary
+        };
+    });
+
+    const npcCoachCount = overviewCoaches.filter(
+        entry => !entry.coach.isUserCoach
+    ).length;
+
+    const overviewAverage = overviewSkillAverage(
+        overviewCoaches
+            .filter(entry => !entry.coach.isUserCoach)
+            .map(entry => entry.overall)
+    );
+
+    // Build the history overview from each active coach's recorded career.
+    // This is presentation-only; no additional data is saved.
+    const staffCareerHistoryHtml = overviewCoaches.map(entry => {
+        const history = Array.isArray(entry.coach.careerHistory)
+            ? [...entry.coach.careerHistory]
+                .filter(record => record && typeof record === 'object')
+                .sort((a, b) =>
+                    (Number(b.year) || 0) - (Number(a.year) || 0)
+                )
+            : [];
+
+        const historyRows = history.map(record => {
+            const wins = Math.max(0, Number(record.wins) || 0);
+            const losses = Math.max(0, Number(record.losses) || 0);
+            const ties = Math.max(0, Number(record.ties) || 0);
+
+            const milestones = Array.isArray(record.milestones)
+                ? [...new Set(record.milestones)]
+                    .filter(value => typeof value === 'string' && value.trim())
+                    .map(value => overviewEscape(value))
+                    .join(' · ')
+                : '';
+
+            return `
+                <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <span class="text-[9px] font-bold uppercase text-blue-700">
+                                Year ${overviewEscape(record.year ?? '—')}
+                            </span>
+                            <p class="text-xs font-bold text-slate-900">
+                                ${overviewEscape(record.teamName || 'Unknown Team')}
+                            </p>
+                        </div>
+
+                        <span class="text-[10px] font-semibold text-slate-600">
+                            ${overviewEscape(record.role || 'Coaching Staff')}
+                        </span>
+                    </div>
+
+                    <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <span class="font-mono text-xs font-bold text-slate-800">
+                            ${wins}-${losses}-${ties}
+                        </span>
+
+                        <span class="text-[10px] text-slate-500">
+                            ${record.tier != null
+                                ? `Tier ${overviewEscape(record.tier)}`
+                                : ''}
+                            ${record.leagueType
+                                ? ` · ${overviewEscape(record.leagueType)}`
+                                : ''}
+                        </span>
+                    </div>
+
+                    ${milestones
+                        ? `<p class="mt-2 text-[10px] font-semibold text-amber-800">${milestones}</p>`
+                        : ''}
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <section class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="flex items-center justify-between gap-2 mb-3">
+                    <div class="min-w-0">
+                        <h5 class="text-sm font-black text-slate-900">
+                            ${overviewEscape(entry.coach.name || 'Unnamed Coach')}
+                        </h5>
+                        <p class="text-[10px] text-slate-500">
+                            ${overviewEscape(entry.role)}
+                            · ${history.length} recorded season${history.length === 1 ? '' : 's'}
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        class="shrink-0 rounded border border-slate-200 px-2 py-1 text-[10px] font-bold text-blue-700 hover:bg-blue-50"
+                        onclick="app.openCoachCard('${entry.coachId}')">
+                        View Profile
+                    </button>
+                </div>
+
+                ${historyRows
+                    ? `<div class="space-y-2">${historyRows}</div>`
+                    : `
+                        <p class="rounded border border-dashed border-slate-300 bg-slate-50 p-3 text-center text-[10px] text-slate-500">
+                            No recorded seasons yet. Career history will accumulate as seasons are completed.
+                        </p>
+                    `}
+            </section>
+        `;
+    }).join('');
+
+        // Include unemployed coaches with recorded careers.
+    // Their canonical objects remain in availableStaff.
+    const historyTeams = [
+        ...(Array.isArray(gameState.teams) ? gameState.teams : []),
+        ...(gameState.playerTeam ? [gameState.playerTeam] : [])
+    ];
+
+    const employedHistoryCoachIds = new Set(
+        historyTeams.flatMap(candidateTeam => [
+            ...(Array.isArray(candidateTeam?.coaches)
+                ? candidateTeam.coaches
+                : []),
+            candidateTeam?.coach,
+            candidateTeam?.staff?.coach,
+            candidateTeam?.staff?.scout,
+            candidateTeam?.staff?.trainer
+        ])
+            .filter(coach => coach?.id != null)
+            .map(coach => String(coach.id))
+    );
+
+    const seenHistoryCoachIds = new Set();
+
+    const freeAgentCareerCoaches = (
+        Array.isArray(gameState.availableStaff)
+            ? gameState.availableStaff
+            : []
+    ).filter(coach => {
+        if (
+            !coach ||
+            coach.id == null ||
+            coach.teamId != null ||
+            employedHistoryCoachIds.has(String(coach.id)) ||
+            seenHistoryCoachIds.has(String(coach.id)) ||
+            !Array.isArray(coach.careerHistory) ||
+            coach.careerHistory.length === 0
+        ) {
+            return false;
+        }
+
+        seenHistoryCoachIds.add(String(coach.id));
+        return true;
+    });
+
+    const freeAgentCareerHistoryHtml = freeAgentCareerCoaches.map(coach => {
+        const history = [...coach.careerHistory]
+            .filter(entry => entry && typeof entry === 'object')
+            .sort((a, b) =>
+                (Number(b.year) || 0) - (Number(a.year) || 0)
+            );
+
+        const recordsHtml = history.map(record => {
+            const wins = Math.max(0, Number(record.wins) || 0);
+            const losses = Math.max(0, Number(record.losses) || 0);
+            const ties = Math.max(0, Number(record.ties) || 0);
+
+            const milestones = Array.isArray(record.milestones)
+                ? [...new Set(record.milestones)]
+                    .filter(value =>
+                        typeof value === 'string' && value.trim()
+                    )
+                    .map(overviewEscape)
+                    .join(' · ')
+                : '';
+
+            return `
+                <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <span class="text-[9px] font-bold uppercase text-blue-700">
+                                Year ${overviewEscape(record.year ?? '—')}
+                            </span>
+                            <p class="text-xs font-bold text-slate-900">
+                                ${overviewEscape(record.teamName || 'Unknown Team')}
+                            </p>
+                        </div>
+
+                        <span class="text-[10px] font-semibold text-slate-600">
+                            ${overviewEscape(record.role || 'Coaching Staff')}
+                        </span>
+                    </div>
+
+                    <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <span class="font-mono text-xs font-bold text-slate-800">
+                            ${wins}-${losses}-${ties}
+                        </span>
+
+                        <span class="text-[10px] text-slate-500">
+                            ${record.tier != null
+                                ? `Tier ${overviewEscape(record.tier)}`
+                                : ''}
+                            ${record.leagueType
+                                ? ` · ${overviewEscape(record.leagueType)}`
+                                : ''}
+                        </span>
+                    </div>
+
+                    ${milestones
+                        ? `<p class="mt-2 text-[10px] font-semibold text-amber-800">${milestones}</p>`
+                        : ''}
+                </div>
+            `;
+        }).join('');
+
+        const coachId = String(coach.id)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'");
+
+        return `
+            <section class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <div>
+                        <h5 class="text-sm font-black text-slate-900">
+                            ${overviewEscape(coach.name || 'Unnamed Coach')}
+                        </h5>
+                        <p class="text-[10px] text-slate-500">
+                            Free Agent · ${history.length} recorded season${history.length === 1 ? '' : 's'}
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        class="rounded border border-slate-200 px-2 py-1 text-[10px] font-bold text-blue-700 hover:bg-blue-50"
+                        onclick="app.openCoachCard('${coachId}')">
+                        View Profile
+                    </button>
+                </div>
+
+                <div class="space-y-2">
+                    ${recordsHtml}
+                </div>
+            </section>
+        `;
+    }).join('');
+
+        // Retired coaches retain compact career records in the permanent archive.
+    const retiredCoachArchive = (
+        Array.isArray(gameState.coachCareerArchive)
+            ? gameState.coachCareerArchive
+            : []
+    ).filter(coach =>
+        coach &&
+        coach.id != null &&
+        Array.isArray(coach.careerHistory)
+    );
+
+    const retiredCareerHistoryHtml = retiredCoachArchive.map(coach => {
+        const history = [...coach.careerHistory]
+            .filter(entry => entry && typeof entry === 'object')
+            .sort((a, b) =>
+                (Number(b.year) || 0) - (Number(a.year) || 0)
+            );
+
+        const recordsHtml = history.map(record => {
+            const wins = Math.max(0, Number(record.wins) || 0);
+            const losses = Math.max(0, Number(record.losses) || 0);
+            const ties = Math.max(0, Number(record.ties) || 0);
+
+            const milestones = Array.isArray(record.milestones)
+                ? [...new Set(record.milestones)]
+                    .filter(value =>
+                        typeof value === 'string' && value.trim()
+                    )
+                    .map(overviewEscape)
+                    .join(' · ')
+                : '';
+
+            return `
+                <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <div>
+                            <span class="text-[9px] font-bold uppercase text-blue-700">
+                                Year ${overviewEscape(record.year ?? '—')}
+                            </span>
+                            <p class="text-xs font-bold text-slate-900">
+                                ${overviewEscape(record.teamName || 'Unknown Team')}
+                            </p>
+                        </div>
+
+                        <span class="text-[10px] font-semibold text-slate-600">
+                            ${overviewEscape(record.role || 'Coaching Staff')}
+                        </span>
+                    </div>
+
+                    <div class="mt-2 flex flex-wrap justify-between items-center gap-2">
+                        <span class="font-mono text-xs font-bold text-slate-800">
+                            ${wins}-${losses}-${ties}
+                        </span>
+
+                        <span class="text-[10px] text-slate-500">
+                            ${record.tier != null
+                                ? `Tier ${overviewEscape(record.tier)}`
+                                : ''}
+                            ${record.leagueType
+                                ? ` · ${overviewEscape(record.leagueType)}`
+                                : ''}
+                        </span>
+                    </div>
+
+                    ${milestones
+                        ? `<p class="mt-2 text-[10px] font-semibold text-amber-800">${milestones}</p>`
+                        : ''}
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <section class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
+                    <div>
+                        <h5 class="text-sm font-black text-slate-900">
+                            ${overviewEscape(coach.name || 'Unnamed Coach')}
+                        </h5>
+                        <p class="text-[10px] text-slate-500">
+                            Retired Year ${overviewEscape(coach.retiredYear ?? '—')}
+                            · Age ${overviewEscape(coach.retiredAge ?? '—')}
+                        </p>
+                    </div>
+
+                    <span class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase text-slate-600">
+                        Retired
+                    </span>
+                </div>
+
+                <p class="mb-3 text-[10px] text-slate-500">
+                    Last team: ${overviewEscape(coach.lastTeamName || 'Unknown')}
+                </p>
+
+                <div class="space-y-2">
+                    ${recordsHtml || `
+                        <p class="rounded border border-dashed border-slate-300 bg-slate-50 p-3 text-center text-[10px] text-slate-500">
+                            No recorded coaching seasons.
+                        </p>
+                    `}
+                </div>
+            </section>
+        `;
+    }).join('');
+
+    // Coaches removed because the local market reached capacity retain
+    // their career records, but are not classified as retired.
+    const coachMarketArchive = (
+        Array.isArray(gameState.coachMarketArchive)
+            ? gameState.coachMarketArchive
+            : []
+    ).filter(coach =>
+        coach &&
+        coach.id != null &&
+        Array.isArray(coach.careerHistory)
+    );
+
+    const coachMarketExitHistoryHtml = coachMarketArchive.map(coach => {
+        const history = [...coach.careerHistory]
+            .filter(entry => entry && typeof entry === 'object')
+            .sort((a, b) =>
+                (Number(b.year) || 0) - (Number(a.year) || 0)
+            );
+
+        const recordsHtml = history.map(record => {
+            const wins = Math.max(0, Number(record.wins) || 0);
+            const losses = Math.max(0, Number(record.losses) || 0);
+            const ties = Math.max(0, Number(record.ties) || 0);
+
+            const milestones = Array.isArray(record.milestones)
+                ? [...new Set(record.milestones)]
+                    .filter(value =>
+                        typeof value === 'string' && value.trim()
+                    )
+                    .map(overviewEscape)
+                    .join(' · ')
+                : '';
+
+            return `
+                <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <div>
+                            <span class="text-[9px] font-bold uppercase text-blue-700">
+                                Year ${overviewEscape(record.year ?? '—')}
+                            </span>
+                            <p class="text-xs font-bold text-slate-900">
+                                ${overviewEscape(record.teamName || 'Unknown Team')}
+                            </p>
+                        </div>
+
+                        <span class="text-[10px] font-semibold text-slate-600">
+                            ${overviewEscape(record.role || 'Coaching Staff')}
+                        </span>
+                    </div>
+
+                    <div class="mt-2 flex flex-wrap justify-between items-center gap-2">
+                        <span class="font-mono text-xs font-bold text-slate-800">
+                            ${wins}-${losses}-${ties}
+                        </span>
+
+                        ${record.tier != null || record.leagueType
+                            ? `<span class="text-[10px] text-slate-500">
+                                ${record.tier != null
+                                    ? `Tier ${overviewEscape(record.tier)}`
+                                    : ''}
+                                ${record.leagueType
+                                    ? ` · ${overviewEscape(record.leagueType)}`
+                                    : ''}
+                            </span>`
+                            : ''}
+                    </div>
+
+                    ${milestones
+                        ? `<p class="mt-2 text-[10px] font-semibold text-amber-800">${milestones}</p>`
+                        : ''}
+                </div>
+            `;
+        }).join('');
+
+        const exitReason = coach.exitReason === 'left_local_market'
+            ? 'Local Market Capacity'
+            : 'Market Exit';
+
+        return `
+            <section class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
+                    <div>
+                        <h5 class="text-sm font-black text-slate-900">
+                            ${overviewEscape(coach.name || 'Unnamed Coach')}
+                        </h5>
+                        <p class="text-[10px] text-slate-500">
+                            Left Market Year ${overviewEscape(coach.exitedYear ?? '—')}
+                        </p>
+                    </div>
+
+                    <span class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase text-slate-600">
+                        ${overviewEscape(exitReason)}
+                    </span>
+                </div>
+
+                <p class="mb-3 text-[10px] text-slate-500">
+                    Last team: ${overviewEscape(coach.lastTeamName || 'Unknown')}
+                </p>
+
+                <div class="space-y-2">
+                    ${recordsHtml || `
+                        <p class="rounded border border-dashed border-slate-300 bg-slate-50 p-3 text-center text-[10px] text-slate-500">
+                            No recorded coaching seasons.
+                        </p>
+                    `}
+                </div>
+            </section>
+        `;
+    }).join('');
+
+    const historyCoaches = [
+        ...overviewCoaches.map(entry => entry.coach),
+        ...freeAgentCareerCoaches,
+        ...retiredCoachArchive,
+        ...coachMarketArchive
+    ];
+
+    const historyAppointmentCount = historyCoaches.reduce(
+        (total, coach) =>
+            total + (
+                Array.isArray(coach.careerHistory)
+                    ? coach.careerHistory.length
+                    : 0
+            ),
         0
     );
 
-    const recentlyImprovedCoaches = developmentRows.filter(
-        row =>
-            row.weeksSinceImprovement !== null &&
-            row.weeksSinceImprovement <= 4
+    const coachesWithHistory = historyCoaches.filter(
+        coach =>
+            Array.isArray(coach.careerHistory) &&
+            coach.careerHistory.length > 0
     ).length;
 
-    const coachesWithAssignments = developmentRows.filter(
-        row => row.assignedHours > 0
-    ).length;
+    const totalAssignedHours = developmentRows.reduce(
+        (sum, row) => sum + row.assignedHours,
+        0
+    );
 
-    const developmentSummaryHtml = `
-        <details class="mb-5 rounded-lg border border-slate-300 bg-white shadow-sm">
-            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 p-4">
-                <div class="min-w-0">
-                    <h4 class="font-black text-sm uppercase tracking-wide text-slate-900">
-                        Staff Development Overview
+    html += `
+        <section class="mb-4 space-y-3">
+
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h4 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                        Current Coaching Staff
                     </h4>
-                    <p class="mt-1 text-xs text-slate-500">
-                        Review historical improvements and current workload when needed.
+                    <p class="text-[10px] text-slate-500">
+                        Select a coach to open their individual profile.
                     </p>
                 </div>
-                <span class="shrink-0 text-[10px] font-bold uppercase tracking-wide text-blue-700">
-                    Expand details ↓
+
+                <span class="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600">
+                    ${npcCoachCount}/3 Staff Positions
                 </span>
-            </summary>
+            </div>
 
-            <div class="px-4 pb-4">
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
-                <div class="rounded border border-slate-200 bg-slate-50 p-3">
-                    <p class="text-[10px] uppercase tracking-wide text-slate-500">
-                        Recorded Increases
-                    </p>
-                    <p class="text-2xl font-black text-slate-900">
-                        ${totalRecordedImprovements}
-                    </p>
-                    <p class="text-[10px] text-slate-500">
-                        Across the current coaching staff
-                    </p>
+            <div class="grid grid-cols-3 gap-2">
+                <div class="rounded border border-slate-200 bg-white p-3">
+                    <span class="block text-[9px] font-bold uppercase text-slate-500">
+                        Staff Coaches
+                    </span>
+                    <span class="mt-1 block text-xl font-black text-slate-900">
+                        ${npcCoachCount}/3
+                    </span>
                 </div>
 
-                <div class="rounded border border-slate-200 bg-slate-50 p-3">
-                    <p class="text-[10px] uppercase tracking-wide text-slate-500">
-                        Recent Improvements
-                    </p>
-                    <p class="text-2xl font-black text-emerald-700">
-                        ${recentlyImprovedCoaches}/${developmentRows.length}
-                    </p>
-                    <p class="text-[10px] text-slate-500">
-                        Improved in the last four weeks
-                    </p>
+                <div class="rounded border border-slate-200 bg-white p-3">
+                    <span class="block text-[9px] font-bold uppercase text-slate-500">
+                        Average Skills
+                    </span>
+                    <span class="mt-1 block text-xl font-black text-slate-900">
+                        ${overviewAverage ?? '—'}
+                    </span>
                 </div>
 
-                <div class="rounded border border-slate-200 bg-slate-50 p-3">
-                    <p class="text-[10px] uppercase tracking-wide text-slate-500">
-                        Assigned Work
-                    </p>
-                    <p class="text-2xl font-black text-blue-700">
-                        ${coachesWithAssignments}/${developmentRows.length}
-                    </p>
-                    <p class="text-[10px] text-slate-500">
-                        Coaches with weekly hours assigned
-                    </p>
+                <div class="rounded border border-slate-200 bg-white p-3">
+                    <span class="block text-[9px] font-bold uppercase text-slate-500">
+                        Assigned Hours
+                    </span>
+                    <span class="mt-1 block text-xl font-black text-slate-900">
+                        ${totalAssignedHours}
+                    </span>
                 </div>
             </div>
 
             <div class="space-y-2">
-                ${developmentRows.map(row => `
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-100 pt-2 first:border-t-0 first:pt-0">
-                        <div class="min-w-0">
-                            <p class="text-xs font-bold text-slate-800">
-                                ${row.name}
-                            </p>
-                            <p class="text-[10px] text-slate-500">
-                                ${row.latest
-                                    ? `Last increase: Year ${row.latest.year}, Week ${row.latest.week}`
-                                    : 'No improvement recorded yet'}
-                                · ${row.improvements} total
-                            </p>
-                        </div>
+                ${overviewCoaches.map(entry => `
+                    <button
+                        type="button"
+                        class="w-full rounded-lg border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        onclick="app.openCoachCard('${entry.coachId}')"
+                        aria-label="Open profile for ${overviewEscape(entry.coach.name)}">
 
-                        <div class="flex flex-wrap items-center gap-2">
-                            <span class="text-[10px] font-semibold ${
-                                row.weeksSinceImprovement !== null &&
-                                row.weeksSinceImprovement >= 6
-                                    ? 'text-amber-700'
-                                    : 'text-slate-600'
-                            }">
-                                ${row.status}
-                            </span>
-                            <span class="rounded bg-slate-100 px-2 py-1 text-[10px] font-mono text-slate-700">
-                                ${row.assignedHours}/40 hrs
-                            </span>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-
-            <p class="mt-3 text-[10px] leading-relaxed text-slate-500">
-                Weekly hours reflect current assignments, while improvements are historical.
-                They help you compare workload and outcomes but do not prove that the current
-                assignments caused a past increase.
-            </p>
-            </div>
-        </details>
-    `;
-
-    html += `
-        <section class="mb-4">
-            <div class="overflow-x-auto rounded-lg border border-slate-300 bg-white shadow-sm">
-                <table class="w-full min-w-[900px] text-left text-xs">
-                    <thead class="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
-                        <tr>
-                            <th class="px-3 py-2.5">Coach</th>
-                            <th class="px-2 py-2.5 text-center">Role</th>
-                            <th class="px-2 py-2.5 text-center">Avg.</th>
-                            <th class="px-2 py-2.5 text-center">Offense</th>
-                            <th class="px-2 py-2.5 text-center">Defense</th>
-                            <th class="px-2 py-2.5 text-center">Scouting</th>
-                            <th class="px-2 py-2.5 text-center">Teaching</th>
-                            <th class="px-2 py-2.5 text-center">Planning</th>
-                            <th class="px-2 py-2.5 text-center">Practice</th>
-                            <th class="px-3 py-2.5 text-right">Workload</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-200">
-                        ${currentCoaches.map(coach => {
-                            const ratings = coach.ratings || {};
-                            const coachId = String(coach.id ?? '');
-
-                            const isHeadCoach = [
-                                team.coach,
-                                team.staff?.coach
-                            ].some(member =>
-                                member?.id != null &&
-                                String(member.id) === coachId
-                            );
-
-                            const isScout =
-                                team.staff?.scout?.id != null &&
-                                String(team.staff.scout.id) === coachId;
-
-                            const isTrainer =
-                                team.staff?.trainer?.id != null &&
-                                String(team.staff.trainer.id) === coachId;
-
-                            const roleLabel = coach.isUserCoach
-                                ? 'You'
-                                : isHeadCoach
-                                    ? 'Head Coach'
-                                    : isScout
-                                        ? 'Scout'
-                                        : isTrainer
-                                            ? 'Trainer'
-                                            : 'Coach';
-
-                            const offense = staffSkill(
-                                ratings.offSchemeMastery
-                            );
-
-                            const defense = staffSkill(
-                                ratings.defSchemeMastery
-                            );
-
-                            const scouting = staffAverage(
-                                ratings.evalPhysicals,
-                                ratings.evalTechnique,
-                                ratings.evalCharacter
-                            );
-
-                            const teaching = staffSkill(ratings.teaching);
-
-                            const planning = staffAverage(
-                                ratings.gameplanInstinct,
-                                ratings.inGameAdjustments
-                            );
-
-                            const practice = staffAverage(
-                                ratings.practiceDiscipline,
-                                ratings.conditioning
-                            );
-
-                            const average = staffAverage(
-                                offense,
-                                defense,
-                                scouting,
-                                teaching,
-                                planning,
-                                practice
-                            );
-
-                            const workload = developmentRows.find(
-                                row => String(row.id) === coachId
-                            )?.assignedHours ?? 0;
-
-                            const cell = value => `
-                                <td class="px-2 py-2.5 text-center">
-                                    <span class="font-mono font-bold tabular-nums text-slate-900">
-                                        ${value ?? '—'}
+                        <div class="flex items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-sm font-black text-slate-900">
+                                        ${overviewEscape(entry.coach.name || 'Unnamed Coach')}
                                     </span>
-                                </td>
-                            `;
 
-                            return `
-                                <tr class="hover:bg-blue-50/50">
-                                    <td class="px-3 py-2.5">
-                                        <span class="font-bold text-slate-900">
-                                            ${coach.name || 'Unnamed Coach'}
-                                        </span>
-                                    </td>
-                                    <td class="px-2 py-2.5 text-center">
-                                        <span class="inline-block rounded bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">
-                                            ${roleLabel}
-                                        </span>
-                                    </td>
-                                    ${cell(average)}
-                                    ${cell(offense)}
-                                    ${cell(defense)}
-                                    ${cell(scouting)}
-                                    ${cell(teaching)}
-                                    ${cell(planning)}
-                                    ${cell(practice)}
-                                    <td class="px-3 py-2.5 text-right font-mono tabular-nums">
-                                        <span class="font-bold text-slate-900">
-                                            ${workload}
-                                        </span>
-                                        <span class="text-slate-500"> hrs</span>
-                                    </td>
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>
-
-            ${developmentSummaryHtml}
-
-            <details class="mt-3 rounded-lg border border-slate-300 bg-white shadow-sm">
-                <summary class="cursor-pointer list-none px-4 py-3 flex items-center justify-between gap-3">
-                    <span class="text-xs font-black uppercase tracking-wide text-slate-800">
-                        Detailed Staff Profiles
-                    </span>
-                    <span class="text-[10px] font-semibold text-blue-700">
-                        Ratings · Development · History · Availability ↓
-                    </span>
-                </summary>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 p-3">
-                ${currentCoaches.map((coach, index) => {
-                    const r = coach.ratings || {};
-
-                    const coachWorkloadRow = developmentRows.find(
-                        row => String(row.id) === String(coach.id)
-                    );
-
-                    const availability = coach.availability || {};
-
-                    const rawWeeklyHours = availability.weeklyHours;
-                    const parsedWeeklyHours = Number(rawWeeklyHours);
-
-                    const weeklyHours =
-                        rawWeeklyHours != null &&
-                        Number.isFinite(parsedWeeklyHours)
-                            ? Math.max(0, Math.min(40, Math.floor(parsedWeeklyHours)))
-                            : null;
-
-                    const availableDays = Array.isArray(availability.availableDays)
-                        ? availability.availableDays
-                            .filter(day => typeof day === 'string' && day.trim())
-                        : [];
-
-                    const daysLabel = availableDays.length
-                        ? availableDays.join(' · ')
-                        : 'Not specified';
-
-                    const timeWindowLabels = {
-                        evening: 'Evenings',
-                        daytime: 'Daytime',
-                        mixed: 'Mixed availability',
-                        flexible: 'Flexible hours'
-                    };
-
-                    const scheduleLabel =
-                        availability.scheduleLabel || 'Schedule not set';
-
-                    const timeWindowLabel =
-                        timeWindowLabels[availability.timeWindow] ||
-                        'Not specified';
-
-                    const rawReliability = availability.reliability;
-                    const parsedReliability = Number(rawReliability);
-
-                    const reliability =
-                        rawReliability != null &&
-                        Number.isFinite(parsedReliability)
-                            ? Math.max(0, Math.min(100, Math.round(parsedReliability)))
-                            : null;
-
-                    const escapeStaffCardText = value =>
-                        String(value ?? '').replace(/[&<>"']/g, char => ({
-                            '&': '&amp;',
-                            '<': '&lt;',
-                            '>': '&gt;',
-                            '"': '&quot;',
-                            "'": '&#39;'
-                        })[char]);
-
-                    const skills = [
-                        ['Offense Scheme', staffSkill(r.offSchemeMastery), 'bg-emerald-500'],
-                        ['Defense Scheme', staffSkill(r.defSchemeMastery), 'bg-blue-500'],
-                        ['Player Evaluation', staffAverage(r.evalPhysicals, r.evalTechnique, r.evalCharacter), 'bg-violet-500'],
-                        ['Teaching', staffSkill(r.teaching), 'bg-amber-500'],
-                        ['Game Planning', staffAverage(r.gameplanInstinct, r.inGameAdjustments), 'bg-sky-500'],
-                        ['Practice', staffAverage(r.practiceDiscipline, r.conditioning), 'bg-rose-500']
-                    ];
-
-                    const compactSkillLabels = {
-                        'Offense Scheme': 'OFF',
-                        'Defense Scheme': 'DEF',
-                        'Player Evaluation': 'SCOUT',
-                        'Teaching': 'TEACH',
-                        'Game Planning': 'PLAN',
-                        'Practice': 'PRACTICE'
-                    };
-
-                                        const rated = skills.filter(skill => skill[1] !== null);
-                    const overall = staffAverage(...rated.map(skill => skill[1]));
-                    const strongest = [...rated].sort(
-                        (a, b) => b[1] - a[1]
-                    )[0];
-
-                    const development = coach.development || {};
-                    const recentDevelopmentHistory = Array.isArray(
-                        development.history
-                    )
-                        ? development.history.slice(-5).reverse()
-                        : [];
-                    const skillCeilings = development.skillCeilings || {};
-                    const progressBySkill = development.progressBySkill || {};
-
-                    const growthSkillLabels = {
-                        offSchemeMastery: 'Offense Scheme',
-                        defSchemeMastery: 'Defense Scheme',
-                        evalPhysicals: 'Physical Evaluation',
-                        evalTechnique: 'Technique Evaluation',
-                        evalCharacter: 'Character Evaluation',
-                        teaching: 'Teaching',
-                        gameplanInstinct: 'Game Planning',
-                        inGameAdjustments: 'In-Game Adjustments',
-                        practiceDiscipline: 'Practice Discipline',
-                        conditioning: 'Conditioning'
-                    };
-
-                    const remainingGrowth = Number(
-                        development.remainingGrowthPoints
-                    );
-
-                    const growthOutlook = !Number.isFinite(remainingGrowth)
-                        ? 'Not yet established'
-                        : remainingGrowth >= 12
-                            ? 'High development runway'
-                            : remainingGrowth >= 6
-                                ? 'Moderate development runway'
-                                : remainingGrowth > 0
-                                    ? 'Limited development runway'
-                                    : 'Career growth budget exhausted';
-
-                    const nextGrowth = Object.entries(progressBySkill)
-                        .map(([skill, progress]) => ({
-                            skill,
-                            label: growthSkillLabels[skill],
-                            progress: Math.max(0, Number(progress) || 0),
-                            rating: Number(r[skill]),
-                            ceiling: Number(skillCeilings[skill])
-                        }))
-                        .filter(item =>
-                            item.label &&
-                            Number.isFinite(item.rating) &&
-                            Number.isFinite(item.ceiling) &&
-                            item.rating < item.ceiling &&
-                            remainingGrowth > 0
-                        )
-                        .sort((a, b) => b.progress - a.progress)[0];
-
-                    const growthProgress = nextGrowth
-                        ? Math.min(100, Math.floor(nextGrowth.progress))
-                        : 0;
-
-                    const staffNumber = currentCoaches
-                        .slice(0, index + 1)
-                        .filter(c => !c.isUserCoach).length;
-
-                    return `
-                        <article class="bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden">
-                            <div class="bg-slate-50 border-b border-slate-200 p-4">
-                                <span class="text-[10px] font-black uppercase tracking-widest text-blue-700">
-                                    ${coach.isUserCoach ? 'Your Coaching Profile' : `Staff Coach ${staffNumber}`}
-                                </span>
-                                <div class="flex justify-between items-center gap-2 mt-1">
-                                    <h5 class="font-black text-lg text-slate-900">
-                                        ${coach.name || 'Unnamed Coach'}
-                                    </h5>
-                                    <span class="text-lg font-black text-slate-900">
-                                        ${overall ?? '—'}
-                                    </span>
-                                </div>
-                                <p class="text-[10px] text-slate-500">Overall skill average</p>
-
-                                <div class="mt-2 flex flex-wrap items-center gap-2">
-                                    <span class="rounded border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] text-blue-900">
-                                        Assigned: <b>${coachWorkloadRow?.assignedHours ?? 0} hrs</b>
-                                    </span>
-                                    <span class="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600">
-                                        ${weeklyHours === null
-                                            ? 'Availability not set'
-                                            : `${weeklyHours} hrs available / week`}
+                                    <span class="rounded bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase text-slate-600">
+                                        ${overviewEscape(entry.role)}
                                     </span>
                                 </div>
 
-                                <div class="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-1.5">
-                                    ${skills.map(([label, value]) => `
-                                        <div
-                                            title="${label}"
-                                            class="rounded border border-slate-200 bg-white px-1.5 py-2 text-center">
-                                            <span class="block text-[9px] font-bold text-slate-500">
-                                                ${compactSkillLabels[label] || label}
-                                            </span>
-                                            <span class="mt-0.5 block text-sm font-black tabular-nums text-slate-900">
-                                                ${value ?? '—'}
-                                            </span>
-                                        </div>
-                                    `).join('')}
-                                </div>
-
-                                ${strongest ? `
-                                    <div class="mt-3 text-xs font-bold text-emerald-900 bg-emerald-50 border border-emerald-200 rounded p-2">
-                                        Strongest: ${strongest[0]} (${strongest[1]})
-                                    </div>
-                                ` : ''}
+                                <p class="mt-1 text-[10px] text-slate-500">
+                                    ${entry.ratingsSummary.map(overviewEscape).join(' · ')}
+                                </p>
                             </div>
 
-                            <details class="border-t border-slate-200 p-4 space-y-3">
-                                <summary class="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-bold text-slate-700">
-                                    <span>Full ratings &amp; coach details</span>
-                                    <span class="text-[10px] font-semibold text-slate-500">
-                                        Development · History · Availability ↓
+                            <div class="flex shrink-0 items-center gap-2">
+                                <div class="text-right">
+                                    <span class="block text-[9px] uppercase text-slate-400">
+                                        Overall
                                     </span>
-                                </summary>
-                                <div class="grid grid-cols-2 gap-2">
-                                    ${skills.map(([label, value, color]) => `
-                                        <div class="rounded border border-slate-200 bg-slate-50 p-2">
-                                            <div class="flex justify-between items-center gap-2">
-                                                <span class="text-[10px] leading-tight font-semibold text-slate-600">
-                                                    ${label}
-                                                </span>
-                                                <span class="text-sm font-black text-slate-900 tabular-nums">
-                                                    ${value ?? '—'}
-                                                </span>
-                                            </div>
-
-                                            <div class="mt-1.5 h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                                                <div
-                                                    class="h-full rounded-full ${color}"
-                                                    style="width:${value ?? 0}%">
-                                                </div>
-                                            </div>
-                                        </div>
-                                    `).join('')}
+                                    <span class="text-xl font-black tabular-nums text-slate-900">
+                                        ${entry.overall ?? '—'}
+                                    </span>
                                 </div>
-
-                                <details class="mt-3 rounded-lg border border-slate-200 bg-slate-50">
-                                    <summary class="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-bold text-slate-700">
-                                        <span>More coach details</span>
-                                        <span class="text-[10px] font-semibold text-slate-500">
-                                            Development · History · Availability
-                                        </span>
-                                    </summary>
-
-                                    <div class="px-3 pb-3 space-y-3">
-                                <div class="rounded-lg border border-sky-200 bg-sky-50 p-3">
-                                    <div class="flex justify-between items-start gap-2">
-                                        <div>
-                                            <h6 class="text-[10px] font-black uppercase tracking-wide text-sky-900">
-                                                Coach Development
-                                            </h6>
-                                            <p class="text-xs font-bold text-sky-950 mt-1">
-                                                ${growthOutlook}
-                                            </p>
-                                        </div>
-                                        <span class="text-[10px] font-semibold text-sky-800">
-                                            ${development.experienceWeeks || 0} weeks
-                                        </span>
-                                    </div>
-
-                                    ${nextGrowth ? `
-                                        <div class="mt-3">
-                                            <div class="flex justify-between items-center gap-2 mb-1">
-                                                <span class="text-[11px] font-semibold text-slate-700">
-                                                    Next: ${nextGrowth.label}
-                                                </span>
-                                                <span class="text-[10px] font-bold text-sky-900">
-                                                    ${growthProgress}/100
-                                                </span>
-                                            </div>
-                                            <div class="h-2 rounded-full bg-sky-100 overflow-hidden">
-                                                <div
-                                                    class="h-full rounded-full bg-sky-500"
-                                                    style="width:${growthProgress}%">
-                                                </div>
-                                            </div>
-                                            ${growthProgress >= 100 ? `
-                                                <p class="text-[10px] text-sky-800 mt-1">
-                                                    Ready for the weekly development check.
-                                                </p>
-                                            ` : ''}
-                                        </div>
-                                    ` : `
-                                        <p class="text-[10px] text-sky-800 mt-2">
-                                            ${remainingGrowth <= 0
-                                                ? 'This coach has used their lifetime growth budget.'
-                                                : 'Skill-specific progress will appear as the coach gains experience in assigned work.'}
-                                        </p>
-                                    `}
-                                </div>
-
-                                <div class="mt-3 rounded-lg border border-slate-200 bg-white p-3">
-                                    <div class="flex items-center justify-between gap-2">
-                                        <h6 class="text-[10px] font-black uppercase tracking-wide text-slate-700">
-                                            Development History
-                                        </h6>
-                                        <span class="text-[10px] text-slate-500">
-                                            ${recentDevelopmentHistory.length} recent
-                                        </span>
-                                    </div>
-
-                                    ${recentDevelopmentHistory.length > 0 ? `
-                                        <div class="mt-3 space-y-2">
-                                            ${recentDevelopmentHistory.map(entry => `
-                                                <div class="flex items-center justify-between gap-3 border-t border-slate-100 pt-2 first:border-t-0 first:pt-0">
-                                                    <div class="min-w-0">
-                                                        <div class="text-xs font-bold text-slate-800">
-                                                            ${growthSkillLabels[entry.skill] || entry.skill}
-                                                        </div>
-                                                        <div class="text-[10px] text-slate-500">
-                                                            Year ${entry.year}, Week ${entry.week}
-                                                        </div>
-                                                    </div>
-
-                                                    <div class="shrink-0 text-right">
-                                                        <div class="text-xs font-black text-emerald-700">
-                                                            ${entry.previousRating} → ${entry.newRating}
-                                                        </div>
-                                                        <div class="text-[9px] font-semibold text-slate-500">
-                                                            Skill improved
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            `).join('')}
-                                        </div>
-                                    ` : `
-                                        <p class="mt-2 text-xs text-slate-500">
-                                            No skill improvements recorded yet.
-                                        </p>
-                                    `}
-                                </div>
-
-                                <div class="border-t border-slate-200 pt-3 space-y-2 text-xs">
-                                    <div>
-                                        <span class="text-slate-500">Tactical style</span>
-                                        <p class="font-bold text-slate-800">
-                                            ${coach.biases?.tactical?.displayName || coach.biases?.tactical?.name || 'Adaptive Strategist'}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span class="text-slate-500">Scouting style</span>
-                                        <p class="font-bold text-slate-800">
-                                            ${coach.biases?.scouting?.displayName || coach.biases?.scouting?.name || 'Balanced Evaluator'}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span class="text-slate-500">Personality</span>
-                                        <p class="font-bold text-slate-800">
-                                            ${coach.biases?.personality?.displayName || coach.biases?.personality?.name || 'Analytical Planner'}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div class="border-t border-slate-200 pt-3 space-y-3">
-                                    <div class="flex items-start justify-between gap-2">
-                                        <div>
-                                            <span class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                                Weekly availability
-                                            </span>
-                                            <p class="mt-1 text-sm font-black text-slate-900">
-                                                ${weeklyHours === null ? 'Not set' : `${weeklyHours} hrs/week`}
-                                            </p>
-                                        </div>
-
-                                        <span class="shrink-0 rounded bg-blue-50 border border-blue-200 px-2 py-1 text-[10px] font-bold text-blue-700">
-                                            ${escapeStaffCardText(timeWindowLabel)}
-                                        </span>
-                                    </div>
-
-                                    <div>
-                                        <span class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                            Preferred schedule
-                                        </span>
-                                        <p class="mt-1 text-xs font-semibold text-slate-800">
-                                            ${escapeStaffCardText(scheduleLabel)}
-                                        </p>
-                                        <p class="mt-1 text-[11px] leading-relaxed text-slate-500">
-                                            ${escapeStaffCardText(daysLabel)}
-                                        </p>
-                                    </div>
-
-                                    <div>
-                                        <div class="flex items-center justify-between gap-2 mb-1">
-                                            <span class="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                                Reliability
-                                            </span>
-                                            <span class="text-xs font-black text-slate-800">
-                                                ${reliability === null ? 'Not set' : `${reliability}%`}
-                                            </span>
-                                        </div>
-
-                                        <div
-                                            class="h-2 rounded-full bg-slate-200 overflow-hidden"
-                                            role="progressbar"
-                                            aria-label="Staff reliability"
-                                            aria-valuemin="0"
-                                            aria-valuemax="100"
-                                            aria-valuenow="${reliability ?? 0}"
-                                        >
-                                            <div
-                                                class="h-full rounded-full bg-emerald-500"
-                                                style="width: ${reliability ?? 0}%"
-                                            ></div>
-                                        </div>
-
-                                        <p class="mt-1 text-[10px] leading-relaxed text-slate-500">
-                                            Likelihood of following through on assigned commitments. Actual effects come in the next patch.
-                                        </p>
-                                    </div>
-                                </div>
-                                    </div>
-                                </details>
-                            </details>
-                        </article>
-                    `;
-                }).join('')}
-                </div>
-            </details>
+                                <span class="text-lg text-slate-400">›</span>
+                            </div>
+                        </div>
+                    </button>
+                `).join('')}
+            </div>
         </section>
     `;
 
+    // Finish the overview before opening the other management sections.
+    html += `
+        </div>
+
+                <div
+            class="staff-hub-pane hidden"
+            data-staff-pane="history">
+
+            <section class="mb-3 rounded-lg border border-slate-200 bg-white p-4">
+                <h4 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                    Coaching Career History
+                </h4>
+
+                <p class="mt-1 text-xs text-slate-500">
+                    Follow your current staff's careers across teams, seasons,
+                    coaching appointments, and accomplishments.
+                </p>
+
+                <div class="mt-3 grid grid-cols-2 gap-2">
+                    <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Coaches with History
+                        </span>
+                        <span class="text-xl font-black text-slate-900">
+                            ${coachesWithHistory}/${historyCoaches.length}
+                        </span>
+                    </div>
+
+                    <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Recorded Appointments
+                        </span>
+                        <span class="text-xl font-black text-slate-900">
+                            ${historyAppointmentCount}
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+            <div class="space-y-3">
+                ${staffCareerHistoryHtml}
+            </div>
+
+            ${freeAgentCareerCoaches.length > 0 ? `
+                <section class="mt-5 space-y-3">
+                    <div>
+                        <h4 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                            Former Staff · Free Agents
+                        </h4>
+                        <p class="text-[10px] text-slate-500">
+                            Coaches currently between teams whose career records remain available.
+                        </p>
+                    </div>
+
+                    ${freeAgentCareerHistoryHtml}
+                </section>
+            ` : ''}
+
+            ${retiredCoachArchive.length > 0 ? `
+                <section class="mt-5 space-y-3">
+                    <div>
+                        <h4 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                            Retired Coaches
+                        </h4>
+                        <p class="text-[10px] text-slate-500">
+                            Permanent career records for coaches who have retired.
+                        </p>
+                    </div>
+
+                    ${retiredCareerHistoryHtml}
+                </section>
+            ` : ''}
+
+            ${coachMarketArchive.length > 0 ? `
+                <section class="mt-5 space-y-3">
+                    <div>
+                        <h4 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                            Left Local Market
+                        </h4>
+                        <p class="text-[10px] text-slate-500">
+                            Coaches whose careers are preserved but who are no longer part of the local coaching pool.
+                        </p>
+                    </div>
+
+                    ${coachMarketExitHistoryHtml}
+                </section>
+            ` : ''}
+
+            <p class="mt-3 text-[10px] leading-relaxed text-slate-500">
+                Records begin when career tracking is active. Earlier coaching
+                seasons that were not recorded are intentionally excluded.
+                Each coach's complete career history is also available from
+                their individual profile.
+            </p>
+        </div>
+    `;
+
+    html += `
+        <div
+            class="staff-hub-pane hidden"
+            data-staff-pane="workload">
+    `;
+
     // 2. Weekly Staff Workload
-    const workCoaches = Game.ensureTeamCoachingStaff?.(team) ||
-        (Array.isArray(team.coaches) ? team.coaches : []);
-    const workPlan = Game.ensureTeamStaffWorkPlan?.(team);
+    const workCoaches = currentCoaches;
+    const workPlan = developmentWorkPlan;
 
     if (workPlan && Array.isArray(workPlan.assignments)) {
         const taskLabels = {
@@ -6195,8 +6231,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         `;
     }
 
+    html += '</div>';
+
     // Staff candidates are displayed in the dedicated Staff Carousel pane.
     container.innerHTML = html;
+
+    // Restore the user's selected destination after any UI refresh.
+    window.app_switchStaffTab(activeStaffHubTab);
 
     const workloadDetails = container.querySelector(
         '#staff-workload-assignments'
@@ -6245,24 +6286,25 @@ export function renderStaffCarouselTab(
         'staff-carousel-day-label'
     );
 
-    const carouselState = gameState.offseasonState || {};
-    const currentReviewDay = Number(carouselState.staffReviewDay);
-    const totalReviewDays = Number(carouselState.staffReviewDays);
+    const reviewState = gameState.offseasonState || {};
 
-    const displayedReviewDay =
-        Number.isInteger(currentReviewDay) && currentReviewDay > 0
-            ? currentReviewDay
+    const reviewDayValue = Number(reviewState.staffReviewDay);
+    const reviewDaysValue = Number(reviewState.staffReviewDays);
+
+    const staffReviewDay =
+        Number.isInteger(reviewDayValue) && reviewDayValue > 0
+            ? reviewDayValue
             : 1;
 
-    const displayedReviewDays =
-        Number.isInteger(totalReviewDays) &&
-        totalReviewDays >= displayedReviewDay
-            ? totalReviewDays
-            : COACH_CAROUSEL_DAYS;
+    const staffReviewDays =
+        Number.isInteger(reviewDaysValue) &&
+        reviewDaysValue >= staffReviewDay
+            ? reviewDaysValue
+            : Math.max(staffReviewDay, COACH_CAROUSEL_DAYS);
 
     if (carouselDayLabel) {
         carouselDayLabel.textContent =
-            `Staff Review · Day ${displayedReviewDay} of ${displayedReviewDays}`;
+            `Staff Review · Day ${staffReviewDay} of ${staffReviewDays}`;
     }
 
     const carouselBudgetLabel = document.getElementById(
@@ -6381,22 +6423,6 @@ export function renderStaffCarouselTab(
         3 - activeNpcCoaches.length
     );
 
-    const reviewState = gameState.offseasonState || {};
-
-    const reviewDayValue = Number(reviewState.staffReviewDay);
-    const reviewDaysValue = Number(reviewState.staffReviewDays);
-
-    const staffReviewDay =
-        Number.isInteger(reviewDayValue) && reviewDayValue > 0
-            ? reviewDayValue
-            : 1;
-
-    const staffReviewDays =
-        Number.isInteger(reviewDaysValue) &&
-        reviewDaysValue >= staffReviewDay
-            ? reviewDaysValue
-            : staffReviewDay;
-
     if (candidates.length === 0) {
         container.innerHTML = `
             <section class="bg-white rounded border border-slate-300 p-6 text-center">
@@ -6455,8 +6481,6 @@ export function renderStaffCarouselTab(
     };
 
     const getCandidateMetric = (candidate, key) => {
-        const ratings = candidate?.ratings || {};
-
         const offense = candidateRating(candidate, 'offSchemeMastery');
         const defense = candidateRating(candidate, 'defSchemeMastery');
         const scouting = averageRatings([
@@ -6576,6 +6600,15 @@ export function renderStaffCarouselTab(
             'stipend'
         ]);
 
+        if (!allowedSorts.has(key)) return;
+
+        staffCarouselSort = key;
+        staffCarouselSortDirection =
+            key === 'name' || key === 'stipend' ? 'asc' : 'desc';
+
+        renderStaffCarouselTab(Game.getGameState() || gameState);
+    };
+
     window.app_setStaffCarouselFitRole = role => {
         const allowedRoles = new Set([
             'general',
@@ -6586,15 +6619,6 @@ export function renderStaffCarouselTab(
         if (!allowedRoles.has(role)) return;
 
         staffCarouselFitRole = role;
-
-        renderStaffCarouselTab(Game.getGameState() || gameState);
-    };
-
-        if (!allowedSorts.has(key)) return;
-
-        staffCarouselSort = key;
-        staffCarouselSortDirection =
-            key === 'name' || key === 'stipend' ? 'asc' : 'desc';
 
         renderStaffCarouselTab(Game.getGameState() || gameState);
     };
@@ -6610,6 +6634,7 @@ export function renderStaffCarouselTab(
         staffCarouselSearch = '';
         staffCarouselSort = 'overall';
         staffCarouselSortDirection = 'desc';
+        staffCarouselFitRole = 'general';
 
         renderStaffCarouselTab(Game.getGameState() || gameState);
     };
@@ -6669,11 +6694,9 @@ export function renderStaffCarouselTab(
             return;
         }
 
-        const ratings = candidate.ratings || {};
-        const biases = candidate.biases || {};
-        const personality = biases.personality || {};
-        const tactical = biases.tactical || {};
-        const scouting = biases.scouting || {};
+        const personality = candidate.biases?.personality || {};
+        const tactical = candidate.biases?.tactical || {};
+        const scouting = candidate.biases?.scouting || {};
 
         const profileSkills = [
             ['Offense scheme', 'offSchemeMastery'],
@@ -6696,6 +6719,112 @@ export function renderStaffCarouselTab(
                 '"': '&quot;',
                 "'": '&#39;'
             })[char]);
+
+        // Show the candidate's actual recorded coaching career.
+        const careerHistory = (
+            Array.isArray(candidate.careerHistory)
+                ? [...candidate.careerHistory]
+                : []
+        )
+            .filter(record =>
+                record && typeof record === 'object'
+            )
+            .sort((a, b) =>
+                (Number(b.year) || 0) - (Number(a.year) || 0)
+            );
+
+        const careerTotals = careerHistory.reduce(
+            (totals, record) => {
+                totals.wins += Math.max(0, Number(record.wins) || 0);
+                totals.losses += Math.max(0, Number(record.losses) || 0);
+                totals.ties += Math.max(0, Number(record.ties) || 0);
+
+                if (
+                    record.roleKey === 'head_coach' ||
+                    record.role === 'Head Coach'
+                ) {
+                    totals.headCoachSeasons++;
+                }
+
+                return totals;
+            },
+            {
+                wins: 0,
+                losses: 0,
+                ties: 0,
+                headCoachSeasons: 0
+            }
+        );
+
+        const careerGames =
+            careerTotals.wins +
+            careerTotals.losses +
+            careerTotals.ties;
+
+        const careerWinPercentage = careerGames > 0
+            ? Math.round(
+                (
+                    careerTotals.wins +
+                    careerTotals.ties * 0.5
+                ) / careerGames * 100
+            )
+            : null;
+
+        const careerHistoryRows = careerHistory
+            .slice(0, 6)
+            .map(record => {
+                const wins = Math.max(0, Number(record.wins) || 0);
+                const losses = Math.max(0, Number(record.losses) || 0);
+                const ties = Math.max(0, Number(record.ties) || 0);
+
+                const milestones = Array.isArray(record.milestones)
+                    ? [...new Set(record.milestones)]
+                        .filter(value =>
+                            typeof value === 'string' && value.trim()
+                        )
+                        .map(escapeProfileText)
+                        .join(' · ')
+                    : '';
+
+                return `
+                    <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                        <div class="flex flex-wrap justify-between items-center gap-2">
+                            <div>
+                                <span class="text-[9px] font-bold uppercase text-blue-700">
+                                    Year ${escapeProfileText(record.year ?? '—')}
+                                </span>
+                                <p class="text-xs font-bold text-slate-900">
+                                    ${escapeProfileText(record.teamName || 'Unknown Team')}
+                                </p>
+                            </div>
+
+                            <span class="text-[10px] font-semibold text-slate-600">
+                                ${escapeProfileText(record.role || 'Coaching Staff')}
+                            </span>
+                        </div>
+
+                        <div class="mt-2 flex flex-wrap justify-between items-center gap-2">
+                            <span class="font-mono text-xs font-bold text-slate-800">
+                                ${wins}-${losses}-${ties}
+                            </span>
+
+                            <span class="text-[10px] text-slate-500">
+                                ${record.tier != null
+                                    ? `Tier ${escapeProfileText(record.tier)}`
+                                    : ''}
+                                ${record.leagueType
+                                    ? ` · ${escapeProfileText(record.leagueType)}`
+                                    : ''}
+                            </span>
+                        </div>
+
+                        ${milestones
+                            ? `<p class="mt-2 text-[10px] font-semibold text-amber-800">${milestones}</p>`
+                            : ''}
+                    </div>
+                `;
+            })
+            .join('');
 
         const currentTeam = latestState.playerTeam || team;
 
@@ -6842,6 +6971,70 @@ export function renderStaffCarouselTab(
                             </span>
                         </div>
                     </div>
+                </section>
+
+                <section class="space-y-3">
+                    <div>
+                        <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
+                            Coaching Experience
+                        </h5>
+                        <p class="mt-1 text-[10px] text-slate-500">
+                            Recorded coaching history and completed season results.
+                        </p>
+                    </div>
+
+                    ${careerHistory.length > 0 ? `
+                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                                <span class="block text-[9px] font-bold uppercase text-slate-500">
+                                    Seasons
+                                </span>
+                                <span class="text-lg font-black text-slate-900">
+                                    ${careerHistory.length}
+                                </span>
+                            </div>
+
+                            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                                <span class="block text-[9px] font-bold uppercase text-slate-500">
+                                    Career Record
+                                </span>
+                                <span class="text-lg font-black text-slate-900">
+                                    ${careerTotals.wins}-${careerTotals.losses}-${careerTotals.ties}
+                                </span>
+                            </div>
+
+                            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                                <span class="block text-[9px] font-bold uppercase text-slate-500">
+                                    Win Percentage
+                                </span>
+                                <span class="text-lg font-black text-slate-900">
+                                    ${careerWinPercentage == null
+                                        ? '—'
+                                        : `${careerWinPercentage}%`}
+                                </span>
+                            </div>
+                        </div>
+
+                        ${careerTotals.headCoachSeasons > 0 ? `
+                            <p class="text-[10px] font-semibold text-slate-600">
+                                ${careerTotals.headCoachSeasons} season${careerTotals.headCoachSeasons === 1 ? '' : 's'} as a head coach.
+                            </p>
+                        ` : ''}
+
+                        <div class="space-y-2">
+                            ${careerHistoryRows}
+                        </div>
+
+                        ${careerHistory.length > 6 ? `
+                            <p class="text-center text-[10px] text-slate-500">
+                                Showing the six most recent seasons of ${careerHistory.length} recorded seasons.
+                            </p>
+                        ` : ''}
+                    ` : `
+                        <p class="rounded border border-dashed border-slate-300 bg-slate-50 p-3 text-center text-[10px] text-slate-500">
+                            No recorded coaching seasons yet. This candidate may be new to coaching or entering from another background.
+                        </p>
+                    `}
                 </section>
 
                 ${tendencies ? `
@@ -6992,6 +7185,7 @@ export function renderStaffCarouselTab(
                 <thead class="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
                     <tr>
                         <th class="px-3 py-2.5">Candidate</th>
+                        <th class="px-2 py-2.5 text-center">Skill Avg.</th>
                         <th class="px-2 py-2.5 text-center">Role Fit</th>
                         <th class="px-2 py-2.5 text-center">Offense</th>
                         <th class="px-2 py-2.5 text-center">Defense</th>
@@ -7008,11 +7202,7 @@ export function renderStaffCarouselTab(
                 <tbody class="divide-y divide-slate-200">
                     ${displayCandidates.length > 0
                         ? displayCandidates.map(s => {
-                            const ratings = s.ratings || {};
-                            const biases = s.biases || {};
-                            const personality = biases.personality || {};
-                            const tactical = biases.tactical || {};
-                            const scouting = biases.scouting || {};
+                            const personality = s.biases?.personality || {};
 
                             const overall = getCandidateMetric(s, 'overall');
                             const roleFit = getCandidateMetric(s, 'roleFit');
@@ -7031,21 +7221,6 @@ export function renderStaffCarouselTab(
                             const weeksUnemployed = Number.isFinite(weeksValue)
                                 ? Math.max(0, Math.floor(weeksValue))
                                 : null;
-
-                            const tendencies = Game.previewCoachTendencies(s, team);
-
-                            const detailedSkills = [
-                                ['Offense scheme', 'offSchemeMastery'],
-                                ['Defense scheme', 'defSchemeMastery'],
-                                ['Physical evaluation', 'evalPhysicals'],
-                                ['Technique evaluation', 'evalTechnique'],
-                                ['Character evaluation', 'evalCharacter'],
-                                ['Teaching', 'teaching'],
-                                ['Gameplan instincts', 'gameplanInstinct'],
-                                ['In-game adjustments', 'inGameAdjustments'],
-                                ['Practice discipline', 'practiceDiscipline'],
-                                ['Conditioning', 'conditioning']
-                            ];
 
                             const scoreCell = value => `
                                 <td class="px-2 py-2.5 text-center">
