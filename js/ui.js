@@ -5479,22 +5479,6 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             specialties.map(item => item.value)
         );
 
-        const rankedSpecialties = [...specialties]
-            .filter(item => item.value !== null)
-            .sort((a, b) => b.value - a.value);
-
-        const strongest = rankedSpecialties[0] || null;
-        const weakest = rankedSpecialties[rankedSpecialties.length - 1] || null;
-
-        const strengthsSummary = rankedSpecialties
-            .slice(0, 2)
-            .map(item => `${item.name} ${Math.round(item.value)}`)
-            .join(' · ') || 'Ratings unavailable';
-
-        const weaknessSummary = weakest
-            ? `${weakest.name} ${Math.round(weakest.value)}`
-            : 'Ratings unavailable';
-
         const coachId = String(coach.id ?? '').replace(
             /\\/g,
             '\\\\'
