@@ -4177,13 +4177,19 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             </label>
                             <span class="text-[9px] font-mono text-emerald-700 font-bold">Fund: $${(team.finances?.balance || 0).toFixed(2)}</span>
                         </div>
-                        <select id="staff-pitch-cash" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none mb-2">
-                            <option value="0">$0.00 (Volunteer / No upfront compensation)</option>
-                            ${(team.finances?.balance || 0) >= 3 ? '<option value="3">$3.00 (Gas money / Whistle fund)</option>' : ''}
-                            ${(team.finances?.balance || 0) >= 6 ? '<option value="6">$6.00 (New clipboard, cones & breakfast donuts)</option>' : ''}
-                            ${(team.finances?.balance || 0) >= 10 ? '<option value="10">$10.00 (Full equipment bag & personal cooler)</option>' : ''}
-                            ${(team.finances?.balance || 0) >= 15 ? '<option value="15">$15.00 (Premium sideline buyout)</option>' : ''}
-                        </select>
+                        <input
+                            type="number"
+                            id="staff-pitch-cash"
+                            min="0"
+                            max="${Math.floor(Math.max(0, Number(team.finances?.balance) || 0))}"
+                            step="1"
+                            value="0"
+                            inputmode="numeric"
+                            class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none"
+                        />
+                        <p class="text-[10px] text-slate-500 mt-1">
+                            Enter any whole-dollar amount. Charged only if the offer is accepted.
+                        </p>
                     </div>
 
                     <div>
@@ -4270,15 +4276,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 ? Math.max(0, Math.floor(tokenBalanceValue))
                 : 0;
 
-            const validCashOffers = [0, 3, 6, 10, 15];
-
             const offerIsValid =
                 Number.isInteger(tokensOffered) &&
                 tokensOffered >= 0 &&
                 tokensOffered <= 2 &&
                 tokensOffered <= currentTokenBalance &&
-                Number.isFinite(cashOffered) &&
-                validCashOffers.includes(cashOffered) &&
+                Number.isSafeInteger(cashOffered) &&
+                cashOffered >= 0 &&
                 cashOffered <= currentCashBalance;
 
             if (!offerIsValid) {
@@ -5014,9 +5018,21 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             specialties.map(item => item.value)
         );
 
-        const strongest = [...specialties]
+        const rankedSpecialties = [...specialties]
             .filter(item => item.value !== null)
-            .sort((a, b) => b.value - a.value)[0];
+            .sort((a, b) => b.value - a.value);
+
+        const strongest = rankedSpecialties[0] || null;
+        const weakest = rankedSpecialties[rankedSpecialties.length - 1] || null;
+
+        const strengthsSummary = rankedSpecialties
+            .slice(0, 2)
+            .map(item => `${item.name} ${Math.round(item.value)}`)
+            .join(' · ') || 'Ratings unavailable';
+
+        const weaknessSummary = weakest
+            ? `${weakest.name} ${Math.round(weakest.value)}`
+            : 'Ratings unavailable';
 
         const coachId = String(coach.id ?? '').replace(
             /\\/g,
@@ -5057,9 +5073,83 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             coach.availability?.weeklyHours
         );
 
-        const availability = Number.isFinite(availableHours)
-            ? `${Math.max(0, Math.min(40, Math.floor(availableHours)))} hrs available`
-            : 'Availability not set';
+        const relevantSkills = coach.isUserCoach
+            ? specialties.map(item => ({
+                name: item.name,
+                value: item.value
+            }))
+            : isHeadCoach
+                ? [
+                    { name: 'Offense', value: readSkill('offSchemeMastery') },
+                    { name: 'Defense', value: readSkill('defSchemeMastery') },
+                    { name: 'Game Planning', value: readSkill('gameplanInstinct') },
+                    { name: 'Adjustments', value: readSkill('inGameAdjustments') }
+                ]
+                : isScout
+                    ? [
+                        { name: 'Physicals', value: readSkill('evalPhysicals') },
+                        { name: 'Technique', value: readSkill('evalTechnique') },
+                        { name: 'Character', value: readSkill('evalCharacter') }
+                    ]
+                    : isTrainer
+                        ? [
+                            { name: 'Teaching', value: readSkill('teaching') },
+                            { name: 'Discipline', value: readSkill('practiceDiscipline') },
+                            { name: 'Conditioning', value: readSkill('conditioning') }
+                        ]
+                        : specialties.map(item => ({
+                            name: item.name,
+                            value: item.value
+                        }));
+
+        const rankedSkills = relevantSkills
+            .filter(item => item.value !== null)
+            .sort((a, b) => b.value - a.value);
+
+        const strengthsSummary = rankedSkills
+            .slice(0, 2)
+            .map(item => `${item.name} ${Math.round(item.value)}`)
+            .join(' · ') || 'Ratings unavailable';
+
+        const lowestSkill = rankedSkills[rankedSkills.length - 1];
+
+        const lowestSkillSummary = lowestSkill
+            ? `${lowestSkill.name} ${Math.round(lowestSkill.value)}`
+            : 'Unavailable';
+
+        const personalityProfile = coach.biases?.personality;
+        const roleStyleProfile =
+            isHeadCoach || coach.isUserCoach
+                ? coach.biases?.tactical
+                : isScout
+                    ? coach.biases?.scouting
+                    : null;
+
+        const styleSummary = [
+            personalityProfile?.displayName || personalityProfile?.name,
+            roleStyleProfile?.displayName || roleStyleProfile?.name
+        ].filter(Boolean).join(' · ') || 'Style not recorded';
+
+                const personalityStyle =
+            coach.biases?.personality?.displayName ||
+            coach.biases?.personality?.name ||
+            null;
+
+        const roleStyleProfile = isHeadCoach
+            ? coach.biases?.tactical
+            : isScout
+                ? coach.biases?.scouting
+                : null;
+
+        const roleStyle =
+            roleStyleProfile?.displayName ||
+            roleStyleProfile?.name ||
+            null;
+
+        const styleSummary = [
+            personalityStyle,
+            roleStyle
+        ].filter(Boolean).join(' · ') || 'Style not recorded';
 
         const ratingsSummary = [
             strongest
@@ -5074,7 +5164,12 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             coachId,
             role,
             overall,
-            ratingsSummary
+            ratingsSummary,
+            strengthsSummary,
+            lowestSkillSummary,
+            styleSummary,
+            workload,
+            availability
         };
     });
 
@@ -5578,43 +5673,34 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             </div>
 
             <div class="grid grid-cols-3 gap-2">
-                <div class="rounded border border-slate-200 bg-white p-3">
-                    <span class="block text-[9px] font-bold uppercase text-slate-500">
-                        Staff Coaches
-                    </span>
-                    <span class="mt-1 block text-xl font-black text-slate-900">
-                        ${npcCoachCount}/3
-                    </span>
-                </div>
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-1 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] text-slate-600">
+                <span>
+                    STAFF
+                    <b class="ml-1 text-slate-900">${npcCoachCount}/3</b>
+                </span>
 
-                <div class="rounded border border-slate-200 bg-white p-3">
-                    <span class="block text-[9px] font-bold uppercase text-slate-500">
-                        Average Skills
-                    </span>
-                    <span class="mt-1 block text-xl font-black text-slate-900">
-                        ${overviewAverage ?? '—'}
-                    </span>
-                </div>
+                <span>
+                    AVG SKILLS
+                    <b class="ml-1 text-slate-900">${overviewAverage ?? '—'}</b>
+                </span>
 
-                <div class="rounded border border-slate-200 bg-white p-3">
-                    <span class="block text-[9px] font-bold uppercase text-slate-500">
-                        Assigned Hours
-                    </span>
-                    <span class="mt-1 block text-xl font-black text-slate-900">
-                        ${totalAssignedHours}
-                    </span>
-                </div>
+                <span>
+                    ASSIGNED HOURS
+                    <b class="ml-1 text-slate-900">${totalAssignedHours}</b>
+                </span>
+            </div>
             </div>
 
             <div class="space-y-2">
                 ${overviewCoaches.map(entry => `
                     <button
                         type="button"
-                        class="w-full rounded-lg border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         onclick="app.openCoachCard('${entry.coachId}')"
                         aria-label="Open profile for ${overviewEscape(entry.coach.name)}">
 
-                        <div class="flex items-center justify-between gap-3">
+                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.8fr)_auto] sm:items-center sm:gap-4">
+
                             <div class="min-w-0">
                                 <div class="flex flex-wrap items-center gap-2">
                                     <span class="text-sm font-black text-slate-900">
@@ -5626,21 +5712,44 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     </span>
                                 </div>
 
-                                <p class="mt-1 text-[10px] text-slate-500">
-                                    ${entry.ratingsSummary.map(overviewEscape).join(' · ')}
+                                <p class="mt-1 truncate text-[10px] text-slate-500">
+                                    ${overviewEscape(entry.styleSummary)}
                                 </p>
                             </div>
 
-                            <div class="flex shrink-0 items-center gap-2">
-                                <div class="text-right">
-                                    <span class="block text-[9px] uppercase text-slate-400">
-                                        Overall
+                            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]">
+                                <span class="text-slate-600">
+                                    <b class="uppercase text-emerald-700">Strengths</b>
+                                    ${overviewEscape(entry.strengthsSummary)}
+                                </span>
+
+                                <span class="text-slate-600">
+                                    <b class="uppercase text-amber-700">Lowest</b>
+                                    ${overviewEscape(entry.lowestSkillSummary)}
+                                </span>
+                            </div>
+
+                            <div class="flex items-center justify-between gap-3 sm:justify-end">
+                                <div class="text-right text-[9px] leading-relaxed text-slate-500">
+                                    <span class="block">
+                                        ${entry.workload}h assigned
                                     </span>
-                                    <span class="text-xl font-black tabular-nums text-slate-900">
-                                        ${entry.overall ?? '—'}
+                                    <span class="block">
+                                        ${overviewEscape(entry.availability)}
                                     </span>
                                 </div>
-                                <span class="text-lg text-slate-400">›</span>
+
+                                <div class="flex shrink-0 items-center gap-1">
+                                    <div class="text-right">
+                                        <span class="block text-[9px] uppercase text-slate-400">
+                                            Overall
+                                        </span>
+                                        <span class="text-xl font-black tabular-nums text-slate-900">
+                                            ${entry.overall ?? '—'}
+                                        </span>
+                                    </div>
+                                    <span class="text-lg text-slate-400">›</span>
+                                </div>
                             </div>
                         </div>
                     </button>
@@ -6393,7 +6502,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
             saveGameState();
             renderStaffTab(gs);
-                };
+        };
 
         window.app_toggleStaffWorkPlay = (index, playKey, checked) => {
             const gs = getGameState();
