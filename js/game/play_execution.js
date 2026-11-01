@@ -3210,6 +3210,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
 export function executeAssignment(pState, assignment, offenseStates, LOS, playState, ballCarrierState) {
     const isBallInAir = playState.ballState.inAir;
+    const qbState = offenseStates.find(o => o.formationRole === 'QB' || o.slot?.startsWith('QB'));
+
     // Clear stale ball-tracking state before resolving the current assignment.
     // A reachable interception below can explicitly restore tracking_ball.
     if (pState.action === 'tracking_ball') {
@@ -3491,7 +3493,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
         // 3. QB Stare-Down Tracking: Low-IQ QBs frequently stare down their target, allowing DBs to cheat.
         // High-IQ QBs disguise their eyes, meaning DBs rarely get an early read.
-        const qb = offenseStates.find(o => o.slot?.startsWith('QB'));
+        const qb = qbState;
         if (qb && qb.currentReadTargetSlot) {
             const qbIQ = qb.playbookIQ || 50;
             const stareDownChance = Math.max(0.05, 0.85 - (qbIQ * 0.008)); // 50 IQ = 45% chance, 90 IQ = 13% chance

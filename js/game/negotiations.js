@@ -651,62 +651,393 @@ export function calculateAiTeamNeedAndDesire(
 }
 
 /**
- * Generates accurate market intel and rumor buzz driven by true AI team desires.
+ * Builds free-agency market intel from observable recruiting activity.
+ *
+ * Rival interest scores are intentionally not read. Estimated interest
+ * ranges are inferred from recorded effort, action types, and known
+ * diminishing returns.
  */
 export function generatePlayerRumors(player, gameState) {
-    if (!player || !gameState) {
-        return { heat: 'QUIET', suitorTeams: [], suitorNames: [], rumorText: 'Quiet on the blacktop.', keyFactor: 'Available' };
+    const quietResult = {
+        heat: 'QUIET',
+        suitorTeams: [],
+        suitorNames: [],
+        suitorDetails: [],
+        estimatedLeader: null,
+        leadStatus: 'No recorded pursuit',
+        rumorText: 'No schools have made recorded recruiting contact yet.',
+        keyFactor: 'No recorded pursuit'
+    };
+
+    if (!player || player.id == null || !gameState) {
+        return quietResult;
     }
 
-    const mainTeams = (gameState.teams || []).filter(t => t.leagueType === 'main');
-    const interested = [];
+    const mainTeams = (gameState.teams || []).filter(
+        team => team?.leagueType === 'main' && team.id != null
+    );
 
-    mainTeams.forEach(team => {
-        const evalResult = calculateAiTeamNeedAndDesire(team, player, gameState, 0);
-        if (evalResult.shouldBid) {
-            interested.push({ team, desire: evalResult.desireScore, reason: evalResult.reason });
+    const teamsById = new Map(
+        mainTeams.map(team => [String(team.id), team])
+    );
+
+    const progress =
+        gameState.offseasonState?.recruitingProgress;
+
+    const currentYear = Number(gameState.year);
+
+    const activities = (
+        Array.isArray(progress?.dailyActivity)
+            ? progress.dailyActivity
+            : []
+    )
+        .filter(activity =>
+            activity &&
+            String(activity.playerId) === String(player.id) &&
+            Number(activity.year) === currentYear &&
+            teamsById.has(String(activity.teamId)) &&
+            [
+                'recruiting_action',
+                'recruiting_sweetener'
+            ].includes(activity.type)
+        )
+        .sort((a, b) =>
+            (Number(a.day) || 0) - (Number(b.day) || 0)
+        );
+
+    if (activities.length === 0) {
+        return quietResult;
+    }
+
+    const actionRates = {
+        outreach: 2.2,
+        teammateConnection: 1.9,
+        roleDiscussion: 2.1,
+        practiceInvitation: 2.3
+    };
+
+    const teamActivity = new Map();
+
+    for (const activity of activities) {
+        const teamKey = String(activity.teamId);
+        const team = teamsById.get(teamKey);
+
+        if (!team) continue;
+
+        if (!teamActivity.has(teamKey)) {
+            teamActivity.set(teamKey, {
+                team,
+                actionCount: 0,
+                sweetenerCount: 0,
+                totalHours: 0,
+                lastActivityDay: 0,
+                actionHistory: {},
+                activityDays: new Set(),
+                estimatedLow: 0,
+                estimatedHigh: 0
+            });
         }
-    });
 
-    interested.sort((a, b) => b.desire - a.desire);
-    const suitorTeams = interested.slice(0, 2).map(i => i.team);
+        const entry = teamActivity.get(teamKey);
+        const activityDay = Number(activity.day) || 0;
 
-    let heat = 'QUIET';
-    if (suitorTeams.length >= 2) heat = 'HOT';
-    else if (suitorTeams.length === 1) heat = 'WARM';
+        entry.lastActivityDay = Math.max(
+            entry.lastActivityDay,
+            activityDay
+        );
 
-    let rumorText = 'Flying under the radar on the playground. Uncontested target.';
-    let keyFactor = 'Open Field';
+        if (activity.type === 'recruiting_action') {
+            const actionType = String(activity.action || '');
+            const pointsPerHour = actionRates[actionType];
 
-    if (suitorTeams.length > 0) {
-        const topSuitor = suitorTeams[0];
-        const topReason = interested[0].reason;
+            if (!Number.isFinite(pointsPerHour)) continue;
 
-        if (heat === 'HOT') {
-            rumorText = `Active bidding battle developing between ${suitorTeams[0].name} and ${suitorTeams[1].name}.`;
-            keyFactor = `Targeted by ${suitorTeams[0].name} & ${suitorTeams[1].name}`;
-        } else {
-            rumorText = `${topSuitor.name} have made him a priority target: ${topReason}.`;
-            keyFactor = `${topSuitor.name} target`;
+            const hours = Math.max(
+                0,
+                Number(activity.hours) || 0
+            );
+
+            if (hours <= 0) continue;
+
+            entry.activityDays.add(activityDay);
+
+            const repeatedActions =
+                entry.actionHistory[actionType] || 0;
+
+            const repetitionMultiplier =
+                Math.pow(0.75, repeatedActions);
+
+            const baseEstimate =
+                hours *
+                pointsPerHour *
+                repetitionMultiplier;
+
+            // Rival coach skill is unknown. Estimate using the engine's
+            // possible skill multiplier range, not the rival's actual rating.
+            entry.estimatedLow += baseEstimate * 0.65;
+            entry.estimatedHigh += baseEstimate * 1.35;
+
+            entry.actionHistory[actionType] =
+                repeatedActions + 1;
+
+            entry.actionCount += 1;
+            entry.totalHours += hours;
+        }
+
+        if (activity.type === 'recruiting_sweetener') {
+            // The fact that a sweetener was used is observable.
+            // Its exact interest gain is deliberately not disclosed.
+            const tokensSpent = Math.max(
+                0,
+                Number(activity.tokensSpent) || 0
+            );
+
+            const cashSpent = Math.max(
+                0,
+                Number(activity.cashSpent) || 0
+            );
+
+            if (tokensSpent > 0 || cashSpent > 0) {
+                entry.activityDays.add(activityDay);
+                entry.sweetenerCount += 1;
+
+                // Sweeteners increase the estimated range, but their
+                // actual internal interest gain remains hidden.
+                entry.estimatedHigh += tokensSpent > 0 ? 8 : 0;
+                entry.estimatedHigh += cashSpent > 0 ? 6 : 0;
+            }
         }
     }
+
+    const currentDay = Math.max(
+        1,
+        Number(gameState.offseasonState?.recruitingDay) || 1
+    );
+
+    const suitorDetails = [...teamActivity.values()]
+        .filter(entry =>
+            entry.actionCount > 0 ||
+            entry.sweetenerCount > 0
+        )
+        .map(entry => {
+            const estimatedLow = Math.max(
+                0,
+                Math.min(100, Math.floor(entry.estimatedLow))
+            );
+
+            const estimatedHigh = Math.max(
+                estimatedLow,
+                Math.min(100, Math.ceil(entry.estimatedHigh))
+            );
+
+            const estimatedMidpoint = Math.round(
+                (estimatedLow + estimatedHigh) / 2
+            );
+
+            const daysSinceContact = Math.max(
+                0,
+                currentDay - entry.lastActivityDay
+            );
+
+            const activityDays = [...entry.activityDays];
+
+            const recentActivityDays = activityDays.filter(day =>
+                day >= currentDay - 1 &&
+                day <= currentDay
+            ).length;
+
+            // Momentum rewards current contact and sustained pursuit.
+            const recencyScore = Math.max(
+                0,
+                30 - daysSinceContact * 10
+            );
+
+            const consistencyScore = Math.min(
+                30,
+                activityDays.length * 6
+            );
+
+            const recentActivityScore = Math.min(
+                40,
+                recentActivityDays * 20
+            );
+
+            const momentumScore = Math.max(
+                0,
+                Math.min(
+                    100,
+                    Math.round(
+                        recencyScore +
+                        consistencyScore +
+                        recentActivityScore
+                    )
+                )
+            );
+
+            const momentum =
+                momentumScore >= 75
+                    ? 'Surging'
+                    : momentumScore >= 55
+                        ? 'Building'
+                        : momentumScore >= 35
+                            ? 'Active'
+                            : momentumScore >= 15
+                                ? 'Cooling'
+                                : 'Stalled';
+
+            // Combine estimated interest and momentum for pursuit ranking.
+            // Keep the underlying interest estimate separate.
+            const pursuitRankScore = Math.round(
+                estimatedMidpoint * 0.75 +
+                momentumScore * 0.25
+            );
+
+            const confidence =
+                entry.actionCount >= 5 && entry.totalHours >= 8
+                    ? 'Moderate'
+                    : entry.actionCount >= 2 || entry.sweetenerCount > 0
+                        ? 'Low–Moderate'
+                        : 'Low';
+
+            const activityLevel =
+                entry.totalHours >= 6 || entry.sweetenerCount >= 2
+                    ? 'Heavy'
+                    : entry.totalHours >= 3 || entry.sweetenerCount > 0
+                        ? 'Moderate'
+                        : 'Light';
+
+            return {
+                team: entry.team,
+                teamId: entry.team.id,
+                teamName: entry.team.name,
+
+                momentum,
+                momentumScore,
+                pursuitRankScore,
+                activeDaysCount: activityDays.length,
+                recentActivityDays,
+                actionCount: entry.actionCount,
+                sweetenerCount: entry.sweetenerCount,
+                totalHours: entry.totalHours,
+                lastActivityDay: entry.lastActivityDay,
+                daysSinceContact,
+                estimatedInterestRange: {
+                    low: estimatedLow,
+                    high: estimatedHigh
+                },
+                estimatedMidpoint,
+                confidence,
+                activityLevel
+            };
+        })
+        .sort((a, b) =>
+            b.pursuitRankScore - a.pursuitRankScore ||
+            b.estimatedMidpoint - a.estimatedMidpoint ||
+            b.lastActivityDay - a.lastActivityDay
+        );
+    if (suitorDetails.length === 0) {
+        return quietResult;
+    }
+
+    const suitorTeams = suitorDetails
+        .slice(0, 3)
+        .map(entry => entry.team);
+
+    const suitorNames = suitorTeams.map(team => team.name);
+
+    const pursuitLeader = suitorDetails[0];
+
+    const interestRanked = [...suitorDetails].sort(
+        (a, b) =>
+            b.estimatedMidpoint - a.estimatedMidpoint ||
+            b.totalHours - a.totalHours
+    );
+
+    const leader = interestRanked[0];
+    const runnerUp = interestRanked[1] || null;
+
+    let heat = 'WARM';
+
+    if (suitorDetails.length >= 2) {
+        heat = 'HOT';
+    }
+
+    let leadStatus = 'Only recorded suitor';
+
+    if (runnerUp) {
+        leadStatus =
+            leader.estimatedInterestRange.low >
+            runnerUp.estimatedInterestRange.high
+                ? 'Estimated lead'
+                : 'Close race';
+    }
+
+    const rumorText = runnerUp
+        ? `${leader.teamName} and ${runnerUp.teamName} are among the most active schools pursuing this player.`
+        : `${leader.teamName} has made recorded recruiting contact with this player.`;
 
     return {
         heat,
         suitorTeams,
-        suitorNames: suitorTeams.map(t => t.name),
+        suitorNames,
+        suitorDetails,
+        estimatedLeader: leader.teamName,
+        leadStatus,
         rumorText,
-        keyFactor
+        keyFactor: `Most observed effort: ${leader.teamName}`,
+        estimateBasis: 'Observed recruiting activity',
+        estimateNote:
+            'Estimated interest is a range, not the rival school’s actual internal score.'
     };
 }
 
 export function getPlayerMarketIntel(player, gameState) {
-    if (!gameState) return generatePlayerRumors(player, gameState);
-    gameState._faMarketCache = gameState._faMarketCache || new Map();
-    if (!gameState._faMarketCache.has(player.id)) {
-        gameState._faMarketCache.set(player.id, generatePlayerRumors(player, gameState));
+    if (
+        !player ||
+        player.id == null ||
+        !gameState
+    ) {
+        return generatePlayerRumors(player, gameState);
     }
-    return gameState._faMarketCache.get(player.id);
+
+    if (!(gameState._faMarketCache instanceof Map)) {
+        gameState._faMarketCache = new Map();
+    }
+
+    const progress =
+        gameState.offseasonState?.recruitingProgress;
+
+    const activities = Array.isArray(progress?.dailyActivity)
+        ? progress.dailyActivity
+        : [];
+
+    // Any new recruiting action or sweetener changes the signature.
+    // The next market-intel request will then rebuild the estimate.
+    const cacheSignature = [
+        Number(gameState.year) || 0,
+        Number(progress?.seasonYear) || 0,
+        Number(progress?.recruitingDay) || 0,
+        activities.length
+    ].join(':');
+
+    const cached = gameState._faMarketCache.get(player.id);
+
+    if (
+        !cached ||
+        cached.signature !== cacheSignature ||
+        !cached.intel
+    ) {
+        const intel = generatePlayerRumors(player, gameState);
+
+        gameState._faMarketCache.set(player.id, {
+            signature: cacheSignature,
+            intel
+        });
+
+        return intel;
+    }
+
+    return cached.intel;
 }
 
 export function clearPlayerMarketCache(gameState) {
