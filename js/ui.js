@@ -10,6 +10,7 @@ import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/f
 import { renderDepthOrderPane } from './ui/depth_order.js';
 import { applyRecruitingSweetener } from './game/staff.js';
 import { DEFAULT_PLAYBACK_INTERVAL_MS, getPlaybackIntervalMs } from './game/simulation_config.js';
+import { getCurrentRosterLimit } from './game/season.js';
 
 let elements = {};
 let selectedPlayerId = null;
