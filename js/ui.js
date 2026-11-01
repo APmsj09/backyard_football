@@ -3727,8 +3727,6 @@ window.app_openRecruitingSweetenerModal = function(playerId) {
 };
 
 window.app_openBidModal = function(playerId) {
-
-window.app_openBidModal = function(playerId) {
     const gs = getGameState();
     if (!gs?.playerTeam) return;
 
