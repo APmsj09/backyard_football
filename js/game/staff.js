@@ -4836,7 +4836,7 @@ export function ensureAiStaffWorkPlan(
         // Evaluation noise can occasionally lead to a suboptimal choice.
         // Better judgment and discipline reduce the chance of mistakes.
         const assignmentScores = new Map(
-            availableCoaches.map(({ coach }) => {
+            availableCoaches.map(coach => {
                 const judgmentNoise =
                     (Math.random() * 2 - 1) *
                     assignmentNoiseRange;
@@ -4851,8 +4851,8 @@ export function ensureAiStaffWorkPlan(
 
         availableCoaches.sort(
             (a, b) =>
-                assignmentScores.get(String(b.coach.id)) -
-                assignmentScores.get(String(a.coach.id))
+                assignmentScores.get(String(b.id)) -
+                assignmentScores.get(String(a.id))
         );
 
         const coach = availableCoaches.shift();
@@ -5797,7 +5797,120 @@ export function resolveCoachCarousel(
             calculateCoachRoleFit(estimatedCandidate, 'defensePrep')
         ].reduce((sum, value) => sum + value, 0) / 4;
 
-        let fitScore = rep * 0.45 + roleFit * 0.55;
+        // Career history is useful evidence, but team results are not
+        // a direct measure of an individual coach's ability.
+        const careerHistory = Array.isArray(candidate.careerHistory)
+            ? candidate.careerHistory.filter(record =>
+                record && typeof record === 'object'
+            )
+            : [];
+
+        const careerSummary = careerHistory.reduce(
+            (summary, record) => {
+                summary.seasons++;
+
+                const roleKey = String(
+                    record.roleKey || ''
+                ).toLowerCase();
+
+                const roleLabel = String(
+                    record.role || ''
+                ).toLowerCase();
+
+                const isHeadCoach =
+                    roleKey === 'head_coach' ||
+                    roleLabel === 'head coach';
+
+                const isGmCoach =
+                    roleKey === 'gm_coach';
+
+                const roleWeight = isHeadCoach
+                    ? 1
+                    : isGmCoach
+                        ? 0.75
+                        : roleKey === 'assistant_scout' ||
+                            roleKey === 'assistant_trainer'
+                            ? 0.35
+                            : 0.45;
+
+                if (isHeadCoach) {
+                    summary.headCoachSeasons++;
+                }
+
+                const hasCompleteRecord = [
+                    record.wins,
+                    record.losses,
+                    record.ties
+                ].every(value =>
+                    value != null &&
+                    Number.isFinite(Number(value))
+                );
+
+                if (!hasCompleteRecord) return summary;
+
+                const wins = Math.max(0, Number(record.wins));
+                const losses = Math.max(0, Number(record.losses));
+                const ties = Math.max(0, Number(record.ties));
+
+                const games = wins + losses + ties;
+
+                if (games <= 0) return summary;
+
+                summary.weightedWins +=
+                    (wins + ties * 0.5) * roleWeight;
+
+                summary.weightedGames +=
+                    games * roleWeight;
+
+                return summary;
+            },
+            {
+                seasons: 0,
+                headCoachSeasons: 0,
+                weightedWins: 0,
+                weightedGames: 0
+            }
+        );
+
+        const careerWinPercentage =
+            careerSummary.weightedGames > 0
+                ? careerSummary.weightedWins /
+                    careerSummary.weightedGames
+                : 0.50;
+
+        // More recorded games provide a more useful signal, but even
+        // a large sample cannot prove that one coach caused the results.
+        const careerConfidence =
+            careerSummary.weightedGames > 0
+                ? careerSummary.weightedGames /
+                    (careerSummary.weightedGames + 18)
+                : 0;
+
+        const careerPerformanceAdjustment =
+            (careerWinPercentage - 0.50) *
+            12 *
+            careerConfidence;
+
+        // Reward actual experience slightly, independently of winning.
+        const careerExperienceAdjustment = Math.min(
+            1.5,
+            careerSummary.seasons * 0.15 +
+            careerSummary.headCoachSeasons * 0.15
+        );
+
+        const careerAdjustment = Math.max(
+            -3,
+            Math.min(
+                3,
+                careerPerformanceAdjustment +
+                careerExperienceAdjustment
+            )
+        );
+
+        let fitScore =
+            rep * 0.45 +
+            roleFit * 0.55 +
+            careerAdjustment;
 
         const tacticalId = getStaffProfileId(candidate, 'tactical');
         // Estimate discipline from the candidate's publicly visible
@@ -5998,15 +6111,83 @@ export function resolveCoachCarousel(
             const chosen = candidates[0];
             const newHire = chosen.candidate;
 
-            // Resolve acceptance only after the AI has selected and
-            // made an offer. A rejection leaves the vacancy open.
-            const negotiation = evaluateStaffNegotiation(
+            // Make the initial offer only after selecting the candidate.
+            let negotiation = evaluateStaffNegotiation(
                 newHire,
                 team,
                 'coach',
                 chosen.pitch
             );
 
+            let finalCashOffer = chosen.offeredStipend;
+            let finalTokenOffer = chosen.offeredTokens;
+
+            // Severely understaffed teams may make one improved offer
+            // when the candidate appears reasonably close to accepting.
+            // The candidate remains free to reject both offers.
+            const initialInterest = Number(negotiation.interestScore);
+
+            if (
+                !negotiation.accepted &&
+                currentCoachCount <= 1 &&
+                Number.isFinite(initialInterest) &&
+                initialInterest >= 35
+            ) {
+                const cashBalance = Number(team.finances?.balance);
+                const availableCash = team.finances &&
+                    Number.isFinite(cashBalance)
+                        ? Math.max(0, cashBalance)
+                        : 0;
+
+                const availableTokens = Math.max(
+                    0,
+                    Math.floor(
+                        Number(team.socialProfile?.favorTokens) || 0
+                    )
+                );
+
+                // The improved offer is deliberately modest:
+                // at most one additional dollar and one additional token.
+                const counterCashOffer = Math.min(
+                    availableCash,
+                    finalCashOffer + 1
+                );
+
+                const counterTokenOffer = Math.min(
+                    2,
+                    availableTokens,
+                    finalTokenOffer + 1
+                );
+
+                const counterOfferImprovesTerms =
+                    counterCashOffer > finalCashOffer ||
+                    counterTokenOffer > finalTokenOffer;
+
+                if (counterOfferImprovesTerms) {
+                    const counterPitch = {
+                        ...chosen.pitch,
+                        cashOffered: counterCashOffer,
+                        tokensOffered: counterTokenOffer
+                    };
+
+                    const counterNegotiation =
+                        evaluateStaffNegotiation(
+                            newHire,
+                            team,
+                            'coach',
+                            counterPitch
+                        );
+
+                    if (counterNegotiation.accepted) {
+                        negotiation = counterNegotiation;
+                        finalCashOffer = counterCashOffer;
+                        finalTokenOffer = counterTokenOffer;
+                    }
+                }
+            }
+
+            // After two unsuccessful offers, stop approaching this
+            // candidate during the current carousel review.
             if (!negotiation.accepted) {
                 rejectedCandidateIds.add(String(newHire.id));
                 continue;
@@ -6029,15 +6210,15 @@ export function resolveCoachCarousel(
                 team.finances.balance = Math.max(
                     0,
                     (Number(team.finances.balance) || 0) -
-                    chosen.offeredStipend
+                    finalCashOffer
                 );
             }
 
-            if (chosen.offeredTokens > 0 && team.socialProfile) {
+            if (finalTokenOffer > 0 && team.socialProfile) {
                 team.socialProfile.favorTokens = Math.max(
                     0,
                     (Number(team.socialProfile.favorTokens) || 0) -
-                    chosen.offeredTokens
+                    finalTokenOffer
                 );
             }
 
