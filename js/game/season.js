@@ -358,6 +358,44 @@ export function transitionOffseasonPhase(
             );
         });
 
+        // Preserve prior-season interest for unsigned prospects.
+        // Staff assignments and action history reset each campaign,
+        // but relationships built with a prospect carry forward.
+        const previousRecruitingProgress =
+            state.recruitingProgress?.initialized === true &&
+            Number(state.recruitingProgress.seasonYear) < Number(gameState.year)
+                ? state.recruitingProgress
+                : null;
+
+        const previousRecruitRecords =
+            previousRecruitingProgress?.recruits || {};
+
+        const getCarryoverInterest = (player, team) => {
+            const previousRecord =
+                previousRecruitRecords[String(player.id)];
+
+            if (
+                !previousRecord ||
+                previousRecord.status === 'committed' ||
+                previousRecord.committedTeamId != null
+            ) {
+                return 0;
+            }
+
+            const rawInterest =
+                previousRecord.interestByTeam?.[String(team.id)];
+
+            const interest = Number(rawInterest);
+
+            return (
+                rawInterest != null &&
+                String(rawInterest).trim() !== '' &&
+                Number.isFinite(interest)
+            )
+                ? Math.max(0, Math.min(100, interest))
+                : 0;
+        };
+
         const recruits = Object.fromEntries(
             eligibleRecruits.map(player => [
                 String(player.id),
@@ -366,7 +404,7 @@ export function transitionOffseasonPhase(
                     interestByTeam: Object.fromEntries(
                         recruitingTeams.map(team => [
                             String(team.id),
-                            0
+                            getCarryoverInterest(player, team)
                         ])
                     ),
                     history: [],

@@ -2185,6 +2185,7 @@ export function renderFreeAgentsTab(gameState) {
         }
 
         if (
+            Number(p.status?.duration) > 0 ||
             Number(p.injury?.duration || p.injuryDuration || 0) > 0
         ) {
             return false;
@@ -2310,6 +2311,14 @@ export function renderFreeAgentsTab(gameState) {
 
 let offseasonFABids = [];
 let offseasonFADay = 1;
+
+let recruitingQuickAssignDefaults = {
+    coachId: '',
+    actionType: 'outreach',
+    hours: 2
+};
+
+const recruitingQuickSelectedIds = new Set();
 
 export function startOffseasonFAMinigame(gameState) {
     offseasonFABids = [];
@@ -2861,6 +2870,70 @@ export function renderOffseasonFAPool(gameState) {
             gameState.playerTeam
         )
     );
+    // Build the shared quick-assignment coach list using remaining
+    // weekly hours, not just each coach's original capacity.
+    const quickBudget =
+        Game.getRecruitingStaffHourBudget?.(gameState.playerTeam) || [];
+
+    const quickTeamWork =
+        progress.teamDailyWork?.[String(gameState.playerTeam.id)] || {};
+
+    const quickPreviousAssignments = Object.values(quickTeamWork).flatMap(
+        assignments => Array.isArray(assignments) ? assignments : []
+    );
+
+    const quickAssignCoaches = quickBudget.map(coach => {
+        const usedHours = quickPreviousAssignments
+            .filter(assignment =>
+                String(assignment.coachId) === String(coach.coachId)
+            )
+            .reduce(
+                (total, assignment) =>
+                    total + Math.max(0, Number(assignment.hours) || 0),
+                0
+            );
+
+        return {
+            ...coach,
+            remainingHours: Math.max(
+                0,
+                Number(coach.weeklyHours) - usedHours
+            )
+        };
+    }).filter(coach => coach.remainingHours > 0);
+
+    if (!quickAssignCoaches.some(coach =>
+        String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId)
+    )) {
+        recruitingQuickAssignDefaults.coachId =
+            quickAssignCoaches[0]?.coachId || '';
+    }
+
+    const quickSelectedCoach = quickAssignCoaches.find(coach =>
+        String(coach.coachId) ===
+        String(recruitingQuickAssignDefaults.coachId)
+    );
+
+    const quickMaxHours = quickSelectedCoach?.remainingHours || 1;
+
+    recruitingQuickAssignDefaults.hours = Math.max(
+        1,
+        Math.min(
+            quickMaxHours,
+            Math.floor(Number(recruitingQuickAssignDefaults.hours) || 2)
+        )
+    );
+
+    const quickEscapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
 
     if (pool.length === 0) {
         container.innerHTML = `<p class="p-8 text-center text-slate-400 italic text-xs">No free agents available matching this filter.</p>`;
@@ -2868,9 +2941,116 @@ export function renderOffseasonFAPool(gameState) {
     }
 
     container.innerHTML = `
+        <div class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <div class="text-xs font-black uppercase tracking-wide text-slate-800">
+                        Quick Recruiting
+                    </div>
+                    <p class="text-[10px] text-slate-500">
+                        Choose your approach once, then apply it to multiple prospects.
+                    </p>
+                </div>
+                <span class="fa-quick-selected-count text-[10px] font-bold text-slate-600">
+                    ${recruitingQuickSelectedIds.size} selected
+                </span>
+            </div>
+
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div>
+                    <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
+                        Coach
+                    </label>
+                    <select
+                        id="fa-quick-coach"
+                        onchange="window.app_updateRecruitingQuickDefaults()"
+                        class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                        ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
+                        ${quickAssignCoaches.map(coach => `
+                            <option
+                                value="${quickEscapeHtml(coach.coachId)}"
+                                data-remaining-hours="${coach.remainingHours}"
+                                ${String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId) ? 'selected' : ''}>
+                                ${quickEscapeHtml(coach.coachName)} · ${coach.remainingHours}h left
+                            </option>
+                        `).join('')}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
+                        Recruiting Action
+                    </label>
+                    <select
+                        id="fa-quick-action"
+                        onchange="window.app_updateRecruitingQuickDefaults()"
+                        class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
+                        <option value="outreach" ${recruitingQuickAssignDefaults.actionType === 'outreach' ? 'selected' : ''}>
+                            Personal outreach
+                        </option>
+                        <option value="teammateConnection" ${recruitingQuickAssignDefaults.actionType === 'teammateConnection' ? 'selected' : ''}>
+                            Teammate connection
+                        </option>
+                        <option value="roleDiscussion" ${recruitingQuickAssignDefaults.actionType === 'roleDiscussion' ? 'selected' : ''}>
+                            Role discussion
+                        </option>
+                        <option value="practiceInvitation" ${recruitingQuickAssignDefaults.actionType === 'practiceInvitation' ? 'selected' : ''}>
+                            Practice invitation
+                        </option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
+                        Hours per Prospect
+                    </label>
+                    <input
+                        type="number"
+                        id="fa-quick-hours"
+                        min="1"
+                        max="${quickMaxHours}"
+                        step="1"
+                        value="${recruitingQuickAssignDefaults.hours}"
+                        onchange="window.app_updateRecruitingQuickDefaults()"
+                        class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                        ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
+                </div>
+            </div>
+
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                    type="button"
+                    onclick="window.app_selectVisibleRecruitingTargets()"
+                    class="rounded border border-slate-300 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-100">
+                    Select Visible
+                </button>
+
+                <button
+                    type="button"
+                    onclick="window.app_clearRecruitingTargetSelection()"
+                    class="rounded border border-slate-300 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-100">
+                    Clear Selection
+                </button>
+
+                <button
+                    type="button"
+                    id="fa-quick-assign-button"
+                    onclick="window.app_quickAssignSelectedRecruitingTargets()"
+                    ${quickAssignCoaches.length === 0 ? 'disabled' : ''}
+                    class="rounded bg-emerald-700 px-4 py-1.5 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
+                    Quick Assign (${recruitingQuickSelectedIds.size})
+                </button>
+            </div>
+
+            <p class="mt-2 text-[9px] text-slate-500">
+                Assignments use the selected coach's weekly hours. Individual recruiting remains available through each prospect's Recruit button.
+            </p>
+        </div>
+
         <table class="min-w-full text-xs font-mono">
             <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
                 <tr>
+                    <th class="py-2 px-2 text-center">Select</th>
                     <th class="py-2 px-3 text-left font-sans">Free Agent</th>
                     <th class="py-2 px-2 text-center">Pos</th>
                     <th class="py-2 px-2 text-center">Scout Status</th>
@@ -2984,6 +3164,15 @@ export function renderOffseasonFAPool(gameState) {
 
                     return `
                     <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
+                        <td class="py-2 px-2 text-center" onclick="event.stopPropagation()">
+                            <input
+                                type="checkbox"
+                                class="fa-recruit-select h-4 w-4 accent-emerald-700"
+                                value="${p.id}"
+                                ${recruitingQuickSelectedIds.has(String(p.id)) ? 'checked' : ''}
+                                onchange="window.app_toggleRecruitingQuickSelection('${p.id}', this.checked)"
+                            />
+                        </td>
                         <td class="py-2 px-3 font-sans font-semibold text-slate-900 truncate max-w-[150px]">
                             <span>${p.name}</span>
                             <span class="block text-slate-400 text-[10px] font-mono">Age ${p.age}</span>
@@ -3120,6 +3309,278 @@ export function removeOffseasonFABid(idx) { offseasonFABids.splice(idx, 1); }
 export function getOffseasonFADay() { return offseasonFADay; }
 export function incrementOffseasonFADay() { offseasonFADay++; }
 export function clearOffseasonFABids() { offseasonFABids = []; }
+
+window.app_updateRecruitingQuickDefaults = function() {
+    const coachSelect = document.getElementById('fa-quick-coach');
+    const actionSelect = document.getElementById('fa-quick-action');
+    const hoursInput = document.getElementById('fa-quick-hours');
+
+    if (!coachSelect || !actionSelect || !hoursInput) return;
+
+    const selectedOption = coachSelect.selectedOptions?.[0];
+    const maxHours = Math.max(
+        0,
+        Math.floor(Number(selectedOption?.dataset.remainingHours) || 0)
+    );
+
+    hoursInput.max = String(maxHours);
+
+    const requestedHours = Math.floor(Number(hoursInput.value) || 1);
+
+    hoursInput.value = String(
+        Math.max(1, Math.min(maxHours || 1, requestedHours))
+    );
+
+    recruitingQuickAssignDefaults = {
+        coachId: coachSelect.value,
+        actionType: actionSelect.value,
+        hours: Number(hoursInput.value)
+    };
+};
+
+window.app_toggleRecruitingQuickSelection = function(playerId, checked) {
+    const key = String(playerId);
+
+    if (checked) {
+        recruitingQuickSelectedIds.add(key);
+    } else {
+        recruitingQuickSelectedIds.delete(key);
+    }
+
+    const button = document.getElementById('fa-quick-assign-button');
+
+    if (button) {
+        button.textContent =
+            `Quick Assign (${recruitingQuickSelectedIds.size})`;
+    }
+
+    const count = document.querySelector(
+        '#fa-minigame-pool-tbody .fa-quick-selected-count'
+    );
+
+    if (count) {
+        count.textContent = `${recruitingQuickSelectedIds.size} selected`;
+    }
+};
+
+window.app_selectVisibleRecruitingTargets = function() {
+    document.querySelectorAll(
+        '#fa-minigame-pool-tbody .fa-recruit-select'
+    ).forEach(checkbox => {
+        checkbox.checked = true;
+        recruitingQuickSelectedIds.add(String(checkbox.value));
+    });
+
+    window.app_toggleRecruitingQuickSelection(
+        '__selection_refresh__',
+        false
+    );
+
+    recruitingQuickSelectedIds.delete('__selection_refresh__');
+
+    const button = document.getElementById('fa-quick-assign-button');
+
+    if (button) {
+        button.textContent =
+            `Quick Assign (${recruitingQuickSelectedIds.size})`;
+    }
+};
+
+window.app_clearRecruitingTargetSelection = function() {
+    recruitingQuickSelectedIds.clear();
+
+    document.querySelectorAll(
+        '#fa-minigame-pool-tbody .fa-recruit-select'
+    ).forEach(checkbox => {
+        checkbox.checked = false;
+    });
+
+    const button = document.getElementById('fa-quick-assign-button');
+
+    if (button) {
+        button.textContent = 'Quick Assign (0)';
+    }
+
+    const count = document.querySelector(
+        '#fa-minigame-pool-tbody .fa-quick-selected-count'
+    );
+
+    if (count) count.textContent = '0 selected';
+};
+
+window.app_quickAssignSelectedRecruitingTargets = function() {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    const state = gs?.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    const phase = String(state?.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    if (
+        !team ||
+        phase !== 'recruiting' ||
+        !progress?.initialized ||
+        progress.completed === true ||
+        Number(progress.seasonYear) !== Number(gs.year)
+    ) {
+        showModal(
+            'Recruiting Unavailable',
+            '<p>The recruiting period is not currently active.</p>'
+        );
+        return;
+    }
+
+    const selectedIds = [...recruitingQuickSelectedIds];
+
+    if (selectedIds.length === 0) {
+        showModal(
+            'No Prospects Selected',
+            '<p>Select at least one prospect before assigning recruiting work.</p>'
+        );
+        return;
+    }
+
+    const coachId = document.getElementById('fa-quick-coach')?.value;
+    const actionType = document.getElementById('fa-quick-action')?.value;
+    const hours = Number(
+        document.getElementById('fa-quick-hours')?.value
+    );
+
+    if (
+        !coachId ||
+        ![
+            'outreach',
+            'teammateConnection',
+            'roleDiscussion',
+            'practiceInvitation'
+        ].includes(actionType) ||
+        !Number.isSafeInteger(hours) ||
+        hours < 1
+    ) {
+        showModal(
+            'Invalid Quick Assignment',
+            '<p>Choose a valid coach, action, and positive whole number of hours.</p>'
+        );
+        return;
+    }
+
+    let assignedCount = 0;
+    const assignedNames = [];
+    const skipped = [];
+
+    for (const playerId of selectedIds) {
+        const currentState = getGameState() || gs;
+
+        const player = currentState.players?.find(
+            candidate => String(candidate?.id) === playerId
+        );
+
+        const record =
+            currentState.offseasonState?.recruitingProgress
+                ?.recruits?.[playerId];
+
+        if (
+            !player ||
+            player.teamId != null ||
+            !record ||
+            record.status !== 'available' ||
+            record.committedTeamId != null
+        ) {
+            skipped.push({
+                playerName: player?.name || playerId,
+                reason: 'No longer available'
+            });
+
+            recruitingQuickSelectedIds.delete(playerId);
+            continue;
+        }
+
+        const result = Game.executeRecruitingAction(
+            currentState,
+            team.id,
+            coachId,
+            player.id,
+            actionType,
+            hours
+        );
+
+        if (result?.success) {
+            assignedCount++;
+            assignedNames.push(player.name);
+            recruitingQuickSelectedIds.delete(playerId);
+        } else {
+            skipped.push({
+                playerName: player.name,
+                reason: result?.message || 'Assignment failed'
+            });
+
+            // No remaining hours means further assignments to this
+            // coach cannot succeed with the selected hours-per-player.
+            if (
+                Number.isFinite(Number(result?.remainingHours)) &&
+                Number(result.remainingHours) < hours
+            ) {
+                break;
+            }
+        }
+    }
+
+    Game.saveGameState?.('backyardFootballGameState');
+
+    const latestState = getGameState() || gs;
+
+    renderOffseasonFAScreen(latestState);
+
+    const escapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    const skippedHtml = skipped.length > 0
+        ? `
+            <div class="mt-3">
+                <div class="font-bold text-amber-800">
+                    Not assigned (${skipped.length})
+                </div>
+                <div class="mt-1 space-y-1 text-xs text-slate-600">
+                    ${skipped.map(item => `
+                        <div>
+                            <b>${escapeHtml(item.playerName)}</b>:
+                            ${escapeHtml(item.reason)}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `
+        : '';
+
+    showModal(
+        'Quick Recruiting Results',
+        `
+            <div class="space-y-2 text-sm">
+                <p>
+                    Successfully assigned work to
+                    <b>${assignedCount}</b> prospect(s).
+                </p>
+                ${skippedHtml}
+                <p class="text-xs text-slate-500">
+                    Successful assignments have been saved. Any remaining
+                    selected prospects can be retried or handled individually.
+                </p>
+            </div>
+        `,
+        null,
+        'Continue'
+    );
+};
 
 window.app_openRecruitingActionModal = function(playerId) {
     const gs = getGameState();
@@ -5106,18 +5567,20 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             .filter(item => item.value !== null)
             .sort((a, b) => b.value - a.value);
 
+        const strongest = rankedSkills[0] || null;
+        const weakest = rankedSkills[rankedSkills.length - 1] || null;
+
         const strengthsSummary = rankedSkills
             .slice(0, 2)
             .map(item => `${item.name} ${Math.round(item.value)}`)
             .join(' · ') || 'Ratings unavailable';
 
-        const lowestSkill = rankedSkills[rankedSkills.length - 1];
-
-        const lowestSkillSummary = lowestSkill
-            ? `${lowestSkill.name} ${Math.round(lowestSkill.value)}`
+        const lowestSkillSummary = weakest
+            ? `${weakest.name} ${Math.round(weakest.value)}`
             : 'Unavailable';
 
         const personalityProfile = coach.biases?.personality;
+
         const roleStyleProfile =
             isHeadCoach || coach.isUserCoach
                 ? coach.biases?.tactical
@@ -5130,30 +5593,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             roleStyleProfile?.displayName || roleStyleProfile?.name
         ].filter(Boolean).join(' · ') || 'Style not recorded';
 
-                const personalityStyle =
-            coach.biases?.personality?.displayName ||
-            coach.biases?.personality?.name ||
-            null;
-
-        const roleStyleProfile = isHeadCoach
-            ? coach.biases?.tactical
-            : isScout
-                ? coach.biases?.scouting
-                : null;
-
-        const roleStyle =
-            roleStyleProfile?.displayName ||
-            roleStyleProfile?.name ||
-            null;
-
-        const styleSummary = [
-            personalityStyle,
-            roleStyle
-        ].filter(Boolean).join(' · ') || 'Style not recorded';
+        const availability = Number.isFinite(availableHours)
+            ? `${Math.max(0, Math.min(40, Math.floor(availableHours)))} hrs available`
+            : 'Availability not set';
 
         const ratingsSummary = [
             strongest
-                ? `${strongest.name} ${strongest.value}`
+                ? `${strongest.name} ${Math.round(strongest.value)}`
                 : 'Ratings unavailable',
             `Workload ${workload} hrs`,
             availability
