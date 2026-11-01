@@ -1148,9 +1148,12 @@ export function buildSocialNetworks(targetPlayers, allPlayers) {
             p.social.goodFriendIds.length < maxGoodFriends &&
             attempts < 10
         ) {
-            const gf = getRandom(
-                Math.random() < 0.6 ? sameClique : others
-            );
+            const friendPool =
+                sameClique.length > 0 && Math.random() < 0.6
+                    ? sameClique
+                    : others;
+
+            const gf = getRandom(friendPool);
 
             if (
                 gf &&
