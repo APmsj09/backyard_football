@@ -8,7 +8,7 @@ import { positionOverallWeights, estimateBestPosition, calculateOverall, getPros
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';
-import { getCurrentRosterLimit } from './game/season.js';
+import { applyRecruitingSweetener } from './game/staff.js';
 import { DEFAULT_PLAYBACK_INTERVAL_MS, getPlaybackIntervalMs } from './game/simulation_config.js';
 
 let elements = {};
@@ -2501,21 +2501,67 @@ function renderRecruitingActivityPanel(gameState) {
         `;
     }).join('');
 
-    const visibleActivity = (Array.isArray(progress.dailyActivity)
+        const visibleActivity = (Array.isArray(progress.dailyActivity)
         ? progress.dailyActivity
         : []
-    ).filter(activity =>
-        String(activity?.teamId) === teamId &&
-        Number(activity?.day) === day &&
-        [
+    ).filter(activity => {
+        const activityDay = activity?.type === 'recruiting_outcome'
+            ? Number(activity?.decisionDay)
+            : Number(activity?.day);
+
+        // Keep activity from the current recruiting week, including
+        // earlier commitments that the user may have missed.
+        if (
+            !Number.isFinite(activityDay) ||
+            activityDay < 1 ||
+            activityDay > day
+        ) {
+            return false;
+        }
+
+        // Our own recruiting actions and gifts.
+        if ([
             'recruiting_action',
-            'recruiting_sweetener',
-            'commitment'
-        ].includes(activity?.type)
-    );
+            'recruiting_sweetener'
+        ].includes(activity?.type)) {
+            return String(activity?.teamId) === teamId;
+        }
+
+        // Show commitments by any program when we had pursued that player.
+        if (activity?.type === 'commitment') {
+            if (String(activity?.teamId) === teamId) {
+                return true;
+            }
+
+            const recruitRecord = progress.recruits?.[
+                String(activity.playerId)
+            ];
+
+            const ourInterest = Number(
+                recruitRecord?.interestByTeam?.[teamId]
+            ) || 0;
+
+            return ourInterest > 0;
+        }
+
+        // Unsigned outcomes are player decisions rather than team actions.
+        if (activity?.type === 'recruiting_outcome') {
+            const recruitRecord = progress.recruits?.[
+                String(activity.playerId)
+            ];
+
+            const ourInterest = Number(
+                recruitRecord?.interestByTeam?.[teamId]
+            ) || 0;
+
+            return ourInterest > 0;
+        }
+
+        return false;
+    });
 
     if (countEl) {
-        countEl.textContent = `${visibleActivity.length} Today`;
+        countEl.textContent = `${visibleActivity.length} This Week`;
     }
 
     const activityRows = visibleActivity
@@ -2536,11 +2582,145 @@ function renderRecruitingActivityPanel(gameState) {
                     : '')
                 || 'Recruit';
 
-            const description = activity?.description
-                || activity?.actionLabel
-                || activity?.action
-                || activity?.type?.replace(/_/g, ' ')
-                || 'Recruiting activity';
+            let description = '';
+
+            const interestGain = Number(activity?.interestGain) || 0;
+            const interestGainText = interestGain > 0
+                ? ` · +${Math.round(interestGain)} interest`
+                : '';
+
+            if (activity?.type === 'recruiting_action') {
+                const actionLabels = {
+                    outreach: 'Personal outreach',
+                    teammateConnection: 'Teammate connection',
+                    roleDiscussion: 'Role discussion',
+                    practiceInvitation: 'Practice invitation'
+                };
+
+                const actionLabel =
+                    activity.label ||
+                    actionLabels[activity.action] ||
+                    'Recruiting action';
+
+                const hours = Math.max(
+                    0,
+                    Number(activity.hours) || 0
+                );
+
+                description =
+                    `${actionLabel} · ${hours} staff hrs` +
+                    interestGainText;
+
+            } else if (activity?.type === 'recruiting_sweetener') {
+                const resourceDetails = [];
+
+                const cashSpent = Math.max(
+                    0,
+                    Number(activity.cashSpent) || 0
+                );
+
+                const tokensSpent = Math.max(
+                    0,
+                    Number(activity.tokensSpent) || 0
+                );
+
+                if (cashSpent > 0) {
+                    resourceDetails.push(
+                        `$${cashSpent.toFixed(2)}`
+                    );
+                }
+
+                if (tokensSpent > 0) {
+                    resourceDetails.push(
+                        `${tokensSpent} Favor Token${tokensSpent === 1 ? '' : 's'}`
+                    );
+                }
+
+                description =
+                    (activity.label || 'Recruiting support') +
+                    (
+                        resourceDetails.length > 0
+                            ? ` · ${resourceDetails.join(' · ')}`
+                            : ''
+                    ) +
+                    interestGainText;
+
+            } else if (activity?.type === 'commitment') {
+                const committedToOurTeam =
+                    String(activity.teamId) === teamId;
+
+                const teamName = activity.teamName || 'Unknown program';
+
+                const chosenProgramInterest = Number(
+                    activity.interestAtCommit
+                );
+
+                const chosenProgramFit = Number(
+                    activity.teamFitAtCommit
+                );
+
+                const recruitRecord = progress.recruits?.[playerId];
+
+                const ourInterestAtDecision = Number(
+                    recruitRecord?.interestByTeam?.[teamId]
+                );
+
+                const decisionLabel = committedToOurTeam
+                    ? 'Committed to your program'
+                    : `Committed elsewhere: ${teamName}`;
+
+                description = decisionLabel +
+                    (
+                        !committedToOurTeam
+                            ? ` · Your interest ${Math.round(
+                                Number.isFinite(ourInterestAtDecision)
+                                    ? ourInterestAtDecision
+                                    : 0
+                            )}/100`
+                            : ''
+                    ) +
+                    (
+                        Number.isFinite(chosenProgramInterest)
+                            ? ` · Chosen program interest ${Math.round(chosenProgramInterest)}/100`
+                            : ''
+                    ) +
+                    (
+                        Number.isFinite(chosenProgramFit)
+                            ? ` · Chosen program fit ${Math.round(chosenProgramFit)}/100`
+                            : ''
+                    );
+
+            } else if (activity?.type === 'recruiting_outcome') {
+                description =
+                    activity.outcome === 'remained_unsigned_after_offers'
+                        ? 'Received serious recruiting interest but remained unsigned'
+                        : activity.outcome === 'remained_unsigned_without_serious_offers'
+                            ? 'Finished recruiting without a serious offer'
+                            : 'Remained unsigned';
+
+            } else {
+                description =
+                    activity?.description ||
+                    activity?.actionLabel ||
+                    activity?.action ||
+                    activity?.type?.replace(/_/g, ' ') ||
+                    'Recruiting activity';
+            }
+
+            // Preserve explicit descriptions supplied by future activity
+            // types without overriding the more detailed recruiting labels.
+            if (
+                ![
+                    'recruiting_action',
+                    'recruiting_sweetener',
+                    'commitment',
+                    'recruiting_outcome'
+                ].includes(activity?.type)
+            ) {
+                description = activity.description ||
+                    activity.actionLabel ||
+                    description;
+            }
 
             return `
                 <div class="py-2 border-b border-gray-700/50">
@@ -2549,7 +2729,11 @@ function renderRecruitingActivityPanel(gameState) {
                             ${escapeHtml(playerName)}
                         </div>
                         <div class="text-xs text-gray-500 whitespace-nowrap">
-                            Day ${day}
+                            Day ${
+                                activity?.type === 'recruiting_outcome'
+                                    ? Number(activity.decisionDay) || '—'
+                                    : Number(activity.day) || '—'
+                            }
                         </div>
                     </div>
                     <div class="text-xs text-gray-400 mt-1">
@@ -2574,7 +2758,7 @@ function renderRecruitingActivityPanel(gameState) {
 
             <section>
                 <div class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">
-                    Day ${day} Activity
+                    Recruiting Week Activity
                 </div>
                 ${activityRows || `
                     <div class="text-sm text-gray-500 py-2">
@@ -2709,17 +2893,66 @@ export function renderOffseasonFAPool(gameState) {
                         gameState.offseasonState?.recruitingProgress
                             ?.recruits?.[String(p.id)];
 
+                    const teamKey = String(gameState.playerTeam.id);
+
                     const userInterest = Math.max(
                         0,
                         Math.min(
                             100,
                             Number(
                                 recruitingRecord?.interestByTeam?.[
-                                    String(gameState.playerTeam.id)
+                                    teamKey
                                 ]
                             ) || 0
                         )
                     );
+
+                    // Show the actual resources invested by our program.
+                    // Missing values are normal for older recruiting records.
+                    const recruitingPush =
+                        recruitingRecord?.recruitingPushByTeam?.[teamKey] || {};
+
+                    const hoursInvested = Math.max(
+                        0,
+                        Number(recruitingPush.hoursInvested) || 0
+                    );
+
+                    const cashSpent = Math.max(
+                        0,
+                        Number(recruitingPush.cashSpent) || 0
+                    );
+
+                    const favorTokensSpent = Math.max(
+                        0,
+                        Number(recruitingPush.favorTokensSpent) || 0
+                    );
+
+                    const formatHours = hoursInvested
+                        .toFixed(1)
+                        .replace(/\.0$/, '');
+
+                    const investmentParts = [];
+
+                    if (hoursInvested > 0) {
+                        investmentParts.push(`${formatHours} staff hrs`);
+                    }
+
+                    if (cashSpent > 0) {
+                        investmentParts.push(
+                            `$${cashSpent.toFixed(0)} in gifts`
+                        );
+                    }
+
+                    if (favorTokensSpent > 0) {
+                        investmentParts.push(
+                            `${favorTokensSpent} Favor Token${favorTokensSpent === 1 ? '' : 's'}`
+                        );
+                    }
+
+                    const investmentSummary =
+                        investmentParts.length > 0
+                            ? investmentParts.join(' · ')
+                            : 'No investment yet';
 
                     const intel = Game.getPlayerMarketIntel(p, gameState);
 
@@ -2730,9 +2963,22 @@ export function renderOffseasonFAPool(gameState) {
                             : 'bg-slate-100 text-slate-600 border-slate-200';
 
                     const marketStatusHtml = `
-                        <span class="border ${interestColor} font-black px-1.5 py-0.5 rounded text-[9px]">
-                            Your Interest: ${userInterest}/100
-                        </span>
+                        <div class="flex flex-col items-start gap-1">
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                                <span class="border ${interestColor} font-black px-1.5 py-0.5 rounded text-[9px]">
+                                    Your Interest: ${userInterest}/100
+                                </span>
+                                <span class="text-[9px] text-slate-500">
+                                    ${investmentSummary}
+                                </span>
+                            </div>
+                            <span
+                                class="text-[10px] text-slate-500 truncate italic"
+                                title="${intel.rumorText}"
+                            >
+                                ${intel.rumorText}
+                            </span>
+                        </div>
                     `;
 
                     return `
@@ -2777,17 +3023,23 @@ export function renderOffseasonFAPool(gameState) {
                             ${formatFreeAgentScoutingFit(scouting.defense)}
                         </td>
                         <td class="py-2 px-3 font-sans">
-                            <div class="flex items-center gap-1.5 truncate max-w-[260px]">
+                            <div class="max-w-[260px]">
                                 ${marketStatusHtml}
-                                <span class="text-[10px] text-slate-500 truncate italic" title="${intel.rumorText}">${intel.rumorText}</span>
                             </div>
                         </td>
-                        <td class="text-right py-2 px-3 font-sans" onclick="event.stopPropagation()">
-                            <button
-                                class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition shadow-sm"
-                                onclick="window.app_openRecruitingActionModal('${p.id}')">
-                                Recruit
-                            </button>
+                        <td class="text-right py-2 px-3 font-sans whitespace-nowrap" onclick="event.stopPropagation()">
+                            <div class="flex flex-col items-end gap-1">
+                                <button
+                                    class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition shadow-sm"
+                                    onclick="window.app_openRecruitingActionModal('${p.id}')">
+                                    Recruit
+                                </button>
+                                <button
+                                    class="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition"
+                                    onclick="window.app_openRecruitingSweetenerModal('${p.id}')">
+                                    Gift / Favor
+                                </button>
+                            </div>
                         </td>
                     </tr>`;
                 }).join('')}
@@ -3188,6 +3440,293 @@ window.app_openRecruitingActionModal = function(playerId) {
         'Perform Recruiting Action'
     );
 };
+
+window.app_openRecruitingSweetenerModal = function(playerId) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+
+    if (!team) return;
+
+    const state = gs.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    const normalizedPhase = String(state?.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    const player = Game.getPlayer(playerId) ||
+        gs.players?.find(p =>
+            String(p?.id) === String(playerId)
+        );
+
+    const record = progress?.recruits?.[String(playerId)];
+
+    if (
+        normalizedPhase !== 'recruiting' ||
+        !progress?.initialized ||
+        progress.completed === true ||
+        !record ||
+        record.status !== 'available' ||
+        record.committedTeamId != null ||
+        !player ||
+        player.teamId != null
+    ) {
+        showModal(
+            'Recruiting Support Unavailable',
+            '<p>This recruit is no longer available.</p>'
+        );
+        return;
+    }
+
+    const teamKey = String(team.id);
+
+    const currentInterest = Math.max(
+        0,
+        Math.min(
+            100,
+            Number(record.interestByTeam?.[teamKey]) || 0
+        )
+    );
+
+    if (currentInterest >= 100) {
+        showModal(
+            'Interest Already Maximized',
+            '<p>Your team has already maximized this recruit’s interest.</p>'
+        );
+        return;
+    }
+
+    const history = Array.isArray(record.history)
+        ? record.history
+        : [];
+
+    const teamSweeteners = history.filter(entry =>
+        entry?.type === 'recruiting_sweetener' &&
+        String(entry.teamId) === teamKey
+    );
+
+    const giftsUsed = teamSweeteners.filter(entry =>
+        String(entry.sweetenerType || '').startsWith('gift_')
+    ).length;
+
+    const favorUsed = teamSweeteners.some(
+        entry => entry.sweetenerType === 'favor'
+    );
+
+    const balance = Number(team.finances?.balance);
+
+    const availableCash = Number.isFinite(balance)
+        ? Math.max(0, balance)
+        : 0;
+
+    const availableTokens = Math.max(
+        0,
+        Math.floor(Number(team.socialProfile?.favorTokens) || 0)
+    );
+
+    const giftOptions = [
+        {
+            value: 'gift_small',
+            cost: 5,
+            label: 'Small recruiting gift'
+        },
+        {
+            value: 'gift_medium',
+            cost: 10,
+            label: 'Generous recruiting gift'
+        },
+        {
+            value: 'gift_large',
+            cost: 20,
+            label: 'Premium recruiting gift'
+        }
+    ];
+
+    const availableOptions = [];
+
+    if (giftsUsed < 3) {
+        giftOptions
+            .filter(gift => gift.cost <= availableCash)
+            .forEach(gift => availableOptions.push(gift));
+    }
+
+    if (availableTokens > 0 && !favorUsed) {
+        availableOptions.push({
+            value: 'favor',
+            cost: 0,
+            label: 'Call in a Favor Token'
+        });
+    }
+
+    const escapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    if (availableOptions.length === 0) {
+        const reasons = [];
+
+        if (giftsUsed >= 3) {
+            reasons.push('You have used all three gifts for this recruit.');
+        } else if (availableCash < 5) {
+            reasons.push('Your team cannot afford even the smallest gift.');
+        }
+
+        if (favorUsed) {
+            reasons.push('You have already used a Favor Token for this recruit.');
+        } else if (availableTokens <= 0) {
+            reasons.push('Your team has no Favor Tokens available.');
+        }
+
+        showModal(
+            'No Recruiting Support Available',
+            `<div class="space-y-2 text-left text-sm">
+                ${reasons.map(reason =>
+                    `<p>${escapeHtml(reason)}</p>`
+                ).join('')}
+            </div>`
+        );
+
+        return;
+    }
+
+    const optionHtml = availableOptions.map(option => `
+        <option value="${option.value}">
+            ${escapeHtml(option.label)}
+            ${option.value === 'favor'
+                ? '· 1 Favor Token'
+                : `· $${option.cost.toFixed(2)}`
+            }
+        </option>
+    `).join('');
+
+    const modalHtml = `
+        <div class="space-y-4 text-left text-xs">
+            <div class="rounded bg-slate-900 p-3 text-white">
+                <h4 class="font-black text-sm">
+                    ${escapeHtml(player.name)}
+                </h4>
+
+                <div class="mt-2 flex justify-between text-slate-300">
+                    <span>Current interest</span>
+                    <b class="text-emerald-300">
+                        ${currentInterest}/100
+                    </b>
+                </div>
+
+                <div class="mt-1 h-2 overflow-hidden rounded bg-slate-700">
+                    <div
+                        class="h-full rounded bg-emerald-400"
+                        style="width:${currentInterest}%">
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+                <div class="rounded border border-slate-200 bg-slate-50 p-2">
+                    <div class="text-[9px] uppercase text-slate-500">
+                        Available Cash
+                    </div>
+                    <div class="mt-1 font-black text-slate-800">
+                        $${availableCash.toFixed(2)}
+                    </div>
+                </div>
+
+                <div class="rounded border border-slate-200 bg-slate-50 p-2">
+                    <div class="text-[9px] uppercase text-slate-500">
+                        Favor Tokens
+                    </div>
+                    <div class="mt-1 font-black text-slate-800">
+                        ${availableTokens}
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <label
+                    for="recruiting-sweetener-type"
+                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                    Recruiting Support
+                </label>
+
+                <select
+                    id="recruiting-sweetener-type"
+                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
+                    ${optionHtml}
+                </select>
+            </div>
+
+            <div class="text-[10px] text-slate-500">
+                Gifts and favors do not consume staff hours.
+                You may purchase up to three gifts and use one Favor Token
+                per recruit during the recruiting week.
+                Repeated gifts of the same size have diminishing returns.
+            </div>
+        </div>
+    `;
+
+    showModal(
+        `Support ${player.name}`,
+        modalHtml,
+        () => {
+            const sweetenerType = document.getElementById(
+                'recruiting-sweetener-type'
+            )?.value;
+
+            const currentState = getGameState();
+            const currentTeam = currentState?.playerTeam;
+
+            if (!currentTeam || !sweetenerType) {
+                showModal(
+                    'Recruiting Support Failed',
+                    '<p>The selected recruiting support could not be processed.</p>'
+                );
+                return;
+            }
+
+            const result = applyRecruitingSweetener(
+                currentState,
+                currentTeam.id,
+                playerId,
+                sweetenerType
+            );
+
+            if (!result?.success) {
+                showModal(
+                    'Recruiting Support Failed',
+                    `<p>${escapeHtml(
+                        result?.message ||
+                        'The recruiting support could not be completed.'
+                    )}</p>`
+                );
+                return;
+            }
+
+            Game.saveGameState?.('backyardFootballGameState');
+
+            renderOffseasonFAScreen(getGameState());
+
+            showModal(
+                'Recruiting Support Complete',
+                `<p>${escapeHtml(
+                    result.message ||
+                    'Your recruiting support was applied successfully.'
+                )}</p>`,
+                null,
+                'Continue'
+            );
+        },
+        'Apply Recruiting Support'
+    );
+};
+
+window.app_openBidModal = function(playerId) {
 
 window.app_openBidModal = function(playerId) {
     const gs = getGameState();

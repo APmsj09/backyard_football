@@ -4,14 +4,21 @@ import { getRandom, getRandomInt } from '../utils.js';
 import { isDebugMode } from './debug_mode.js';
 import {
     game, setGame, playerMap, getPlayer, getRosterObjects, addMessage,
-    getRelationshipLevel, improveRelationship, decreaseRelationship, getScoutedPlayerInfo
+    getRelationshipLevel, improveRelationship, decreaseRelationship,
+    getScoutedPlayerInfo, getTeamScoutingReport
 } from './state.js';
 import {
     generatePlayer, generateDraftClassModifiers, calculateOverall, estimateBestPosition
 } from './player.js';
 import {
-    coachPersonalities, offenseFormations, defenseFormations, teamNames, divisionNames, relationshipLevels
+    coachPersonalities, offenseFormations, defenseFormations,
+    offensivePlaybook, defensivePlaybook,
+    teamNames, divisionNames, relationshipLevels
 } from '../data.js';
+import {
+    getOffensivePlayKnowledge,
+    getDefensivePlayKnowledge
+} from './playcalling_knowledge.js';
 import {
     resetGameStats, finalizeGameResults
 } from './state.js';
@@ -327,12 +334,26 @@ export function transitionOffseasonPhase(
             const age = Number(player.age);
             const status = player.status || {};
 
+            const statusType = String(
+                status.type || ''
+            ).toLowerCase();
+
+            const lifecycle = String(
+                player.lifecycle || ''
+            ).toLowerCase();
+
+            const lifecycleStatus = String(
+                player.lifecycleStatus || player.lifecycle?.status || ''
+            ).toLowerCase();
+
             return (
+                Number.isFinite(age) &&
                 age >= 12 &&
                 age <= 18 &&
-                !['retired', 'departed', 'temporary'].includes(status.type) &&
-                !(Number(status.duration) > 0) &&
-                player.lifecycle !== 'draft_eligible' &&
+                !['retired', 'departed', 'temporary'].includes(statusType) &&
+                !['retired', 'departed', 'temporary'].includes(lifecycleStatus) &&
+                lifecycle !== 'draft_eligible' &&
+                lifecycleStatus !== 'draft_eligible' &&
                 !protectedDraftProspectIds.has(String(player.id))
             );
         });
@@ -1425,16 +1446,29 @@ export function createPlayerTeam(teamName, options = {}) {
     }
 }
 */
-export function addPlayerToTeam(player, team) {
+export function addPlayerToTeam(player, team, gameState = game) {
     if (!player || !team || !team.roster || typeof player.id === 'undefined') return false;
 
     // A player who permanently walked away over a broken promise cannot
     // return to that specific team through any recruiting pathway.
-    if (player.refusedTeamIds?.includes(team.id)) return false;
+    const hasRefusedThisTeam =
+        Array.isArray(player.refusedTeamIds) &&
+        player.refusedTeamIds.some(
+            refusedTeamId =>
+                String(refusedTeamId) === String(team.id)
+        );
 
-    const currentLimit = getCurrentRosterLimit(game);
+    if (hasRefusedThisTeam) return false;
+
+    const currentLimit = getCurrentRosterLimit(gameState);
     if (team.roster.length >= currentLimit) return false;
-    if (team.roster.includes(player.id)) return false;
+
+    const alreadyOnRoster = team.roster.some(
+        rosterPlayerId =>
+            String(rosterPlayerId) === String(player.id)
+    );
+
+    if (alreadyOnRoster) return false;
 
     if (player.number == null) {
         const offOvr = calculateOverall(player, player.favoriteOffensivePosition);
@@ -2257,41 +2291,13 @@ export function processWeeklyPlayerGrowth() {
         ]
     };
 
-    const getTrainingPosition = player => {
-        const estimatedPosition = String(
-            estimateBestPosition(player) ||
-            player.favoriteOffensivePosition ||
-            player.position ||
-            ''
-        ).toUpperCase();
+    const getTrainingPosition = (player, team) =>
+        getTrainingPlayerPosition(player, team);
 
-        if (['OT', 'OG', 'C', 'G', 'T'].includes(estimatedPosition)) {
-            return 'OL';
-        }
-
-        if (['DE', 'DT', 'NT'].includes(estimatedPosition)) {
-            return 'DL';
-        }
-
-        if (['CB', 'S', 'FS', 'SS'].includes(estimatedPosition)) {
-            return 'DB';
-        }
-
-        return estimatedPosition;
-    };
-
-    const getTrainingSkillValue = (player, skill) => {
+    const getTrainingSkillValue = (player, skill, team) => {
         if (!player?.attributes || !skill) return null;
 
-        for (const category of Object.values(player.attributes)) {
-            const value = category?.[skill];
-
-            if (typeof value === 'number' && Number.isFinite(value)) {
-                return value;
-            }
-        }
-
-        return null;
+        return getTrainingAttributeScore(player, skill, team);
     };
 
     const increaseTrainingSkill = (player, skill) => {
@@ -2313,8 +2319,8 @@ export function processWeeklyPlayerGrowth() {
         return false;
     };
 
-    const getAutomaticTrainingSkill = player => {
-        const position = getTrainingPosition(player);
+    const getAutomaticTrainingSkill = (player, team) => {
+        const position = getTrainingPosition(player, team);
 
         const positionSkills =
             automaticSkillsByPosition[position] ||
@@ -2336,7 +2342,7 @@ export function processWeeklyPlayerGrowth() {
         return skillPool
             .map(skill => ({
                 skill,
-                value: getTrainingSkillValue(player, skill)
+                value: getTrainingSkillValue(player, skill, team)
             }))
             .filter(item =>
                 item.value !== null &&
@@ -2345,8 +2351,8 @@ export function processWeeklyPlayerGrowth() {
             .sort((a, b) => a.value - b.value)[0]?.skill || null;
     };
 
-    const matchesTrainingFocus = (player, focus) => {
-        const position = getTrainingPosition(player);
+    const matchesTrainingFocus = (player, focus, team) => {
+        const position = getTrainingPosition(player, team);
         const normalizedFocus = String(focus || 'all').trim();
 
         if (normalizedFocus === 'all') return true;
@@ -2392,9 +2398,116 @@ export function processWeeklyPlayerGrowth() {
             ? team.coaches.filter(coach => coach?.id != null)
             : [];
 
-        const focusedTrainingPlayers = new Set();
+    const focusedTrainingPlayers = new Set();
 
-        const trainingAssignments = (
+    // Automated coaches must use their own scouting evidence rather than
+    // accessing a player's hidden potential or personality ratings.
+    const getReportedTrainingTraits = player => {
+        const report = getTeamScoutingReport(team, player.id);
+
+        const rawConfidence = Number(report?.confidence);
+
+        const confidence = Number.isFinite(rawConfidence)
+            ? Math.max(
+                0,
+                Math.min(
+                    1,
+                    rawConfidence > 1
+                        ? rawConfidence / 100
+                        : rawConfidence
+                )
+            )
+            : 0;
+
+        let workEthic = 50;
+
+        const characterSummary = String(
+            report?.evaluation?.characterSummary || ''
+        ).toLowerCase();
+
+        let reportedEffort = null;
+
+        if (characterSummary.includes('strong effort/reliability signals')) {
+            reportedEffort = 75;
+        } else if (characterSummary.includes('generally steady effort')) {
+            reportedEffort = 60;
+        } else if (
+            characterSummary.includes('effort/reliability need closer review')
+        ) {
+            reportedEffort = 35;
+        }
+
+        if (reportedEffort !== null && confidence >= 0.50) {
+            workEthic =
+                50 + ((reportedEffort - 50) * confidence);
+        }
+
+        const potentialPriorityValues = {
+            A: 2.0,
+            B: 1.5,
+            C: 1.0,
+            D: 0.5,
+            F: 0
+        };
+
+        const potentialGrowthValues = {
+            A: 1.12,
+            B: 1.07,
+            C: 1.0,
+            D: 0.93,
+            F: 0.86
+        };
+
+        let potentialPriority = 1.0;
+        let potentialGrowthFactor = 1.0;
+
+        const potentialRange = report?.potentialRange;
+
+        if (potentialRange && confidence >= 0.50) {
+            const bestGrade = String(
+                potentialRange.bestPossible || ''
+            ).toUpperCase();
+
+            const worstGrade = String(
+                potentialRange.worstPossible || ''
+            ).toUpperCase();
+
+            const bestPriority = potentialPriorityValues[bestGrade];
+            const worstPriority = potentialPriorityValues[worstGrade];
+
+            const bestGrowth = potentialGrowthValues[bestGrade];
+            const worstGrowth = potentialGrowthValues[worstGrade];
+
+            if (
+                Number.isFinite(bestPriority) &&
+                Number.isFinite(worstPriority) &&
+                Number.isFinite(bestGrowth) &&
+                Number.isFinite(worstGrowth)
+            ) {
+                const estimatedPriority =
+                    (bestPriority + worstPriority) / 2;
+
+                const estimatedGrowth =
+                    (bestGrowth + worstGrowth) / 2;
+
+                // Blend the report estimate toward neutral according
+                // to its confidence. Wider uncertainty has less impact.
+                potentialPriority =
+                    1 + ((estimatedPriority - 1) * confidence);
+
+                potentialGrowthFactor =
+                    1 + ((estimatedGrowth - 1) * confidence);
+            }
+        }
+
+        return {
+            workEthic: Math.max(0, Math.min(100, workEthic)),
+            potentialPriority,
+            potentialGrowthFactor
+        };
+    };
+
+    const trainingAssignments = (
             team.staffWorkPlan?.assignments || []
         ).map((assignment, index) => {
             if (
@@ -2470,15 +2583,16 @@ export function processWeeklyPlayerGrowth() {
                     !focusedTrainingPlayers.has(player) &&
                     matchesTrainingFocus(
                         player,
-                        assignment.focus
+                        assignment.focus,
+                        team
                     )
                 )
                 .map(player => {
                     const skill = requestedSkill ||
-                        getAutomaticTrainingSkill(player);
+                        getAutomaticTrainingSkill(player, team);
 
                     const skillValue = skill
-                        ? getTrainingSkillValue(player, skill)
+                        ? getTrainingSkillValue(player, skill, team)
                         : null;
 
                     // A chosen skill at its cap does not silently turn into
@@ -2496,34 +2610,24 @@ export function processWeeklyPlayerGrowth() {
                         ? ageValue
                         : 14;
 
-                    const ethicValue = Number(
-                        player.personality?.workEthic
-                    );
-
-                    const workEthic = Number.isFinite(ethicValue)
-                        ? Math.max(0, Math.min(100, ethicValue))
-                        : 50;
-
-                    const potentialFactor = {
-                        A: 2.0,
-                        B: 1.5,
-                        C: 1.0,
-                        D: 0.5,
-                        F: 0
-                    }[player.potential] ?? 1.0;
+                    const trainingTraits =
+                        getReportedTrainingTraits(player);
 
                     // Favor players with room to improve and developmental
-                    // runway, without making low work ethic irrelevant.
+                    // runway, using only the team's available estimates.
                     const priority =
                         (95 - skillValue) * 0.45 +
                         Math.max(0, 18 - age) * 1.1 +
-                        (workEthic - 50) * 0.035 +
-                        potentialFactor;
+                        (trainingTraits.workEthic - 50) * 0.035 +
+                        trainingTraits.potentialPriority;
 
                     return {
                         player,
                         skill,
                         skillValue,
+                        workEthic: trainingTraits.workEthic,
+                        potentialGrowthFactor:
+                            trainingTraits.potentialGrowthFactor,
                         priority
                     };
                 })
@@ -2556,7 +2660,12 @@ export function processWeeklyPlayerGrowth() {
 
             const targets = rotatedPool.slice(0, maxTargets);
 
-            targets.forEach(({ player, skill }) => {
+            targets.forEach(({
+                player,
+                skill,
+                workEthic,
+                potentialGrowthFactor
+            }) => {
                 // A player only receives one focused-training attempt per
                 // week, even if several assignments cover the same player.
                 focusedTrainingPlayers.add(player);
@@ -2565,14 +2674,6 @@ export function processWeeklyPlayerGrowth() {
                 const coachQuality = getCoachTrainingQuality(coach);
 
                 const coachFactor = 0.75 + coachQuality / 200;
-
-                const ethicValue = Number(
-                    player.personality?.workEthic
-                );
-
-                const workEthic = Number.isFinite(ethicValue)
-                    ? Math.max(0, Math.min(100, ethicValue))
-                    : 50;
 
                 const ethicFactor = 0.70 + workEthic / 200;
 
@@ -2589,13 +2690,7 @@ export function processWeeklyPlayerGrowth() {
                             ? 0.90
                             : 0.80;
 
-                const potentialFactor = {
-                    A: 1.12,
-                    B: 1.07,
-                    C: 1.0,
-                    D: 0.93,
-                    F: 0.86
-                }[player.potential] ?? 1.0;
+                const potentialFactor = potentialGrowthFactor;
 
                 // Focused training is a modest weekly advantage, not a
                 // guaranteed point or a replacement for natural growth.
@@ -4413,12 +4508,34 @@ export function resolveRecruitingDay(gameState = game) {
             .map(team => [String(team.id), team])
     );
 
-    const getEligibleTeam = teamId => {
+    const getEligibleTeam = (teamId, player = null) => {
         const team = teamsById.get(String(teamId));
 
         if (!team || team.leagueType !== 'main') return null;
 
-        const rosterSize = getRosterObjects(team).length;
+        const hasBeenRefusedByPlayer =
+            Array.isArray(player?.refusedTeamIds) &&
+            player.refusedTeamIds.some(
+                refusedTeamId =>
+                    String(refusedTeamId) === String(team.id)
+            );
+
+        if (hasBeenRefusedByPlayer) return null;
+
+        if (!Array.isArray(team.roster)) return null;
+
+        const rosterIds = team.roster;
+
+        const alreadyOnRoster =
+            player?.id != null &&
+            rosterIds.some(
+                rosterPlayerId =>
+                    String(rosterPlayerId) === String(player.id)
+            );
+
+        if (alreadyOnRoster) return null;
+
+        const rosterSize = rosterIds.length;
         const rosterLimit = getCurrentRosterLimit(gameState);
 
         return rosterSize < rosterLimit ? team : null;
@@ -4465,8 +4582,8 @@ export function resolveRecruitingDay(gameState = game) {
             protectedDraftIds.has(String(player.id)) ||
             lifecycle === 'draft_eligible' ||
             lifecycleStatus === 'draft_eligible' ||
-            ['retired', 'departed', 'temporary'].includes(statusType) ||
-            ['retired', 'departed', 'temporary'].includes(lifecycleStatus) ||
+            ['retired', 'departed', 'temporary', 'injured'].includes(statusType) ||
+            ['retired', 'departed', 'temporary', 'injured'].includes(lifecycleStatus) ||
             Number(player.status?.duration) > 0 ||
             Number(player.injury?.duration || player.injuryDuration || 0) > 0
         ) {
@@ -4486,14 +4603,421 @@ export function resolveRecruitingDay(gameState = game) {
             : 0;
     };
 
-    const commitPlayer = (player, record, team, interest) => {
-        if (!player || !record || !team || player.teamId != null) {
+        /**
+     * Measures how well a team's actual installed and foundational
+     * playbook concepts match a player's football preferences.
+     *
+     * Formation choices are intentionally ignored. The team can
+     * choose formations situationally while keeping its playbook.
+     *
+     * Mastery influences appeal because having a concept installed
+     * is not the same as being good at executing it.
+     */
+    const getTeamFootballConceptFit = (
+        team,
+        side,
+        preferredConcepts
+    ) => {
+        if (
+            !Array.isArray(preferredConcepts) ||
+            preferredConcepts.length === 0
+        ) {
+            return 50;
+        }
+
+        const isOffense = side === 'offense';
+
+        const playbook = isOffense
+            ? offensivePlaybook
+            : defensivePlaybook;
+
+        const foundationKeys = isOffense
+            ? [
+                'Uni_InsideZone',
+                'Uni_StretchRight',
+                'Uni_QuickSlants',
+                'Uni_FourVerts'
+            ]
+            : [
+                'Cover_2_Zone_Base',
+                'Cover_1_Robber',
+                'Man_Blitz_Base',
+                'GoalLine_RunStuff'
+            ];
+
+        const installedKeys = isOffense
+            ? team.gameplan?.installedOffense
+            : team.gameplan?.installedDefense;
+
+        const activeKeys = [
+            ...new Set([
+                ...foundationKeys,
+                ...(Array.isArray(installedKeys)
+                    ? installedKeys.slice(0, 8)
+                    : [])
+            ])
+        ].filter(key => Boolean(playbook[key]));
+
+        if (activeKeys.length === 0) return 50;
+
+        const knowledgeFunction = isOffense
+            ? getOffensivePlayKnowledge
+            : getDefensivePlayKnowledge;
+
+        const mastery = team.gameplan?.mastery || {};
+
+        const conceptScores = preferredConcepts
+            .filter(concept => typeof concept === 'string')
+            .slice(0, 3)
+            .map(preferredConcept => {
+                const matchingPlays = activeKeys.filter(key => {
+                    const knowledge = knowledgeFunction(
+                        key,
+                        playbook[key]
+                    );
+
+                    return knowledge.archetype === preferredConcept;
+                });
+
+                if (matchingPlays.length === 0) return 0;
+
+                const masteryScores = matchingPlays.map(key => {
+                    const rawMastery = Number(mastery[key]);
+
+                    const playMastery = Number.isFinite(rawMastery)
+                        ? Math.max(0, Math.min(100, rawMastery))
+                        : 40;
+
+                    return playMastery;
+                });
+
+                const bestMastery = Math.max(...masteryScores);
+
+                // Availability matters most. Familiarity and additional
+                // options provide smaller bonuses.
+                const availabilityScore =
+                    35 +
+                    bestMastery * 0.55 +
+                    Math.min(10, (matchingPlays.length - 1) * 3);
+
+                return Math.max(
+                    0,
+                    Math.min(100, availabilityScore)
+                );
+            });
+
+        if (conceptScores.length === 0) return 50;
+
+        return Math.round(
+            conceptScores.reduce((sum, score) => sum + score, 0) /
+            conceptScores.length
+        );
+    };
+
+    /**
+     * Calculates how appealing a program is from the player's
+     * perspective. Private preferences are read only here, during
+     * the player's decision—not during AI recruiting evaluations.
+     */
+    const calculatePlayerRecruitingFit = (player, record, team) => {
+        const clamp = value =>
+            Math.max(0, Math.min(100, Math.round(value)));
+
+        const getScore = (value, fallback = 50) => {
+            const number = Number(value);
+
+            return Number.isFinite(number)
+                ? clamp(number)
+                : fallback;
+        };
+
+        const preferences = player?.recruitingPreferences || {};
+
+        const getPriority = key =>
+            getScore(preferences[key], 50);
+
+        const appeal = record?.teamAppealByTeam?.[String(team.id)] || {};
+
+        const roleOpportunity = getScore(
+            appeal.roster?.roleOpportunity
+        );
+
+        const coachingQuality = getScore(
+            appeal.coaching?.coachingQuality
+        );
+
+        const recentSuccess = getScore(
+            appeal.program?.recentSuccess
+        );
+
+        const programReputation = getScore(
+            appeal.program?.reputation
+        );
+
+        // The player knows their own friendships and rivalries.
+        // Use that personal perspective for relationships rather
+        // than relying on what the recruiting staff has discovered.
+        const rosterIds = new Set(
+            getRosterObjects(team)
+                .filter(member => member?.id != null)
+                .map(member => String(member.id))
+        );
+
+        const social = player?.social || {};
+
+        const friendIds = new Set([
+            social.bestFriendId,
+            ...(Array.isArray(social.goodFriendIds)
+                ? social.goodFriendIds
+                : [])
+        ]
+            .filter(id => id != null)
+            .map(String));
+
+        const rivalIds = new Set(
+            (Array.isArray(social.rivalIds) ? social.rivalIds : [])
+                .filter(id => id != null)
+                .map(String)
+        );
+
+        const friendCount = [...friendIds].filter(
+            id => rosterIds.has(id)
+        ).length;
+
+        const rivalCount = [...rivalIds].filter(
+            id => rosterIds.has(id)
+        ).length;
+
+        const relationshipAppeal = clamp(
+            50 + friendCount * 18 - rivalCount * 18
+        );
+
+        // Evaluate the actual football concepts available to this team.
+        // The player's primary side receives greater weight, but
+        // two-way opportunities still contribute to overall fit.
+        const footballPreferences =
+            player?.footballPreferences || {};
+
+        const offenseConceptFit = getTeamFootballConceptFit(
+            team,
+            'offense',
+            footballPreferences.preferredOffenseConcepts
+        );
+
+        const defenseConceptFit = getTeamFootballConceptFit(
+            team,
+            'defense',
+            footballPreferences.preferredDefenseConcepts
+        );
+
+        const primarySide = String(
+            player?.primarySide || ''
+        ).toLowerCase();
+
+        const offenseWeight = primarySide === 'defense'
+            ? 0.35
+            : 0.65;
+
+        const footballFit = clamp(
+            offenseConceptFit * offenseWeight +
+            defenseConceptFit * (1 - offenseWeight)
+        );
+
+        // Higher priority means the player cares more about that factor.
+        // Scheme preference is reserved for a later pass, when we have
+        // a reliable player-side scheme/style profile to compare.
+        const factors = [
+            {
+                priority: getPriority('roleOpportunity'),
+                appeal: roleOpportunity
+            },
+            {
+                priority: getPriority('relationships'),
+                appeal: relationshipAppeal
+            },
+            {
+                priority: getPriority('development'),
+                appeal: coachingQuality
+            },
+            {
+                priority: getPriority('winning'),
+                appeal: recentSuccess
+            },
+            {
+                priority: getPriority('programPrestige'),
+                appeal: programReputation
+            },
+            {
+                priority: getPriority('schemeFit'),
+                appeal: footballFit
+            }
+        ];
+
+        const totalPriority = factors.reduce(
+            (sum, factor) => sum + factor.priority,
+            0
+        );
+
+        const fitScore = totalPriority > 0
+            ? clamp(
+                factors.reduce(
+                    (sum, factor) =>
+                        sum + factor.priority * factor.appeal,
+                    0
+                ) / totalPriority
+            )
+            : 50;
+
+        // Neutral fit = 1.00. Strong fit can improve a team's odds
+        // by up to 20%; poor fit can reduce them by up to 20%.
+        const fitMultiplier = 0.80 + fitScore / 250;
+
+        return {
+            fitScore,
+            fitMultiplier,
+            footballFit,
+            offenseConceptFit,
+            defenseConceptFit
+        };
+    };
+
+        /**
+     * Measures how much actual recruiting work a team invested
+     * in a player, independently of accumulated interest.
+     *
+     * The player's private priorities influence which approaches
+     * are most relevant, but are only read during the decision.
+     */
+    const calculateRecruitingPushMultiplier = (
+        player,
+        record,
+        team
+    ) => {
+        const push = record?.recruitingPushByTeam?.[
+            String(team.id)
+        ];
+
+        // Older recruiting records may not contain investment data.
+        if (!push || typeof push !== 'object') {
+            return 1;
+        }
+
+        const preferences = player?.recruitingPreferences || {};
+
+        const getPriority = key => {
+            const value = Number(preferences[key]);
+
+            return Number.isFinite(value)
+                ? Math.max(5, Math.min(95, value))
+                : 50;
+        };
+
+        const actionPriority = {
+            outreach: 'relationships',
+            teammateConnection: 'relationships',
+            roleDiscussion: 'roleOpportunity',
+            practiceInvitation: 'development'
+        };
+
+        const effortByType =
+            push.effectiveEffortByType &&
+            typeof push.effectiveEffortByType === 'object'
+                ? push.effectiveEffortByType
+                : {};
+
+        let relevantEffort = 0;
+        let hasTypedEffort = false;
+
+        for (const [actionType, rawEffort] of Object.entries(
+            effortByType
+        )) {
+            const effort = Number(rawEffort);
+
+            if (!Number.isFinite(effort) || effort <= 0) {
+                continue;
+            }
+
+            hasTypedEffort = true;
+
+            const preferenceKey = actionPriority[actionType];
+
+            const relevance = preferenceKey
+                ? 0.75 + getPriority(preferenceKey) / 200
+                : 1;
+
+            relevantEffort += effort * relevance;
+        }
+
+        // Fall back to aggregate effort for older records or records
+        // without action-specific effort breakdowns.
+        if (!hasTypedEffort) {
+            const aggregateEffort = Number(push.effectiveEffort);
+
+            relevantEffort = Number.isFinite(aggregateEffort)
+                ? Math.max(0, aggregateEffort)
+                : 0;
+        }
+
+        // Diminishing returns prevent extreme investment from
+        // overwhelming the player's own preferences.
+        const effortScore = 1 - Math.exp(
+            -Math.max(0, relevantEffort) / 32
+        );
+
+        const effortBonus = effortScore * 0.12;
+
+        const cashSpent = Math.max(
+            0,
+            Number(push.cashSpent) || 0
+        );
+
+        const favorTokensSpent = Math.max(
+            0,
+            Number(push.favorTokensSpent) || 0
+        );
+
+        // Gifts and favors provide a smaller, separate advantage.
+        // The spending cap prevents unlimited financial influence.
+        const sweetenerScore = Math.min(
+            1,
+            cashSpent / 35 +
+            favorTokensSpent * 0.25
+        );
+
+        const sweetenerBonus = sweetenerScore * 0.05;
+
+        return Math.max(
+            1,
+            Math.min(
+                1.17,
+                1 + effortBonus + sweetenerBonus
+            )
+        );
+    };
+
+    const commitPlayer = (
+        player,
+        record,
+        team,
+        interest,
+        fitScore = 50,
+        fitMultiplier = 1,
+        pushMultiplier = 1
+    ) => {
+        if (
+            !player ||
+            !record ||
+            !team ||
+            player.teamId != null ||
+            record.status !== 'available' ||
+            record.committedTeamId != null
+        ) {
             return null;
         }
 
         // Use the established roster-assignment pipeline so roster IDs,
         // player.teamId, and related team state remain consistent.
-        if (!addPlayerToTeam(player, team)) {
+        if (!addPlayerToTeam(player, team, gameState)) {
             return null;
         }
 
@@ -4513,13 +5037,77 @@ export function resolveRecruitingDay(gameState = game) {
             playerId: player.id,
             playerName: player.name,
             teamId: team.id,
-            teamName: team.name,
+            teamName: team.name || 'Unknown program',
             day,
-            interestAtCommit: interest,
+            decisionDay: day,
+            interestAtCommit: Number.isFinite(Number(interest))
+                ? Math.max(
+                    0,
+                    Math.min(100, Number(interest))
+                )
+                : 0,
+            teamFitAtCommit:
+                fitScore != null &&
+                String(fitScore).trim() !== '' &&
+                Number.isFinite(Number(fitScore))
+                    ? Math.max(
+                        0,
+                        Math.min(100, Math.round(Number(fitScore)))
+                    )
+                    : 50,
+
+            teamFitMultiplierAtCommit:
+                fitMultiplier != null &&
+                String(fitMultiplier).trim() !== '' &&
+                Number.isFinite(Number(fitMultiplier))
+                    ? Math.max(
+                        0.8,
+                        Math.min(1.2, Number(fitMultiplier))
+                    )
+                    : 1,
             decisionType: finalDay
                 ? 'end_of_week'
-                : 'early_commitment'
+                : 'early_commitment',
+
+            recruitingPushMultiplierAtCommit:
+                Number.isFinite(Number(pushMultiplier))
+                    ? Math.max(
+                        1,
+                        Math.min(1.17, Number(pushMultiplier))
+                    )
+                    : 1,
         };
+
+        // Preserve successful recruiting campaigns on the player
+        // so the history survives the end of the recruiting week.
+        player.recruitingCampaignHistory =
+            Array.isArray(player.recruitingCampaignHistory)
+                ? player.recruitingCampaignHistory
+                : [];
+
+        const alreadyRecordedCommitment =
+            player.recruitingCampaignHistory.some(entry =>
+                entry?.type === 'commitment' &&
+                Number(entry.seasonYear) === Number(gameState.year)
+            );
+
+        if (!alreadyRecordedCommitment) {
+            player.recruitingCampaignHistory.push({
+                type: 'commitment',
+                seasonYear: Number(gameState.year),
+                decisionDay: day,
+                outcome: 'committed',
+                teamId: team.id,
+                teamName: team.name || 'Unknown program',
+                interestAtCommit: commitment.interestAtCommit,
+                teamFitAtCommit: commitment.teamFitAtCommit,
+                teamFitMultiplierAtCommit:
+                    commitment.teamFitMultiplierAtCommit,
+                recruitingPushMultiplierAtCommit:
+                    commitment.recruitingPushMultiplierAtCommit,
+                decisionType: commitment.decisionType
+            });
+        }
 
         progress.commitments = Array.isArray(progress.commitments)
             ? progress.commitments
@@ -4554,16 +5142,42 @@ export function resolveRecruitingDay(gameState = game) {
 
         // Interest above the serious-contender threshold determines the
         // odds. A leader is favored, but the result isn't guaranteed.
-        const weighted = candidates.map(candidate => ({
-            ...candidate,
-            weight: Math.pow(
-                Math.max(
-                    1,
-                    candidate.interest - seriousInterestThreshold
-                ),
-                1.6
+        const weighted = candidates.map(candidate => {
+            const fitMultiplier = Number.isFinite(
+                Number(candidate.fitMultiplier)
             )
-        }));
+                ? Math.max(
+                    0.8,
+                    Math.min(1.2, Number(candidate.fitMultiplier))
+                )
+                : 1;
+
+            const pushMultiplier = Number.isFinite(
+                Number(candidate.pushMultiplier)
+            )
+                ? Math.max(
+                    1,
+                    Math.min(1.17, Number(candidate.pushMultiplier))
+                )
+                : 1;
+
+            // Player-program fit matters substantially.
+            // Additional recruiting effort helps, but has diminishing returns.
+            const decisionMultiplier =
+                Math.pow(fitMultiplier, 1.5) *
+                Math.sqrt(pushMultiplier);
+
+            return {
+                ...candidate,
+                weight: Math.pow(
+                    Math.max(
+                        1,
+                        candidate.interest - seriousInterestThreshold
+                    ),
+                    1.6
+                ) * decisionMultiplier
+            };
+        });
 
         const totalWeight = weighted.reduce(
             (sum, candidate) => sum + candidate.weight,
@@ -4572,7 +5186,21 @@ export function resolveRecruitingDay(gameState = game) {
 
         if (totalWeight <= 0) return null;
 
-        let draw = Math.random() * totalWeight;
+        // Remaining unsigned is a genuine player decision, not a failure
+        // of the recruiting system.
+        //
+        // Offers must collectively become attractive enough to outweigh
+        // the player's option to wait for a better opportunity.
+        const noCommitWeight = 55;
+
+        let draw = Math.random() * (
+            totalWeight + noCommitWeight
+        );
+
+        // The player rejects all available programs.
+        if (draw >= totalWeight) {
+            return null;
+        }
 
         for (const candidate of weighted) {
             draw -= candidate.weight;
@@ -4581,6 +5209,114 @@ export function resolveRecruitingDay(gameState = game) {
         }
 
         return weighted[weighted.length - 1] || null;
+    };
+
+    /**
+     * Preserves a player's recruiting outcome between seasons.
+     *
+     * Remaining unsigned does not make a player ineligible for future
+     * recruiting. A new campaign will reset team interest while this
+     * personal history remains attached to the player.
+     */
+    const recordUnsignedOutcome = (
+        player,
+        record,
+        contenders
+    ) => {
+        if (!player || !record) return;
+
+        const seasonYear = Number(gameState.year);
+
+        player.recruitingCampaignHistory =
+            Array.isArray(player.recruitingCampaignHistory)
+                ? player.recruitingCampaignHistory
+                : [];
+
+        // Prevent the same season's outcome from being recorded twice.
+        const alreadyRecorded =
+            player.recruitingCampaignHistory.some(entry =>
+                entry?.type === 'unsigned_outcome' &&
+                Number(entry.seasonYear) === seasonYear
+            );
+
+        if (alreadyRecorded) return;
+
+        const interestValues = Object.entries(record.interestByTeam || {})
+            .filter(([teamId]) => {
+                const team = teamsById.get(String(teamId));
+                return team?.leagueType === 'main';
+            })
+            .map(([, rawInterest]) => {
+                if (rawInterest == null || String(rawInterest).trim() === '') return null;
+                const interest = Number(rawInterest);
+                return Number.isFinite(interest)
+                    ? Math.max(0, Math.min(100, interest))
+                    : null;
+            })
+            .filter(interest => interest !== null);
+
+        const bestInterest = interestValues.length > 0
+            ? Math.max(...interestValues)
+            : 0;
+
+        const seriousInterestTeamIds = Object.entries(
+            record.interestByTeam || {}
+        )
+            .filter(([teamId, rawInterest]) => {
+                const team = teamsById.get(String(teamId));
+
+                if (
+                    team?.leagueType !== 'main' ||
+                    rawInterest == null ||
+                    String(rawInterest).trim() === ''
+                ) {
+                    return false;
+                }
+
+                const interest = Number(rawInterest);
+
+                return (
+                    Number.isFinite(interest) &&
+                    interest >= seriousInterestThreshold
+                );
+            })
+            .map(([teamId]) => String(teamId));
+
+        const hadSeriousOffer = seriousInterestTeamIds.length > 0;
+
+        const outcome = {
+            type: 'unsigned_outcome',
+            seasonYear,
+            decisionDay: day,
+            outcome: hadSeriousOffer
+                ? 'remained_unsigned_after_offers'
+                : 'remained_unsigned_without_serious_offers',
+            seriousContenderCount: seriousInterestTeamIds.length,
+            bestInterest
+        };
+
+        player.recruitingCampaignHistory.push(outcome);
+
+        record.history = Array.isArray(record.history)
+            ? record.history
+            : [];
+
+        const event = {
+            type: 'recruiting_outcome',
+            playerId: player.id,
+            playerName: player.name,
+            ...outcome
+        };
+
+        record.history.push(event);
+
+        progress.dailyActivity = Array.isArray(
+            progress.dailyActivity
+        )
+            ? progress.dailyActivity
+            : [];
+
+        progress.dailyActivity.push(event);
     };
 
     for (const [playerId, record] of Object.entries(
@@ -4595,22 +5331,215 @@ export function resolveRecruitingDay(gameState = game) {
 
         const player = getAvailablePlayer(playerId);
 
-        if (!player) continue;
+        if (!player) {
+            const unavailablePlayer = gameState.players.find(
+                candidate =>
+                    String(candidate?.id) === String(playerId)
+            );
+
+            const unavailableStatusType = String(
+                unavailablePlayer?.status?.type || ''
+            ).toLowerCase();
+
+            const unavailableLifecycle = String(
+                unavailablePlayer?.lifecycle || ''
+            ).toLowerCase();
+
+            const unavailableLifecycleStatus = String(
+                unavailablePlayer?.lifecycleStatus ||
+                unavailablePlayer?.lifecycle?.status ||
+                ''
+            ).toLowerCase();
+
+            const unavailableAge = Number(unavailablePlayer?.age);
+
+            const statusDuration = Number(
+                unavailablePlayer?.status?.duration
+            );
+
+            const injuryDuration = Number(
+                unavailablePlayer?.injury?.duration ??
+                unavailablePlayer?.injuryDuration ??
+                0
+            );
+
+            // First establish that the player would otherwise be
+            // eligible for this recruiting campaign.
+            const isOtherwiseRecruitingEligible =
+                unavailablePlayer?.teamId == null &&
+                Number.isFinite(unavailableAge) &&
+                unavailableAge >= 12 &&
+                unavailableAge <= 18 &&
+                !protectedDraftIds.has(String(unavailablePlayer?.id)) &&
+                unavailableLifecycle !== 'draft_eligible' &&
+                unavailableLifecycleStatus !== 'draft_eligible' &&
+                !['retired', 'departed', 'temporary'].includes(
+                    unavailableStatusType
+                ) &&
+                !['retired', 'departed', 'temporary'].includes(
+                    unavailableLifecycleStatus
+                );
+
+            // An injury only qualifies for deferral when it actually
+            // explains why an otherwise eligible player is unavailable.
+            const isTemporarilyUnavailable =
+                isOtherwiseRecruitingEligible &&
+                (
+                    (
+                        Number.isFinite(statusDuration) &&
+                        statusDuration > 0
+                    ) ||
+                    (
+                        Number.isFinite(injuryDuration) &&
+                        injuryDuration > 0
+                    )
+                );
+
+            const isInjuryRelated =
+                unavailableStatusType === 'injured' ||
+                (
+                    Number.isFinite(injuryDuration) &&
+                    injuryDuration > 0
+                );
+
+            const deferredReason = isInjuryRelated
+                ? 'injured_at_end_of_recruiting'
+                : 'temporary_status_at_end_of_recruiting';
+
+            // Give injured prospects the remaining recruiting days
+            // to recover rather than permanently closing their campaign.
+            if (isTemporarilyUnavailable && !finalDay) {
+                continue;
+            }
+
+            const isDeferred = isTemporarilyUnavailable && finalDay;
+
+            if (isDeferred) {
+                record.status = 'deferred';
+                record.deferredDay = day;
+                record.deferredReason = deferredReason;
+            } else {
+                record.status = 'unavailable';
+                record.unavailableDay = day;
+                record.unavailableReason = 'no_longer_eligible';
+            }
+
+            const outcomeEvent = {
+                type: isDeferred
+                    ? 'recruiting_deferred'
+                    : 'recruiting_unavailable',
+                playerId,
+                day,
+                decisionDay: day,
+                reason: isDeferred
+                    ? deferredReason
+                    : 'no_longer_eligible'
+            };
+
+            record.history = Array.isArray(record.history)
+                ? record.history
+                : [];
+
+            record.history.push(outcomeEvent);
+
+            progress.dailyActivity = Array.isArray(progress.dailyActivity)
+                ? progress.dailyActivity
+                : [];
+
+            progress.dailyActivity.push(outcomeEvent);
+
+            if (unavailablePlayer) {
+                unavailablePlayer.recruitingCampaignHistory =
+                    Array.isArray(
+                        unavailablePlayer.recruitingCampaignHistory
+                    )
+                        ? unavailablePlayer.recruitingCampaignHistory
+                        : [];
+
+                const historyType = isDeferred
+                    ? 'deferred_outcome'
+                    : 'unavailable_outcome';
+
+                const alreadyRecordedOutcome =
+                    unavailablePlayer.recruitingCampaignHistory.some(
+                        entry =>
+                            entry?.type === historyType &&
+                            Number(entry.seasonYear) ===
+                                Number(gameState.year)
+                    );
+
+                if (!alreadyRecordedOutcome) {
+                    unavailablePlayer.recruitingCampaignHistory.push({
+                        type: historyType,
+                        seasonYear: Number(gameState.year),
+                        decisionDay: day,
+                        outcome: isDeferred
+                            ? (
+                                isInjuryRelated
+                                    ? 'deferred_due_to_injury'
+                                    : 'deferred_due_to_temporary_status'
+                            )
+                            : 'campaign_ended_unavailable',
+                        reason: isDeferred
+                            ? deferredReason
+                            : 'no_longer_eligible'
+                    });
+                }
+            }
+
+            continue;
+        }
 
         const contenders = Object.entries(
             record.interestByTeam || {}
         )
-            .map(([teamId, rawInterest]) => ({
-                team: getEligibleTeam(teamId),
-                interest: Number(rawInterest) || 0
-            }))
+            .map(([teamId, rawInterest]) => {
+                const team = getEligibleTeam(teamId, player);
+
+                if (!team) return null;
+
+                const numericInterest = Number(rawInterest);
+
+                const interest = Number.isFinite(numericInterest)
+                    ? Math.max(0, Math.min(100, numericInterest))
+                    : 0;
+
+                const playerFit = calculatePlayerRecruitingFit(
+                    player,
+                    record,
+                    team
+                );
+
+                const pushMultiplier =
+                    calculateRecruitingPushMultiplier(
+                        player,
+                        record,
+                        team
+                    );
+
+                return {
+                    team,
+                    interest,
+                    fitScore: playerFit.fitScore,
+                    fitMultiplier: playerFit.fitMultiplier,
+                    pushMultiplier
+                };
+            })
             .filter(candidate =>
-                candidate.team &&
+                candidate &&
                 candidate.interest >= seriousInterestThreshold
             )
             .sort((a, b) => b.interest - a.interest);
 
         if (contenders.length === 0) {
+            if (finalDay) {
+                recordUnsignedOutcome(
+                    player,
+                    record,
+                    contenders
+                );
+            }
+
             continue;
         }
 
@@ -4632,6 +5561,8 @@ export function resolveRecruitingDay(gameState = game) {
                 leader.interest >= 82 &&
                 (hasFewAlternatives || strongLead)
             ) {
+                // Strong recruiting interest can trigger an early
+                // decision, but it does not dictate which team wins.
                 const earlyCommitChance = Math.min(
                     0.85,
                     0.35 +
@@ -4640,7 +5571,11 @@ export function resolveRecruitingDay(gameState = game) {
                 );
 
                 if (Math.random() < earlyCommitChance) {
-                    winner = leader;
+                    // Let the player evaluate all serious offers using
+                    // the same fit, recruiting investment, and
+                    // willingness-to-remain-unsigned calculations
+                    // used for the final recruiting decision.
+                    winner = chooseWeightedCandidate(contenders);
                 }
             }
         }
@@ -4650,13 +5585,26 @@ export function resolveRecruitingDay(gameState = game) {
             winner = chooseWeightedCandidate(contenders);
         }
 
-        if (!winner) continue;
+        if (!winner) {
+            if (finalDay) {
+                recordUnsignedOutcome(
+                    player,
+                    record,
+                    contenders
+                );
+            }
+
+            continue;
+        }
 
         const commitment = commitPlayer(
             player,
             record,
             winner.team,
-            winner.interest
+            winner.interest,
+            winner.fitScore,
+            winner.fitMultiplier,
+            winner.pushMultiplier
         );
 
         if (!commitment) continue;
@@ -4730,158 +5678,24 @@ export function executeAICutDowns() {
         const gmDirective =
             team.gameplan?.gmDirective || 'COACH_AUTONOMY';
 
-        // Scouting hours improve the accuracy of roster evaluations.
-        const scoutingHours = (
-            team.staffWorkPlan?.assignments || []
-        ).reduce((total, assignment) => {
-            if (assignment?.task !== 'scouting') return total;
+        // Roster evaluations use this team's stored scouting reports.
+        // Unscouted attributes remain unknown instead of being reconstructed
+        // from the player's true ratings.
+        const getCutEvaluationScore = p => {
+            const { report, confidence } =
+                getTrainingReportConfidence(team, p);
 
-            const hours = Number(assignment.hours);
+            const position = getTrainingPlayerPosition(p, team);
 
-            return total + (
-                Number.isFinite(hours)
-                    ? Math.max(0, hours)
-                    : 0
-            );
-        }, 0);
+            // A public position does not reveal a player's ability.
+            // Without a usable scouting report, positional ability stays neutral.
+            let val = position
+                ? getTrainingOverallScore(p, position, team)
+                : 50;
 
-        const baseScoutAccuracy = scout
-            ? (
-                (scout.ratings?.evalTechnique ?? 50) +
-                (scout.ratings?.evalPhysicals ?? 50)
-            ) / 200
-            : 0.5;
-
-        // Full scouting effort is reached at 12 assigned hours.
-        // Accuracy remains bounded to preserve uncertainty.
-        const scoutingEffortMultiplier =
-            0.7 + 0.3 * Math.min(1, scoutingHours / 12);
-
-        const scoutAcc = Math.max(
-            0.25,
-            Math.min(
-                0.85,
-                baseScoutAccuracy * scoutingEffortMultiplier
-            )
-        );
-
-        // Personality-driven roster valuation
-        const getCutEvaluationScore = (p) => {
-            // Build an imperfect player assessment before calculating
-            // overall. The evaluation must not start from the true OVR.
-            const positionOptions = [
-                'QB', 'RB', 'WR', 'TE',
-                'OL', 'DL', 'LB', 'DB'
-            ];
-
-            const playerId = String(p.id ?? 'unknown');
-            const assessmentUncertainty = Math.max(
-                2,
-                Math.round((1 - scoutAcc) * 12)
-            );
-
-            const scoutingProfileId =
-                scout?.profileIds?.scouting ||
-                scout?.biases?.scouting?.id ||
-                ({
-                    'Speed Chaser': 'athletic_bias_evaluator',
-                    'Technique Purist': 'technique_first_evaluator',
-                    'Character First': 'character_focused_evaluator',
-                    'Objective Scout': 'balanced_evaluator'
-                }[scout?.biases?.scouting?.name]) ||
-                'balanced_evaluator';
-
-            // Deterministic noise gives each player a consistent assessment
-            // during this evaluation, rather than reshuffling their rating
-            // every time the sort comparator runs.
-            const assessmentNoise = key => {
-                let hash = 2166136261;
-                const text = String(key);
-
-                for (let i = 0; i < text.length; i++) {
-                    hash ^= text.charCodeAt(i);
-                    hash = Math.imul(hash, 16777619);
-                }
-
-                return ((hash >>> 0) / 4294967295) * 2 - 1;
-            };
-
-            const perceivedAttributes = {};
-
-            for (const [category, attributes] of Object.entries(
-                p.attributes || {}
-            )) {
-                perceivedAttributes[category] = {};
-
-                for (const [attribute, rawValue] of Object.entries(
-                    attributes || {}
-                )) {
-                    if (
-                        typeof rawValue !== 'number' ||
-                        !Number.isFinite(rawValue) ||
-                        ['height', 'weight'].includes(attribute)
-                    ) {
-                        perceivedAttributes[category][attribute] =
-                            rawValue;
-                        continue;
-                    }
-
-                    // Scouting styles can create modest systematic biases.
-                    let scoutingBias = 0;
-
-                    if (
-                        scoutingProfileId === 'athletic_bias_evaluator' &&
-                        category === 'physical'
-                    ) {
-                        scoutingBias = 2;
-                    } else if (
-                        scoutingProfileId === 'technique_first_evaluator' &&
-                        category === 'technical'
-                    ) {
-                        scoutingBias = 2;
-                    } else if (
-                        scoutingProfileId === 'character_focused_evaluator' &&
-                        category === 'mental'
-                    ) {
-                        scoutingBias = 2;
-                    }
-
-                    const noise = assessmentNoise(
-                        `${game.year}:${team.id}:${playerId}:${category}:${attribute}`
-                    ) * assessmentUncertainty;
-
-                    perceivedAttributes[category][attribute] = Math.max(
-                        1,
-                        Math.min(
-                            99,
-                            Math.round(rawValue + noise + scoutingBias)
-                        )
-                    );
-                }
-            }
-
-            const perceivedPlayer = {
-                ...p,
-                attributes: perceivedAttributes
-            };
-
-            // Use the listed position when available. If it is missing,
-            // estimate the best position from perceived—not true—attributes.
-            const pos = positionOptions.includes(p.pos)
-                ? p.pos
-                : positionOptions.reduce((best, candidatePosition) => (
-                    calculateOverall(perceivedPlayer, candidatePosition) >
-                    calculateOverall(perceivedPlayer, best)
-                        ? candidatePosition
-                        : best
-                ), 'WR');
-
-            let val = calculateOverall(perceivedPlayer, pos);
-
-            // Development preference must use observable information,
-            // never the player's hidden true potential grade.
             const playerAge = Number(p.age);
 
+            // Age is observable information; hidden potential is not.
             if (
                 gmDirective === 'DEVELOP_YOUTH' &&
                 Number.isFinite(playerAge)
@@ -4893,71 +5707,91 @@ export function executeAICutDowns() {
                 }
             }
 
-            // Personality traits are estimates, not perfect knowledge.
-            // Scouting quality controls the uncertainty in each estimate.
-            const estimateTrait = (rawValue, traitKey) => {
-                const raw = Number(rawValue);
-                const actual = Number.isFinite(raw) ? raw : 50;
+            const characterSummary = String(
+                report?.evaluation?.characterSummary || ''
+            ).toLowerCase();
 
-                let scoutingBias = 0;
+            let estimatedWorkEthic = 50;
+            let estimatedTeamFit = 50;
 
-                // Character-focused evaluators may overrate a player's
-                // apparent work ethic and loyalty.
+            // Character evaluations require at least moderate confidence.
+            // Blend reported signals toward neutral when confidence is limited.
+            if (confidence >= 0.50) {
+                let effortSignal = null;
+
                 if (
-                    scoutingProfileId === 'character_focused_evaluator' &&
-                    ['workEthic', 'loyalty'].includes(traitKey)
+                    characterSummary.includes(
+                        'strong effort/reliability signals'
+                    )
                 ) {
-                    scoutingBias = 2;
+                    effortSignal = 75;
+                } else if (
+                    characterSummary.includes(
+                        'generally steady effort'
+                    )
+                ) {
+                    effortSignal = 60;
+                } else if (
+                    characterSummary.includes(
+                        'effort/reliability need closer review'
+                    )
+                ) {
+                    effortSignal = 35;
                 }
 
-                const noise = assessmentNoise(
-                    `${game.year}:${team.id}:${playerId}:trait:${traitKey}`
-                ) * assessmentUncertainty;
+                if (effortSignal !== null) {
+                    estimatedWorkEthic =
+                        50 + (effortSignal - 50) * confidence;
+                }
 
-                return Math.max(
-                    1,
-                    Math.min(
-                        99,
-                        Math.round(actual + noise + scoutingBias)
+                let teamFitSignal = null;
+
+                if (characterSummary.includes('team-oriented')) {
+                    teamFitSignal = 75;
+                } else if (
+                    characterSummary.includes(
+                        'may fit with clear expectations'
                     )
-                );
-            };
+                ) {
+                    teamFitSignal = 60;
+                } else if (
+                    characterSummary.includes(
+                        'may need relationship-building'
+                    )
+                ) {
+                    teamFitSignal = 35;
+                }
 
-            const ethic = estimateTrait(
-                p.personality?.workEthic,
-                'workEthic'
+                if (teamFitSignal !== null) {
+                    estimatedTeamFit =
+                        50 + (teamFitSignal - 50) * confidence;
+                }
+            }
+
+            // Physical and mental traits also come from reported ranges.
+            const toughness = getTrainingAttributeScore(
+                p,
+                'toughness',
+                team
             );
 
-            const ego = estimateTrait(
-                p.personality?.ego,
-                'ego'
+            const strength = getTrainingAttributeScore(
+                p,
+                'strength',
+                team
             );
-
-            const loyalty = estimateTrait(
-                p.personality?.loyalty,
-                'loyalty'
-            );
-
-            // Physical and mental traits use the previously constructed
-            // imperfect attribute assessment.
-            const toughness = Number(
-                perceivedAttributes.mental?.toughness
-            ) || 50;
-
-            const perceivedStrength = Number(
-                perceivedAttributes.physical?.strength
-            ) || 50;
 
             // Individual coaching tendencies influence cut-day evaluations.
-            // These are preferences, not guarantees about which player is cut.
+            // They can favor certain player profiles, but cannot reveal
+            // personality traits the team has not scouted.
             let coachingBias = 0;
 
             if (discipline >= 65) {
-                if (ethic < 40) {
+                if (estimatedWorkEthic < 40) {
                     coachingBias -= 12;
                 }
 
-                if (ego > 75) {
+                if (estimatedTeamFit < 40) {
                     coachingBias -= 10;
                 }
 
@@ -4966,21 +5800,20 @@ export function executeAICutDowns() {
                 }
             }
 
-            if (riskTolerance >= 65) {
-                if (perceivedStrength > 60) {
-                    coachingBias += 6;
-                }
+            if (
+                riskTolerance >= 65 &&
+                strength > 60
+            ) {
+                coachingBias += 6;
             }
 
             if (
                 relationshipOrientation >= 65 &&
-                loyalty > 65
+                estimatedTeamFit > 65
             ) {
                 coachingBias += 8;
             }
 
-            // Prevent overlapping tendencies from overwhelming the
-            // player's evaluated value.
             coachingBias = Math.max(
                 -20,
                 Math.min(12, coachingBias)
@@ -4988,7 +5821,15 @@ export function executeAICutDowns() {
 
             val += coachingBias;
 
-            if (gmDirective === 'WIN_NOW' && p.age >= 16) val += 5; // Prefers experienced players
+            // Experience is observable; this is a roster philosophy choice.
+            if (
+                gmDirective === 'WIN_NOW' &&
+                Number.isFinite(playerAge) &&
+                playerAge >= 16
+            ) {
+                val += 5;
+            }
+
             return val;
         };
 
@@ -5015,82 +5856,9 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
     let added = 0;
     const limit = getCurrentRosterLimit(game);
 
-    const scout =
-        getTeamCoachingSpecialist(team, 'scouting') ||
-        getTeamCoachingSpecialist(team, 'general');
-
-    const getRating = key => {
-        const value = Number(scout?.ratings?.[key]);
-        return Number.isFinite(value)
-            ? Math.max(0, Math.min(100, value))
-            : 50;
-    };
-
-    const scoutingHours = (
-        team.staffWorkPlan?.assignments || []
-    ).reduce((total, assignment) => {
-        if (assignment?.task !== 'scouting') return total;
-
-        const hours = Number(assignment.hours);
-
-        return total + (
-            Number.isFinite(hours) && hours > 0
-                ? hours
-                : 0
-        );
-    }, 0);
-
-    // Scouting quality and actual time invested determine how uncertain
-    // the AI's estimate of an available player's ability will be.
-    const baseScoutAccuracy = (
-        getRating('evalTechnique') +
-        getRating('evalPhysicals')
-    ) / 200;
-
-    const scoutingEffortMultiplier =
-        0.7 + 0.3 * Math.min(1, scoutingHours / 12);
-
-    const scoutingAccuracy = Math.max(
-        0.25,
-        Math.min(0.90, baseScoutAccuracy * scoutingEffortMultiplier)
-    );
-
-    const assessmentUncertainty = Math.max(
-        2,
-        Math.round((1 - scoutingAccuracy) * 12)
-    );
-
-    const legacyScoutingIds = {
-        'Speed Chaser': 'athletic_bias_evaluator',
-        'Technique Purist': 'technique_first_evaluator',
-        'Character First': 'character_focused_evaluator',
-        'Objective Scout': 'balanced_evaluator'
-    };
-
-    const scoutingProfileId =
-        scout?.profileIds?.scouting ||
-        scout?.biases?.scouting?.id ||
-        legacyScoutingIds[scout?.biases?.scouting?.name] ||
-        'balanced_evaluator';
-
-    // Stable noise makes repeated evaluations consistent for the same
-    // team, player, season, and attribute.
-    const assessmentNoise = key => {
-        let hash = 2166136261;
-
-        for (const character of String(key)) {
-            hash ^= character.charCodeAt(0);
-            hash = Math.imul(hash, 16777619);
-        }
-
-        return ((hash >>> 0) / 4294967295) * 2 - 1;
-    };
-
-    const positionOptions = [
-        'QB', 'RB', 'WR', 'TE',
-        'OL', 'DL', 'LB', 'DB'
-    ];
-
+    // Walk-on evaluations use the team's own scouting reports.
+    // Unscouted ability remains unknown rather than being reconstructed
+    // from the player's actual attributes.
     const assessmentCache = new Map();
 
     const evaluateWalkOn = player => {
@@ -5100,85 +5868,21 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
             return assessmentCache.get(cacheKey);
         }
 
-        const perceivedAttributes = {};
+        const { report, confidence } =
+            getTrainingReportConfidence(team, player);
 
-        for (const [category, attributes] of Object.entries(
-            player.attributes || {}
-        )) {
-            perceivedAttributes[category] = {};
+        const position = getTrainingPlayerPosition(player, team);
 
-            for (const [attribute, rawValue] of Object.entries(
-                attributes || {}
-            )) {
-                if (
-                    typeof rawValue !== 'number' ||
-                    !Number.isFinite(rawValue) ||
-                    ['height', 'weight'].includes(attribute)
-                ) {
-                    perceivedAttributes[category][attribute] = rawValue;
-                    continue;
-                }
-
-                let scoutingBias = 0;
-
-                if (
-                    scoutingProfileId === 'athletic_bias_evaluator' &&
-                    category === 'physical'
-                ) {
-                    scoutingBias = 2;
-                } else if (
-                    scoutingProfileId === 'technique_first_evaluator' &&
-                    category === 'technical'
-                ) {
-                    scoutingBias = 2;
-                } else if (
-                    scoutingProfileId === 'character_focused_evaluator' &&
-                    category === 'mental'
-                ) {
-                    scoutingBias = 2;
-                }
-
-                const noise = assessmentNoise(
-                    `${game.year}:${team.id}:${cacheKey}:${category}:${attribute}`
-                ) * assessmentUncertainty;
-
-                perceivedAttributes[category][attribute] = Math.max(
-                    1,
-                    Math.min(
-                        99,
-                        Math.round(rawValue + noise + scoutingBias)
-                    )
-                );
-            }
-        }
-
-        const perceivedPlayer = {
-            ...player,
-            attributes: perceivedAttributes
-        };
-
-        let bestEstimatedOverall = -Infinity;
-        let estimatedPosition = 'WR';
-
-        for (const position of positionOptions) {
-            const overall = Number(
-                calculateOverall(perceivedPlayer, position)
-            );
-
-            if (
-                Number.isFinite(overall) &&
-                overall > bestEstimatedOverall
-            ) {
-                bestEstimatedOverall = overall;
-                estimatedPosition = position;
-            }
-        }
+        const overall = report && confidence >= 0.50
+            ? getTrainingOverallScore(player, position, team)
+            : 50;
 
         const result = {
-            position: estimatedPosition,
-            overall: Number.isFinite(bestEstimatedOverall)
-                ? bestEstimatedOverall
-                : 50
+            position,
+            overall: Number.isFinite(Number(overall))
+                ? Number(overall)
+                : 50,
+            confidence
         };
 
         assessmentCache.set(cacheKey, result);
@@ -5197,14 +5901,16 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
         );
         if (unassigned.length === 0) break;
 
-        // Rank candidates by the AI's estimated ability, not true OVR.
-        // Stable tie-breaking avoids arbitrary changes in selection order.
+        // Prefer candidates with stronger reported ability.
+        // When ability estimates are equal, prefer the more thoroughly
+        // scouted candidate before using a stable tie-breaker.
         unassigned.sort((a, b) => {
             const assessmentA = evaluateWalkOn(a);
             const assessmentB = evaluateWalkOn(b);
 
             return (
                 assessmentB.overall - assessmentA.overall ||
+                assessmentB.confidence - assessmentA.confidence ||
                 String(a.id ?? a.name ?? '').localeCompare(
                     String(b.id ?? b.name ?? '')
                 )
@@ -5234,6 +5940,42 @@ export function aiManageRoster(team) {
 
     const aiAvailableNetwork = getTeamNetworkRecruits(team);
 
+    // Network relationships are observable, but actual player ability
+    // must come from this team's own scouting reports.
+    const getNetworkRecruitEvaluation = candidate => {
+        const { report, confidence } =
+            getTrainingReportConfidence(team, candidate);
+
+        const position = getTrainingPlayerPosition(
+            candidate,
+            team
+        );
+
+        const ability = report && confidence >= 0.50
+            ? getTrainingOverallScore(
+                candidate,
+                position,
+                team
+            )
+            : 50;
+
+        const rawNetworkStrength = Number(
+            candidate?.networkStrength
+        );
+
+        const networkStrength = Number.isFinite(rawNetworkStrength)
+            ? Math.max(0, Math.min(100, rawNetworkStrength))
+            : 0;
+
+        return {
+            ability: Number.isFinite(Number(ability))
+                ? Number(ability)
+                : 50,
+            confidence,
+            networkStrength
+        };
+    };
+
     while (
         playableCount < TEMPORARY_HELP_THRESHOLD &&
         team.roster.length < getCurrentRosterLimit(game) &&
@@ -5241,8 +5983,23 @@ export function aiManageRoster(team) {
     ) {
         const bestFA = aiAvailableNetwork.reduce((best, current) => {
             if (!best) return current;
-            const currentScore = getPlayerScore(current, team.coach) + (current.networkStrength * 15);
-            const bestScore = getPlayerScore(best, team.coach) + (best.networkStrength * 15);
+
+            const currentEvaluation =
+                getNetworkRecruitEvaluation(current);
+
+            const bestEvaluation =
+                getNetworkRecruitEvaluation(best);
+
+            const currentScore =
+                currentEvaluation.ability +
+                currentEvaluation.networkStrength * 15 +
+                currentEvaluation.confidence * 5;
+
+            const bestScore =
+                bestEvaluation.ability +
+                bestEvaluation.networkStrength * 15 +
+                bestEvaluation.confidence * 5;
+
             return currentScore > bestScore ? current : best;
         }, null);
 
@@ -5266,9 +6023,23 @@ export function aiManageRoster(team) {
 
     if (team.roster.length < getCurrentRosterLimit(game) && team.socialProfile?.favorTokens > 0) {
         const topFriend = aiAvailableNetwork.reduce((best, p) => {
-            if (p.networkStrength < relationshipLevels.GOOD_FRIEND.level) return best;
-            const score = getPlayerScore(p, team.coach) + (p.networkStrength * 20) + (p.personality?.streetCred || 50);
-            return score > (best ? best._score : 150) ? { ...p, _score: score } : best;
+            if (
+                p.networkStrength <
+                relationshipLevels.GOOD_FRIEND.level
+            ) {
+                return best;
+            }
+
+            const evaluation = getNetworkRecruitEvaluation(p);
+
+            const score =
+                evaluation.ability +
+                evaluation.networkStrength * 20 +
+                evaluation.confidence * 10;
+
+            return score > (best ? best._score : 100)
+                ? { ...p, _score: score }
+                : best;
         }, null);
 
         if (topFriend && Math.random() < 0.3) {
@@ -5398,13 +6169,39 @@ const TRAINING_VALID_POSITIONS = new Set([
     ...TRAINING_DEFENSE_POSITIONS
 ]);
 
-function getTrainingPlayerPosition(player) {
-    const rawPosition = player?.pos || estimateBestPosition(player);
+function getTrainingReportConfidence(team, player) {
+    const report = player?.id != null
+        ? getTeamScoutingReport(team, player.id)
+        : null;
+
+    const rawConfidence = Number(report?.confidence);
+
+    const confidence = Number.isFinite(rawConfidence)
+        ? Math.max(
+            0,
+            Math.min(
+                1,
+                rawConfidence > 1
+                    ? rawConfidence / 100
+                    : rawConfidence
+            )
+        )
+        : 0;
+
+    return { report, confidence };
+}
+
+function normalizeTrainingPosition(rawPosition) {
+    const value = String(rawPosition || '')
+        .trim()
+        .toUpperCase();
 
     const positionAliases = {
         OT: 'OL',
         OG: 'OL',
         C: 'OL',
+        G: 'OL',
+        T: 'OL',
         DE: 'DL',
         DT: 'DL',
         NT: 'DL',
@@ -5414,24 +6211,148 @@ function getTrainingPlayerPosition(player) {
         SS: 'DB'
     };
 
-    const position = positionAliases[rawPosition] || rawPosition;
+    const position = positionAliases[value] || value;
 
     return TRAINING_VALID_POSITIONS.has(position)
         ? position
         : null;
 }
 
-function getTrainingAttributeScore(player, skill) {
-    const values = Object.values(player?.attributes || {})
-        .map(category => category?.[skill])
-        .filter(value =>
-            typeof value === 'number' &&
-            Number.isFinite(value)
-        );
+function getTrainingPlayerPosition(player, team = null) {
+    // A player's listed roster position is public information.
+    const listedPosition = normalizeTrainingPosition(
+        player?.pos ||
+        player?.position ||
+        player?.Pos
+    );
 
-    return values.length > 0
-        ? values.reduce((sum, value) => sum + value, 0) / values.length
-        : 101;
+    if (listedPosition) return listedPosition;
+
+    // Preserve full evaluation for the player-controlled organization.
+    if (team?.isPlayerControlled) {
+        return normalizeTrainingPosition(
+            player?.favoriteOffensivePosition ||
+            player?.favoriteDefensivePosition ||
+            estimateBestPosition(player)
+        );
+    }
+
+    // AI coaches must use their own scouting evidence for an alternative role.
+    const { report, confidence } = getTrainingReportConfidence(
+        team,
+        player
+    );
+
+    if (!report || confidence < 0.50) return null;
+
+    const reportedFits = [
+        report.evaluation?.offenseFit,
+        report.evaluation?.defenseFit
+    ]
+        .map(fit => {
+            const position = normalizeTrainingPosition(fit?.position);
+            const low = Number(fit?.low);
+            const high = Number(fit?.high);
+
+            if (
+                !position ||
+                fit?.low == null ||
+                fit?.high == null ||
+                !Number.isFinite(low) ||
+                !Number.isFinite(high) ||
+                high < low
+            ) {
+                return null;
+            }
+
+            return {
+                position,
+                score: low + ((high - low) / 2) * confidence
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score);
+
+    return reportedFits[0]?.position || null;
+}
+
+function getTrainingAttributeScore(player, skill, team = null) {
+    // The player-controlled organization can use its full roster information.
+    if (team?.isPlayerControlled) {
+        const values = Object.values(player?.attributes || {})
+            .map(category => category?.[skill])
+            .filter(value =>
+                typeof value === 'number' &&
+                Number.isFinite(value)
+            );
+
+        return values.length > 0
+            ? values.reduce((sum, value) => sum + value, 0) / values.length
+            : 101;
+    }
+
+    const { report, confidence } = getTrainingReportConfidence(
+        team,
+        player
+    );
+
+    // No reliable scouting evidence means the AI uses a neutral estimate.
+    if (!report || confidence < 0.50) return 50;
+
+    const estimates = Object.values(
+        report.attributeRanges || {}
+    )
+        .map(category => category?.[skill])
+        .filter(range =>
+            range &&
+            Number.isFinite(Number(range.low)) &&
+            Number.isFinite(Number(range.high)) &&
+            Number(range.high) >= Number(range.low)
+        )
+        .map(range => {
+            const low = Number(range.low);
+            const high = Number(range.high);
+
+            return low + ((high - low) / 2) * confidence;
+        });
+
+    return estimates.length > 0
+        ? estimates.reduce((sum, value) => sum + value, 0) /
+            estimates.length
+        : 50;
+}
+
+function getTrainingOverallScore(player, position, team) {
+    if (team?.isPlayerControlled) {
+        return calculateOverall(player, position || 'WR');
+    }
+
+    const { report, confidence } = getTrainingReportConfidence(
+        team,
+        player
+    );
+
+    if (!report || confidence < 0.50) return 50;
+
+    const fits = [
+        report.evaluation?.offenseFit,
+        report.evaluation?.defenseFit
+    ].filter(fit =>
+        fit &&
+        (!position ||
+            normalizeTrainingPosition(fit.position) === position) &&
+        Number.isFinite(Number(fit.low)) &&
+        Number.isFinite(Number(fit.high)) &&
+        Number(fit.high) >= Number(fit.low)
+    );
+
+    if (fits.length === 0) return 50;
+
+    const fit = fits[0];
+    const low = Number(fit.low);
+    const high = Number(fit.high);
+
+    return low + ((high - low) / 2) * confidence;
 }
 
 function getTrainingAssignmentTargetIds(team, assignment) {
@@ -5450,7 +6371,7 @@ function getTrainingAssignmentTargetIds(team, assignment) {
     const focus = String(assignment.focus || 'all');
 
     const candidates = roster.filter(player => {
-        const position = getTrainingPlayerPosition(player);
+        const position = getTrainingPlayerPosition(player, team);
 
         if (focus === 'all') return true;
 
@@ -5475,18 +6396,29 @@ function getTrainingAssignmentTargetIds(team, assignment) {
     const skill = String(assignment.skill || '').trim();
 
     candidates.sort((a, b) => {
-        const positionA = getTrainingPlayerPosition(a) || 'WR';
-        const positionB = getTrainingPlayerPosition(b) || 'WR';
+        const positionA = getTrainingPlayerPosition(a, team);
+        const positionB = getTrainingPlayerPosition(b, team);
 
         const scoreA = skill
-            ? getTrainingAttributeScore(a, skill)
-            : calculateOverall(a, positionA);
+            ? getTrainingAttributeScore(a, skill, team)
+            : getTrainingOverallScore(a, positionA, team);
 
         const scoreB = skill
-            ? getTrainingAttributeScore(b, skill)
-            : calculateOverall(b, positionB);
+            ? getTrainingAttributeScore(b, skill, team)
+            : getTrainingOverallScore(b, positionB, team);
+
+        // When reports are equally incomplete, favor younger players
+        // and players with fewer recent snaps rather than hidden ratings.
+        const ageDifference =
+            (Number(a.age) || 14) - (Number(b.age) || 14);
+
+        const snapDifference =
+            (Number(a.snapsThisWeek) || 0) -
+            (Number(b.snapsThisWeek) || 0);
 
         return scoreA - scoreB ||
+            ageDifference ||
+            snapDifference ||
             String(a.id).localeCompare(String(b.id));
     });
 

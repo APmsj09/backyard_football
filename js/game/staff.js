@@ -13,6 +13,10 @@ import {
     getTeamScoutingReport
 } from './state.js';
 import { calculateOverall } from './player.js';
+import {
+    getOffensivePlayKnowledge,
+    getDefensivePlayKnowledge
+} from './playcalling_knowledge.js';
 import { evaluateStaffNegotiation } from './negotiations.js';
 import { isPlayerViableForPosition, rebuildDepthChartFromOrder } from './depth_chart.js';
 
@@ -50,6 +54,137 @@ function getStaffProfileId(staff, category) {
     const legacyName = staff?.biases?.[category]?.name;
 
     return LEGACY_STAFF_PROFILE_IDS[category]?.[legacyName] || null;
+}
+
+/**
+ * Evaluates how prominently a position features in the team's actual
+ * installed playbook. This measures opportunity and tactical involvement,
+ * not the recruit's private preferences or playing ability.
+ *
+ * Key positions receive full weight. Supporting positions receive
+ * partial weight because they contribute without being the primary role.
+ */
+function getRecruitingPlaybookRoleSnapshot(team, position) {
+    const normalizedPosition = String(position || '').toUpperCase();
+
+    const offensePositions = ['QB', 'RB', 'WR', 'TE', 'OL'];
+    const defensePositions = ['DL', 'LB', 'DB'];
+
+    const isOffense = offensePositions.includes(normalizedPosition);
+    const isDefense = defensePositions.includes(normalizedPosition);
+
+    if (!isOffense && !isDefense) return null;
+
+    const side = isOffense ? 'offense' : 'defense';
+    const playbook = isOffense
+        ? offensivePlaybook
+        : defensivePlaybook;
+
+    const foundationKeys = isOffense
+        ? [
+            'Uni_InsideZone',
+            'Uni_StretchRight',
+            'Uni_QuickSlants',
+            'Uni_FourVerts'
+        ]
+        : [
+            'Cover_2_Zone_Base',
+            'Cover_1_Robber',
+            'Man_Blitz_Base',
+            'GoalLine_RunStuff'
+        ];
+
+    const installedKeys = isOffense
+        ? (team?.gameplan?.installedOffense || [])
+        : (team?.gameplan?.installedDefense || []);
+
+    const activePlayKeys = [
+        ...new Set([
+            ...foundationKeys,
+            ...installedKeys
+        ])
+    ].filter(key => playbook?.[key]);
+
+    if (activePlayKeys.length === 0) return null;
+
+    const relevantPlays = activePlayKeys.map(key => {
+        const definition = playbook[key];
+
+        const knowledge = isOffense
+            ? getOffensivePlayKnowledge(key, definition)
+            : getDefensivePlayKnowledge(key, definition);
+
+        const keyPositions = Array.isArray(knowledge?.keyPositions)
+            ? knowledge.keyPositions
+            : [];
+
+        const supportingPositions = Array.isArray(
+            knowledge?.supportingPositions
+        )
+            ? knowledge.supportingPositions
+            : [];
+
+        let role = null;
+
+        if (keyPositions.includes(normalizedPosition)) {
+            role = 'key';
+        } else if (
+            supportingPositions.includes(normalizedPosition)
+        ) {
+            role = 'supporting';
+        }
+
+        if (!role) return null;
+
+        const rawMastery = Number(
+            team?.gameplan?.mastery?.[key]
+        );
+
+        const mastery = Number.isFinite(rawMastery)
+            ? Math.max(0, Math.min(100, rawMastery))
+            : 40;
+
+        return {
+            key,
+            role,
+            mastery
+        };
+    }).filter(Boolean);
+
+    const keyPlays = relevantPlays.filter(
+        play => play.role === 'key'
+    );
+
+    const supportingPlays = relevantPlays.filter(
+        play => play.role === 'supporting'
+    );
+
+    const roleWeight =
+        keyPlays.length +
+        supportingPlays.length * 0.5;
+
+    const roleScore = Math.round(
+        100 * roleWeight / activePlayKeys.length
+    );
+
+    const averageMastery = relevantPlays.length > 0
+        ? Math.round(
+            relevantPlays.reduce(
+                (total, play) => total + play.mastery,
+                0
+            ) / relevantPlays.length
+        )
+        : 40;
+
+    return {
+        position: normalizedPosition,
+        side,
+        activePlayCount: activePlayKeys.length,
+        keyPlayCount: keyPlays.length,
+        supportingPlayCount: supportingPlays.length,
+        roleScore: Math.max(0, Math.min(100, roleScore)),
+        averageMastery
+    };
 }
 
 export const tacticalBiases = [
@@ -2293,28 +2428,14 @@ export function processCoachOffseasonRetention(
 
 
 function buildDefaultAutomatedStaffAssignments(coaches) {
-    const tasks = [
+    const specialtyTasks = [
         'scouting',
-        'training',
         'offensePrep',
         'defensePrep'
     ];
 
-    const taskScore = (coach, task) => {
-        const skills = COACH_DEVELOPMENT_TASK_SKILLS[task] || [];
-
-        if (skills.length === 0) return 50;
-
-        return skills.reduce((total, skill) => {
-            const value = Number(coach.ratings?.[skill]);
-
-            return total + (
-                Number.isFinite(value)
-                    ? Math.max(0, Math.min(100, value))
-                    : 50
-            );
-        }, 0) / skills.length;
-    };
+    const taskScore = (coach, task) =>
+        getAiStaffTaskScore(coach, task);
 
     const eligibleCoaches = coaches
         .filter(coach => coach?.id != null)
@@ -2339,10 +2460,10 @@ function buildDefaultAutomatedStaffAssignments(coaches) {
 
     const remainingCoaches = [...eligibleCoaches];
     const assignments = [];
+    const coveredTasks = new Set();
 
-    // Give each task a primary specialist, using the staff skills to
-    // choose the best available coach for that responsibility.
-    for (const task of tasks) {
+    // Give the three core responsibilities a primary specialist first.
+    for (const task of specialtyTasks) {
         if (remainingCoaches.length === 0) break;
 
         remainingCoaches.sort(
@@ -2353,11 +2474,10 @@ function buildDefaultAutomatedStaffAssignments(coaches) {
 
         const { coach, capacity } = remainingCoaches.shift();
 
-        // Most hours go toward the coach's assigned specialty.
-        // The remainder supports player development.
-        const specialtyHours = task === 'training'
-            ? capacity
-            : Math.max(1, Math.round(capacity * 0.7));
+        const specialtyHours = Math.max(
+            1,
+            Math.round(capacity * 0.70)
+        );
 
         const trainingHours = capacity - specialtyHours;
 
@@ -2369,6 +2489,8 @@ function buildDefaultAutomatedStaffAssignments(coaches) {
             ...(task === 'scouting' ? { maxTargets: 2 } : {})
         });
 
+        coveredTasks.add(task);
+
         if (trainingHours > 0) {
             assignments.push({
                 coachId: String(coach.id),
@@ -2378,6 +2500,100 @@ function buildDefaultAutomatedStaffAssignments(coaches) {
                 maxTargets: 4
             });
         }
+    }
+
+    // Additional coaches can focus entirely on player development.
+    for (const { coach, capacity } of remainingCoaches) {
+        assignments.push({
+            coachId: String(coach.id),
+            task: 'training',
+            hours: capacity,
+            focus: 'all',
+            maxTargets: 4
+        });
+    }
+
+    // When there are fewer than three coaches, transfer some development
+    // hours into secondary coverage of the missing responsibilities.
+    const uncoveredTasks = specialtyTasks.filter(
+        task => !coveredTasks.has(task)
+    );
+
+    for (let taskIndex = 0; taskIndex < uncoveredTasks.length; taskIndex++) {
+        const task = uncoveredTasks[taskIndex];
+        const remainingTaskCount = uncoveredTasks.length - taskIndex;
+
+        const candidates = eligibleCoaches
+            .map(({ coach }) => {
+                const trainingAssignment = assignments.find(
+                    assignment =>
+                        assignment.task === 'training' &&
+                        String(assignment.coachId) === String(coach.id)
+                );
+
+                const existingSpecialtyCount = assignments.filter(
+                    assignment =>
+                        assignment.task !== 'training' &&
+                        String(assignment.coachId) === String(coach.id)
+                ).length;
+
+                return {
+                    coach,
+                    trainingAssignment,
+                    existingSpecialtyCount,
+                    fitScore: taskScore(coach, task)
+                };
+            })
+            .filter(candidate =>
+                candidate.trainingAssignment &&
+                Number(candidate.trainingAssignment.hours) > 0
+            )
+            .sort((a, b) =>
+                a.existingSpecialtyCount - b.existingSpecialtyCount ||
+                b.fitScore - a.fitScore
+            );
+
+        const selected = candidates[0];
+
+        if (!selected) continue;
+
+        const availableTrainingHours = Math.max(
+            0,
+            Math.floor(
+                Number(selected.trainingAssignment.hours) || 0
+            )
+        );
+
+        // Preserve up to four hours for player development when possible.
+        // Distribute the remaining hours across uncovered responsibilities.
+        const protectedTrainingHours = Math.min(
+            4,
+            availableTrainingHours
+        );
+
+        const distributableHours = Math.max(
+            0,
+            availableTrainingHours - protectedTrainingHours
+        );
+
+        const secondaryHours = Math.min(
+            8,
+            Math.floor(distributableHours / remainingTaskCount)
+        );
+
+        if (secondaryHours <= 0) continue;
+
+        selected.trainingAssignment.hours -= secondaryHours;
+
+        assignments.push({
+            coachId: String(selected.coach.id),
+            task,
+            hours: secondaryHours,
+            focus: 'all',
+            ...(task === 'scouting' ? { maxTargets: 2 } : {})
+        });
+
+        coveredTasks.add(task);
     }
 
     return assignments;
@@ -2802,6 +3018,180 @@ export function recordRecruitingStaffAssignment(
 }
 
 /**
+ * Builds a team-side snapshot of what a program can offer a recruit.
+ *
+ * This deliberately does not inspect hidden player ability, potential,
+ * or recruiting preferences. It uses the team's own roster, staff,
+ * public team information, and relationship evidence already known
+ * through that team's scouting report.
+ */
+function buildRecruitingTeamAppealSnapshot(team, player, day = null) {
+    if (!team || !player) return null;
+
+    const clamp = value =>
+        Math.max(0, Math.min(100, Math.round(value)));
+
+    const roster = getRosterObjects(team);
+
+    const listedPosition = String(player.pos || '')
+        .trim()
+        .toUpperCase();
+
+    const validPositions = [
+        'QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'
+    ];
+
+    // Use only the player's listed position for the initial
+    // competition estimate. Do not infer hidden positional talent.
+    const positionCompetition = validPositions.includes(listedPosition)
+        ? roster.filter(member =>
+            String(member?.pos || '').trim().toUpperCase() ===
+            listedPosition
+        ).length
+        : null;
+
+    // Fewer players ahead at the listed position generally means
+    // a clearer opportunity to earn a role.
+    const roleOpportunity = positionCompetition === null
+        ? 50
+        : clamp(
+            90 -
+            positionCompetition * 14 -
+            Math.max(0, roster.length - 14) * 2
+        );
+
+    const coaches = ensureTeamCoachingStaff(team);
+
+    const getCoachSkill = (coach, skill) => {
+        const value = Number(coach?.ratings?.[skill]);
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, value))
+            : 50;
+    };
+
+    const coachingQuality = coaches.length > 0
+        ? clamp(
+            coaches.reduce((total, coach) => {
+                return total + (
+                    getCoachSkill(coach, 'teaching') +
+                    getCoachSkill(coach, 'practiceDiscipline') +
+                    getCoachSkill(coach, 'conditioning')
+                ) / 3;
+            }, 0) / coaches.length
+        )
+        : 50;
+
+    const wins = Math.max(0, Number(team.wins) || 0);
+    const losses = Math.max(0, Number(team.losses) || 0);
+    const ties = Math.max(0, Number(team.ties) || 0);
+    const gamesPlayed = wins + losses + ties;
+
+    const recentSuccess = gamesPlayed > 0
+        ? clamp(
+            ((wins + ties * 0.5) / gamesPlayed) * 100
+        )
+        : 50;
+
+    const rawStreetCred = Number(team.socialProfile?.streetCred);
+    const streetCred = Number.isFinite(rawStreetCred)
+        ? clamp(rawStreetCred)
+        : 50;
+
+    const tier = Number(team.tier);
+    const tierAdjustment = tier === 1
+        ? 12
+        : tier === 2
+            ? -5
+            : 0;
+
+    const programReputation = clamp(
+        30 + streetCred * 0.55 + tierAdjustment
+    );
+
+    // Relationship benefits must be supported by evidence this team
+    // has actually discovered. Never inspect player.social directly.
+    const scoutingReport = getTeamScoutingReport(
+        team,
+        player.id
+    );
+
+    const networkEvidence = scoutingReport?.networkEvidence;
+
+    const knownFriendIds = Array.isArray(
+        networkEvidence?.knownTeammateFriendIds
+    )
+        ? networkEvidence.knownTeammateFriendIds.map(String)
+        : [];
+
+    const knownRivalIds = Array.isArray(
+        networkEvidence?.knownTeammateRivalIds
+    )
+        ? networkEvidence.knownTeammateRivalIds.map(String)
+        : [];
+
+    const rosterIds = new Set(
+        roster
+            .filter(member => member?.id != null)
+            .map(member => String(member.id))
+    );
+
+    const knownFriendCount = new Set(
+        knownFriendIds.filter(id => rosterIds.has(id))
+    ).size;
+
+    const knownRivalCount = new Set(
+        knownRivalIds.filter(id => rosterIds.has(id))
+    ).size;
+
+    const relationshipAppeal = clamp(
+        50 +
+        knownFriendCount * 12 -
+        knownRivalCount * 10
+    );
+
+    return {
+        version: 1,
+        evaluatedDay: Number.isInteger(Number(day))
+            ? Number(day)
+            : null,
+
+        roster: {
+            size: roster.length,
+            listedPosition,
+            positionCompetition,
+            roleOpportunity
+        },
+
+        coaching: {
+            coachCount: coaches.length,
+            coachingQuality
+        },
+
+        program: {
+            tier: Number.isFinite(tier) ? tier : null,
+            streetCred,
+            reputation: programReputation,
+            recentSuccess,
+            gamesPlayed
+        },
+
+        relationships: {
+            knownFriendCount,
+            knownRivalCount,
+            appeal: relationshipAppeal
+        },
+
+        scheme: {
+            offenseFormation: team.formations?.offense || null,
+            defenseFormation: team.formations?.defense || null,
+            tacticalProfileId:
+                getStaffProfileId(team.coach, 'tactical')
+        }
+    };
+}
+
+/**
  * Performs a staff-led recruiting action and increases the recruit's
  * interest in the team. Staff hours are validated and persisted first.
  */
@@ -3001,7 +3391,63 @@ export function executeRecruitingAction(
 
     const repetitionMultiplier = Math.pow(0.75, repeatedActions);
 
+    // Each player responds differently to recruiting approaches.
+    // These preferences remain private to the player; recruiting staff
+    // only observe the resulting change in interest.
+    const actionPreferenceWeights = {
+        outreach: {
+            relationships: 1
+        },
+        teammateConnection: {
+            relationships: 1
+        },
+        roleDiscussion: {
+            roleOpportunity: 0.7,
+            schemeFit: 0.3
+        },
+        practiceInvitation: {
+            development: 0.75,
+            roleOpportunity: 0.25
+        }
+    };
+
+    const preferenceWeights =
+        actionPreferenceWeights[actionType] || {};
+
+    const preferenceEntries = Object.entries(preferenceWeights);
+
+    const preferenceScore = preferenceEntries.length > 0
+        ? preferenceEntries.reduce((total, [key, weight]) => {
+            const rawPreference = Number(
+                player.recruitingPreferences?.[key]
+            );
+
+            const preference = Number.isFinite(rawPreference)
+                ? Math.max(0, Math.min(100, rawPreference))
+                : 50;
+
+            return total + preference * weight;
+        }, 0) /
+            preferenceEntries.reduce(
+                (total, [, weight]) => total + weight,
+                0
+            )
+        : 50;
+
+    // Neutral preference = 1.00.
+    // Strong interest = up to 1.18.
+    // Low interest = down to 0.82.
+    const playerResponseMultiplier = Math.max(
+        0.82,
+        Math.min(
+            1.18,
+            1 + (preferenceScore - 50) / 250
+        )
+    );
+
     let contextBonus = 0;
+    let roleDiscussionSnapshot = null;
+
     const roster = getRosterObjects(team);
     const recruitId = String(player.id);
 
@@ -3102,12 +3548,18 @@ export function executeRecruitingAction(
                             fit?.position || ''
                         ).toUpperCase();
 
+                        const low = Number(fit?.low);
+                        const high = Number(fit?.high);
+
                         return (
                             validPositions.includes(fitPosition) &&
                             fit.low != null &&
                             fit.high != null &&
-                            Number.isFinite(Number(fit.low)) &&
-                            Number.isFinite(Number(fit.high))
+                            String(fit.low).trim() !== '' &&
+                            String(fit.high).trim() !== '' &&
+                            Number.isFinite(low) &&
+                            Number.isFinite(high) &&
+                            high >= low
                         );
                     })
                     .map(fit => {
@@ -3145,15 +3597,36 @@ export function executeRecruitingAction(
             } else if (positionalPeers.length >= 4) {
                 contextBonus -= 3;
             }
+
+            // A role discussion is more credible when the team's actual
+            // playbook gives this position meaningful opportunities.
+            // This evaluates play concepts, not formations.
+            roleDiscussionSnapshot =
+                getRecruitingPlaybookRoleSnapshot(team, position);
+
+            if (roleDiscussionSnapshot) {
+                const roleUsageBonus = Math.round(
+                    (roleDiscussionSnapshot.roleScore - 40) * 0.08 +
+                    (
+                        roleDiscussionSnapshot.averageMastery - 40
+                    ) * 0.03
+                );
+
+                contextBonus += Math.max(
+                    -4,
+                    Math.min(5, roleUsageBonus)
+                );
+            }
         }
     }
 
-    let interestGain =
+    let interestGain = (
         assignedHours *
             profile.pointsPerHour *
             skillMultiplier *
             repetitionMultiplier +
-        contextBonus;
+        contextBonus
+    ) * playerResponseMultiplier;
 
     // Interest is harder to move once a player is already strongly engaged.
     if (currentInterest >= 90) {
@@ -3175,6 +3648,78 @@ export function executeRecruitingAction(
 
     recruitRecord.interestByTeam[teamKey] = newInterest;
 
+    // Track actual recruiting investment separately from accumulated
+    // interest. The eventual player decision will consider the type,
+    // quality, and amount of effort invested by each team.
+    if (
+        !recruitRecord.recruitingPushByTeam ||
+        typeof recruitRecord.recruitingPushByTeam !== 'object'
+    ) {
+        recruitRecord.recruitingPushByTeam = {};
+    }
+
+    const recruitingPush =
+        recruitRecord.recruitingPushByTeam[teamKey] ||= {
+            hoursInvested: 0,
+            effectiveEffort: 0,
+            actionHoursByType: {},
+            effectiveEffortByType: {},
+            actionCountByType: {},
+            coachHoursById: {},
+            lastActionDay: null,
+            lastActionYear: null
+        };
+
+    const effectiveEffort =
+        assignedHours *
+        skillMultiplier *
+        repetitionMultiplier;
+
+    recruitingPush.hoursInvested =
+        Math.max(0, Number(recruitingPush.hoursInvested) || 0) +
+        assignedHours;
+
+    recruitingPush.effectiveEffort =
+        Math.max(0, Number(recruitingPush.effectiveEffort) || 0) +
+        effectiveEffort;
+
+    if (!recruitingPush.actionHoursByType) {
+        recruitingPush.actionHoursByType = {};
+    }
+
+    if (!recruitingPush.effectiveEffortByType) {
+        recruitingPush.effectiveEffortByType = {};
+    }
+
+    if (!recruitingPush.actionCountByType) {
+        recruitingPush.actionCountByType = {};
+    }
+
+    if (!recruitingPush.coachHoursById) {
+        recruitingPush.coachHoursById = {};
+    }
+
+    recruitingPush.actionHoursByType[actionType] =
+        (Number(recruitingPush.actionHoursByType[actionType]) || 0) +
+        assignedHours;
+
+    recruitingPush.effectiveEffortByType[actionType] =
+        (Number(recruitingPush.effectiveEffortByType[actionType]) || 0) +
+        effectiveEffort;
+
+    recruitingPush.actionCountByType[actionType] =
+        (Number(recruitingPush.actionCountByType[actionType]) || 0) +
+        1;
+
+    const coachKey = String(coach.id);
+
+    recruitingPush.coachHoursById[coachKey] =
+        (Number(recruitingPush.coachHoursById[coachKey]) || 0) +
+        assignedHours;
+
+    recruitingPush.lastActionDay = recruitingDay;
+    recruitingPush.lastActionYear = Number(gameState.year);
+
     const activity = {
         type: 'recruiting_action',
         year: Number(gameState.year),
@@ -3187,7 +3732,25 @@ export function executeRecruitingAction(
         playerName: player.name,
         action: actionType,
         label: profile.label,
+        roleUsageAssessment: roleDiscussionSnapshot
+            ? {
+                position: roleDiscussionSnapshot.position,
+                side: roleDiscussionSnapshot.side,
+                activePlayCount:
+                    roleDiscussionSnapshot.activePlayCount,
+                keyPlayCount:
+                    roleDiscussionSnapshot.keyPlayCount,
+                supportingPlayCount:
+                    roleDiscussionSnapshot.supportingPlayCount,
+                roleScore: roleDiscussionSnapshot.roleScore,
+                averageMastery:
+                    roleDiscussionSnapshot.averageMastery
+            }
+            : null,
         hours: assignedHours,
+        skillMultiplier,
+        repetitionMultiplier,
+        effectiveEffort,
         interestBefore: currentInterest,
         interestGain: newInterest - currentInterest,
         interestAfter: newInterest
@@ -3485,6 +4048,66 @@ export function applyRecruitingSweetener(
     record.interestByTeam[teamKey] = newInterest;
     record.history = history;
 
+    // Track gifts and favors separately from staff recruiting effort.
+    // This allows player decisions to distinguish personal attention
+    // from material incentives.
+    if (
+        !record.recruitingPushByTeam ||
+        typeof record.recruitingPushByTeam !== 'object' ||
+        Array.isArray(record.recruitingPushByTeam)
+    ) {
+        record.recruitingPushByTeam = {};
+    }
+
+    if (
+        !record.recruitingPushByTeam[teamKey] ||
+        typeof record.recruitingPushByTeam[teamKey] !== 'object'
+    ) {
+        record.recruitingPushByTeam[teamKey] = {
+            hoursInvested: 0,
+            effectiveEffort: 0,
+            actionHoursByType: {},
+            effectiveEffortByType: {},
+            actionCountByType: {},
+            coachHoursById: {},
+            lastActionDay: null,
+            lastActionYear: null
+        };
+    }
+
+    const recruitingPush =
+        record.recruitingPushByTeam[teamKey];
+
+    recruitingPush.cashSpent =
+        Math.max(0, Number(recruitingPush.cashSpent) || 0) +
+        cost;
+
+    recruitingPush.favorTokensSpent =
+        Math.max(0, Number(recruitingPush.favorTokensSpent) || 0) +
+        tokensSpent;
+
+    recruitingPush.sweetenerCountByType =
+        recruitingPush.sweetenerCountByType || {};
+
+    recruitingPush.sweetenerCountByType[sweetenerType] =
+        (
+            Number(
+                recruitingPush.sweetenerCountByType[sweetenerType]
+            ) || 0
+        ) + 1;
+
+    recruitingPush.sweetenerCount =
+        Math.max(0, Number(recruitingPush.sweetenerCount) || 0) + 1;
+
+    recruitingPush.sweetenerInterestAdded =
+        Math.max(
+            0,
+            Number(recruitingPush.sweetenerInterestAdded) || 0
+        ) + (newInterest - currentInterest);
+
+    recruitingPush.lastSweetenerDay = recruitingDay;
+    recruitingPush.lastSweetenerYear = Number(gameState.year);
+
     const activity = {
         type: 'recruiting_sweetener',
         year: Number(gameState.year),
@@ -3497,6 +4120,12 @@ export function applyRecruitingSweetener(
         label,
         cashSpent: cost,
         tokensSpent,
+        baseInterestGain: baseGain,
+        sameGiftCount,
+        diminishingReturnMultiplier: Math.pow(
+            0.65,
+            sameGiftCount
+        ),
         interestBefore: currentInterest,
         interestGain: newInterest - currentInterest,
         interestAfter: newInterest
@@ -3649,12 +4278,16 @@ export function processAiRecruitingDay(gameState) {
                     fit?.position || ''
                 ).toUpperCase();
 
+                const low = Number(fit.low);
+                const high = Number(fit.high);
+
                 return (
                     positionTargets[fitPosition] &&
                     fit.low != null &&
                     fit.high != null &&
-                    Number.isFinite(Number(fit.low)) &&
-                    Number.isFinite(Number(fit.high))
+                    Number.isFinite(low) &&
+                    Number.isFinite(high) &&
+                    high >= low
                 );
             })
             .map(fit => {
@@ -3913,36 +4546,6 @@ export function processAiRecruitingDay(gameState) {
             const decisionNoiseRange =
                 2 + ((100 - decisionQuality) / 100) * 8;
 
-            const rankedActions = actionOptions
-                .map(option => {
-                    const skillScore = option.skills.reduce(
-                        (sum, skill) => sum + skillValue(skill),
-                        0
-                    ) / option.skills.length;
-
-                    const preferenceBonus =
-                        getRecruitingActionPreferenceBonus(option.type);
-
-                    // Noise can cause a coach to choose a less-suited
-                    // action, especially when decision quality is poor.
-                    const judgmentNoise =
-                        (Math.random() * 2 - 1) *
-                        decisionNoiseRange;
-
-                    return {
-                        ...option,
-                        score:
-                            skillScore +
-                            preferenceBonus +
-                            judgmentNoise
-                    };
-                })
-                .sort((a, b) => b.score - a.score);
-
-            const selectedAction = rankedActions[0] || null;
-
-            if (!selectedAction) continue;
-
             const evaluatedTargets = Object.entries(
                 progress.recruits || {}
             ).map(([recruitKey, record]) => {
@@ -3970,7 +4573,7 @@ export function processAiRecruitingDay(gameState) {
                 const peers = roster.filter(member =>
                     position &&
                     String(member?.pos || '').toUpperCase() === position
-                );
+                );  
 
                 const targetCount = positionTargets[position];
 
@@ -3980,26 +4583,25 @@ export function processAiRecruitingDay(gameState) {
                     ? Math.max(0, targetCount - peers.length)
                     : 0;
 
-                // Scheme fit uses this team's recruiting coach's profile.
-                const tacticalId = getStaffProfileId(coach, 'tactical');
-                let schemeBonus = 0;
+                // Evaluate football fit through the team's actual installed
+                // playbook. Coaches should recruit for how their team plays,
+                // not for a rigid tactical identity or formation preference.
+                const playbookRoleSnapshot = position
+                    ? getRecruitingPlaybookRoleSnapshot(team, position)
+                    : null;
 
-                if (
-                    tacticalId === 'spread_passing_specialist' &&
-                    ['QB', 'WR', 'TE'].includes(position)
-                ) {
-                    schemeBonus = 5;
-                } else if (
-                    tacticalId === 'power_run_specialist' &&
-                    ['RB', 'OL', 'TE'].includes(position)
-                ) {
-                    schemeBonus = 5;
-                } else if (
-                    tacticalId === 'pressure_oriented_defender' &&
-                    ['DL', 'LB', 'DB'].includes(position)
-                ) {
-                    schemeBonus = 5;
-                }
+                const footballRoleBonus = playbookRoleSnapshot
+                    ? Math.max(
+                        -3,
+                        Math.min(
+                            5,
+                            (playbookRoleSnapshot.roleScore - 35) * 0.07 +
+                            (
+                                playbookRoleSnapshot.averageMastery - 40
+                            ) * 0.03
+                        )
+                    )
+                    : 0;
 
                 const age = Number(player.age);
 
@@ -4366,7 +4968,7 @@ export function processAiRecruitingDay(gameState) {
                         Math.max(0, knownFriendCount - 1) * 3
                     ) +
                     (hasKnownRival ? -25 : 0) +
-                    schemeBonus +
+                    footballRoleBonus +
                     ageBonus +
                     ownInterest * 0.20 +
                     scoutingAdjustment +
@@ -4374,11 +4976,117 @@ export function processAiRecruitingDay(gameState) {
                     competitionAdjustment +
                     targetJudgmentNoise;
 
+                // Evaluate the recruiting tactic against this particular
+                // prospect using only information available to this team.
+                const getTargetActionContextBonus = actionType => {
+                    switch (actionType) {
+                        case 'teammateConnection': {
+                            const friendBonus = hasKnownFriend
+                                ? 6 + Math.min(
+                                    3,
+                                    Math.max(0, knownFriendCount - 1) * 1.5
+                                )
+                                : 0;
+
+                            const rivalPenalty = hasKnownRival ? -3 : 0;
+
+                            return friendBonus + rivalPenalty;
+                        }
+
+                        case 'roleDiscussion': {
+                            const depthOpportunityBonus = Math.max(
+                                -2,
+                                Math.min(4, rosterNeed * 1.2)
+                            );
+
+                            const playbookOpportunityBonus =
+                                playbookRoleSnapshot
+                                    ? Math.max(
+                                        -3,
+                                        Math.min(
+                                            5,
+                                            (
+                                                playbookRoleSnapshot.roleScore -
+                                                35
+                                            ) * 0.08
+                                        )
+                                    )
+                                    : 0;
+
+                            return (
+                                depthOpportunityBonus +
+                                playbookOpportunityBonus
+                            );
+                        }
+
+                        case 'practiceInvitation':
+                            // Younger prospects may have more time to
+                            // benefit from a developmental opportunity.
+                            return Number.isFinite(age)
+                                ? age <= 15
+                                    ? 2
+                                    : age >= 18
+                                        ? -1
+                                        : 0
+                                : 0;
+
+                        case 'outreach':
+                            // Personal outreach remains a flexible option
+                            // when the team observes recruiting competition.
+                            return Math.min(
+                                2,
+                                rivalTeamCount * 0.5
+                            );
+
+                        default:
+                            return 0;
+                    }
+                };
+
+                const targetActionNoiseRange =
+                    decisionNoiseRange * 0.75;
+
+                const targetActions = actionOptions
+                    .map(option => {
+                        const skillScore = option.skills.reduce(
+                            (sum, skill) => sum + skillValue(skill),
+                            0
+                        ) / option.skills.length;
+
+                        const preferenceBonus =
+                            getRecruitingActionPreferenceBonus(option.type);
+
+                        const contextBonus =
+                            getTargetActionContextBonus(option.type);
+
+                        // Coaches can still misread a situation or choose
+                        // a less suitable action, even with good information.
+                        const judgmentNoise =
+                            (Math.random() * 2 - 1) *
+                            targetActionNoiseRange;
+
+                        return {
+                            ...option,
+                            score:
+                                skillScore +
+                                preferenceBonus +
+                                contextBonus +
+                                judgmentNoise
+                        };
+                    })
+                    .sort((a, b) => b.score - a.score);
+
+                const selectedTargetAction =
+                    targetActions[0] || null;
+
                 return {
                     player,
                     score,
                     ownInterest,
-                    rosterNeed
+                    rosterNeed,
+                    observedRivalTeamCount: rivalTeamCount,
+                    observedCompetitionPressure,
+                    selectedAction: selectedTargetAction
                 };
             })
                 .filter(Boolean)
@@ -4387,6 +5095,9 @@ export function processAiRecruitingDay(gameState) {
             if (evaluatedTargets.length === 0) continue;
 
             const target = evaluatedTargets[0];
+            const selectedAction = target.selectedAction;
+
+            if (!selectedAction) continue;
 
             const result = executeRecruitingAction(
                 gameState,
@@ -4401,6 +5112,109 @@ export function processAiRecruitingDay(gameState) {
 
             targetedToday.add(String(target.player.id));
 
+            // AI programs may use recruiting sweeteners, but should
+            // reserve these resources for meaningful recruiting contests.
+            // Competition is based only on activity this team has observed.
+            let sweetenerResult = null;
+
+            const interestAfterAction = Number(result.interestAfter) || 0;
+
+            const competitionPressure = Number(
+                target.observedCompetitionPressure
+            ) || 0;
+
+            const shouldConsiderSweetener = (
+                target.observedRivalTeamCount > 0 &&
+                day >= Math.max(2, totalDays - 2) &&
+                competitionPressure >= 2 &&
+                interestAfterAction >= 35 &&
+                interestAfterAction < 90
+            );
+
+            if (shouldConsiderSweetener) {
+                const balance = Number(team.finances?.balance);
+
+                // Preserve a modest cash reserve instead of allowing AI
+                // recruiting to consume the entire team balance.
+                const reserve = Number.isFinite(balance)
+                    ? Math.max(10, balance * 0.15)
+                    : Infinity;
+
+                const spendableCash = Number.isFinite(balance)
+                    ? Math.max(0, balance - reserve)
+                    : 0;
+
+                const availableFavorTokens = Math.max(
+                    0,
+                    Math.floor(
+                        Number(team.socialProfile?.favorTokens) || 0
+                    )
+                );
+
+                let favorAttempted = false;
+
+                // Favor Tokens are scarce. Save them for particularly
+                // competitive late-week recruiting situations.
+                if (
+                    availableFavorTokens > 0 &&
+                    day >= totalDays - 1 &&
+                    competitionPressure >= 4
+                ) {
+                    favorAttempted = true;
+
+                    sweetenerResult = applyRecruitingSweetener(
+                        gameState,
+                        team.id,
+                        target.player.id,
+                        'favor'
+                    );
+                }
+
+                // Otherwise, use the largest gift that preserves the
+                // team's cash reserve. The sweetener function enforces
+                // the existing three-gift limit per recruit.
+                if (!sweetenerResult?.success) {
+                    const giftType = spendableCash >= 20
+                        ? 'gift_large'
+                        : spendableCash >= 10
+                            ? 'gift_medium'
+                            : spendableCash >= 5
+                                ? 'gift_small'
+                                : null;
+
+                    if (giftType) {
+                        sweetenerResult = applyRecruitingSweetener(
+                            gameState,
+                            team.id,
+                            target.player.id,
+                            giftType
+                        );
+                    }
+                }
+
+                // If a gift isn't affordable or available, a Favor Token
+                // can still be used late in the week when competition
+                // is substantial.
+                if (
+                    !sweetenerResult?.success &&
+                    !favorAttempted &&
+                    availableFavorTokens > 0 &&
+                    day >= Math.max(2, totalDays - 2) &&
+                    competitionPressure >= 3
+                ) {
+                    sweetenerResult = applyRecruitingSweetener(
+                        gameState,
+                        team.id,
+                        target.player.id,
+                        'favor'
+                    );
+                }
+            }
+
+            const appliedSweetener = sweetenerResult?.success
+                ? sweetenerResult
+                : null;
+
             actions.push({
                 teamId: team.id,
                 teamName: team.name,
@@ -4410,8 +5224,23 @@ export function processAiRecruitingDay(gameState) {
                 playerName: target.player.name,
                 action: selectedAction.type,
                 hours: hoursToday,
-                interestGain: result.interestGain,
-                interestAfter: result.interestAfter
+
+                interestGain:
+                    result.interestGain +
+                    (appliedSweetener?.interestGain || 0),
+
+                interestAfter:
+                    appliedSweetener?.interestAfter ??
+                    result.interestAfter,
+
+                sweetenerType:
+                    appliedSweetener?.activity?.sweetenerType || null,
+
+                sweetenerCashSpent:
+                    appliedSweetener?.cashSpent || 0,
+
+                sweetenerTokensSpent:
+                    appliedSweetener?.tokensSpent || 0
             });
         }
     }
@@ -5012,6 +5841,9 @@ export function ensureAiStaffWorkPlan(
                         taskScore: getAiStaffTaskScore(
                             coach,
                             specialty.task
+                        ) + (
+                            (Math.random() * 2 - 1) *
+                            assignmentNoiseRange
                         )
                     };
                 })
@@ -5747,8 +6579,7 @@ export function resolveCoachCarousel(
         const estimatedCandidate = {
             ...candidate,
             ratings: {
-                ...(candidate.ratings || {}),
-                ...scoutingReport.estimatedRatings
+                ...(scoutingReport?.estimatedRatings || {})
             }
         };
 
@@ -5913,19 +6744,6 @@ export function resolveCoachCarousel(
             careerAdjustment;
 
         const tacticalId = getStaffProfileId(candidate, 'tactical');
-        // Estimate discipline from the candidate's publicly visible
-        // personality profile, not their private individual behavior profile.
-        const disciplineTendency = Number.isFinite(
-            Number(scoutingReport.estimatedTendencies?.discipline)
-        )
-            ? Math.max(
-                0,
-                Math.min(
-                    100,
-                    Number(scoutingReport.estimatedTendencies.discipline)
-                )
-            )
-            : 50;
         const offense = team.formations?.offense || '';
 
         if (
@@ -5963,7 +6781,7 @@ export function resolveCoachCarousel(
 
         if (
             directive === 'HARD_CONDITIONING' &&
-            disciplineTendency >= 70
+            estimatedRating('practiceDiscipline') >= 65
         ) {
             fitScore += 8;
         }

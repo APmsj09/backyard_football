@@ -4421,7 +4421,191 @@ export function openPlayerCard(playerId) {
             </div>`;
     }
 
-        // Tab 4: Career Totals + Season-by-Season Stats
+        // Recruiting campaign history.
+    // Only recorded outcomes are displayed; private player preferences
+    // and unobserved recruiting information remain hidden.
+    // Recruiting campaign history includes both successful commitments
+    // and seasons in which the player remained unsigned.
+    const recruitingHistory = Array.isArray(
+        sourcePlayer.recruitingCampaignHistory
+    )
+        ? sourcePlayer.recruitingCampaignHistory
+            .filter(entry =>
+                entry?.type === 'unsigned_outcome' ||
+                entry?.type === 'commitment'
+            )
+            .slice()
+            .sort(
+                (a, b) =>
+                    Number(b.seasonYear || 0) -
+                    Number(a.seasonYear || 0)
+            )
+        : [];
+
+    const escapeRecruitingText = value =>
+        String(value ?? '').replace(
+            /[&<>"']/g,
+            character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[character]
+        );
+
+    const recruitingHistoryHtml = recruitingHistory.length > 0
+        ? `
+            <div class="space-y-2">
+                ${recruitingHistory.map(entry => {
+                    const isCommitment =
+                        entry.type === 'commitment' ||
+                        entry.outcome === 'committed';
+
+                    const outcomeLabel = isCommitment
+                        ? 'Committed to a program'
+                        : entry.outcome === 'remained_unsigned_after_offers'
+                            ? 'Remained unsigned after receiving offers'
+                            : 'No serious recruiting offers';
+
+                    const seasonYear = escapeRecruitingText(
+                        entry.seasonYear
+                    );
+
+                    const decisionDay =
+                        Number(entry.decisionDay) || '—';
+
+                    if (isCommitment) {
+                        const teamName = escapeRecruitingText(
+                            entry.teamName || 'Unknown program'
+                        );
+
+                        const interest = Math.max(
+                            0,
+                            Math.min(
+                                100,
+                                Number(entry.interestAtCommit) || 0
+                            )
+                        );
+
+                        const fit = Math.max(
+                            0,
+                            Math.min(
+                                100,
+                                Number(entry.teamFitAtCommit) || 0
+                            )
+                        );
+
+                        const decisionLabel =
+                            entry.decisionType === 'early_commitment'
+                                ? 'Early commitment'
+                                : 'Final-day commitment';
+
+                        return `
+                            <div class="bg-emerald-50 border border-emerald-200 rounded p-3">
+                                <div class="flex justify-between items-center gap-2">
+                                    <span class="font-black text-slate-800 text-xs">
+                                        Season ${seasonYear}
+                                    </span>
+                                    <span class="text-[9px] uppercase tracking-wide font-bold text-emerald-700">
+                                        Commitment
+                                    </span>
+                                </div>
+
+                                <p class="mt-1 text-xs text-slate-700">
+                                    ${outcomeLabel}
+                                </p>
+
+                                <p class="mt-2 text-sm font-black text-emerald-800">
+                                    ${teamName}
+                                </p>
+
+                                <div class="mt-2 flex flex-wrap gap-3 text-[10px] text-slate-600">
+                                    <span>
+                                        Interest:
+                                        <b>${interest}/100</b>
+                                    </span>
+                                    <span>
+                                        Program fit:
+                                        <b>${fit}/100</b>
+                                    </span>
+                                    <span>
+                                        Decision:
+                                        <b>Day ${decisionDay}</b>
+                                    </span>
+                                </div>
+
+                                <p class="mt-1 text-[9px] text-slate-500">
+                                    ${decisionLabel}
+                                </p>
+                            </div>
+                        `;
+                    }
+
+                    const contenderCount = Math.max(
+                        0,
+                        Number(entry.seriousContenderCount) || 0
+                    );
+
+                    const bestInterest = Math.max(
+                        0,
+                        Math.min(
+                            100,
+                            Number(entry.bestInterest) || 0
+                        )
+                    );
+
+                    const receivedOffers =
+                        entry.outcome === 'remained_unsigned_after_offers';
+
+                    return `
+                        <div class="bg-slate-50 border border-slate-200 rounded p-3">
+                            <div class="flex justify-between items-center gap-2">
+                                <span class="font-black text-slate-800 text-xs">
+                                    Season ${seasonYear}
+                                </span>
+                                <span class="text-[9px] uppercase tracking-wide font-bold ${
+                                    receivedOffers
+                                        ? 'text-amber-700'
+                                        : 'text-slate-500'
+                                }">
+                                    ${receivedOffers
+                                        ? 'Offers received'
+                                        : 'Limited interest'
+                                    }
+                                </span>
+                            </div>
+
+                            <p class="mt-1 text-xs text-slate-700">
+                                ${outcomeLabel}
+                            </p>
+
+                            <div class="mt-2 flex flex-wrap gap-3 text-[10px] text-slate-500">
+                                <span>
+                                    Serious contenders:
+                                    <b class="text-slate-700">${contenderCount}</b>
+                                </span>
+                                <span>
+                                    Highest interest:
+                                    <b class="text-slate-700">${bestInterest}/100</b>
+                                </span>
+                                <span>
+                                    Decision:
+                                    <b class="text-slate-700">Day ${decisionDay}</b>
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `
+        : `
+            <p class="text-xs text-slate-400 italic py-4">
+                No previous recruiting campaign outcomes have been recorded.
+            </p>
+        `;
+
+    // Tab 4: Career Totals + Season-by-Season Stats
     const careerStats = player.careerStats || {};
 
     const careerStatColumns = [
@@ -4570,6 +4754,7 @@ export function openPlayerCard(playerId) {
                 <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="attributes" onclick="app_switchPlayerCardTab('attributes')">📊 All Attributes</button>
                 ${isMyTeam ? `<button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="growth" onclick="app_switchPlayerCardTab('growth')">📈 Development History</button>` : ''}
                 <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="stats" onclick="app_switchPlayerCardTab('stats')">📜 Career Stats</button>
+                <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="recruiting" onclick="app_switchPlayerCardTab('recruiting')">🤝 Recruiting History</button>
             </div>
 
             <!-- PANE 1: SUMMARY -->
@@ -4677,6 +4862,28 @@ export function openPlayerCard(playerId) {
             <!-- PANE 4: STATS HISTORY -->
             <div id="pcard-pane-stats" class="pcard-pane hidden max-h-72 overflow-y-auto">
                 ${statsTableHtml}
+            </div>
+
+            <!-- PANE 5: RECRUITING HISTORY -->
+            <div id="pcard-pane-recruiting" class="pcard-pane hidden max-h-72 overflow-y-auto">
+                <div class="space-y-3">
+                    <div class="bg-slate-900 text-white rounded p-3">
+                        <h5 class="font-black text-xs uppercase tracking-wider">
+                            Previous Recruiting Campaigns
+                        </h5>
+                        <p class="text-[10px] text-slate-400 mt-1">
+                            Recorded outcomes from previous recruiting seasons.
+                        </p>
+                        <div class="text-2xl font-black text-amber-300 mt-2">
+                            ${recruitingHistory.length}
+                        </div>
+                        <div class="text-[9px] uppercase tracking-wider text-slate-400">
+                            Recorded campaigns
+                        </div>
+                    </div>
+
+                    ${recruitingHistoryHtml}
+                </div>
             </div>
 
             <!-- Bottom Actions -->

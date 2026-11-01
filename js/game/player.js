@@ -975,6 +975,282 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
     const egoRoll = gaussianRandom(50, 25);
     const loyaltyRoll = gaussianRandom(60, 20);
 
+    // Individual recruiting priorities.
+    //
+    // These represent how important different aspects of a program
+    // are to the player when deciding where to play.
+    //
+    // They are not evaluations of any team's quality and are not
+    // automatically visible to recruiting teams.
+    //
+    // Existing personality traits influence the priorities, while
+    // independent variation ensures players with similar personalities
+    // can still want different things.
+    const clampRecruitingPriority = value =>
+        Math.max(5, Math.min(95, Math.round(value)));
+
+    const recruitingPreferences = {
+        // How important an immediate path to playing time is.
+        roleOpportunity: clampRecruitingPriority(
+            gaussianRandom(50, 16) +
+            (egoRoll - 50) * 0.35 +
+            (age >= 16 ? 6 : 0)
+        ),
+
+        // How important friends, relationships, and belonging are.
+        relationships: clampRecruitingPriority(
+            gaussianRandom(50, 16) +
+            (loyaltyRoll - 50) * 0.25 +
+            (likeabilityRoll - 50) * 0.25
+        ),
+
+        // How much the player values coaching and development.
+        development: clampRecruitingPriority(
+            gaussianRandom(50, 16) +
+            (workEthicRoll - 50) * 0.30 +
+            (dependabilityRoll - 50) * 0.25
+        ),
+
+        // How much the player values winning and competing.
+        winning: clampRecruitingPriority(
+            gaussianRandom(50, 18) +
+            (streetCredRoll - 50) * 0.12
+        ),
+
+        // How much program reputation and recognition matter.
+        programPrestige: clampRecruitingPriority(
+            gaussianRandom(50, 18) +
+            (streetCredRoll - 50) * 0.25 +
+            (egoRoll - 50) * 0.10
+        ),
+
+        // How important it is that the team's football approach
+        // matches the player's preferred style.
+        schemeFit: clampRecruitingPriority(
+            gaussianRandom(50, 18)
+        ),
+
+        // The player's preferred football environment.
+        // Archetype influences the initial preference, but does not
+        // dictate it. Individual players can favor a different system.
+        schemeStyle: (() => {
+            const offensiveStyles = [
+                'balanced',
+                'spread_passing',
+                'power_run'
+            ];
+
+            const defensiveStyles = [
+                'balanced',
+                'pressure',
+                'coverage'
+            ];
+
+            const powerRunArchetypes = [
+                'Power Back',
+                'Bruiser',
+                'Heavy Crusher QB',
+                'Road Grader',
+                'Wall Protector',
+                'Mauler',
+                'Jumbo Athlete',
+                'Lead Blocker TE',
+                'Extra Lineman'
+            ];
+
+            const spreadArchetypes = [
+                'Scrambler',
+                'Gunslinger',
+                'Dual-Threat',
+                'Backyard Magician',
+                'Cannon Arm',
+                'Receiving Back',
+                'Third-Down Back',
+                'Deep Threat',
+                'Route Technician',
+                'Gadget Player',
+                'Vertical TE',
+                'Move TE',
+                'Hybrid Wing'
+            ];
+
+            const pressureArchetypes = [
+                'Speed Rusher',
+                'Bull Rusher',
+                'Pass Rush Specialist',
+                'Blitz Specialist',
+                'Hard Hitter',
+                'Thumper'
+            ];
+
+            const coverageArchetypes = [
+                'Island Corner',
+                'Ballhawk Safety',
+                'Zone Specialist',
+                'Press Corner',
+                'Free Safety',
+                'Coverage LB',
+                'Hybrid Safety',
+                'Middle Hawk'
+            ];
+
+            const archetypeName = String(archetype?.name || '');
+
+            let favoredOffense = 'balanced';
+            let favoredDefense = 'balanced';
+
+            if (powerRunArchetypes.includes(archetypeName)) {
+                favoredOffense = 'power_run';
+            } else if (spreadArchetypes.includes(archetypeName)) {
+                favoredOffense = 'spread_passing';
+            }
+
+            if (pressureArchetypes.includes(archetypeName)) {
+                favoredDefense = 'pressure';
+            } else if (coverageArchetypes.includes(archetypeName)) {
+                favoredDefense = 'coverage';
+            }
+
+            // A player's archetype is only a tendency, not a fixed identity.
+            const chooseStyle = (favoredStyle, availableStyles) =>
+                Math.random() < 0.70
+                    ? favoredStyle
+                    : getRandom(availableStyles);
+
+            return {
+                offense: chooseStyle(
+                    favoredOffense,
+                    offensiveStyles
+                ),
+                defense: chooseStyle(
+                    favoredDefense,
+                    defensiveStyles
+                )
+            };
+        })()
+    };
+
+    // Individual football preferences.
+    //
+    // These describe the types of plays and assignments a player
+    // would enjoy being involved in. They are preferences, not
+    // evaluations of ability or mandatory positional assignments.
+    //
+    // Concept IDs correspond to playcalling_knowledge.js.
+    const offensiveConceptPreferences = {
+        'Field General': ['balancedPass', 'crossingPass', 'playAction'],
+        'Scrambler': ['rolloutPass', 'runPassOption', 'screenPass'],
+        'Gunslinger': ['verticalPass', 'floodPass', 'playAction'],
+        'Heavy Crusher QB': ['powerRun', 'insideRun', 'playAction'],
+        'Game Manager': ['quickPass', 'balancedPass', 'playAction'],
+        'Dual-Threat': ['runPassOption', 'rolloutPass', 'counterRun'],
+        'Backyard Magician': ['trickPass', 'rolloutPass', 'screenPass'],
+        'Cannon Arm': ['verticalPass', 'playAction', 'floodPass'],
+
+        'Power Back': ['powerRun', 'insideRun', 'counterRun'],
+        'Speed Back': ['outsideRun', 'counterRun', 'screenPass'],
+        'Workhorse': ['insideRun', 'powerRun', 'counterRun'],
+        'Receiving Back': ['screenPass', 'quickPass', 'crossingPass'],
+        'Bruiser': ['powerRun', 'insideRun', 'playAction'],
+        'Third-Down Back': ['screenPass', 'quickPass', 'runPassOption'],
+        'Change-of-Pace': ['outsideRun', 'screenPass', 'counterRun'],
+        'Slashing Back': ['counterRun', 'outsideRun', 'insideRun'],
+
+        'Deep Threat': ['verticalPass', 'floodPass', 'playAction'],
+        'Route Technician': ['crossingPass', 'quickPass', 'floodPass'],
+        'Red Zone Specialist': ['verticalPass', 'crossingPass', 'playAction'],
+        'Slot Brawler': ['crossingPass', 'quickPass', 'screenPass'],
+        'Possession Receiver': ['quickPass', 'crossingPass', 'balancedPass'],
+        'Gadget Player': ['screenPass', 'trickPass', 'runPassOption'],
+        'Jump Ball Specialist': ['verticalPass', 'floodPass', 'balancedPass'],
+
+        'Vertical TE': ['verticalPass', 'playAction', 'floodPass'],
+        'Jumbo Athlete': ['playAction', 'powerRun', 'insideRun'],
+        'Lead Blocker TE': ['powerRun', 'insideRun', 'counterRun'],
+        'Hybrid Wing': ['playAction', 'crossingPass', 'counterRun'],
+        'Move TE': ['rolloutPass', 'screenPass', 'crossingPass'],
+        'Extra Lineman': ['powerRun', 'insideRun', 'playAction'],
+        'H-Back': ['counterRun', 'playAction', 'powerRun'],
+
+        'Road Grader': ['powerRun', 'insideRun', 'counterRun'],
+        'Mobile Guard': ['outsideRun', 'counterRun', 'screenPass'],
+        'Wall Protector': ['verticalPass', 'balancedPass', 'playAction'],
+        'Technician OL': ['quickPass', 'crossingPass', 'balancedPass'],
+        'Mauler': ['powerRun', 'insideRun', 'playAction'],
+        'Athletic Tackle': ['outsideRun', 'playAction', 'screenPass'],
+        'Center/General': ['quickPass', 'playAction', 'balancedPass'],
+
+        'Speed Rusher': ['manBlitz', 'zoneBlitz', 'runFit'],
+        'Run Stuffer': ['runFit', 'balancedZone', 'zoneCover2'],
+        'Bull Rusher': ['manBlitz', 'runFit', 'zoneBlitz'],
+        'Versatile End': ['zoneBlitz', 'balancedZone', 'manBlitz'],
+        'Nose Tackle': ['runFit', 'zoneCover2', 'balancedZone'],
+        'Edge Setter': ['runFit', 'zoneBlitz', 'balancedZone'],
+        'Pass Rush Specialist': ['manBlitz', 'zoneBlitz', 'manCoverage'],
+
+        'Middle Hawk': ['balancedZone', 'zoneCover3', 'runFit'],
+        'Hard Hitter': ['runFit', 'manBlitz', 'zoneBlitz'],
+        'Blitz Specialist': ['manBlitz', 'zoneBlitz', 'runFit'],
+        'Coverage LB': ['zoneCover2', 'zoneCover3', 'splitFieldZone'],
+        'Sideline-to-Sideline': ['balancedZone', 'zoneCover3', 'manCoverage'],
+        'Thumper': ['runFit', 'zoneCover2', 'manBlitz'],
+        'Hybrid Safety': ['splitFieldZone', 'manCoverage', 'zoneBlitz'],
+
+        'Island Corner': ['manCoverage', 'quartersCoverage', 'zoneCover3'],
+        'Ballhawk Safety': ['quartersCoverage', 'splitFieldZone', 'zoneCover3'],
+        'Nickel Stopper': ['manCoverage', 'runFit', 'manBlitz'],
+        'Zone Specialist': ['zoneCover3', 'zoneCover2', 'splitFieldZone'],
+        'Press Corner': ['manCoverage', 'bracketCoverage', 'quartersCoverage'],
+        'Box Safety': ['runFit', 'manCoverage', 'manBlitz'],
+        'Free Safety': ['quartersCoverage', 'splitFieldZone', 'zoneCover3']
+    };
+
+    const defensiveConceptPreferences = {
+        DL: ['runFit', 'manBlitz', 'zoneBlitz'],
+        LB: ['balancedZone', 'runFit', 'zoneBlitz'],
+        DB: ['balancedZone', 'manCoverage', 'zoneCover3']
+    };
+
+    const chooseConceptPreferences = (
+        preferredConcepts,
+        fallbackConcepts
+    ) => {
+        const pool = [...(
+            Array.isArray(preferredConcepts) && preferredConcepts.length
+                ? preferredConcepts
+                : fallbackConcepts
+        )];
+
+        const selected = [];
+
+        // Select two concepts without replacement. Players sharing
+        // an archetype can therefore develop different preferences.
+        while (pool.length > 0 && selected.length < 2) {
+            const index = getRandomInt(0, pool.length - 1);
+            selected.push(pool.splice(index, 1)[0]);
+        }
+
+        // Some players have interests that don't neatly match
+        // their archetype. Introduce a little individual variation.
+        if (Math.random() < 0.25 && fallbackConcepts.length > 0) {
+            selected[1] = getRandom(fallbackConcepts);
+        }
+
+        return [...new Set(selected)];
+    };
+
+    const footballPreferences = {
+        preferredOffenseConcepts: chooseConceptPreferences(
+            offensiveConceptPreferences[archetype.name],
+            ['balancedPass', 'insideRun', 'quickPass']
+        ),
+
+        preferredDefenseConcepts: chooseConceptPreferences(
+            defensiveConceptPreferences[archetype.def],
+            ['balancedZone', 'zoneCover3', 'runFit']
+        )
+    };
+
     // --- GENERATE LORE BACKGROUND BLURB ---
     // --- GENERATE LORE BACKGROUND BLURB ---
     const generateBio = () => {
@@ -1086,16 +1362,13 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         careerStats: { seasonsPlayed: 0, snapsThisSeason: 0 },
         progression: [],
 
-        personality: {
-            workEthic: Math.max(15, Math.min(99, Math.round(workEthicRoll))),
-            dependability: Math.max(20, Math.min(99, Math.round(dependabilityRoll))),
-            streetCred: Math.max(0, Math.min(100, Math.round(streetCredRoll))),
-            likeability: Math.max(10, Math.min(99, Math.round(likeabilityRoll))),
-            ego: Math.max(0, Math.min(100, Math.round(egoRoll))),
-            loyalty: Math.max(0, Math.min(100, Math.round(loyaltyRoll))),
-            clique: getRandom(cliques),
-            entersDraft: Math.random() < 0.60
-        },
+        // Persistent, individual preferences used by the recruiting
+        // decision system. These remain hidden from recruiting teams.
+        recruitingPreferences,
+
+        // Private preferences for the football concepts a player
+        // would enjoy being used in. Not exposed to recruiting AI.
+        footballPreferences,
 
         social: {
             bestFriendId: null,
