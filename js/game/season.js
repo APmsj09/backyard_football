@@ -1043,18 +1043,99 @@ let availableColors = [...teamColors];
 function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
 export function buildSocialNetworks(targetPlayers, allPlayers) {
-    targetPlayers.forEach(p => {
-        if (!p.social) p.social = { bestFriendId: null, goodFriendIds: [], rivalIds: [] };
+    const playersToProcess = Array.isArray(targetPlayers)
+        ? targetPlayers.filter(player =>
+            player && typeof player === 'object'
+        )
+        : [];
 
-        let maxGoodFriends = 3; let maxRivals = 2;
-        if (p.personality.likeability > 70) { maxGoodFriends = getRandomInt(4, 7); maxRivals = getRandomInt(0, 1); }
-        else if (p.personality.likeability < 35) { maxGoodFriends = getRandomInt(1, 2); maxRivals = getRandomInt(2, 3); }
+    const networkPlayers = Array.isArray(allPlayers)
+        ? allPlayers.filter(player =>
+            player && typeof player === 'object'
+        )
+        : playersToProcess;
 
-        const sameClique = allPlayers.filter(o => o.id !== p.id && o.personality?.clique === p.personality?.clique);
-        const others = allPlayers.filter(o => o.id !== p.id);
+    // Initialize every participant before creating any relationships.
+    // Players can be referenced as friends or rivals before their own
+    // turn in the targetPlayers loop.
+    const allParticipants = [
+        ...new Set([
+            ...networkPlayers,
+            ...playersToProcess
+        ])
+    ];
 
-        if (!p.social.bestFriendId && Math.random() < 0.8 && sameClique.length > 0) {
+    allParticipants.forEach(player => {
+        if (
+            !player.personality ||
+            typeof player.personality !== 'object' ||
+            Array.isArray(player.personality)
+        ) {
+            player.personality = {};
+        }
+
+        const rawLikeability = player.personality.likeability;
+        const likeability = Number(rawLikeability);
+
+        player.personality.likeability =
+            rawLikeability != null &&
+            String(rawLikeability).trim() !== '' &&
+            Number.isFinite(likeability)
+                ? Math.max(0, Math.min(100, likeability))
+                : 50;
+
+        if (
+            !player.social ||
+            typeof player.social !== 'object' ||
+            Array.isArray(player.social)
+        ) {
+            player.social = {};
+        }
+
+        if (player.social.bestFriendId === undefined) {
+            player.social.bestFriendId = null;
+        }
+
+        if (!Array.isArray(player.social.goodFriendIds)) {
+            player.social.goodFriendIds = [];
+        }
+
+        if (!Array.isArray(player.social.rivalIds)) {
+            player.social.rivalIds = [];
+        }
+    });
+
+    // All players now have valid personality and social structures.
+    playersToProcess.forEach(p => {
+        let maxGoodFriends = 3;
+        let maxRivals = 2;
+
+        if (p.personality.likeability > 70) {
+            maxGoodFriends = getRandomInt(4, 7);
+            maxRivals = getRandomInt(0, 1);
+        } else if (p.personality.likeability < 35) {
+            maxGoodFriends = getRandomInt(1, 2);
+            maxRivals = getRandomInt(2, 3);
+        }
+
+        const sameClique = p.personality.clique != null
+            ? networkPlayers.filter(o =>
+                o.id !== p.id &&
+                o.personality?.clique === p.personality.clique
+            )
+            : [];
+
+        const others = networkPlayers.filter(o =>
+            o.id !== p.id
+        );
+
+        if (
+            !p.social.bestFriendId &&
+            Math.random() < 0.8 &&
+            sameClique.length > 0
+        ) {
             const bf = getRandom(sameClique);
+
             if (!bf.social.bestFriendId) {
                 p.social.bestFriendId = bf.id;
                 bf.social.bestFriendId = p.id;
@@ -1062,22 +1143,55 @@ export function buildSocialNetworks(targetPlayers, allPlayers) {
         }
 
         let attempts = 0;
-        while (p.social.goodFriendIds.length < maxGoodFriends && attempts < 10) {
-            const gf = getRandom(Math.random() < 0.6 ? sameClique : others);
-            if (gf && gf.id !== p.id && gf.id !== p.social.bestFriendId && !p.social.goodFriendIds.includes(gf.id)) {
+
+        while (
+            p.social.goodFriendIds.length < maxGoodFriends &&
+            attempts < 10
+        ) {
+            const gf = getRandom(
+                Math.random() < 0.6 ? sameClique : others
+            );
+
+            if (
+                gf &&
+                gf.id !== p.id &&
+                gf.id !== p.social.bestFriendId &&
+                !p.social.goodFriendIds.includes(gf.id)
+            ) {
                 p.social.goodFriendIds.push(gf.id);
-                if (!gf.social.goodFriendIds.includes(p.id)) gf.social.goodFriendIds.push(p.id);
+
+                if (!gf.social.goodFriendIds.includes(p.id)) {
+                    gf.social.goodFriendIds.push(p.id);
+                }
             }
+
             attempts++;
         }
 
         attempts = 0;
-        while (p.social.rivalIds.length < maxRivals && attempts < 10) {
+
+        while (
+            p.social.rivalIds.length < maxRivals &&
+            attempts < 10
+        ) {
             const rv = getRandom(others);
-            if (rv && rv.id !== p.id && rv.personality?.clique !== p.personality?.clique && !p.social.goodFriendIds.includes(rv.id) && rv.id !== p.social.bestFriendId) {
-                if (!p.social.rivalIds.includes(rv.id)) p.social.rivalIds.push(rv.id);
-                if (!rv.social.rivalIds.includes(p.id)) rv.social.rivalIds.push(p.id);
+
+            if (
+                rv &&
+                rv.id !== p.id &&
+                rv.personality?.clique !== p.personality?.clique &&
+                !p.social.goodFriendIds.includes(rv.id) &&
+                rv.id !== p.social.bestFriendId
+            ) {
+                if (!p.social.rivalIds.includes(rv.id)) {
+                    p.social.rivalIds.push(rv.id);
+                }
+
+                if (!rv.social.rivalIds.includes(p.id)) {
+                    rv.social.rivalIds.push(p.id);
+                }
             }
+
             attempts++;
         }
     });

@@ -1362,6 +1362,17 @@ export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) 
         careerStats: { seasonsPlayed: 0, snapsThisSeason: 0 },
         progression: [],
 
+        personality: {
+            workEthic: Math.max(15, Math.min(99, Math.round(workEthicRoll))),
+            dependability: Math.max(20, Math.min(99, Math.round(dependabilityRoll))),
+            streetCred: Math.max(0, Math.min(100, Math.round(streetCredRoll))),
+            likeability: Math.max(10, Math.min(99, Math.round(likeabilityRoll))),
+            ego: Math.max(0, Math.min(100, Math.round(egoRoll))),
+            loyalty: Math.max(0, Math.min(100, Math.round(loyaltyRoll))),
+            clique: getRandom(cliques),
+            entersDraft: Math.random() < 0.60
+        },
+
         // Persistent, individual preferences used by the recruiting
         // decision system. These remain hidden from recruiting teams.
         recruitingPreferences,
