@@ -4365,6 +4365,42 @@ export function processAiRecruitingDay(gameState) {
         return true;
     };
 
+    const getAiRecruitingRosterLimit = () => (
+        Number(gameState.currentWeek) === 0 &&
+        !gameState.offseasonFACompleted
+            ? 24
+            : 18
+    );
+
+    const hasAiOfferCapacity = team => {
+        const teamKey = String(team.id);
+        const rosterSize = getRosterObjects(team).length;
+        const rosterLimit = getAiRecruitingRosterLimit();
+
+        const activeReservations = Object.entries(
+            progress.recruits || {}
+        ).reduce((total, [recruitId, record]) => {
+            if (
+                record?.status !== 'available' ||
+                record.committedTeamId != null ||
+                record.offersByTeam?.[teamKey]?.status !== 'active'
+            ) {
+                return total;
+            }
+
+            const prospect = gameState.players.find(
+                player =>
+                    String(player?.id) === String(recruitId)
+            );
+
+            return prospect && prospect.teamId == null
+                ? total + 1
+                : total;
+        }, 0);
+
+        return rosterSize + activeReservations < rosterLimit;
+    };
+
     if (!progress.aiProcessedDays) {
         progress.aiProcessedDays = {};
     }
@@ -5112,24 +5148,125 @@ export function processAiRecruitingDay(gameState) {
 
             targetedToday.add(String(target.player.id));
 
-            // AI programs may use recruiting sweeteners, but should
-            // reserve these resources for meaningful recruiting contests.
-            // Competition is based only on activity this team has observed.
-            let sweetenerResult = null;
+            let offerExtended = false;
 
-            const interestAfterAction = Number(result.interestAfter) || 0;
+            const recruitKey = String(target.player.id);
+            const recruitRecord =
+                progress.recruits?.[recruitKey];
 
-            const competitionPressure = Number(
-                target.observedCompetitionPressure
-            ) || 0;
+            if (recruitRecord) {
+                recruitRecord.offersByTeam =
+                    recruitRecord.offersByTeam &&
+                    typeof recruitRecord.offersByTeam === 'object' &&
+                    !Array.isArray(recruitRecord.offersByTeam)
+                        ? recruitRecord.offersByTeam
+                        : {};
 
-            const shouldConsiderSweetener = (
-                target.observedRivalTeamCount > 0 &&
-                day >= Math.max(2, totalDays - 2) &&
-                competitionPressure >= 2 &&
-                interestAfterAction >= 35 &&
-                interestAfterAction < 90
-            );
+                const existingOffer =
+                    recruitRecord.offersByTeam[teamKey];
+
+                const invitationQuality = (
+                    skillValue('evalCharacter') +
+                    skillValue('gameplanInstinct') +
+                    skillValue('authority')
+                ) / 3;
+
+                // Better decision-makers are more consistent, but
+                // still retain some uncertainty when extending offers.
+                const invitationNoiseRange =
+                    2 + ((100 - invitationQuality) / 100) * 6;
+
+                const invitationNoise =
+                    (Math.random() * 2 - 1) *
+                    invitationNoiseRange;
+
+                const invitationRiskAdjustment =
+                    (
+                        getStaffBehaviorTendency(coach, 'riskTolerance') -
+                        50
+                    ) / 50 * 3;
+
+                const invitationPatienceAdjustment =
+                    (
+                        getStaffBehaviorTendency(coach, 'patience') -
+                        50
+                    ) / 50 * 2;
+
+                const invitationScore =
+                    target.score +
+                    invitationNoise +
+                    invitationRiskAdjustment -
+                    invitationPatienceAdjustment;
+
+                const shouldExtendOffer =
+                    Number(result.interestAfter) >= 18 &&
+                    invitationScore >= 22;
+
+                const offerCanBeExtended =
+                    !existingOffer ||
+                    existingOffer.status === 'withdrawn';
+
+                if (
+                    shouldExtendOffer &&
+                    offerCanBeExtended &&
+                    hasAiOfferCapacity(team)
+                ) {
+                    const offer = {
+                        status: 'active',
+                        offeredDay: day,
+                        offeredYear: Number(gameState.year),
+                        withdrawnDay: null,
+                        respondedDay: null
+                    };
+
+                    recruitRecord.offersByTeam[teamKey] = offer;
+
+                    const offerActivity = {
+                        type: 'recruiting_offer',
+                        year: Number(gameState.year),
+                        day,
+                        teamId: team.id,
+                        teamName: team.name,
+                        playerId: target.player.id,
+                        playerName: target.player.name,
+                        action: 'extend',
+                        status: 'active',
+                        label: 'Offered a roster spot'
+                    };
+
+                    recruitRecord.history = Array.isArray(
+                        recruitRecord.history
+                    )
+                        ? recruitRecord.history
+                        : [];
+
+                    recruitRecord.history.push(offerActivity);
+
+                    progress.dailyActivity = Array.isArray(
+                        progress.dailyActivity
+                    )
+                        ? progress.dailyActivity
+                        : [];
+
+                    progress.dailyActivity.push(offerActivity);
+
+                    offerExtended = true;
+                }
+            }
+
+            actions.push({
+                teamId: team.id,
+                teamName: team.name,
+                coachId: coach.id,
+                coachName: coach.name || 'Coach',
+                playerId: target.player.id,
+                playerName: target.player.name,
+                action: selectedAction.type,
+                hours: hoursToday,
+                interestGain: result.interestGain,
+                interestAfter: result.interestAfter,
+                offerExtended
+            });
 
             if (shouldConsiderSweetener) {
                 const balance = Number(team.finances?.balance);

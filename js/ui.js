@@ -10,7 +10,10 @@ import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/f
 import { renderDepthOrderPane } from './ui/depth_order.js';
 import { applyRecruitingSweetener } from './game/staff.js';
 import { DEFAULT_PLAYBACK_INTERVAL_MS, getPlaybackIntervalMs } from './game/simulation_config.js';
-import { getCurrentRosterLimit } from './game/season.js';
+import {
+    getCurrentRosterLimit,
+    setRecruitingOffer
+} from './game/season.js';
 
 let elements = {};
 let selectedPlayerId = null;
@@ -2971,6 +2974,23 @@ export function renderOffseasonFAPool(gameState) {
             )
         );
 
+        const userOffer =
+            recruitingRecord?.offersByTeam?.[teamKey] || null;
+
+        const hasActiveOffer =
+            userOffer?.status === 'active';
+
+        const offerStatusHtml = hasActiveOffer
+            ? `
+                <span class="border border-emerald-300 bg-emerald-50 text-emerald-800 font-black px-1.5 py-0.5 rounded text-[9px]">
+                    Roster Invitation Active
+                </span>
+             `
+            : `
+                <span class="text-[9px] text-slate-500">
+                    No active roster invitation
+                </span>
+            `;
         const schools = recordedSchools.map(detail => {
             const teamId = detail.teamId ?? detail.team?.id;
 
@@ -3603,6 +3623,7 @@ export function renderOffseasonFAPool(gameState) {
                                     ${investmentSummary}
                                 </span>
                             </div>
+                            ${offerStatusHtml}
                             <span
                                 class="text-[10px] text-slate-500 truncate italic"
                                 title="${intel.rumorText}"
@@ -3669,6 +3690,15 @@ export function renderOffseasonFAPool(gameState) {
                         </td>
                         <td class="text-right py-2 px-3 font-sans whitespace-nowrap" onclick="event.stopPropagation()">
                             <div class="flex flex-col items-end gap-1">
+                                <button
+                                    class="${
+                                        hasActiveOffer
+                                            ? 'bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300'
+                                            : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                                    } font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition"
+                                    onclick="window.app_setRecruitingOffer('${p.id}', '${hasActiveOffer ? 'withdraw' : 'extend'}')">
+                                    ${hasActiveOffer ? 'Withdraw Offer' : 'Offer Spot'}
+                                </button>
                                 <button
                                     class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition shadow-sm"
                                     onclick="window.app_openRecruitingActionModal('${p.id}')">
@@ -3767,6 +3797,108 @@ export function removeOffseasonFABid(idx) { offseasonFABids.splice(idx, 1); }
 export function getOffseasonFADay() { return offseasonFADay; }
 export function incrementOffseasonFADay() { offseasonFADay++; }
 export function clearOffseasonFABids() { offseasonFABids = []; }
+
+window.app_setRecruitingOffer = function(
+    playerId,
+    action = 'extend'
+) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    const state = gs?.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    const escapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    const normalizedPhase = String(state?.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    if (
+        !team ||
+        normalizedPhase !== 'recruiting' ||
+        !progress ||
+        progress.initialized !== true ||
+        progress.completed === true ||
+        Number(progress.seasonYear) !== Number(gs.year)
+    ) {
+        showModal(
+            'Recruiting Unavailable',
+            '<p>The recruiting week is not currently active.</p>'
+        );
+        return;
+    }
+
+    const player = gs.players?.find(
+        candidate =>
+            String(candidate?.id) === String(playerId)
+    );
+
+    const record = progress.recruits?.[String(playerId)];
+
+    if (
+        !player ||
+        player.teamId != null ||
+        !record ||
+        record.status !== 'available' ||
+        record.committedTeamId != null
+    ) {
+        showModal(
+            'Prospect Unavailable',
+            '<p>This prospect is no longer available for a roster invitation.</p>'
+        );
+        return;
+    }
+
+    if (!['extend', 'withdraw'].includes(action)) {
+        showModal(
+            'Invalid Offer Action',
+            '<p>Please refresh the recruiting screen and try again.</p>'
+        );
+        return;
+    }
+
+    const result = setRecruitingOffer(
+        gs,
+        team.id,
+        player.id,
+        action
+    );
+
+    if (!result?.success) {
+        showModal(
+            'Offer Could Not Be Updated',
+            `<p>${escapeHtml(
+                result?.message || 'The roster invitation could not be updated.'
+            )}</p>`
+        );
+        return;
+    }
+
+    Game.saveGameState?.('backyardFootballGameState');
+
+    renderOffseasonFAScreen(getGameState());
+
+    showModal(
+        action === 'extend'
+            ? 'Roster Spot Offered'
+            : 'Roster Invitation Withdrawn',
+        `<p>${escapeHtml(
+            result.message ||
+            'The recruiting offer has been updated.'
+        )}</p>`,
+        null,
+        'Continue'
+    );
+};
 window.app_setRecruitingTab = function(tab) {
     if (!['prospects', 'battles'].includes(tab)) return;
 

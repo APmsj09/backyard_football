@@ -404,9 +404,10 @@ export function transitionOffseasonPhase(
                     interestByTeam: Object.fromEntries(
                         recruitingTeams.map(team => [
                             String(team.id),
-                            getCarryoverInterest(player, team)
+                            0
                         ])
                     ),
+                    offersByTeam: {},
                     history: [],
                     status: 'available',
                     committedTeamId: null
@@ -4733,6 +4734,263 @@ export function processOffseasonFADay(
 }
 
 /**
+ * Extends or withdraws a formal invitation for a prospect to join a team.
+ *
+ * Active offers reserve roster places but do not increase player interest.
+ * Both user-controlled and AI teams use the same validation.
+ */
+export function setRecruitingOffer(
+    gameState,
+    teamId,
+    playerId,
+    action = 'extend'
+) {
+    const state = gameState?.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    const recruitingDay = Number(state?.recruitingDay);
+    const recruitingDays = Number(state?.recruitingDays);
+
+    if (
+        !gameState?.teams ||
+        !gameState?.players ||
+        !progress ||
+        progress.initialized !== true ||
+        progress.completed === true ||
+        Number(progress.seasonYear) !== Number(gameState.year) ||
+        String(state?.phase || '').toLowerCase().replace(/[^a-z]/g, '') !== 'recruiting' ||
+        !Number.isInteger(recruitingDay) ||
+        !Number.isInteger(recruitingDays) ||
+        recruitingDay < 1 ||
+        recruitingDay > recruitingDays
+    ) {
+        return {
+            success: false,
+            message: 'The recruiting week is not active.'
+        };
+    }
+
+    if (!['extend', 'withdraw'].includes(action)) {
+        return {
+            success: false,
+            message: 'Invalid recruiting offer action.'
+        };
+    }
+
+    const teamKey = String(teamId);
+    const playerKey = String(playerId);
+
+    const team = gameState.teams.find(
+        candidate =>
+            String(candidate?.id) === teamKey &&
+            candidate.leagueType === 'main'
+    );
+
+    const player = gameState.players.find(
+        candidate => String(candidate?.id) === playerKey
+    );
+
+    const record = progress.recruits?.[playerKey];
+
+    if (
+        !team ||
+        !player ||
+        player.teamId != null ||
+        !record ||
+        record.status !== 'available' ||
+        record.committedTeamId != null
+    ) {
+        return {
+            success: false,
+            message: 'This prospect is no longer available.'
+        };
+    }
+
+    const age = Number(player.age);
+
+    const statusType = String(
+        player.status?.type || ''
+    ).toLowerCase();
+
+    const lifecycle = String(
+        player.lifecycle || ''
+    ).toLowerCase();
+
+    const lifecycleStatus = String(
+        player.lifecycleStatus || player.lifecycle?.status || ''
+    ).toLowerCase();
+
+    const protectedDraftIds = new Set(
+        (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
+            .map(prospect =>
+                prospect && typeof prospect === 'object'
+                    ? prospect.id
+                    : prospect
+            )
+            .filter(id => id != null)
+            .map(id => String(id))
+    );
+
+    const hasRefusedTeam = (
+        Array.isArray(player.refusedTeamIds) &&
+        player.refusedTeamIds.some(
+            refusedTeamId => String(refusedTeamId) === teamKey
+        )
+    );
+
+    if (
+        !Number.isFinite(age) ||
+        age < 12 ||
+        age > 18 ||
+        hasRefusedTeam ||
+        protectedDraftIds.has(playerKey) ||
+        lifecycle === 'draft_eligible' ||
+        lifecycleStatus === 'draft_eligible' ||
+        ['retired', 'departed', 'temporary', 'injured'].includes(statusType) ||
+        ['retired', 'departed', 'temporary', 'injured'].includes(lifecycleStatus) ||
+        Number(player.status?.duration) > 0 ||
+        Number(player.injury?.duration || player.injuryDuration || 0) > 0
+    ) {
+        return {
+            success: false,
+            message: 'This prospect is not eligible for an offer.'
+        };
+    }
+
+    if (
+        !record.offersByTeam ||
+        typeof record.offersByTeam !== 'object' ||
+        Array.isArray(record.offersByTeam)
+    ) {
+        record.offersByTeam = {};
+    }
+
+    const existingOffer = record.offersByTeam[teamKey];
+
+    if (action === 'withdraw') {
+        if (existingOffer?.status !== 'active') {
+            return {
+                success: false,
+                message: 'Your team does not have an active offer for this prospect.'
+            };
+        }
+
+        existingOffer.status = 'withdrawn';
+        existingOffer.withdrawnDay = recruitingDay;
+
+    } else {
+        if (existingOffer?.status === 'active') {
+            return {
+                success: true,
+                alreadyActive: true,
+                message: `Your invitation to ${player.name} is already active.`
+            };
+        }
+
+        if (existingOffer?.status === 'accepted') {
+            return {
+                success: false,
+                message: 'This prospect has already accepted an offer.'
+            };
+        }
+
+        // Count active invitations to other available prospects.
+        // Each invitation reserves one place on the team's roster.
+        const activeReservations = Object.entries(
+            progress.recruits || {}
+        ).reduce((total, [otherPlayerId, otherRecord]) => {
+            if (
+                String(otherPlayerId) === playerKey ||
+                otherRecord?.status !== 'available' ||
+                otherRecord?.committedTeamId != null
+            ) {
+                return total;
+            }
+
+            const otherOffer =
+                otherRecord?.offersByTeam?.[teamKey];
+
+            if (otherOffer?.status !== 'active') {
+                return total;
+            }
+
+            const otherPlayer = gameState.players.find(
+                candidate =>
+                    String(candidate?.id) === String(otherPlayerId)
+            );
+
+            if (!otherPlayer || otherPlayer.teamId != null) {
+                return total;
+            }
+
+            return total + 1;
+        }, 0);
+
+        const rosterSize = getRosterObjects(team).length;
+        const rosterLimit = getCurrentRosterLimit(gameState);
+        const availableSpots = Math.max(
+            0,
+            rosterLimit - rosterSize - activeReservations
+        );
+
+        if (availableSpots <= 0) {
+            return {
+                success: false,
+                message:
+                    `No roster spots are available for another invitation. ` +
+                    `${activeReservations} spot(s) are already reserved by active offers.`
+            };
+        }
+
+        record.offersByTeam[teamKey] = {
+            status: 'active',
+            offeredDay: recruitingDay,
+            offeredYear: Number(gameState.year),
+            withdrawnDay: null,
+            respondedDay: null
+        };
+    }
+
+    const offer = record.offersByTeam[teamKey];
+
+    const activity = {
+        type: 'recruiting_offer',
+        year: Number(gameState.year),
+        day: recruitingDay,
+        teamId: team.id,
+        teamName: team.name,
+        playerId: player.id,
+        playerName: player.name,
+        action,
+        status: offer.status,
+        label: action === 'extend'
+            ? 'Offered a roster spot'
+            : 'Withdrew roster invitation'
+    };
+
+    record.history = Array.isArray(record.history)
+        ? record.history
+        : [];
+
+    record.history.push(activity);
+
+    progress.dailyActivity = Array.isArray(progress.dailyActivity)
+        ? progress.dailyActivity
+        : [];
+
+    progress.dailyActivity.push(activity);
+
+    return {
+        success: true,
+        action,
+        offer,
+        message: action === 'extend'
+            ? `Your team has officially invited ${player.name} to join.`
+            : `Your invitation to ${player.name} has been withdrawn.`
+    };
+}
+
+/**
  * Resolves recruiting commitments for the current day.
  *
  * Days 2–6 can produce early commitments when a player has strong interest
@@ -5330,6 +5588,54 @@ export function resolveRecruitingDay(gameState = game) {
         record.committedTeamId = team.id;
         record.committedDay = day;
 
+        // The player accepts the winning team's offer and declines
+        // every other active invitation.
+        record.offersByTeam =
+            record.offersByTeam &&
+            typeof record.offersByTeam === 'object' &&
+            !Array.isArray(record.offersByTeam)
+                ? record.offersByTeam
+                : {};
+
+        record.history = Array.isArray(record.history)
+            ? record.history
+            : [];
+
+        progress.dailyActivity = Array.isArray(progress.dailyActivity)
+            ? progress.dailyActivity
+            : [];
+
+        Object.entries(record.offersByTeam).forEach(
+            ([offerTeamId, offer]) => {
+                if (offer?.status !== 'active') return;
+
+                const accepted =
+                    String(offerTeamId) === String(team.id);
+
+                offer.status = accepted ? 'accepted' : 'declined';
+                offer.respondedDay = day;
+
+                const offerTeam = teamsById.get(String(offerTeamId));
+
+                const offerEvent = {
+                    type: 'recruiting_offer_response',
+                    year: Number(gameState.year),
+                    day,
+                    playerId: player.id,
+                    playerName: player.name,
+                    teamId: offerTeam?.id ?? offerTeamId,
+                    teamName: offerTeam?.name || 'Unknown Team',
+                    status: offer.status,
+                    label: accepted
+                        ? 'Accepted roster invitation'
+                        : 'Declined roster invitation'
+                };
+
+                record.history.push(offerEvent);
+                progress.dailyActivity.push(offerEvent);
+            }
+        );
+
         const commitment = {
             playerId: player.id,
             playerName: player.name,
@@ -5788,42 +6094,17 @@ export function resolveRecruitingDay(gameState = game) {
         }
 
         const contenders = Object.entries(
-            record.interestByTeam || {}
+            record.offersByTeam || {}
         )
-            .map(([teamId, rawInterest]) => {
-                const team = getEligibleTeam(teamId, player);
-
-                if (!team) return null;
-
-                const numericInterest = Number(rawInterest);
-
-                const interest = Number.isFinite(numericInterest)
-                    ? Math.max(0, Math.min(100, numericInterest))
-                    : 0;
-
-                const playerFit = calculatePlayerRecruitingFit(
-                    player,
-                    record,
-                    team
-                );
-
-                const pushMultiplier =
-                    calculateRecruitingPushMultiplier(
-                        player,
-                        record,
-                        team
-                    );
-
-                return {
-                    team,
-                    interest,
-                    fitScore: playerFit.fitScore,
-                    fitMultiplier: playerFit.fitMultiplier,
-                    pushMultiplier
-                };
-            })
+            .filter(([, offer]) =>
+                offer?.status === 'active'
+            )
+            .map(([teamId]) => ({
+                team: getEligibleTeam(teamId),
+                interest: getInterest(record, teamId)
+            }))
             .filter(candidate =>
-                candidate &&
+                candidate.team &&
                 candidate.interest >= seriousInterestThreshold
             )
             .sort((a, b) => b.interest - a.interest);
@@ -5911,6 +6192,57 @@ export function resolveRecruitingDay(gameState = game) {
         } else {
             earlyCommitments.push(commitment);
         }
+    }
+
+        // Any invitations still active after the final recruiting day
+    // have expired without a commitment.
+    if (finalDay) {
+        progress.dailyActivity = Array.isArray(progress.dailyActivity)
+            ? progress.dailyActivity
+            : [];
+
+        Object.entries(progress.recruits || {}).forEach(
+            ([playerId, record]) => {
+                if (
+                    record?.status !== 'available' ||
+                    record.committedTeamId != null
+                ) {
+                    return;
+                }
+
+                Object.entries(record.offersByTeam || {}).forEach(
+                    ([teamId, offer]) => {
+                        if (offer?.status !== 'active') return;
+
+                        offer.status = 'declined';
+                        offer.respondedDay = day;
+                        offer.responseReason = 'recruiting_window_closed';
+
+                        const player = getAvailablePlayer(playerId);
+                        const offerTeam = teamsById.get(String(teamId));
+
+                        const offerEvent = {
+                            type: 'recruiting_offer_response',
+                            year: Number(gameState.year),
+                            day,
+                            playerId,
+                            playerName: player?.name || 'Unknown Player',
+                            teamId: offerTeam?.id ?? teamId,
+                            teamName: offerTeam?.name || 'Unknown Team',
+                            status: 'declined',
+                            label: 'Roster invitation expired'
+                        };
+
+                        record.history = Array.isArray(record.history)
+                            ? record.history
+                            : [];
+
+                        record.history.push(offerEvent);
+                        progress.dailyActivity.push(offerEvent);
+                    }
+                );
+            }
+        );
     }
 
     // Record the day's resolution so revisiting or reloading the phase
