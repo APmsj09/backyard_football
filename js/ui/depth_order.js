@@ -28,6 +28,116 @@ export function renderDepthOrderPane(gameState) {
     const stChart = team.specialTeams;
     const specChart = team.specialists;
 
+    const depthOrder = team.depthOrder || {};
+
+    const rosterById = new Map(
+        roster.map(player => [String(player.id), player])
+    );
+
+    const renderPositionDepthCard = pos => {
+        const playerIds = Array.isArray(depthOrder[pos])
+            ? depthOrder[pos]
+            : [];
+
+        const players = playerIds
+            .map(playerId => rosterById.get(String(playerId)))
+            .filter(Boolean);
+
+        const isOffensePosition = ['QB', 'RB', 'WR', 'TE', 'OL'].includes(pos);
+
+        const headerColor = isOffensePosition
+            ? 'bg-blue-950 text-blue-200'
+            : 'bg-rose-950 text-rose-200';
+
+        return `
+            <section class="min-w-0 bg-white border border-slate-200 rounded shadow-sm overflow-hidden flex flex-col">
+                <div class="flex items-center justify-between px-3 py-2 ${headerColor}">
+                    <div>
+                        <span class="font-black text-sm uppercase tracking-wider">${pos}</span>
+                        <span class="text-[9px] uppercase tracking-wide opacity-70 ml-1">Depth Ranking</span>
+                    </div>
+                    <span class="text-[10px] font-mono">${players.length} Players</span>
+                </div>
+
+                <div class="max-h-[360px] overflow-y-auto divide-y divide-slate-100">
+                    ${players.length ? players.map((player, index) => {
+                        const ovr = calculateOverall(player, pos);
+                        const energy = Math.max(
+                            0,
+                            Math.min(100, Math.round(100 - (player.fatigue || 0)))
+                        );
+
+                        const playerIdArg = String(player.id)
+                            .replace(/\\/g, '\\\\')
+                            .replace(/'/g, "\\'");
+
+                        return `
+                            <div class="grid grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-2 hover:bg-slate-50">
+                                <span class="text-xs font-black text-slate-400 text-center">
+                                    ${index + 1}
+                                </span>
+
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-1.5 min-w-0">
+                                        <span class="font-bold text-xs text-slate-900 truncate">
+                                            ${player.name}
+                                        </span>
+                                        <span class="text-[9px] text-slate-400 font-mono shrink-0">
+                                            #${player.number || '--'}
+                                        </span>
+                                        <span class="text-[9px] bg-slate-100 text-slate-500 rounded px-1 shrink-0">
+                                            ${player.pos || 'ATH'}
+                                        </span>
+                                    </div>
+
+                                    <div class="text-[10px] text-slate-500 font-mono mt-0.5">
+                                        Age ${player.age} ·
+                                        <span class="${energy < 60 ? 'text-rose-600 font-bold' : ''}">
+                                            Energy ${energy}%
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center gap-1.5 shrink-0">
+                                    <div class="text-right">
+                                        <span class="text-base font-black ${ovr >= 70 ? 'text-emerald-700' : 'text-slate-800'}">
+                                            ${ovr}
+                                        </span>
+                                        <span class="block text-[8px] text-slate-400 font-bold uppercase">
+                                            OVR
+                                        </span>
+                                    </div>
+
+                                    <div class="flex flex-col gap-0.5">
+                                        <button
+                                            type="button"
+                                            class="w-6 h-5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-200 disabled:opacity-25 disabled:cursor-not-allowed text-[10px] font-black"
+                                            ${index === 0 ? 'disabled' : ''}
+                                            onclick="event.stopPropagation(); window.movePositionDepthOrder('${pos}', '${playerIdArg}', -1)"
+                                            title="Move up">
+                                            ▲
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            class="w-6 h-5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-200 disabled:opacity-25 disabled:cursor-not-allowed text-[10px] font-black"
+                                            ${index === players.length - 1 ? 'disabled' : ''}
+                                            onclick="event.stopPropagation(); window.movePositionDepthOrder('${pos}', '${playerIdArg}', 1)"
+                                            title="Move down">
+                                            ▼
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>`;
+                    }).join('') : `
+                        <div class="px-3 py-6 text-center text-[10px] text-slate-400 italic">
+                            No eligible players currently listed.
+                        </div>
+                    `}
+                </div>
+            </section>`;
+    };
+
     const renderSlotCard = (slot, side) => {
         let playerId;
         if (side === 'offense') playerId = offChart[slot];
@@ -92,91 +202,170 @@ export function renderDepthOrderPane(gameState) {
     };
 
     pane.innerHTML = `
-        <!-- Scheme Header & Quick Actions -->
+        <!-- Universal Depth Chart Header -->
         <div class="mb-4 bg-slate-900 text-white rounded p-3 flex flex-wrap justify-between items-center gap-3 shrink-0">
-            <div class="flex items-center gap-4">
-                <div>
-                    <span class="text-slate-400 text-[10px] font-bold uppercase block tracking-wider">Offensive Scheme</span>
-                    <span class="font-black text-blue-400 text-sm">${offFormKey} (8 Starters)</span>
-                </div>
-                <div class="border-l border-slate-700 pl-4">
-                    <span class="text-slate-400 text-[10px] font-bold uppercase block tracking-wider">Defensive Scheme</span>
-                    <span class="font-black text-rose-400 text-sm">${defFormKey} (8 Starters)</span>
+            <div class="min-w-0">
+                <span class="font-black text-sm uppercase tracking-wider">
+                    Universal Position Rankings
+                </span>
+
+                <p class="text-[10px] text-slate-400 mt-1">
+                    All eight core positions remain visible regardless of formation.
+                    Use the arrows to adjust player rankings.
+                </p>
+
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
+                    <span class="text-[10px] text-blue-300 font-bold">
+                        ACTIVE OFFENSE: ${offFormKey}
+                    </span>
+                    <span class="text-[10px] text-rose-300 font-bold">
+                        ACTIVE DEFENSE: ${defFormKey}
+                    </span>
                 </div>
             </div>
-            <div class="flex gap-2">
-                <button class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold px-3 py-1.5 rounded text-xs uppercase tracking-wider"
-                        onclick="window.resetDepthChartOverrides()">
+
+            <div class="flex gap-2 shrink-0">
+                <button
+                    class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold px-3 py-1.5 rounded text-xs uppercase tracking-wider"
+                    onclick="window.resetDepthChartOverrides()">
                     Reset Locks
                 </button>
-                <button class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-3 py-1.5 rounded text-xs uppercase tracking-wider shadow"
-                        onclick="window.autoOptimizeLineup()">
+
+                <button
+                    class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-3 py-1.5 rounded text-xs uppercase tracking-wider shadow"
+                    onclick="window.autoOptimizeLineup()">
                     ⚡ Auto-Optimize Best Lineup
                 </button>
             </div>
         </div>
 
-        <!-- 3-Column Unified Lineup Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 pb-6">
-            <!-- Offensive Starters -->
-            <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
-                <div class="flex justify-between items-center border-b border-slate-200 pb-2">
-                    <h4 class="font-black text-xs text-blue-900 uppercase tracking-wider">Starting Offense</h4>
-                </div>
-                <div class="space-y-1.5">
-                    ${Object.keys(offChart).map(slot => renderSlotCard(slot, 'offense')).join('')}
-                </div>
-            </div>
+        <!-- Universal Core Position Rankings + Specialists -->
+        <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,2.2fr)_minmax(260px,0.8fr)] gap-4 pb-6 min-w-0">
 
-            <!-- Defensive Starters -->
-            <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
-                <div class="flex justify-between items-center border-b border-slate-200 pb-2">
-                    <h4 class="font-black text-xs text-rose-900 uppercase tracking-wider">Starting Defense</h4>
-                </div>
-                <div class="space-y-1.5">
-                    ${Object.keys(defChart).map(slot => renderSlotCard(slot, 'defense')).join('')}
-                </div>
-            </div>
+            <!-- All Eight Core Positions -->
+            <div class="min-w-0 space-y-4">
 
-            <!-- Special Teams & Situational Specialists (Col 3) -->
-            <div class="space-y-4">
-                <!-- Special Teams -->
-                <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
-                    <div class="flex justify-between items-center border-b border-slate-200 pb-2">
-                        <h4 class="font-black text-xs text-amber-900 uppercase tracking-wider">Special Teams</h4>
-                        <span class="text-[10px] text-slate-500 font-mono">Specialists</span>
+                <!-- Offensive Positions -->
+                <section class="space-y-2">
+                    <div class="flex justify-between items-center border-b border-slate-200 pb-1">
+                        <h4 class="font-black text-xs text-blue-950 uppercase tracking-wider">
+                            Offensive Depth
+                        </h4>
+                        <span class="text-[9px] text-slate-400 uppercase font-bold">
+                            QB · RB · WR · TE · OL
+                        </span>
                     </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-3">
+                        ${['QB', 'RB', 'WR', 'TE', 'OL'].map(renderPositionDepthCard).join('')}
+                    </div>
+                </section>
+
+                <!-- Defensive Positions -->
+                <section class="space-y-2">
+                    <div class="flex justify-between items-center border-b border-slate-200 pb-1">
+                        <h4 class="font-black text-xs text-rose-950 uppercase tracking-wider">
+                            Defensive Depth
+                        </h4>
+                        <span class="text-[9px] text-slate-400 uppercase font-bold">
+                            DL · LB · DB
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-3">
+                        ${['DL', 'LB', 'DB'].map(renderPositionDepthCard).join('')}
+                    </div>
+                </section>
+            </div>
+
+            <!-- Specialized Assignments -->
+            <aside class="min-w-0 space-y-4">
+
+                <!-- Special Teams -->
+                <section class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
+                    <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+                        <h4 class="font-black text-xs text-amber-900 uppercase tracking-wider">
+                            Special Teams
+                        </h4>
+                        <span class="text-[10px] text-slate-500 font-mono">
+                            Specialists
+                        </span>
+                    </div>
+
                     <div class="space-y-1.5">
                         ${renderSlotCard('PR', 'specialTeams')}
                         ${renderSlotCard('P', 'specialTeams')}
                     </div>
+
                     <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200 space-y-0.5">
                         <div><b>PR:</b> Punt returner (Speed & Hands).</div>
                         <div><b>P:</b> Punter (Throw Power & Accuracy).</div>
                     </div>
-                </div>
+                </section>
 
                 <!-- Package Specialists -->
-                <div class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
+                <section class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
                     <div class="flex justify-between items-center border-b border-slate-200 pb-2">
-                        <h4 class="font-black text-xs text-indigo-900 uppercase tracking-wider">Package Specialists</h4>
-                        <span class="text-[10px] text-slate-500 font-mono">Sub-Packages</span>
+                        <h4 class="font-black text-xs text-indigo-900 uppercase tracking-wider">
+                            Package Specialists
+                        </h4>
+                        <span class="text-[10px] text-slate-500 font-mono">
+                            Situational
+                        </span>
                     </div>
+
                     <div class="space-y-1.5">
                         ${renderSlotCard('FB', 'specialists')}
                         ${renderSlotCard('SLOT', 'specialists')}
                         ${renderSlotCard('NCB', 'specialists')}
                     </div>
+
                     <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200 space-y-0.5">
                         <div><b>FB:</b> Lead blocker in Power/Jumbo sets.</div>
                         <div><b>SLOT:</b> Slot WR in Spread/Trips sets.</div>
                         <div><b>NCB:</b> Extra DB in Nickel/Dime packages.</div>
                     </div>
-                </div>
-            </div>
+                </section>
+            </aside>
         </div>
     `;
 }
+
+window.movePositionDepthOrder = function(position, playerId, direction) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team) return;
+
+    const validPositions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+
+    if (!validPositions.includes(position)) return;
+
+    const order = team.depthOrder?.[position];
+    if (!Array.isArray(order)) return;
+
+    const currentIndex = order.findIndex(
+        id => String(id) === String(playerId)
+    );
+
+    const nextIndex = currentIndex + Number(direction);
+
+    if (
+        currentIndex < 0 ||
+        nextIndex < 0 ||
+        nextIndex >= order.length
+    ) {
+        return;
+    }
+
+    [order[currentIndex], order[nextIndex]] =
+        [order[nextIndex], order[currentIndex]];
+
+    Game.rebuildDepthChartFromOrder(team);
+
+    saveGameState();
+    renderDepthOrderPane(gs);
+    document.dispatchEvent(new CustomEvent('refresh-ui'));
+};
 
 // Position-specific key skills to display in the swap modal
 const POSITION_KEY_SKILLS = {

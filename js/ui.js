@@ -9954,13 +9954,14 @@ function renderPositionalOveralls() {
     });
 
     pane.innerHTML = `
-        <!-- Top Strategic Radar: Position Room Strength -->
-        <div class="mb-3 bg-slate-900 text-white rounded p-3 border border-slate-700 shadow-sm shrink-0">
+        <div class="grid grid-cols-1 2xl:grid-cols-[minmax(220px,0.62fr)_minmax(0,2.38fr)] gap-3 items-start min-w-0">
+            <!-- Top Strategic Radar: Position Room Strength -->
+            <div class="min-w-0 bg-slate-900 text-white rounded p-3 border border-slate-700 shadow-sm shrink-0">
             <div class="flex justify-between items-center mb-2 pb-1 border-b border-slate-800">
                 <span class="text-[10px] font-black uppercase tracking-wider text-amber-400">Franchise Position Room Strength</span>
                 <span class="text-[10px] text-slate-400 font-mono">Starter / Backup OVR</span>
             </div>
-            <div class="grid grid-cols-4 sm:grid-cols-8 gap-2">
+                <div class="grid grid-cols-2 sm:grid-cols-4 2xl:grid-cols-2 gap-2">
                 ${roomSummaries.map(r => `
                     <div class="bg-slate-800/80 p-2 rounded border border-slate-700 text-center">
                         <span class="text-[10px] font-black uppercase text-slate-300 block">${r.pos}</span>
@@ -9972,7 +9973,7 @@ function renderPositionalOveralls() {
         </div>
 
         <!-- Master 8-Way Versatility Matrix Table -->
-        <div class="bg-white rounded border border-slate-200 shadow-sm overflow-x-auto">
+            <div class="min-w-0 bg-white rounded border border-slate-200 shadow-sm overflow-x-auto">
         <table class="w-full min-w-[820px] table-fixed text-xs font-mono">
             <colgroup>
                 <col style="width: 4%">
@@ -10048,6 +10049,7 @@ function renderPositionalOveralls() {
                     }).join('')}
                 </tbody>
             </table>
+            </div>
         </div>
     `;
 }

@@ -310,7 +310,26 @@ export function aiSetDepthChart(team) {
 }
 
 export function assignPlayerToSlot(team, playerId, slot, side) {
-    if (!team) return false;
+    if (!team || !['offense', 'defense'].includes(side)) return false;
+
+    const formationMap = side === 'offense'
+        ? offenseFormations
+        : defenseFormations;
+
+    const defaultFormation = side === 'offense'
+        ? 'Balanced'
+        : '3-2-3 Base';
+
+    const formationKey = normalizeFormationKey(
+        formationMap,
+        team.formations?.[side],
+        defaultFormation
+    );
+
+    const activeSlots = formationMap[formationKey]?.slots || [];
+
+    if (!activeSlots.includes(slot)) return false;
+
     if (!team.depthChart) team.depthChart = { offense: {}, defense: {}, special: {} };
     if (!team.depthChart.offense) team.depthChart.offense = {};
     if (!team.depthChart.defense) team.depthChart.defense = {};
@@ -327,8 +346,6 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
     }
 
     // 2. ASSIGN SLOT: Validate before locking the assignment.
-    if (!['offense', 'defense'].includes(side)) return false;
-
     const gameDayRoster = getGameDayRosterObjects(team);
 
     if (!gameDayRoster.some(
@@ -359,18 +376,10 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
         }
     });
 
-    // Lock the assignment only after validation succeeds.
+    // Lock the formation-specific assignment without changing
+    // the player's universal position ranking.
     team.slotOverrides[side][slot] = playerId;
     team.depthChart[side][slot] = playerId;
-    
-    if (!team.depthOrder) team.depthOrder = {};
-    if (!team.depthOrder[posKey]) team.depthOrder[posKey] = [];
-
-    const groupList = team.depthOrder[posKey];
-    const existingIndex = groupList.indexOf(playerId);
-    if (existingIndex > -1) groupList.splice(existingIndex, 1);
-    groupList.unshift(playerId);
-    team.depthOrder[posKey] = groupList;
 
     rebuildDepthChartFromOrder(team);
     return true;
@@ -378,22 +387,9 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
 
 export function updateDepthChart(playerId, slotName, side) {
     const team = game?.playerTeam;
-    if (!team || !team.depthOrder) return;
+    if (!team) return;
 
-    let posKey = slotName.replace(/\d+/g, '');
-    if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
-    if (posKey === 'FB') posKey = 'RB';
-    if (posKey === 'TE') posKey = 'TE';
-    if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
-    if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
-
-    const groupList = team.depthOrder[posKey] || [];
-    const existingIndex = groupList.indexOf(playerId);
-    if (existingIndex > -1) groupList.splice(existingIndex, 1);
-
-    groupList.unshift(playerId);
-    team.depthOrder[posKey] = groupList;
-    rebuildDepthChartFromOrder(team);
+    assignPlayerToSlot(team, playerId, slotName, side);
 }
 
 export function changeFormation(side, formationName) {
