@@ -948,14 +948,141 @@ function restoreActiveFaMarket(market) {
     return new Map();
 }
 
+const SAVE_COMPRESSION_PREFIX = 'BF-LZW1:';
+
+/**
+ * Compresses serialized game data into a compact UTF-16 string.
+ * Uses a 12-bit LZW dictionary to reduce localStorage usage.
+ *
+ * Existing uncompressed saves remain supported.
+ */
+function compressSaveText(text) {
+    const bytes = new TextEncoder().encode(text);
+
+    if (bytes.length === 0) return text;
+
+    const dictionary = new Map();
+    let nextCode = 256;
+    let currentCode = bytes[0];
+
+    const outputParts = [];
+    let codeChunk = [];
+
+    const emitCode = code => {
+        codeChunk.push(code);
+
+        if (codeChunk.length >= 8192) {
+            outputParts.push(
+                String.fromCharCode(...codeChunk)
+            );
+            codeChunk = [];
+        }
+    };
+
+    for (let i = 1; i < bytes.length; i++) {
+        const nextByte = bytes[i];
+        const key = currentCode * 256 + nextByte;
+        const existingCode = dictionary.get(key);
+
+        if (existingCode !== undefined) {
+            currentCode = existingCode;
+            continue;
+        }
+
+        emitCode(currentCode);
+
+        if (nextCode < 4096) {
+            dictionary.set(key, nextCode++);
+        }
+
+        currentCode = nextByte;
+    }
+
+    emitCode(currentCode);
+
+    if (codeChunk.length > 0) {
+        outputParts.push(String.fromCharCode(...codeChunk));
+    }
+
+    const compressed =
+        SAVE_COMPRESSION_PREFIX + outputParts.join('');
+
+    // Avoid increasing storage size for poorly compressible data.
+    return compressed.length < text.length
+        ? compressed
+        : text;
+}
+
+/**
+ * Restores compressed saves while allowing legacy JSON saves.
+ */
+function decompressSaveText(stored) {
+    if (!stored.startsWith(SAVE_COMPRESSION_PREFIX)) {
+        return stored;
+    }
+
+    const payload = stored.slice(
+        SAVE_COMPRESSION_PREFIX.length
+    );
+
+    if (payload.length === 0) return '';
+
+    const dictionary = new Array(4096);
+
+    for (let i = 0; i < 256; i++) {
+        dictionary[i] = String.fromCharCode(i);
+    }
+
+    let nextCode = 256;
+
+    let previous = dictionary[payload.charCodeAt(0)];
+
+    if (previous === undefined) {
+        throw new Error('Invalid compressed save: invalid first code.');
+    }
+
+    const output = [previous];
+
+    for (let i = 1; i < payload.length; i++) {
+        const code = payload.charCodeAt(i);
+
+        let entry = dictionary[code];
+
+        if (entry === undefined && code === nextCode) {
+            entry = previous + previous.charAt(0);
+        }
+
+        if (entry === undefined) {
+            throw new Error(
+                'Invalid compressed save: invalid dictionary code.'
+            );
+        }
+
+        output.push(entry);
+
+        if (nextCode < 4096) {
+            dictionary[nextCode++] =
+                previous + entry.charAt(0);
+        }
+
+        previous = entry;
+    }
+
+    const binary = output.join('');
+    const bytes = new Uint8Array(binary.length);
+
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+
+    return new TextDecoder().decode(bytes);
+}
+
 const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
 
 // Measure serialized state and identify its largest sections when saving fails.
 function getSerializedByteLength(value) {
-    if (typeof TextEncoder !== 'undefined') {
-        return new TextEncoder().encode(value).length;
-    }
-
+    // localStorage stores strings as UTF-16 code units.
     return value.length * 2;
 }
 
@@ -1352,8 +1479,9 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
         }
 
         const serialized = JSON.stringify(dataToSave);
+        const compressed = compressSaveText(serialized);
 
-        if (autoWriteStorage(saveKey, serialized, dataToSave, 'Primary save')) {
+        if (autoWriteStorage(saveKey, compressed, dataToSave, 'Primary save')) {
             return true;
         }
 
@@ -1466,11 +1594,12 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
                 });
 
             const fallbackSerialized = JSON.stringify(dataToSave);
+            const fallbackCompressed = compressSaveText(fallbackSerialized);
 
             if (
                 autoWriteStorage(
                     saveKey,
-                    fallbackSerialized,
+                    fallbackCompressed,
                     dataToSave,
                     'Emergency compressed save'
                 )
@@ -1496,7 +1625,9 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
         const saved = localStorage.getItem(saveKey);
         if (!saved) return null;
 
-        const loaded = JSON.parse(saved);
+        const loaded = JSON.parse(
+            decompressSaveText(saved)
+        );
         game = loaded;
         game._activeFaMarket = restoreActiveFaMarket(game._activeFaMarket);
 
