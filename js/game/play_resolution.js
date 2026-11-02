@@ -1,3 +1,5 @@
+// play_resolution.js
+
 import {
     game, getPlayer, getRosterObjects, finalizeGameResults, resetGameStats,
     applyStatEvents // <-- Added

@@ -651,6 +651,64 @@ export function getRosterObjects(team) {
     return team.roster.map(id => playerMap.get(id)).filter(Boolean);
 }
 
+export function getTemporaryRosterObjects(team) {
+    if (!team || !Array.isArray(team.temporaryPlayers)) return [];
+
+    const permanentIds = new Set(
+        (team.roster || []).map(id => String(id))
+    );
+
+    const seen = new Set();
+
+    return team.temporaryPlayers
+        .map(id => getPlayer(id))
+        .filter(player => {
+            if (!player || player.id == null) return false;
+
+            const playerId = String(player.id);
+
+            if (
+                permanentIds.has(playerId) ||
+                seen.has(playerId) ||
+                player.teamId != null ||
+                player.status?.type !== 'temporary' ||
+                ['departed', 'retired'].includes(player.status?.type) ||
+                Number(player.status?.duration || 0) > 0
+            ) {
+                return false;
+            }
+
+            // A temporary participant cannot simultaneously help
+            // another team.
+            const assignedElsewhere = (game?.teams || []).some(
+                candidate =>
+                    candidate &&
+                    String(candidate.id) !== String(team.id) &&
+                    Array.isArray(candidate.temporaryPlayers) &&
+                    candidate.temporaryPlayers.some(
+                        id => String(id) === playerId
+                    )
+            );
+
+            if (assignedElsewhere) return false;
+
+            seen.add(playerId);
+            return true;
+        });
+}
+
+export function getGameDayRosterObjects(team) {
+    const permanentPlayers = getRosterObjects(team);
+    const permanentIds = new Set(
+        permanentPlayers.map(player => String(player.id))
+    );
+
+    const temporaryPlayers = getTemporaryRosterObjects(team)
+        .filter(player => !permanentIds.has(String(player.id)));
+
+    return [...permanentPlayers, ...temporaryPlayers];
+}
+
 export function ensureStats(player) {
     if (player && !player.gameStats) {
         player.gameStats = {
@@ -689,7 +747,10 @@ export function resetGameStats(teamA, teamB) {
         team.playCallHistory = [];
     });
 
-    const playersInGame = [...getRosterObjects(teamA), ...getRosterObjects(teamB)];
+    const playersInGame = [
+        ...getGameDayRosterObjects(teamA),
+        ...getGameDayRosterObjects(teamB)
+    ];
     playersInGame.forEach(player => {
         if (!player) return;
         player.fatigue = 0;
@@ -809,7 +870,10 @@ export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
         masterAway.ties = (masterAway.ties || 0) + 1;
     }
 
-    const allPlayerIds = [...(homeTeam.roster || []), ...(awayTeam.roster || [])];
+    const allPlayerIds = [
+        ...getGameDayRosterObjects(homeTeam).map(player => player.id),
+        ...getGameDayRosterObjects(awayTeam).map(player => player.id)
+    ];
     allPlayerIds.forEach(id => {
         const p = getPlayer(id);
         if (!p || !p.gameStats) return;

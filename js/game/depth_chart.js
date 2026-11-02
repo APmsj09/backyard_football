@@ -1,4 +1,11 @@
-import { getPlayer, getRosterObjects, game } from './state.js';
+// game/depth_chart.js
+
+import {
+    getPlayer,
+    getRosterObjects,
+    getGameDayRosterObjects,
+    game
+} from './state.js';
 import { offenseFormations, defenseFormations } from '../data.js';
 import { calculateOverall, calculateSlotSuitability, estimateBestPosition } from './player.js';
 import { pushGameLog } from './collisions.js';
@@ -96,7 +103,7 @@ export function isPlayerViableForPosition(p, pos) {
 }
 
 export function populateNaturalDepthOrder(team) {
-    const rosterObjs = getRosterObjects(team);
+    const rosterObjs = getGameDayRosterObjects(team);
     team.depthOrder = {
         'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
         'DL': [], 'LB': [], 'DB': []
@@ -172,7 +179,18 @@ export function rebuildDepthChartFromOrder(team) {
 
     pruneUnnaturalDepthOrder(team);
 
-    const rosterIds = new Set(team.roster);
+    // Remove players who are no longer eligible for this game-day roster.
+    Object.keys(team.depthOrder).forEach(pos => {
+        if (!Array.isArray(team.depthOrder[pos])) return;
+
+        team.depthOrder[pos] = team.depthOrder[pos].filter(
+            playerId => rosterIds.has(playerId)
+        );
+    });
+
+    const rosterIds = new Set(
+        getGameDayRosterObjects(team).map(player => player.id)
+    );
     const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
     team.formations.offense = offFormKey;
     const offSlots = offenseFormations[offFormKey]?.slots || [];
@@ -223,7 +241,7 @@ export function rebuildDepthChartFromOrder(team) {
             }
         }
         // Fallback: search remaining roster if position bucket is exhausted
-        for (const pid of team.roster) {
+        for (const pid of rosterIds) {
             if (!usedSet.has(pid)) {
                 usedSet.add(pid);
                 return pid;
@@ -310,7 +328,11 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
     // 2. ASSIGN SLOT: Validate before locking the assignment.
     if (!['offense', 'defense'].includes(side)) return false;
 
-    if (!Array.isArray(team.roster) || !team.roster.includes(playerId)) {
+    const gameDayRoster = getGameDayRosterObjects(team);
+
+    if (!gameDayRoster.some(
+        player => player.id === playerId
+    )) {
         return false;
     }
 
@@ -453,7 +475,7 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = nul
     const team = game.teams.find(t => t && t.id === teamId) || game.playerTeam;
     if (!team || !team.depthChart) return { success: false, message: 'Team or depth chart invalid.' };
 
-    const fullRoster = getRosterObjects(team);
+    const fullRoster = getGameDayRosterObjects(team);
     const outPlayer = fullRoster.find(p => p && p.id === outPlayerId);
     const inPlayer = fullRoster.find(p => p && p.id === inPlayerId);
     if (!outPlayer || !inPlayer) return { success: false, message: 'Player not found.' };
@@ -507,7 +529,7 @@ export function autoMakeSubstitutions(team, options = {}, gameLog = null) {
         recoverLimit = 35;
     }
 
-    const fullRoster = getRosterObjects(team);
+    const fullRoster = getGameDayRosterObjects(team);
     let subsDone = 0;
 
     const activeOffense = new Set(Object.values(team.depthChart.offense || {}).filter(Boolean));

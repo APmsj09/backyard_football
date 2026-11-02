@@ -47,6 +47,61 @@ const WEEKS_IN_SEASON = 9;
 const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const DEFENSIVE_POSITION_FITS = ['DL', 'LB', 'DB'];
 
+function getEmergencyRosterCount(team) {
+    if (!team) return 0;
+
+    const gs = Game.getGameState() || gameState;
+    if (!gs) return 0;
+
+    const permanentPlayers = Game.getRosterObjects(team).filter(player =>
+        player &&
+        !['departed', 'retired', 'temporary'].includes(player.status?.type) &&
+        (!player.status || Number(player.status.duration || 0) <= 0)
+    );
+
+    const permanentIds = new Set(
+        permanentPlayers.map(player => String(player.id))
+    );
+
+    const seenTemporaryIds = new Set();
+
+    const temporaryPlayers = (team.temporaryPlayers || [])
+        .map(id => gs.players?.find(
+            player => player && String(player.id) === String(id)
+        ))
+        .filter(player => {
+            if (!player || player.id == null) return false;
+
+            const playerId = String(player.id);
+
+            if (
+                permanentIds.has(playerId) ||
+                seenTemporaryIds.has(playerId) ||
+                player.teamId != null ||
+                player.status?.type !== 'temporary' ||
+                Number(player.status.duration || 0) > 0
+            ) {
+                return false;
+            }
+
+            const assignedElsewhere = (gs.teams || []).some(other =>
+                other &&
+                String(other.id) !== String(team.id) &&
+                Array.isArray(other.temporaryPlayers) &&
+                other.temporaryPlayers.some(
+                    id => String(id) === playerId
+                )
+            );
+
+            if (assignedElsewhere) return false;
+
+            seenTemporaryIds.add(playerId);
+            return true;
+        });
+
+    return permanentPlayers.length + temporaryPlayers.length;
+}
+
 function getBestPositionFit(player, positions) {
     if (!player) return { position: '—', ovr: 0 };
 
@@ -2523,13 +2578,7 @@ function showEmergencyFriendCallup(onContinue) {
 
     const team = gameState.playerTeam;
 
-    const getActiveCount = () => Game.getRosterObjects(team).filter(p =>
-        p && (
-            p.status?.type === 'temporary' ||
-            !p.status ||
-            p.status.duration === 0
-        )
-    ).length;
+    const getActiveCount = () => getEmergencyRosterCount(team);
 
     const continueFlow = () => {
         gameState = Game.getGameState();
@@ -2538,8 +2587,8 @@ function showEmergencyFriendCallup(onContinue) {
 
     const activeCount = getActiveCount();
 
-    // Emergency help is unnecessary once the team reaches 12 active players.
-    if (activeCount >= TEMPORARY_HELP_THRESHOLD) {
+    // Emergency help is unnecessary once eight eligible players are available.
+    if (activeCount >= MIN_HEALTHY_PLAYERS) {
         continueFlow();
         return;
     }
@@ -2615,10 +2664,10 @@ function showEmergencyFriendCallup(onContinue) {
         <div class="space-y-3 text-left">
             <p class="text-sm text-slate-700">
                 You have <b>${activeCount} active players</b>.
-                Teams below ${TEMPORARY_HELP_THRESHOLD} can call connected friends for emergency help.
+                Teams with fewer than ${MIN_HEALTHY_PLAYERS} available players can call connected friends for emergency help.
             </p>
             <p class="text-xs text-slate-600">
-                Each call costs 1 Favor Token. Friends may decline and return to their normal status after the week.
+                Each successful call costs 1 Favor Token. Friends remain available until your permanent roster recovers enough players to field a full lineup.
                 You have <b>${tokensAvailable} tokens</b>.
             </p>
             <div class="space-y-2 max-h-72 overflow-y-auto">
@@ -2923,15 +2972,9 @@ async function handleAdvanceWeek() {
         }
     };
 
-    const activeCount = Game.getRosterObjects(gameState.playerTeam).filter(p =>
-        p && (
-            p.status?.type === 'temporary' ||
-            !p.status ||
-            p.status.duration === 0
-        )
-    ).length;
+    const activeCount = getEmergencyRosterCount(gameState.playerTeam);
 
-    if (activeCount < TEMPORARY_HELP_THRESHOLD) {
+    if (activeCount < MIN_HEALTHY_PLAYERS) {
         showEmergencyFriendCallup(proceedToGameDay);
         return;
     }
@@ -3127,9 +3170,28 @@ function buildPlayerCardScoutingContext(sourcePlayer, gameState) {
         ? team.roster
         : [];
 
+    const temporaryEntries = Array.isArray(team?.temporaryPlayers)
+        ? team.temporaryPlayers
+        : [];
+
+    const isTemporaryTeammate = Boolean(
+        team &&
+        sourcePlayer.status?.type === 'temporary' &&
+        temporaryEntries.some(entry => {
+            const id =
+                entry && typeof entry === 'object'
+                    ? entry.id
+                    : entry;
+
+            return id != null &&
+                String(id) === String(sourcePlayer.id);
+        })
+    );
+
     const ownsPlayer = Boolean(
         team &&
         (
+            isTemporaryTeammate ||
             String(sourcePlayer.teamId) === String(team.id) ||
             rosterEntries.some(entry => {
                 const rosterPlayerId =
@@ -3151,7 +3213,10 @@ function buildPlayerCardScoutingContext(sourcePlayer, gameState) {
             level: 4,
             friendTip: null,
             potentialDisplay: sourcePlayer.potential || 'Unknown',
-            statusLabel: 'Your player'
+            statusLabel: isTemporaryTeammate
+                ? 'Temporary teammate'
+                : 'Your player',
+            isTemporaryTeammate: false,
         };
     }
 
@@ -4293,12 +4358,21 @@ export function openPlayerCard(playerId) {
     const scoutingLevel = view.level;
     const friendTip = view.friendTip;
     const isMyTeam = view.isOwned;
+    const isTemporaryTeammate =
+        view.isTemporaryTeammate === true;
 
     const team = gs.teams.find(
         t => String(t.id) === String(sourcePlayer.teamId)
+    ) || (
+        isTemporaryTeammate
+            ? gs.playerTeam
+            : null
     );
 
-    const teamName = team ? team.name : 'Free Agent';
+    const teamName = team ? team.name : 'Available Player';
+
+    const isOffseasonRecruiting =
+        gs.offseasonState?.phase === OFFSEASON_PHASES.RECRUITING;
     const potentialDisplay = view.potentialDisplay;
 
     const makeReportedFit = fit => {
@@ -4797,8 +4871,13 @@ export function openPlayerCard(playerId) {
             <!-- Top Identity Banner -->
             <div class="bg-slate-900 text-white p-3.5 rounded flex justify-between items-start shadow-sm">
                 <div>
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-2 flex-wrap">
                         <h3 class="text-xl font-black uppercase tracking-wider">${player.name}</h3>
+                        ${isTemporaryTeammate ? `
+                            <span class="text-[9px] bg-emerald-900 text-emerald-300 font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-emerald-700">
+                                Temporary Help
+                            </span>
+                        ` : ''}
                         <span class="text-xs bg-slate-800 text-amber-400 font-mono px-2 py-0.5 rounded border border-slate-700">#${player.number || '--'}</span>
                     </div>
                     <p class="text-xs text-slate-400 mt-0.5 font-sans">
@@ -4965,21 +5044,36 @@ export function openPlayerCard(playerId) {
             </div>
 
             <!-- Bottom Actions -->
-            ${isMyTeam ? `
-                <div class="pt-2 border-t border-slate-200 flex justify-between items-center">
-                    <button class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-600 px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider shadow-sm flex items-center gap-1.5 transition" onclick="app.openPositionDialog('${player.id}')">
-                        <span>💬</span> Talk Position Change
-                    </button>
-                    <button class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-1.5 rounded font-bold text-xs uppercase tracking-wider shadow-sm" onclick="app.cutPlayer('${player.id}')">Release Player</button>
-                </div>
-            ` : (!player.teamId ? `
-                <div class="pt-3 border-t border-slate-200 flex justify-between items-center bg-slate-50 p-2.5 rounded">
-                    <span class="text-xs text-slate-600 font-bold">Unsigned Neighborhood Free Agent</span>
-                    <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition" onclick="app.openBidModal('${player.id}')">
-                        Negotiate Contract 🤝
-                    </button>
-                </div>
-            ` : '')}
+            ${isMyTeam
+                ? (
+                    isTemporaryTeammate
+                        ? ''
+                        : `
+                            <div class="pt-2 border-t border-slate-200 flex justify-between items-center">
+                                <button class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-600 px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider shadow-sm flex items-center gap-1.5 transition" onclick="app.openPositionDialog('${player.id}')">
+                                    <span>💬</span> Talk Position Change
+                                </button>
+                                <button class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-1.5 rounded font-bold text-xs uppercase tracking-wider shadow-sm" onclick="app.cutPlayer('${player.id}')">
+                                    Release Player
+                                </button>
+                            </div>
+                        `
+                )
+                : (
+                    !player.teamId && isOffseasonRecruiting
+                        ? `
+                            <div class="pt-3 border-t border-slate-200 flex justify-between items-center bg-slate-50 p-2.5 rounded">
+                                <span class="text-xs text-slate-600 font-bold">
+                                    Available for Offseason Recruiting
+                                </span>
+                                <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition" onclick="app.openBidModal('${player.id}')">
+                                    Recruit Player 🤝
+                                </button>
+                            </div>
+                        `
+                        : ''
+                )
+            }
         </div>
     `;
 

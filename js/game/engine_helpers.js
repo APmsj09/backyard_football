@@ -1,6 +1,9 @@
 //engine_helper.js
 
-import { getPlayer } from './state.js';
+import {
+    getPlayer,
+    getGameDayRosterObjects
+} from './state.js';
 import { calculateSlotSuitability } from './player.js';
 import { getPriority } from './depth_chart.js';
 import { offenseFormations, defenseFormations, routeTree } from '../data.js';
@@ -93,7 +96,8 @@ export function resolveDepthForPlay(offense, defense) {
         const formationData = side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName];
         if (!formationData) return;
 
-        const rosterIds = team.roster || [];
+        const rosterIds = getGameDayRosterObjects(team)
+            .map(player => player.id);
         const usedThisPlay = new Set();
         const sortedSlots = [...formationData.slots].sort((a, b) => getPriority(b) - getPriority(a));
 

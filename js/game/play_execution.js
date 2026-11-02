@@ -1,7 +1,11 @@
 //play_execution.js
 
 import { getDistance } from './physics.js';
-import { getPlayer, game } from './state.js';
+import {
+    getPlayer,
+    getGameDayRosterObjects,
+    game
+} from './state.js';
 import { isPlayerViableForPosition } from './depth_chart.js';
 import {
     routeTree, offenseFormations, defenseFormations, defensivePlaybook
@@ -267,6 +271,20 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
         const coveredOffensiveSlots = new Set();
         const usedDefensivePlayersThisSnap = new Set();
 
+        const gameDayRoster = getGameDayRosterObjects(team);
+
+        const permanentPlayerIds = new Set(
+            (team.roster || []).map(id => String(id))
+        );
+
+        const temporaryPlayerIds = new Set(
+            (team.temporaryPlayers || []).map(id => String(id))
+        );
+
+        const gameDayPlayerIds = new Set(
+            gameDayRoster.map(player => String(player.id))
+        );
+
         sortedSlots.forEach(slot => {
             if (!playState.resolvedDepth) playState.resolvedDepth = resolveDepthForPlay(offense, defense);
 
@@ -289,12 +307,23 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     requiredPosition = 'WR'; // Evaluate returners based on WR skills (Speed, Agility, Hands)
                 }
 
-                const playerFitsSlot = candidate =>
-                    Boolean(
-                        candidate &&
-                        Array.isArray(team.roster) &&
-                        team.roster.includes(candidate.id) &&
-                        candidate.teamId === team.id &&
+                const playerFitsSlot = candidate => {
+                    if (!candidate || candidate.id == null) return false;
+
+                    const candidateId = String(candidate.id);
+
+                    const isPermanentMember =
+                        permanentPlayerIds.has(candidateId) &&
+                        String(candidate.teamId) === String(team.id);
+
+                    const isTemporaryFriend =
+                        temporaryPlayerIds.has(candidateId) &&
+                        gameDayPlayerIds.has(candidateId) &&
+                        candidate.teamId == null &&
+                        candidate.status?.type === 'temporary';
+
+                    return Boolean(
+                        (isPermanentMember || isTemporaryFriend) &&
                         !['departed', 'retired'].includes(candidate.status?.type) &&
                         !usedDefensivePlayersThisSnap.has(candidate.id) &&
                         isPlayerViableForPosition(candidate, requiredPosition) &&
@@ -304,11 +333,12 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             candidate.status.type === 'temporary'
                         )
                     );
+                };
 
                 if (!playerFitsSlot(player)) {
                     const candidateIds = [
                         ...(team.depthOrder?.[requiredPosition] || []),
-                        ...(team.roster || [])
+                        ...gameDayRoster.map(candidate => candidate.id)
                     ];
 
                     player = candidateIds

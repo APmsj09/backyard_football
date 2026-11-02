@@ -2293,18 +2293,99 @@ export function updatePlayerStatuses() {
 
 export function endOfWeekCleanup() {
     if (!game || !game.teams) return;
+
     game.teams.forEach(team => {
         if (!team || !Array.isArray(team.roster)) return;
+
+        // Remove any legacy temporary players still stored in the
+        // permanent roster.
         team.roster = team.roster.filter(id => {
             const player = getPlayer(id);
+
             if (!player) return false;
+
             if (player.status?.type === 'temporary') {
                 player.teamId = null;
                 player.number = null;
                 return false;
             }
+
             return true;
         });
+
+        if (!Array.isArray(team.temporaryPlayers)) {
+            team.temporaryPlayers = [];
+        }
+
+        // Only healthy, available permanent players count toward
+        // the minimum roster needed to field an 8v8 game.
+        const availablePermanentCount = getRosterObjects(team).filter(player =>
+            player &&
+            !['departed', 'retired'].includes(player.status?.type) &&
+            (
+                !player.status ||
+                Number(player.status.duration || 0) <= 0
+            )
+        ).length;
+
+        if (availablePermanentCount >= 8) {
+            // The permanent roster has recovered. Release all friends.
+            team.temporaryPlayers.forEach(id => {
+                const player = getPlayer(id);
+
+                if (!player) return;
+
+                if (player.status?.type === 'temporary') {
+                    player.status = {
+                        type: 'healthy',
+                        description: '',
+                        duration: 0
+                    };
+                }
+
+                player.teamId = null;
+                player.number = null;
+            });
+
+            team.temporaryPlayers = [];
+        } else {
+            // Keep valid temporary friends while the permanent roster
+            // is still too short to field a team.
+            const seen = new Set();
+
+            team.temporaryPlayers = team.temporaryPlayers.filter(id => {
+                if (id == null) return false;
+
+                const player = getPlayer(id);
+                const playerId = String(id);
+
+                if (
+                    !player ||
+                    player.id == null ||
+                    seen.has(playerId) ||
+                    player.teamId != null ||
+                    player.status?.type !== 'temporary'
+                ) {
+                    return false;
+                }
+
+                // A temporary friend cannot help two teams at once.
+                const assignedToAnotherTeam = game.teams.some(other =>
+                    other &&
+                    String(other.id) !== String(team.id) &&
+                    Array.isArray(other.temporaryPlayers) &&
+                    other.temporaryPlayers.some(
+                        otherId => String(otherId) === playerId
+                    )
+                );
+
+                if (assignedToAnotherTeam) return false;
+
+                seen.add(playerId);
+                return true;
+            });
+        }
+
         rebuildDepthChartFromOrder(team);
     });
 }
@@ -3326,43 +3407,10 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
         return;
     }
 
-    // Resolve In-Season Weekly Bids
-    if (game.weeklyBids && game.weeklyBids.length > 0) {
-        const processedPlayers = new Set();
-        game.weeklyBids.forEach(bid => {
-            if (processedPlayers.has(bid.playerId)) return;
-            processedPlayers.add(bid.playerId);
-
-            const player = getPlayer(bid.playerId);
-            if (!player || player.teamId) return;
-
-            const allPlayerBids = game.weeklyBids.filter(b => b.playerId === bid.playerId);
-            const resolution = resolvePlayerBiddingWar(player, allPlayerBids);
-
-            if (resolution?.winner) {
-                const win = resolution.winner;
-                const team = win.team;
-
-                if (addPlayerToTeam(player, team)) {
-                    if (win.offer.tokensOffered > 0 && team.socialProfile) {
-                        team.socialProfile.favorTokens = Math.max(0, team.socialProfile.favorTokens - win.offer.tokensOffered);
-                    }
-
-                    player.activePromise = createPlayerPromise(
-                        player,
-                        team,
-                        win.offer,
-                        { promiseSeason: game.year, source: 'weeklyFA' }
-                    );
-
-                    player.status = { type: 'healthy', description: '', duration: 0 };
-                    aiSetDepthChart(team);
-                    if (team.id === game.playerTeam?.id) {
-                        addMessage("Contract Finalized", `🤝 <b>${player.name}</b> chose your offer over competing bids and joined the team!`);
-                    }
-                }
-            }
-        });
+    // Retire legacy in-season bidding records.
+    // Permanent player additions are handled during offseason recruiting.
+    // Emergency in-season help is managed separately through temporary friends.
+    if (Array.isArray(game.weeklyBids)) {
         game.weeklyBids = [];
     }
 
@@ -3775,30 +3823,96 @@ export function callFriend(playerId) {
         return { success: false, message: "Game state error prevented calling friend." };
     }
     const team = game.playerTeam;
+
+    // Permanent player additions are restricted to the offseason
+    // recruiting window. In-season emergency help uses temporary friends.
+    if (
+        game.offseasonState?.phase !== OFFSEASON_PHASES.RECRUITING ||
+        game.draftCompleted !== true
+    ) {
+        return {
+            success: false,
+            message: 'Permanent player additions are only available during offseason recruiting.'
+        };
+    }
     if (!team.socialProfile) team.socialProfile = { favorTokens: 3, streetCred: 50 };
     if (team.socialProfile.favorTokens <= 0) {
         return { success: false, message: "You are out of Favor Tokens for this season! No one owes you a ride." };
     }
 
-    const roster = getRosterObjects(team);
-    const healthyCount = roster.filter(p => p && (!p.status || p.status.duration === 0)).length;
+    const permanentRoster = getRosterObjects(team);
 
-    const activeCount = roster.filter(p =>
-        p && (
-            p.status?.type === 'temporary' ||
-            !p.status ||
-            p.status.duration === 0
+    const availablePermanentPlayers = permanentRoster.filter(p =>
+        p &&
+        !['departed', 'retired', 'temporary'].includes(p.status?.type) &&
+        (!p.status || Number(p.status.duration || 0) <= 0)
+    );
+
+    const temporaryRoster = (team.temporaryPlayers || [])
+        .map(id =>
+            (game.players || []).find(
+                p => p && String(p.id) === String(id)
+            )
         )
-    ).length;
+        .filter(p =>
+            p &&
+            p.id != null &&
+            p.teamId == null &&
+            p.status?.type === 'temporary' &&
+            !['departed', 'retired'].includes(p.status.type) &&
+            !game.teams?.some(other =>
+                other &&
+                String(other.id) !== String(team.id) &&
+                Array.isArray(other.temporaryPlayers) &&
+                other.temporaryPlayers.some(
+                    id => String(id) === String(p.id)
+                )
+            )
+        );
 
-    if (activeCount >= TEMPORARY_HELP_THRESHOLD) {
+    // Include existing temporary friends in social and positional
+    // evaluations, but keep the permanent count separate.
+    const roster = [...permanentRoster, ...temporaryRoster];
+
+    const healthyCount = availablePermanentPlayers.length;
+    const activeCount = healthyCount + temporaryRoster.length;
+
+    if (activeCount >= 8) {
         return {
             success: false,
-            message: `Your roster has ${activeCount} active players. You can only call a friend when fewer than ${TEMPORARY_HELP_THRESHOLD} are available.`
+            message: `Your team already has ${activeCount} available players. Friends can only be called when fewer than 8 players are available.`
         };
     }
-    const player = game.freeAgents.find(p => p && p.id === playerId);
-    if (!player) return { success: false, message: "That player is no longer hanging around the park this week." };
+    const player = game.freeAgents.find(
+        p => p && String(p.id) === String(playerId)
+    );
+
+    if (!player) {
+        return {
+            success: false,
+            message: "That player is no longer hanging around the park this week."
+        };
+    }
+
+    const alreadyHelpingAnotherTeam = (game.teams || []).some(other =>
+        other &&
+        Array.isArray(other.temporaryPlayers) &&
+        other.temporaryPlayers.some(
+            id => String(id) === String(player.id)
+        )
+    );
+
+    if (
+        player.teamId != null ||
+        alreadyHelpingAnotherTeam ||
+        ['departed', 'retired', 'temporary'].includes(player.status?.type) ||
+        (player.status && Number(player.status.duration || 0) > 0)
+    ) {
+        return {
+            success: false,
+            message: `${player.name} is not currently available to help out.`
+        };
+    }
 
     // --- LOGIC-BASED ACCEPTANCE CALCULATION ---
     let interestScore = Math.round((team.socialProfile.streetCred || 50) * 0.3);
@@ -3871,23 +3985,51 @@ export function callFriend(playerId) {
     game.freeAgents = game.freeAgents.filter(p => p && p.id !== playerId);
 
     if (interestScore >= callThreshold) {
-        // Player accepts offer!
-        player.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
-        if (addPlayerToTeam(player, team)) {
-            team.socialProfile.favorTokens -= 1;
-            const fullRoster = getRosterObjects(team);
-            fullRoster.forEach(rosterPlayer => {
-                if (rosterPlayer && rosterPlayer.id !== player.id) {
-                    improveRelationship(rosterPlayer.id, player.id);
-                }
-            });
-            const reasonBlurb = decisionReasons.length > 0 ? ` (${decisionReasons.join(', ')})` : '';
-            const message = `🤝 ${player.name} agreed to help out!${reasonBlurb} [Favors Left: ${team.socialProfile.favorTokens}]`;
-            addMessage("Roster Update: Friend Joined", message);
-            return { success: true, message };
-        } else {
-            return { success: false, message: `Failed to add ${player.name} to roster.` };
+        // Player accepts as a temporary friend, not a permanent roster member.
+        if (!Array.isArray(team.temporaryPlayers)) {
+            team.temporaryPlayers = [];
         }
+
+        if (
+            team.temporaryPlayers.some(
+                id => String(id) === String(player.id)
+            ) ||
+            team.roster.some(
+                id => String(id) === String(player.id)
+            )
+        ) {
+            return {
+                success: false,
+                message: `${player.name} is already part of the team.`
+            };
+        }
+
+        player.status = {
+            type: 'temporary',
+            description: 'Helping Out',
+            duration: 0
+        };
+
+        player.teamId = null;
+        player.number = null;
+
+        team.temporaryPlayers.push(player.id);
+        team.socialProfile.favorTokens -= 1;
+
+        roster.forEach(rosterPlayer => {
+            if (rosterPlayer && rosterPlayer.id !== player.id) {
+                improveRelationship(rosterPlayer.id, player.id);
+            }
+        });
+
+        const reasonBlurb = decisionReasons.length > 0
+            ? ` (${decisionReasons.join(', ')})`
+            : '';
+
+        const message = `🤝 ${player.name} agreed to help out!${reasonBlurb} [Favors Left: ${team.socialProfile.favorTokens}]`;
+
+        addMessage("Roster Update: Friend Joined", message);
+        return { success: true, message };
     } else {
         // Player declines offer!
         const declineReason = decisionReasons.slice(-1)[0] || 'was not interested in joining right now';
@@ -6089,9 +6231,43 @@ export function aiManageRoster(team) {
     if (!team || !team.roster || !game || !team.coach) return;
 
     const roster = getRosterObjects(team);
-    let playableCount = roster.filter(p =>
-        p && (!p.status || p.status.duration === 0 || p.status.type === 'temporary')
+
+    const isAvailablePermanentPlayer = player =>
+        player &&
+        !['departed', 'retired', 'temporary'].includes(player.status?.type) &&
+        (!player.status || Number(player.status.duration || 0) <= 0);
+
+    const availablePermanentCount = roster.filter(
+        isAvailablePermanentPlayer
     ).length;
+
+    if (!Array.isArray(team.temporaryPlayers)) {
+        team.temporaryPlayers = [];
+    }
+
+    const availableTemporaryCount = team.temporaryPlayers
+        .map(id => getPlayer(id))
+        .filter(player =>
+            player &&
+            player.id != null &&
+            player.teamId == null &&
+            player.status?.type === 'temporary' &&
+            Number(player.status.duration || 0) <= 0 &&
+            !team.roster.some(
+                id => String(id) === String(player.id)
+            ) &&
+            !(game.teams || []).some(other =>
+                other &&
+                String(other.id) !== String(team.id) &&
+                Array.isArray(other.temporaryPlayers) &&
+                other.temporaryPlayers.some(
+                    id => String(id) === String(player.id)
+                )
+            )
+        ).length;
+
+    let playableCount =
+        availablePermanentCount + availableTemporaryCount;
 
     const aiAvailableNetwork = getTeamNetworkRecruits(team);
 
@@ -6132,8 +6308,7 @@ export function aiManageRoster(team) {
     };
 
     while (
-        playableCount < TEMPORARY_HELP_THRESHOLD &&
-        team.roster.length < getCurrentRosterLimit(game) &&
+        playableCount < 8 &&
         aiAvailableNetwork.length > 0
     ) {
         const bestFA = aiAvailableNetwork.reduce((best, current) => {
@@ -6160,52 +6335,58 @@ export function aiManageRoster(team) {
 
         if (!bestFA) break;
 
-        const idx = aiAvailableNetwork.findIndex(p => p.id === bestFA.id);
-        if (idx > -1) aiAvailableNetwork.splice(idx, 1);
+        const idx = aiAvailableNetwork.findIndex(
+            p => String(p.id) === String(bestFA.id)
+        );
+
+        if (idx > -1) {
+            aiAvailableNetwork.splice(idx, 1);
+        }
 
         const masterFA = getPlayer(bestFA.id);
         if (!masterFA) continue;
 
-        const originalStatus = masterFA.status;
-        masterFA.status = { type: 'temporary', description: 'Helping Out', duration: 1 };
+        const playerId = String(masterFA.id);
 
-        if (addPlayerToTeam(masterFA, team)) {
-            playableCount++;
-        } else {
-            masterFA.status = originalStatus;
-        }
-    }
+        const alreadyHelpingAnotherTeam = (game.teams || []).some(other =>
+            other &&
+            String(other.id) !== String(team.id) &&
+            Array.isArray(other.temporaryPlayers) &&
+            other.temporaryPlayers.some(
+                id => String(id) === playerId
+            )
+        );
 
-    if (team.roster.length < getCurrentRosterLimit(game) && team.socialProfile?.favorTokens > 0) {
-        const topFriend = aiAvailableNetwork.reduce((best, p) => {
-            if (
-                p.networkStrength <
-                relationshipLevels.GOOD_FRIEND.level
-            ) {
-                return best;
-            }
+        const alreadyOnThisTeam =
+            team.roster.some(id => String(id) === playerId) ||
+            team.temporaryPlayers.some(id => String(id) === playerId);
 
-            const evaluation = getNetworkRecruitEvaluation(p);
+        const isUnavailable =
+            masterFA.teamId != null ||
+            alreadyHelpingAnotherTeam ||
+            alreadyOnThisTeam ||
+            ['departed', 'retired', 'temporary'].includes(
+                masterFA.status?.type
+            ) ||
+            (
+                masterFA.status &&
+                Number(masterFA.status.duration || 0) > 0
+            );
 
-            const score =
-                evaluation.ability +
-                evaluation.networkStrength * 20 +
-                evaluation.confidence * 10;
+        if (isUnavailable) continue;
 
-            return score > (best ? best._score : 100)
-                ? { ...p, _score: score }
-                : best;
-        }, null);
+        // AI emergency help is temporary and does not change ownership.
+        masterFA.status = {
+            type: 'temporary',
+            description: 'Helping Out',
+            duration: 0
+        };
 
-        if (topFriend && Math.random() < 0.3) {
-            const masterFriend = getPlayer(topFriend.id);
-            if (masterFriend) {
-                masterFriend.status = { type: 'healthy', description: '', duration: 0 };
-                if (addPlayerToTeam(masterFriend, team)) {
-                    team.socialProfile.favorTokens -= 1;
-                }
-            }
-        }
+        masterFA.teamId = null;
+        masterFA.number = null;
+
+        team.temporaryPlayers.push(masterFA.id);
+        playableCount++;
     }
 
     aiSetDepthChart(team);
