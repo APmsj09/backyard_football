@@ -6760,8 +6760,16 @@ function getPracticeScheduleFatigueCost(team) {
     );
 }
 
-export function developPlayer(player, team = null) {
+export function developPlayer(
+    player,
+    team = null,
+    options = {}
+) {
     if (!player || !player.attributes) return { player, improvements: [] };
+
+    const ageAlreadyAdvanced =
+        options?.ageAlreadyAdvanced === true;
+
     const developmentReport = { player, improvements: [] };
 
     // Keep coach lookups scoped to the team whose player is developing.
@@ -6906,9 +6914,12 @@ export function developPlayer(player, team = null) {
         player.age <= 18 &&
         hasMaturationProfile
     ) {
-        // Development is resolved before the offseason age increment.
-        // Advance the maturation curve to the age the player is entering.
-        const targetAge = player.age + 1;
+        // Youth players are developed before their age increment.
+        // Main-league players are developed after their age increment.
+        // Both paths must advance the maturation curve by exactly one year.
+        const targetAge = ageAlreadyAdvanced
+            ? player.age
+            : player.age + 1;
 
         const getPhysicalScaleCap = age => {
             if (age <= 8) return 0.60;
@@ -8060,6 +8071,37 @@ export function advanceToOffseason() {
         };
     }
 
+    // Prevent an interrupted rollover from running again against partially
+    // modified player, team, staff, and draft data.
+    const rolloverYear = Number(game.year);
+
+    const inProgressYear = Number(game._offseasonInProgressYear);
+
+    if (
+        Number.isFinite(inProgressYear) &&
+        (
+            inProgressYear === rolloverYear ||
+            inProgressYear === rolloverYear - 1
+        )
+    ) {
+        console.error(
+            `[Offseason] Year ${rolloverYear} has an unfinished rollover. ` +
+            'Reload the last saved game before attempting the rollover again.'
+        );
+
+        return {
+            retiredPlayers: [],
+            hofInductees: [],
+            developmentResults: [],
+            leavingPlayers: [],
+            pendingRetentions: [],
+            staffDepartures: [],
+            staffHappinessChanges: [],
+            interrupted: true
+        };
+    }
+    game._offseasonInProgressYear = Number(game.year);
+
     // Initialize tracking arrays at the top so any offseason phase can safely push to them
     const retiredPlayers = [];
     const hofInductees = [];
@@ -8070,7 +8112,9 @@ export function advanceToOffseason() {
     const staffDepartures = [];
     const staffHappinessChanges = [];
 
-    // Persist the queue with the game state so the interview flow can access it.
+    // Mark this season as actively processing before any lifecycle mutations.
+    // If an exception interrupts the function, a second call cannot repeat
+    // the same season's aging, development, departures, or draft preparation.
     game.pendingRetentions = pendingRetentions;
 
     let totalVacancies = 0;
@@ -8396,9 +8440,20 @@ export function advanceToOffseason() {
         if (!game.records) game.records = { game: {}, season: {}, career: {} };
 
         const checkSeasonRec = (statKey, val) => {
-            if (!game.records.season[statKey]) game.records.season[statKey] = { val: 0, holder: 'None', year: 0 };
+            if (!game.records.season[statKey]) {
+                game.records.season[statKey] = {
+                    val: 0,
+                    holder: 'None',
+                    year: 0
+                };
+            }
+
             if (val > game.records.season[statKey].val) {
-                game.records.season[statKey] = { val, holder: player.name, year: game.year };
+                game.records.season[statKey] = {
+                    val,
+                    holder: player.name,
+                    year: completedSeasonYear
+                };
             }
         };
 
@@ -8426,6 +8481,8 @@ export function advanceToOffseason() {
         checkCareerRec('tackles', cStats.tackles || 0);
         checkCareerRec('sacks', cStats.sacks || 0);
         checkCareerRec('interceptions', cStats.interceptions || 0);
+
+        const completedSeasonAge = player.age;
 
         player.age++;
         player.careerStats.seasonsPlayed = (player.careerStats.seasonsPlayed || 0) + 1;
@@ -8480,14 +8537,18 @@ export function advanceToOffseason() {
         }
 
         // Run full player development (biological maturation + drill points)
-        const devReport = developPlayer(player, team);
+        const devReport = developPlayer(
+            player,
+            team,
+            { ageAlreadyAdvanced: true }
+        );
         developmentResults.push(devReport);
 
         // Record End-of-Year Progression Snapshot WITH DETAILED ATTRIBUTE GAINS
         if (!player.progression) player.progression = [];
         player.progression.push({
-            year: game.year - 1,
-            age: player.age,
+            year: completedSeasonYear,
+            age: completedSeasonAge,
             teamName: teamName,
             ovr: calculateOverall(player, estimateBestPosition(player)),
             improvements: devReport.improvements || [],
@@ -9255,9 +9316,13 @@ export function advanceToOffseason() {
         staffHappinessChanges
     };
 
+    // Clear the in-progress marker only after every rollover operation
+    // has completed successfully.
+    game._offseasonCompletedYear = completedSeasonYear;
+
     // Mark rollover complete; staff review, draft, and recruiting are
     // separate phases and must not rerun the season lifecycle.
-    game._offseasonCompletedYear = completedSeasonYear;
+    delete game._offseasonInProgressYear;
 
     return {
         retiredPlayers,

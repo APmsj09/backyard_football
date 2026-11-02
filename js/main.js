@@ -1961,9 +1961,6 @@ function finishOffseasonFAMinigame() {
         return;
     }
 
-    // Mark summer FA complete so the hard 18-player limit activates
-    gameState.offseasonFACompleted = true;
-
     // 1. Let the AI trim their 24-man summer rosters down to the 18-man season limit
     Game.executeAICutDowns();
 
@@ -1972,8 +1969,16 @@ function finishOffseasonFAMinigame() {
         if (!team.isPlayerControlled) {
             Game.autoFillTeamWalkOns(team, 14);
         }
-        try { Game.aiSetDepthChart(team); } catch (error) { console.error(error); }
+        try {
+            Game.aiSetDepthChart(team);
+        } catch (error) {
+            console.error(error);
+        }
     }
+
+    // Mark summer free agency complete only after AI roster processing.
+    // This activates the hard 18-player limit for the user's remaining cuts.
+    gameState.offseasonFACompleted = true;
 
     // REPORT 4: Finalize Offseason Report (Roster health verification)
     if (typeof debugCollector !== 'undefined') debugCollector.finalizeOffseasonReport(gameState);
@@ -2026,9 +2031,59 @@ async function handleLoadGame(saveKey) {
             Game.rebuildDepthChartFromOrder(gameState.playerTeam);
         }
 
+        const offseasonPhase = gameState.offseasonState?.phase;
+
+        if (gameState.playerTeam) {
+            // Restore the standalone Coach Carousel when it was already open.
+            if (offseasonPhase === OFFSEASON_PHASES.STAFF_REVIEW) {
+                if (gameState.offseasonState?.staffCarouselOpened === true) {
+                    openStaffCarouselScreen();
+                } else {
+                    UI.renderDashboard(gameState);
+                    UI.switchTab('my-team', gameState);
+                    updateOffseasonAdvanceButton(gameState);
+                    UI.showScreen('dashboard-screen');
+                }
+
+                return;
+            }
+
+            // Restore an in-progress rookie draft without rebuilding a
+            // previously prepared draft board.
+            if (offseasonPhase === OFFSEASON_PHASES.DRAFT) {
+                launchOffseasonDraft({ phaseAlreadyDraft: true });
+                return;
+            }
+
+            // Restore active recruiting, including a completed Day 7
+            // whose transition to finalization needs to be retried.
+            if (offseasonPhase === OFFSEASON_PHASES.RECRUITING) {
+                UI.showScreen('offseason-fa-screen');
+                UI.renderOffseasonFAScreen(gameState);
+                return;
+            }
+
+            // An unfinished roster-finalization phase needs its review screen.
+            // If processing was already completed, return to the dashboard
+            // so the user can finish any required roster cuts and advance.
+            if (
+                offseasonPhase === OFFSEASON_PHASES.ROSTER_FINALIZATION &&
+                gameState.offseasonFACompleted !== true
+            ) {
+                UI.showScreen('offseason-fa-screen');
+                UI.renderOffseasonFAScreen(gameState);
+                return;
+            }
+        }
+
         UI.renderDashboard(gameState);
         UI.switchTab('my-team', gameState);
         UI.showScreen('dashboard-screen');
+
+        // Restore the regular-season roster-limit warning when applicable.
+        if (gameState.playerTeam) {
+            window.checkUserRosterLimit?.();
+        }
     } catch (error) {
         console.error("Load Error:", error);
         UI.showModal(
@@ -2677,9 +2732,32 @@ async function handleAdvanceWeek() {
         );
         return;
     }
+
+    // Recruiting has its own daily progression controls.
+    // Never allow the dashboard's Advance button to bypass the
+    // seven-day recruiting period and enter regular-season game handling.
+    if (
+        gameState.offseasonState?.phase ===
+        OFFSEASON_PHASES.RECRUITING
+    ) {
+        UI.showModal(
+            'Recruiting Week Still Active',
+            '<p>Complete the seven-day recruiting period before moving toward the regular season.</p>'
+        );
+        return;
+    }
+
     // 2. Advance to Offseason, resolving user-team flight risks first.
     if (gameState.currentWeek >= WEEKS_IN_SEASON) {
         const report = Game.advanceToOffseason();
+
+            if (report?.interrupted) {
+                UI.showModal(
+                    'Offseason Rollover Interrupted',
+                    '<p>The previous rollover did not complete. Reload the last saved game to restore the completed season before retrying.</p>'
+                );
+                return;
+            }
 
         gameState = Game.getGameState();
 

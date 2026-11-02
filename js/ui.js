@@ -2366,18 +2366,25 @@ export function renderFreeAgentsTab(gameState) {
             }
 
             return {
-                teamId,
-                recentActivity: schoolActivities,
-
                 teamName:
                     detail.teamName ||
                     detail.team?.name ||
-                    'Unknown School',
+                    'Unknown Team',
 
                 isUserTeam,
                 low,
                 high,
                 midpoint,
+
+                momentum: detail.momentum || 'Unknown',
+                momentumScore: Math.max(
+                    0,
+                    Math.min(100, Number(detail.momentumScore) || 0)
+                ),
+                activeDaysCount: Math.max(
+                    0,
+                    Number(detail.activeDaysCount) || 0
+                ),
 
                 activityLevel: detail.activityLevel || 'Recorded',
                 confidence: isUserTeam
@@ -2397,17 +2404,32 @@ export function renderFreeAgentsTab(gameState) {
             };
         }).sort((a, b) => b.midpoint - a.midpoint);
 
-        const leader = schools[0];
-        const runnerUp = schools[1] || null;
+        const leader = [...schools].sort(
+            (a, b) => b.midpoint - a.midpoint
+        )[0];
 
-        let leadSummary = 'Only recorded suitor';
+        const runnerUp = [...schools]
+            .filter(school => school !== leader)
+            .sort((a, b) => b.midpoint - a.midpoint)[0] || null;
+
+        const momentumLeader = [...schools].sort(
+            (a, b) =>
+                b.momentumScore - a.momentumScore ||
+                b.activeDaysCount - a.activeDaysCount
+        )[0];
+
+        let leadSummary = 'Only recorded pursuing team';
 
         if (runnerUp) {
             leadSummary =
                 leader.low > runnerUp.high
-                    ? `${leader.teamName} appears to hold an estimated lead`
-                    : 'Close or uncertain recruiting race';
+                    ? `Estimated interest lead: ${leader.teamName}`
+                    : 'Estimated interest race is close or uncertain';
         }
+
+        const momentumSummary = momentumLeader
+            ? `Strongest momentum: ${momentumLeader.teamName} (${momentumLeader.momentum})`
+            : 'No momentum estimate';
 
         return {
             playerName: player.name || 'Unknown Prospect',
@@ -2416,7 +2438,8 @@ export function renderFreeAgentsTab(gameState) {
                 player
             ),
             schools,
-            leadSummary
+            leadSummary,
+            momentumSummary
         };
     })
         .filter(Boolean)
@@ -2472,8 +2495,12 @@ export function renderFreeAgentsTab(gameState) {
                                                 </span>
                                             </div>
 
-                                            <div class="mt-1 text-[10px] text-slate-600">
+                                            <div class="mt-1 text-[10px] font-semibold text-slate-700">
                                                 ${quickEscapeHtml(entry.leadSummary)}
+                                            </div>
+
+                                            <div class="mt-0.5 text-[10px] text-indigo-700">
+                                                ${quickEscapeHtml(entry.momentumSummary)}
                                             </div>
                                         </div>
 
@@ -2528,6 +2555,25 @@ export function renderFreeAgentsTab(gameState) {
                                                     }"
                                                     style="width: ${school.midpoint}%">
                                                 </div>
+                                            </div>
+                                            <div class="mt-1 flex flex-wrap items-center justify-between gap-2">
+                                                <span class="rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                                                    school.momentum === 'Surging'
+                                                        ? 'bg-emerald-100 text-emerald-800'
+                                                        : school.momentum === 'Building'
+                                                            ? 'bg-blue-100 text-blue-800'
+                                                            : school.momentum === 'Active'
+                                                                ? 'bg-indigo-100 text-indigo-800'
+                                                                : school.momentum === 'Cooling'
+                                                                    ? 'bg-amber-100 text-amber-800'
+                                                                    : 'bg-slate-100 text-slate-600'
+                                                }">
+                                                    Momentum: ${quickEscapeHtml(school.momentum)}
+                                                </span>
+
+                                                <span class="text-[9px] font-mono text-slate-500">
+                                                    ${school.activeDaysCount} recruiting day${school.activeDaysCount === 1 ? '' : 's'} active
+                                                </span>
                                             </div>
 
                                             <div class="mt-1 flex flex-wrap justify-between gap-1 text-[9px] text-slate-500">
