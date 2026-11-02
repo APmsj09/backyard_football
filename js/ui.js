@@ -2311,6 +2311,7 @@ export function renderFreeAgentsTab(gameState) {
 
 let offseasonFABids = [];
 let offseasonFADay = 1;
+let recruitingActiveTab = 'prospects';
 
 let recruitingQuickAssignDefaults = {
     coachId: '',
@@ -3174,7 +3175,7 @@ export function renderOffseasonFAPool(gameState) {
                         Recruiting Battle Board
                     </h3>
                     <p class="mt-0.5 text-[10px] text-slate-300">
-                        Observed recruiting activity and estimated school interest
+                        Observed recruiting activity and estimated team interest
                     </p>
                 </div>
 
@@ -3188,7 +3189,7 @@ export function renderOffseasonFAPool(gameState) {
                 </div>
             </div>
 
-            <div class="p-3 space-y-2">
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-3 p-3">
 
                 ${
                     battleBoardEntries.length > 0
@@ -3218,7 +3219,7 @@ export function renderOffseasonFAPool(gameState) {
                                         </div>
 
                                         <span class="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 text-[9px] font-bold text-slate-700">
-                                            ${entry.schools.length} school${entry.schools.length === 1 ? '' : 's'} pursuing
+                                            ${entry.schools.length} team${entry.schools.length === 1 ? '' : 's'} pursuing
                                         </span>
 
                                     </div>
@@ -3347,7 +3348,7 @@ export function renderOffseasonFAPool(gameState) {
                                     No recorded recruiting battles yet
                                 </div>
                                 <p class="mt-1 text-[10px] text-slate-500">
-                                    Schools appear here after observable recruiting actions or gifts are recorded.
+                                    Teams appear here after observable recruiting actions or gifts are recorded.
                                 </p>
                             </div>
                         `
@@ -3364,115 +3365,139 @@ export function renderOffseasonFAPool(gameState) {
 
 
     container.innerHTML = `
-        ${battleBoardHtml}
+        <div class="mb-3 flex items-center gap-2 border-b border-slate-200 pb-2">
+            <button
+                type="button"
+                id="fa-recruiting-tab-prospects"
+                aria-pressed="${recruitingActiveTab === 'prospects'}"
+                onclick="window.app_setRecruitingTab('prospects')"
+                class="rounded-md px-3 py-2 text-xs font-bold ${
+                    recruitingActiveTab === 'prospects'
+                        ? 'bg-slate-900 text-white'
+                        : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                }">
+                Prospects
+                <span class="ml-1 opacity-70">${pool.length}</span>
+            </button>
 
-        <div class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                    <div class="text-xs font-black uppercase tracking-wide text-slate-800">
-                        Quick Recruiting
-                    </div>
-                    <p class="text-[10px] text-slate-500">
-                        Choose your approach once, then apply it to multiple prospects.
-                    </p>
-                </div>
-                <span class="fa-quick-selected-count text-[10px] font-bold text-slate-600">
-                    ${recruitingQuickSelectedIds.size} selected
+            <button
+                type="button"
+                id="fa-recruiting-tab-battles"
+                aria-pressed="${recruitingActiveTab === 'battles'}"
+                onclick="window.app_setRecruitingTab('battles')"
+                class="rounded-md px-3 py-2 text-xs font-bold ${
+                    recruitingActiveTab === 'battles'
+                        ? 'bg-slate-900 text-white'
+                        : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                }">
+                Battle Board
+                <span class="ml-1 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-700">
+                    ${contestedBattleCount}
                 </span>
-            </div>
-
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <div>
-                    <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
-                        Coach
-                    </label>
-                    <select
-                        id="fa-quick-coach"
-                        onchange="window.app_updateRecruitingQuickDefaults()"
-                        class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
-                        ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
-                        ${quickAssignCoaches.map(coach => `
-                            <option
-                                value="${quickEscapeHtml(coach.coachId)}"
-                                data-remaining-hours="${coach.remainingHours}"
-                                ${String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId) ? 'selected' : ''}>
-                                ${quickEscapeHtml(coach.coachName)} · ${coach.remainingHours}h left
-                            </option>
-                        `).join('')}
-                    </select>
-                </div>
-
-                <div>
-                    <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
-                        Recruiting Action
-                    </label>
-                    <select
-                        id="fa-quick-action"
-                        onchange="window.app_updateRecruitingQuickDefaults()"
-                        class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
-                        <option value="outreach" ${recruitingQuickAssignDefaults.actionType === 'outreach' ? 'selected' : ''}>
-                            Personal outreach
-                        </option>
-                        <option value="teammateConnection" ${recruitingQuickAssignDefaults.actionType === 'teammateConnection' ? 'selected' : ''}>
-                            Teammate connection
-                        </option>
-                        <option value="roleDiscussion" ${recruitingQuickAssignDefaults.actionType === 'roleDiscussion' ? 'selected' : ''}>
-                            Role discussion
-                        </option>
-                        <option value="practiceInvitation" ${recruitingQuickAssignDefaults.actionType === 'practiceInvitation' ? 'selected' : ''}>
-                            Practice invitation
-                        </option>
-                    </select>
-                </div>
-
-                <div>
-                    <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
-                        Hours per Prospect
-                    </label>
-                    <input
-                        type="number"
-                        id="fa-quick-hours"
-                        min="1"
-                        max="${quickMaxHours}"
-                        step="1"
-                        value="${recruitingQuickAssignDefaults.hours}"
-                        onchange="window.app_updateRecruitingQuickDefaults()"
-                        class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
-                        ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
-                </div>
-            </div>
-
-            <div class="mt-3 flex flex-wrap items-center gap-2">
-                <button
-                    type="button"
-                    onclick="window.app_selectVisibleRecruitingTargets()"
-                    class="rounded border border-slate-300 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-100">
-                    Select Visible
-                </button>
-
-                <button
-                    type="button"
-                    onclick="window.app_clearRecruitingTargetSelection()"
-                    class="rounded border border-slate-300 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-100">
-                    Clear Selection
-                </button>
-
-                <button
-                    type="button"
-                    id="fa-quick-assign-button"
-                    onclick="window.app_quickAssignSelectedRecruitingTargets()"
-                    ${quickAssignCoaches.length === 0 ? 'disabled' : ''}
-                    class="rounded bg-emerald-700 px-4 py-1.5 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
-                    Quick Assign (${recruitingQuickSelectedIds.size})
-                </button>
-            </div>
-
-            <p class="mt-2 text-[9px] text-slate-500">
-                Assignments use the selected coach's weekly hours. Individual recruiting remains available through each prospect's Recruit button.
-            </p>
+            </button>
         </div>
 
-        <table class="min-w-full text-xs font-mono">
+        <div
+            id="fa-recruiting-prospects-panel"
+            class="${recruitingActiveTab === 'prospects' ? '' : 'hidden'}">
+
+            <!-- Compact horizontal recruiting toolbar -->
+            <div class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-12 gap-2 items-end">
+
+                    <div class="xl:col-span-3">
+                        <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
+                            Coach
+                        </label>
+                        <select
+                            id="fa-quick-coach"
+                            onchange="window.app_updateRecruitingQuickDefaults()"
+                            class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                            ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
+                            ${quickAssignCoaches.map(coach => `
+                                <option
+                                    value="${quickEscapeHtml(coach.coachId)}"
+                                    data-remaining-hours="${coach.remainingHours}"
+                                    ${String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId) ? 'selected' : ''}>
+                                    ${quickEscapeHtml(coach.coachName)} · ${coach.remainingHours}h left
+                                </option>
+                            `).join('')}
+                        </select>
+                    </div>
+
+                    <div class="xl:col-span-3">
+                        <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
+                            Recruiting Action
+                        </label>
+                        <select
+                            id="fa-quick-action"
+                            onchange="window.app_updateRecruitingQuickDefaults()"
+                            class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
+                            <option value="outreach" ${recruitingQuickAssignDefaults.actionType === 'outreach' ? 'selected' : ''}>
+                                Personal outreach
+                            </option>
+                            <option value="teammateConnection" ${recruitingQuickAssignDefaults.actionType === 'teammateConnection' ? 'selected' : ''}>
+                                Teammate connection
+                            </option>
+                            <option value="roleDiscussion" ${recruitingQuickAssignDefaults.actionType === 'roleDiscussion' ? 'selected' : ''}>
+                                Role discussion
+                            </option>
+                            <option value="practiceInvitation" ${recruitingQuickAssignDefaults.actionType === 'practiceInvitation' ? 'selected' : ''}>
+                                Practice invitation
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="xl:col-span-1">
+                        <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
+                            Hours
+                        </label>
+                        <input
+                            type="number"
+                            id="fa-quick-hours"
+                            min="1"
+                            max="${quickMaxHours}"
+                            step="1"
+                            value="${recruitingQuickAssignDefaults.hours}"
+                            onchange="window.app_updateRecruitingQuickDefaults()"
+                            class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                            ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <button
+                            type="button"
+                            onclick="window.app_selectVisibleRecruitingTargets()"
+                            class="w-full rounded border border-slate-300 bg-white px-2 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-100 whitespace-nowrap">
+                            Select Visible
+                        </button>
+                    </div>
+
+                    <div class="xl:col-span-1">
+                        <button
+                            type="button"
+                            onclick="window.app_clearRecruitingTargetSelection()"
+                            class="w-full rounded border border-slate-300 bg-white px-2 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-100">
+                            Clear
+                        </button>
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <button
+                            type="button"
+                            id="fa-quick-assign-button"
+                            onclick="window.app_quickAssignSelectedRecruitingTargets()"
+                            ${quickAssignCoaches.length === 0 ? 'disabled' : ''}
+                            class="w-full rounded bg-emerald-700 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap">
+                            Assign (${recruitingQuickSelectedIds.size})
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-xs font-mono">
+
             <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
                 <tr>
                     <th class="py-2 px-2 text-center">Select</th>
@@ -3659,7 +3684,15 @@ export function renderOffseasonFAPool(gameState) {
                     </tr>`;
                 }).join('')}
             </tbody>
-        </table>
+                </table>
+            </div>
+        </div>
+
+        <div
+            id="fa-recruiting-battles-panel"
+            class="${recruitingActiveTab === 'battles' ? '' : 'hidden'}">
+            ${battleBoardHtml}
+        </div>
     `;
 }
 
@@ -3734,6 +3767,58 @@ export function removeOffseasonFABid(idx) { offseasonFABids.splice(idx, 1); }
 export function getOffseasonFADay() { return offseasonFADay; }
 export function incrementOffseasonFADay() { offseasonFADay++; }
 export function clearOffseasonFABids() { offseasonFABids = []; }
+window.app_setRecruitingTab = function(tab) {
+    if (!['prospects', 'battles'].includes(tab)) return;
+
+    recruitingActiveTab = tab;
+
+    const prospectsPanel = document.getElementById(
+        'fa-recruiting-prospects-panel'
+    );
+
+    const battlesPanel = document.getElementById(
+        'fa-recruiting-battles-panel'
+    );
+
+    const prospectsButton = document.getElementById(
+        'fa-recruiting-tab-prospects'
+    );
+
+    const battlesButton = document.getElementById(
+        'fa-recruiting-tab-battles'
+    );
+
+    const showProspects = tab === 'prospects';
+
+    prospectsPanel?.classList.toggle('hidden', !showProspects);
+    battlesPanel?.classList.toggle('hidden', showProspects);
+
+    const activeClass =
+        'rounded-md px-3 py-2 text-xs font-bold bg-slate-900 text-white';
+
+    const inactiveClass =
+        'rounded-md px-3 py-2 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
+
+    if (prospectsButton) {
+        prospectsButton.className =
+            showProspects ? activeClass : inactiveClass;
+
+        prospectsButton.setAttribute(
+            'aria-pressed',
+            String(showProspects)
+        );
+    }
+
+    if (battlesButton) {
+        battlesButton.className =
+            showProspects ? inactiveClass : activeClass;
+
+        battlesButton.setAttribute(
+            'aria-pressed',
+            String(!showProspects)
+        );
+    }
+};
 
 window.app_updateRecruitingQuickDefaults = function() {
     const coachSelect = document.getElementById('fa-quick-coach');

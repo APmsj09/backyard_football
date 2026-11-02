@@ -9469,6 +9469,61 @@ export function advanceToOffseason() {
     playerMap.clear();
     game.players.forEach(p => playerMap.set(p.id, p));
 
+    // Initialize inherited scouting for unsigned players entering
+    // the upcoming recruiting period. Draft-class scouting was already
+    // initialized separately above.
+    const draftClassIds = new Set(
+        (Array.isArray(game.draftClass) ? game.draftClass : [])
+            .map(player => String(player?.id))
+    );
+
+    const inheritedFreeAgentProspects = game.players.filter(player => {
+        if (
+            !player ||
+            player.id == null ||
+            player.teamId != null
+        ) {
+            return false;
+        }
+
+        const age = Number(player.age);
+
+        const statusType = String(
+            player.status?.type || ''
+        ).toLowerCase();
+
+        const lifecycle = String(
+            player.lifecycle || ''
+        ).toLowerCase();
+
+        const lifecycleStatus = String(
+            player.lifecycleStatus || player.lifecycle?.status || ''
+        ).toLowerCase();
+
+        return (
+            Number.isFinite(age) &&
+            age >= 12 &&
+            age <= 18 &&
+            !draftClassIds.has(String(player.id)) &&
+            lifecycle !== 'draft_eligible' &&
+            lifecycleStatus !== 'draft_eligible' &&
+            !['retired', 'departed', 'temporary'].includes(statusType) &&
+            !['retired', 'departed', 'temporary'].includes(lifecycleStatus) &&
+            !(Number(player.status?.duration) > 0) &&
+            !(Number(player.injury?.duration || player.injuryDuration || 0) > 0)
+        );
+    });
+
+    // Every main-league team receives its own imperfect inherited reports.
+    mainTeams.forEach(team => {
+        initializeInheritedScoutingReports(
+            team,
+            inheritedFreeAgentProspects,
+            game.year,
+            0
+        );
+    });
+
     game.gameResults = [];
     game.breakthroughs = [];
     game.offseasonFACompleted = false;
