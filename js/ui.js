@@ -14,6 +14,7 @@ import {
     getCurrentRosterLimit,
     setRecruitingOffer
 } from './game/season.js';
+import { buildAutomatedStaffAssignmentsForTeam } from './game/staff.js';
 
 let elements = {};
 let selectedPlayerId = null;
@@ -1513,6 +1514,30 @@ export function updateSelectedPlayerRow(newSelectedId) {
     document.querySelectorAll('.draft-player-row').forEach(r => r.classList.toggle('bg-amber-100', r.dataset.playerId === newSelectedId));
 }
 
+let activeDraftSidebarTab = 'prospect';
+
+window.app_switchDraftSidebarTab = function(tab) {
+    if (!['prospect', 'team'].includes(tab)) return;
+
+    activeDraftSidebarTab = tab;
+
+    document.querySelectorAll('.draft-sidebar-tab-btn').forEach(btn => {
+        const isActive = btn.dataset.sidebarTab === tab;
+
+        btn.className = `draft-sidebar-tab-btn py-2 rounded text-xs font-black uppercase tracking-wider transition ${
+            isActive
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+        }`;
+    });
+
+    document.getElementById('draft-sidebar-prospect-pane')
+        ?.classList.toggle('hidden', tab !== 'prospect');
+
+    document.getElementById('draft-sidebar-team-pane')
+        ?.classList.toggle('hidden', tab !== 'team');
+};
+
 let activeDossierTab = 'overview';
 window.app_switchDossierTab = function(tab) {
     activeDossierTab = tab;
@@ -1756,23 +1781,38 @@ export function renderPlayerRoster(playerTeam) {
     const roster = getUIRosterObjects(playerTeam);
     elements.rosterCount.textContent = `${roster.length}/18`;
 
-    // 1. Render Unsquished Full-Height Roster List
+    // 1. Render a compact, full-width two-way roster list.
     elements.draftRosterList.innerHTML = roster.map(p => {
         const fits = getBestTwoWayFits(p);
 
         return `
-        <li class="py-1.5 px-3 flex justify-between items-center text-xs hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
-            <div class="flex items-center gap-1.5 truncate pr-2">
-                <span class="text-slate-400 font-mono text-[10px] w-4">#${p.number || '--'}</span>
-                <span class="font-semibold text-slate-900 truncate">${p.name}</span>
-                <span class="text-[10px] text-slate-400 font-mono">(${p.age}yo)</span>
+        <li
+            class="px-2.5 py-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-xs hover:bg-slate-100 transition cursor-pointer"
+            onclick="app.openPlayerCard('${p.id}')">
+
+            <div class="flex items-center gap-1.5 min-w-0">
+                <span class="text-slate-400 font-mono text-[10px] shrink-0">
+                    #${p.number || '--'}
+                </span>
+
+                <span class="font-semibold text-slate-900 truncate">
+                    ${p.name}
+                </span>
+
+                <span class="text-[10px] text-slate-400 font-mono shrink-0">
+                    (${p.age}yo)
+                </span>
             </div>
-            <div class="text-right shrink-0 flex flex-col items-end gap-0.5 text-[10px] leading-tight">
+
+            <div class="flex items-center justify-end flex-wrap gap-x-2 gap-y-0.5 text-[10px] shrink-0">
                 ${renderPositionFit(fits.offense, 'offense', true)}
                 ${renderPositionFit(fits.defense, 'defense', true)}
             </div>
         </li>`;
-    }).join('') || '<li class="p-6 text-center text-slate-400 text-xs italic">No players drafted yet.</li>';
+    }).join('') || `
+        <li class="p-6 text-center text-slate-400 text-xs italic">
+            No players drafted yet.
+        </li>`;
 
     // 2. Render Two-Way Positional Rooms & Quality Radar
     const summaryEl = document.getElementById('roster-summary');
@@ -3064,23 +3104,6 @@ export function renderOffseasonFAPool(gameState) {
             )
         );
 
-        const userOffer =
-            recruitingRecord?.offersByTeam?.[teamKey] || null;
-
-        const hasActiveOffer =
-            userOffer?.status === 'active';
-
-        const offerStatusHtml = hasActiveOffer
-            ? `
-                <span class="border border-emerald-300 bg-emerald-50 text-emerald-800 font-black px-1.5 py-0.5 rounded text-[9px]">
-                    Roster Invitation Active
-                </span>
-             `
-            : `
-                <span class="text-[9px] text-slate-500">
-                    No active roster invitation
-                </span>
-            `;
         const schools = recordedSchools.map(detail => {
             const teamId = detail.teamId ?? detail.team?.id;
 
@@ -6372,6 +6395,913 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         };
     });
 
+        const gmStrategyDepartments =
+        team.teamInstructions?.departments || {};
+
+    const strategyPositions = [
+        'QB',
+        'RB',
+        'WR',
+        'TE',
+        'OL',
+        'DL',
+        'LB',
+        'DB'
+    ];
+
+    const strategyAutonomyOptions = [
+        ['delegate', 'Delegate'],
+        ['guided', 'Guided'],
+        ['direct', 'Direct']
+    ];
+
+    const strategyPriorityOptions = [
+        ['must', 'Must prioritize'],
+        ['high', 'High priority'],
+        ['normal', 'Normal'],
+        ['monitor', 'Monitor'],
+        ['ignore', 'Ignore']
+    ];
+
+    const strategyDepartmentCards = [
+        {
+            key: 'recruiting',
+            label: 'Recruiting',
+            description: 'Guide which position groups receive recruiting attention.',
+            autonomy: true,
+            positions: true
+        },
+        {
+            key: 'scouting',
+            label: 'Scouting',
+            description: 'Direct routine scouting toward the positions your roster needs.',
+            autonomy: false,
+            positions: true
+        },
+        {
+            key: 'development',
+            label: 'Player Development',
+            description: 'Tell coaches which position groups should receive development attention.',
+            autonomy: false,
+            positions: true
+        },
+        {
+            key: 'practice',
+            label: 'Practice',
+            description: 'Control how closely weekly practice choices follow your direction.',
+            autonomy: true,
+            positions: false
+        },
+        {
+            key: 'gameplan',
+            label: 'Game Planning',
+            description: 'Control how much discretion coaches have over weekly game planning.',
+            autonomy: true,
+            positions: false
+        }
+    ];
+
+    const getStrategyAutonomy = department => {
+        const rawValue = department === 'staff'
+            ? team.teamInstructions?.autonomy
+            : gmStrategyDepartments[department]?.autonomy;
+
+        const value = String(rawValue || 'guided')
+            .trim()
+            .toLowerCase();
+
+        return strategyAutonomyOptions.some(
+            ([key]) => key === value
+        )
+            ? value
+            : 'guided';
+    };
+
+    const getStrategyPriority = (department, position) => {
+        const rawValue =
+            gmStrategyDepartments[department]
+                ?.positionPriorities?.[position];
+
+        const value = String(rawValue || 'normal')
+            .trim()
+            .toLowerCase();
+
+        return strategyPriorityOptions.some(
+            ([key]) => key === value
+        )
+            ? value
+            : 'normal';
+    };
+
+    const renderStrategyAutonomyControl = department => {
+        const currentValue = getStrategyAutonomy(department);
+
+        return `
+            <label class="block">
+                <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                    Staff autonomy
+                </span>
+                <select
+                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs font-semibold text-slate-800"
+                    onchange="app_setTeamStrategySetting('${department}', 'autonomy', '', this.value)">
+                    ${strategyAutonomyOptions.map(([value, label]) => `
+                        <option
+                            value="${value}"
+                            ${currentValue === value ? 'selected' : ''}>
+                            ${label}
+                        </option>
+                    `).join('')}
+                </select>
+            </label>
+        `;
+    };
+
+    const renderStrategyPositionControls = department => {
+        return `
+            <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                ${strategyPositions.map(position => {
+                    const currentValue = getStrategyPriority(
+                        department,
+                        position
+                    );
+
+                    return `
+                        <label class="block min-w-0">
+                            <span class="mb-1 block text-[9px] font-black uppercase text-slate-500">
+                                ${position}
+                            </span>
+                            <select
+                                class="w-full rounded border border-slate-300 bg-white p-2 text-[10px] font-semibold text-slate-800"
+                                onchange="app_setTeamStrategySetting('${department}', 'positionPriority', '${position}', this.value)">
+                                ${strategyPriorityOptions.map(([value, label]) => `
+                                    <option
+                                        value="${value}"
+                                        ${currentValue === value ? 'selected' : ''}>
+                                        ${label}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </label>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    };
+
+        const strategyIndividualPriorityOptions = [
+        ['inherit', 'Use position priority'],
+        ['must', 'Must prioritize'],
+        ['high', 'High priority'],
+        ['normal', 'Normal'],
+        ['monitor', 'Monitor'],
+        ['ignore', 'Ignore']
+    ];
+
+    const strategyEscape = value =>
+        String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]);
+
+    const strategyRosterIds = new Set(
+        (team.roster || []).map(String)
+    );
+
+    const strategyProspects = (
+        Array.isArray(gameState.players)
+            ? gameState.players
+            : []
+    )
+        .filter(player => {
+            if (
+                !player ||
+                player.id == null ||
+                strategyRosterIds.has(String(player.id)) ||
+                String(player.teamId) === String(team.id)
+            ) {
+                return false;
+            }
+
+            const status = String(
+                player.status?.type || ''
+            ).toLowerCase();
+
+            return ![
+                'retired',
+                'departed',
+                'temporary'
+            ].includes(status);
+        })
+        .sort((a, b) => {
+            const positionComparison = String(
+                a.pos || ''
+            ).localeCompare(String(b.pos || ''));
+
+            return positionComparison ||
+                String(a.name || '').localeCompare(
+                    String(b.name || '')
+                );
+        });
+
+    const strategyRosterPlayers = (
+        Game.getRosterObjects?.(team) || []
+    )
+        .filter(player =>
+            player?.id != null
+        )
+        .sort((a, b) =>
+            String(a.name || '').localeCompare(
+                String(b.name || '')
+            )
+        );
+
+    const getStrategyProspectLabel = player => {
+        const name = strategyEscape(
+            player.name || 'Unnamed player'
+        );
+
+        const position = strategyEscape(
+            String(player.pos || 'Unknown').toUpperCase()
+        );
+
+        const age = Number.isFinite(Number(player.age))
+            ? ` · Age ${Number(player.age)}`
+            : '';
+
+        return `${name} — ${position}${age}`;
+    };
+
+    const getStrategyIndividualPriority = (
+        department,
+        targetId,
+        mapName
+    ) => {
+        if (targetId == null || targetId === '') {
+            return 'inherit';
+        }
+
+        const map =
+            gmStrategyDepartments[department]?.[mapName] || {};
+
+        const value = String(map[String(targetId)] || '')
+            .trim()
+            .toLowerCase();
+
+        return strategyIndividualPriorityOptions.some(
+            ([key]) => key === value
+        )
+            ? value
+            : 'inherit';
+    };
+
+    const getInitialStrategyTargetId = (
+        players,
+        priorityMaps
+    ) => {
+        const savedIds = priorityMaps.flatMap(map =>
+            Object.keys(map || {})
+        );
+
+        const savedMatch = savedIds.find(id =>
+            players.some(player =>
+                String(player.id) === String(id)
+            )
+        );
+
+        return savedMatch != null
+            ? String(savedMatch)
+            : String(players[0]?.id ?? '');
+    };
+
+    const strategyInitialProspectId =
+        getInitialStrategyTargetId(
+            strategyProspects,
+            [
+                gmStrategyDepartments.recruiting?.prospectPriorities,
+                gmStrategyDepartments.scouting?.prospectPriorities
+            ]
+        );
+
+    const strategyInitialPlayerId =
+        getInitialStrategyTargetId(
+            strategyRosterPlayers,
+            [
+                gmStrategyDepartments.development?.playerPriorities
+            ]
+        );
+
+    const renderStrategyIndividualPrioritySelect = (
+        id,
+        department,
+        targetId,
+        mapName
+    ) => {
+        const currentValue = getStrategyIndividualPriority(
+            department,
+            targetId,
+            mapName
+        );
+
+        return `
+            <select
+                id="${id}"
+                class="w-full rounded border border-slate-300 bg-white p-2 text-[10px] font-semibold text-slate-800"
+                ${targetId ? '' : 'disabled'}
+                onchange="app_setTeamStrategyIndividualPriority('${department}', this.value)">
+                ${strategyIndividualPriorityOptions.map(([value, label]) => `
+                    <option
+                        value="${value}"
+                        ${currentValue === value ? 'selected' : ''}>
+                        ${label}
+                    </option>
+                `).join('')}
+            </select>
+        `;
+    };
+
+    const strategyEmphasisPriorityOptions = [
+        ['inherit', 'Use broader priorities'],
+        ...strategyPriorityOptions
+    ];
+
+    const getStrategyEmphasisOptions = side => {
+        const isOffense = side === 'offense';
+
+        const playbook = isOffense
+            ? offensivePlaybook
+            : defensivePlaybook;
+
+        const installedKeys = isOffense
+            ? team.gameplan?.installedOffense || []
+            : team.gameplan?.installedDefense || [];
+
+        const foundationKeys = isOffense
+            ? [
+                'Uni_InsideZone',
+                'Uni_StretchRight',
+                'Uni_QuickSlants',
+                'Uni_FourVerts'
+            ]
+            : [
+                'Cover_2_Zone_Base',
+                'Cover_1_Robber',
+                'Man_Blitz_Base',
+                'GoalLine_RunStuff'
+            ];
+
+        const availableKeys = [
+            ...new Set([
+                ...foundationKeys,
+                ...(
+                    Array.isArray(installedKeys)
+                        ? installedKeys.slice(0, 8)
+                        : []
+                )
+            ])
+        ];
+
+        const descriptors = new Map();
+        const specificPlays = [];
+
+        const addDescriptor = (rawKey, group) => {
+            if (
+                typeof rawKey !== 'string' ||
+                !rawKey.trim()
+            ) {
+                return;
+            }
+
+            const key = rawKey.trim().toLowerCase();
+
+            if (!descriptors.has(key)) {
+                descriptors.set(key, {
+                    value: key,
+                    groups: new Set()
+                });
+            }
+
+            descriptors.get(key).groups.add(group);
+        };
+
+        availableKeys.forEach(playKey => {
+            const play = playbook[playKey];
+
+            if (!play) return;
+
+            addDescriptor(play.type, 'Play Type');
+            addDescriptor(play.concept, 'Concept');
+
+            (Array.isArray(play.tags) ? play.tags : [])
+                .forEach(tag =>
+                    addDescriptor(tag, 'Tags')
+                );
+
+            if (play.blitz) {
+                addDescriptor('blitz', 'Tags');
+            }
+
+            specificPlays.push({
+                value: String(playKey).toLowerCase(),
+                label: play.name || playKey
+            });
+        });
+
+        const groups = new Map([
+            ['Play Type', []],
+            ['Concept', []],
+            ['Tags', []],
+            ['Specific Plays', specificPlays]
+        ]);
+
+        descriptors.forEach(descriptor => {
+            descriptor.groups.forEach(group => {
+                groups.get(group)?.push({
+                    value: descriptor.value,
+                    label: descriptor.value
+                });
+            });
+        });
+
+        return [...groups.entries()]
+            .filter(([, options]) => options.length > 0)
+            .map(([label, options]) => ({
+                label,
+                options
+            }));
+    };
+
+    const getStrategyEmphasisMap = (
+        department,
+        side
+    ) => {
+        const instructions =
+            gmStrategyDepartments[department] || {};
+
+        const mapName = side === 'offense'
+            ? 'offenseEmphasis'
+            : 'defenseEmphasis';
+
+        return instructions[mapName] || {};
+    };
+
+    const renderStrategyEmphasisEditor = (
+        department,
+        side
+    ) => {
+        const targetId =
+            `strategy-emphasis-target-${department}-${side}`;
+
+        const priorityId =
+            `strategy-emphasis-priority-${department}-${side}`;
+
+        const optionGroups = getStrategyEmphasisOptions(side);
+
+        const priorityMap = getStrategyEmphasisMap(
+            department,
+            side
+        );
+
+        const savedTarget = Object.keys(priorityMap).find(key =>
+            optionGroups.some(group =>
+                group.options.some(option =>
+                    option.value === String(key).toLowerCase()
+                )
+            )
+        );
+
+        const hasOptions = optionGroups.length > 0;
+
+        const targetOptionsHtml = optionGroups.map(group => `
+            <optgroup label="${group.label}">
+                ${group.options.map(option => `
+                    <option
+                        value="${strategyEscape(option.value)}"
+                        ${String(option.value) === String(savedTarget || '')
+                            .toLowerCase() ? 'selected' : ''}>
+                        ${strategyEscape(option.label)}
+                    </option>
+                `).join('')}
+            </optgroup>
+        `).join('');
+
+        const selectedPriority = savedTarget != null
+            ? String(priorityMap[savedTarget] || 'normal')
+                .trim()
+                .toLowerCase()
+            : 'inherit';
+
+        return `
+            <div class="space-y-2">
+                <label class="block">
+                    <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                        Concept or play
+                    </span>
+                    <select
+                        id="${targetId}"
+                        class="w-full rounded border border-slate-300 bg-white p-2 text-[10px] font-semibold text-slate-800"
+                        ${hasOptions ? '' : 'disabled'}
+                        onchange="app_syncTeamStrategyEmphasis('${department}', '${side}')">
+                        <option value="">Choose a concept or play...</option>
+                        ${targetOptionsHtml}
+                    </select>
+                </label>
+
+                <label class="block">
+                    <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                        Priority
+                    </span>
+                    <select
+                        id="${priorityId}"
+                        class="w-full rounded border border-slate-300 bg-white p-2 text-[10px] font-semibold text-slate-800"
+                        ${savedTarget != null ? '' : 'disabled'}
+                        onchange="app_setTeamStrategyEmphasis('${department}', '${side}', this.value)">
+                        ${strategyEmphasisPriorityOptions.map(([value, label]) => `
+                            <option
+                                value="${value}"
+                                ${selectedPriority === value ? 'selected' : ''}>
+                                ${label}
+                            </option>
+                        `).join('')}
+                    </select>
+                </label>
+
+                <p
+                    id="strategy-emphasis-status-${department}-${side}"
+                    class="text-[9px] font-bold text-emerald-700"
+                    aria-live="polite">
+                </p>
+            </div>
+        `;
+    };
+
+    window.app_syncTeamStrategyIndividualPriority = targetType => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+
+        if (!currentTeam?.teamInstructions) return;
+
+        if (targetType === 'prospect') {
+            const targetId = document.getElementById(
+                'strategy-prospect-target'
+            )?.value;
+
+            for (const department of [
+                'recruiting',
+                'scouting'
+            ]) {
+                const prioritySelect = document.getElementById(
+                    `strategy-prospect-priority-${department}`
+                );
+
+                if (!prioritySelect) continue;
+
+                const map =
+                    currentTeam.teamInstructions
+                        .departments?.[department]
+                        ?.prospectPriorities || {};
+
+                const value = String(
+                    map[String(targetId)] || 'inherit'
+                ).toLowerCase();
+
+                prioritySelect.value =
+                    strategyIndividualPriorityOptions.some(
+                        ([key]) => key === value
+                    )
+                        ? value
+                        : 'inherit';
+            }
+        } else if (targetType === 'player') {
+            const targetId = document.getElementById(
+                'strategy-player-target'
+            )?.value;
+
+            const prioritySelect = document.getElementById(
+                'strategy-player-priority'
+            );
+
+            const map =
+                currentTeam.teamInstructions
+                    .departments?.development
+                    ?.playerPriorities || {};
+
+            const value = String(
+                map[String(targetId)] || 'inherit'
+            ).toLowerCase();
+
+            if (prioritySelect) {
+                prioritySelect.value =
+                    strategyIndividualPriorityOptions.some(
+                        ([key]) => key === value
+                    )
+                        ? value
+                        : 'inherit';
+            }
+        }
+    };
+
+        window.app_syncTeamStrategyEmphasis = (
+        department,
+        side
+    ) => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+
+        if (!currentTeam?.teamInstructions) return;
+
+        if (
+            !['practice', 'gameplan'].includes(department) ||
+            !['offense', 'defense'].includes(side)
+        ) {
+            return;
+        }
+
+        const target = document.getElementById(
+            `strategy-emphasis-target-${department}-${side}`
+        );
+
+        const priority = document.getElementById(
+            `strategy-emphasis-priority-${department}-${side}`
+        );
+
+        if (!target || !priority) return;
+
+        const mapName = side === 'offense'
+            ? 'offenseEmphasis'
+            : 'defenseEmphasis';
+
+        const map =
+            currentTeam.teamInstructions
+                .departments?.[department]?.[mapName] || {};
+
+        const value = target.value
+            ? String(map[target.value] || 'inherit').toLowerCase()
+            : 'inherit';
+
+        priority.value =
+            strategyEmphasisPriorityOptions.some(
+                ([key]) => key === value
+            )
+                ? value
+                : 'inherit';
+
+        priority.disabled = !target.value;
+
+        const status = document.getElementById(
+            `strategy-emphasis-status-${department}-${side}`
+        );
+
+        if (status) status.textContent = '';
+    };
+
+    window.app_setTeamStrategyEmphasis = (
+        department,
+        side,
+        value
+    ) => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+
+        if (!currentTeam) return;
+
+        Game.ensureTeamStaffWorkPlan?.(currentTeam);
+
+        if (
+            !['practice', 'gameplan'].includes(department) ||
+            !['offense', 'defense'].includes(side) ||
+            !strategyEmphasisPriorityOptions.some(
+                ([key]) => key === value
+            )
+        ) {
+            return;
+        }
+
+        const target = document.getElementById(
+            `strategy-emphasis-target-${department}-${side}`
+        );
+
+        const targetKey = String(target?.value || '')
+            .trim()
+            .toLowerCase();
+
+        if (!targetKey) return;
+
+        const departmentInstructions =
+            currentTeam.teamInstructions?.departments?.[department];
+
+        if (!departmentInstructions) return;
+
+        const mapName = side === 'offense'
+            ? 'offenseEmphasis'
+            : 'defenseEmphasis';
+
+        if (
+            !departmentInstructions[mapName] ||
+            typeof departmentInstructions[mapName] !== 'object' ||
+            Array.isArray(departmentInstructions[mapName])
+        ) {
+            departmentInstructions[mapName] = {};
+        }
+
+        const priorityMap =
+            departmentInstructions[mapName];
+
+        if (value === 'inherit') {
+            delete priorityMap[targetKey];
+        } else {
+            priorityMap[targetKey] = value;
+        }
+
+        saveGameState();
+
+        const status = document.getElementById(
+            `strategy-emphasis-status-${department}-${side}`
+        );
+
+        if (status) status.textContent = 'Saved';
+    };
+
+    window.app_setTeamStrategyIndividualPriority = (
+        department,
+        value
+    ) => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+
+        if (!currentTeam) return;
+
+        Game.ensureTeamStaffWorkPlan?.(currentTeam);
+
+        const allowedDepartments = [
+            'recruiting',
+            'scouting',
+            'development'
+        ];
+
+        const allowedValues =
+            strategyIndividualPriorityOptions.map(
+                ([key]) => key
+            );
+
+        if (
+            !allowedDepartments.includes(department) ||
+            !allowedValues.includes(value)
+        ) {
+            return;
+        }
+
+        const isDevelopment = department === 'development';
+
+        const targetId = document.getElementById(
+            isDevelopment
+                ? 'strategy-player-target'
+                : 'strategy-prospect-target'
+        )?.value;
+
+        if (!targetId) return;
+
+        const departmentInstructions =
+            currentTeam.teamInstructions?.departments?.[department];
+
+        if (!departmentInstructions) return;
+
+        const mapName = isDevelopment
+            ? 'playerPriorities'
+            : 'prospectPriorities';
+
+        if (
+            !departmentInstructions[mapName] ||
+            typeof departmentInstructions[mapName] !== 'object' ||
+            Array.isArray(departmentInstructions[mapName])
+        ) {
+            departmentInstructions[mapName] = {};
+        }
+
+        const priorityMap =
+            departmentInstructions[mapName];
+
+        if (value === 'inherit') {
+            delete priorityMap[String(targetId)];
+        } else {
+            priorityMap[String(targetId)] = value;
+        }
+
+        saveGameState();
+
+        const statusId = isDevelopment
+            ? 'strategy-player-priority-status'
+            : 'strategy-prospect-priority-status';
+
+        const statusElement = document.getElementById(statusId);
+
+        if (statusElement) {
+            statusElement.textContent = 'Saved';
+        }
+    };
+
+    window.app_setTeamStrategySetting = (
+        department,
+        setting,
+        position,
+        value
+    ) => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+
+        if (!currentTeam) return;
+
+        Game.ensureTeamStaffWorkPlan?.(currentTeam);
+
+        const instructions = currentTeam.teamInstructions;
+
+        if (!instructions || typeof instructions !== 'object') {
+            return;
+        }
+
+        const autonomyValues = strategyAutonomyOptions.map(
+            ([key]) => key
+        );
+
+        const priorityValues = strategyPriorityOptions.map(
+            ([key]) => key
+        );
+
+        if (setting === 'staffAutonomy') {
+            if (!autonomyValues.includes(value)) return;
+
+            instructions.autonomy = value;
+        } else {
+            const allowedDepartments = [
+                'recruiting',
+                'scouting',
+                'development',
+                'practice',
+                'gameplan'
+            ];
+
+            if (!allowedDepartments.includes(department)) return;
+
+            const departmentInstructions =
+                instructions.departments?.[department];
+
+            if (
+                !departmentInstructions ||
+                typeof departmentInstructions !== 'object'
+            ) {
+                return;
+            }
+
+            if (setting === 'autonomy') {
+                if (
+                    !['recruiting', 'practice', 'gameplan'].includes(
+                        department
+                    ) ||
+                    !autonomyValues.includes(value)
+                ) {
+                    return;
+                }
+
+                departmentInstructions.autonomy = value;
+            } else if (setting === 'positionPriority') {
+                if (
+                    !['recruiting', 'scouting', 'development'].includes(
+                        department
+                    ) ||
+                    !strategyPositions.includes(position) ||
+                    !priorityValues.includes(value)
+                ) {
+                    return;
+                }
+
+                if (
+                    !departmentInstructions.positionPriorities ||
+                    typeof departmentInstructions.positionPriorities !== 'object'
+                ) {
+                    departmentInstructions.positionPriorities = {};
+                }
+
+                departmentInstructions.positionPriorities[position] = value;
+            } else {
+                return;
+            }
+        }
+
+        saveGameState();
+        renderStaffTab(gs);
+    };
+
+    window.app_setTeamStaffAutonomy = value => {
+        window.app_setTeamStrategySetting(
+            'staff',
+            'staffAutonomy',
+            '',
+            value
+        );
+    };
+
     let activeStaffHubTab =
         container.querySelector(
             '.staff-hub-tab-btn.bg-slate-900'
@@ -6380,6 +7310,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     window.app_switchStaffTab = tab => {
         const allowedTabs = [
             'overview',
+            'strategy',
             'workload',
             'history'
         ];
@@ -6427,6 +7358,14 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             <button
                 type="button"
                 class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
+                data-staff-tab="strategy"
+                onclick="app_switchStaffTab('strategy')">
+                Strategy
+            </button>
+
+            <button
+                type="button"
+                class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
                 data-staff-tab="workload"
                 onclick="app_switchStaffTab('workload')">
                 Workload
@@ -6440,6 +7379,235 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 History
             </button>
         </nav>
+                <div
+            class="staff-hub-pane hidden"
+            data-staff-pane="strategy">
+
+            <div class="mb-3 rounded border border-slate-200 bg-slate-50 p-3">
+                <h3 class="text-xs font-black uppercase tracking-wide text-slate-900">
+                    GM Strategy & Delegation
+                </h3>
+                <p class="mt-1 text-[11px] leading-relaxed text-slate-600">
+                    Set the priorities. Your staff will use their skills,
+                    available time, and judgment to carry out the work.
+                </p>
+            </div>
+
+            <section class="mb-3 rounded border border-slate-200 bg-white p-3">
+                <div class="mb-2">
+                    <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                        Overall Staff Delegation
+                    </h4>
+                    <p class="mt-1 text-[10px] text-slate-500">
+                        Controls how much responsibility the staff receives
+                        when the workload is automatically assigned.
+                    </p>
+                </div>
+
+                <label class="block max-w-sm">
+                    <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                        Staff operating mode
+                    </span>
+                    <select
+                        class="w-full rounded border border-slate-300 bg-white p-2 text-xs font-semibold text-slate-800"
+                        onchange="app_setTeamStaffAutonomy(this.value)">
+                        ${strategyAutonomyOptions.map(([value, label]) => `
+                            <option
+                                value="${value}"
+                                ${getStrategyAutonomy('staff') === value ? 'selected' : ''}>
+                                ${label}
+                            </option>
+                        `).join('')}
+                    </select>
+                </label>
+
+                <div class="mt-2 grid grid-cols-1 gap-1 text-[10px] text-slate-600 sm:grid-cols-3">
+                    <p><b>Delegate:</b> Staff has more discretion.</p>
+                    <p><b>Guided:</b> Staff follows GM priorities closely.</p>
+                    <p><b>Direct:</b> Keep execution in your hands where supported.</p>
+                </div>
+            </section>
+
+            <div class="space-y-3">
+                ${strategyDepartmentCards.map(department => `
+                    <section class="rounded border border-slate-200 bg-white p-3">
+                        <div class="mb-3">
+                            <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                                ${department.label}
+                            </h4>
+                            <p class="mt-1 text-[10px] leading-relaxed text-slate-500">
+                                ${department.description}
+                            </p>
+                        </div>
+
+                        ${department.autonomy ? `
+                            <div class="mb-3 max-w-sm">
+                                ${renderStrategyAutonomyControl(department.key)}
+                            </div>
+                        ` : ''}
+
+                        ${department.positions ? `
+                            <div class="border-t border-slate-100 pt-3">
+                                <h5 class="mb-2 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                    Position Priorities
+                                </h5>
+                                ${renderStrategyPositionControls(department.key)}
+                            </div>
+                        ` : ''}
+
+                        ${['practice', 'gameplan'].includes(department.key) ? `
+                            <div class="border-t border-slate-100 pt-3">
+                                <h5 class="mb-2 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                    Offensive Emphasis
+                                </h5>
+                                ${renderStrategyEmphasisEditor(
+                                    department.key,
+                                    'offense'
+                                )}
+                            </div>
+
+                            <div class="mt-3 border-t border-slate-100 pt-3">
+                                <h5 class="mb-2 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                    Defensive Emphasis
+                                </h5>
+                                ${renderStrategyEmphasisEditor(
+                                    department.key,
+                                    'defense'
+                                )}
+                            </div>
+                        ` : ''}
+                    </section>
+                `).join('')}
+            </div>
+
+                        <section class="mt-3 rounded border border-slate-200 bg-white p-3">
+                <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                    Individual Prospect Priorities
+                </h4>
+                <p class="mt-1 mb-3 text-[10px] leading-relaxed text-slate-500">
+                    Override position priorities for specific players.
+                    Recruiting and scouting can have different instructions
+                    for the same prospect.
+                </p>
+
+                ${strategyProspects.length > 0 ? `
+                    <div class="space-y-3">
+                        <label class="block">
+                            <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                Select prospect
+                            </span>
+                            <select
+                                id="strategy-prospect-target"
+                                class="w-full rounded border border-slate-300 bg-white p-2 text-xs font-semibold text-slate-800"
+                                onchange="app_syncTeamStrategyIndividualPriority('prospect')">
+                                ${strategyProspects.map(player => `
+                                    <option
+                                        value="${strategyEscape(player.id)}"
+                                        ${String(player.id) === strategyInitialProspectId ? 'selected' : ''}>
+                                        ${getStrategyProspectLabel(player)}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </label>
+
+                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <label class="block">
+                                <span class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                    Recruiting priority
+                                </span>
+                                ${renderStrategyIndividualPrioritySelect(
+                                    'strategy-prospect-priority-recruiting',
+                                    'recruiting',
+                                    strategyInitialProspectId,
+                                    'prospectPriorities'
+                                )}
+                            </label>
+
+                            <label class="block">
+                                <span class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                    Scouting priority
+                                </span>
+                                ${renderStrategyIndividualPrioritySelect(
+                                    'strategy-prospect-priority-scouting',
+                                    'scouting',
+                                    strategyInitialProspectId,
+                                    'prospectPriorities'
+                                )}
+                            </label>
+                        </div>
+
+                        <p
+                            id="strategy-prospect-priority-status"
+                            class="text-[9px] font-bold text-emerald-700"
+                            aria-live="polite">
+                        </p>
+                    </div>
+                ` : `
+                    <p class="text-[10px] italic text-slate-500">
+                        No external prospects are currently available.
+                    </p>
+                `}
+            </section>
+
+            <section class="mt-3 rounded border border-slate-200 bg-white p-3">
+                <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                    Individual Development Priorities
+                </h4>
+                <p class="mt-1 mb-3 text-[10px] leading-relaxed text-slate-500">
+                    Give specific players development priority over the
+                    default position-group setting.
+                </p>
+
+                ${strategyRosterPlayers.length > 0 ? `
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <label class="block">
+                            <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                Select player
+                            </span>
+                            <select
+                                id="strategy-player-target"
+                                class="w-full rounded border border-slate-300 bg-white p-2 text-xs font-semibold text-slate-800"
+                                onchange="app_syncTeamStrategyIndividualPriority('player')">
+                                ${strategyRosterPlayers.map(player => `
+                                    <option
+                                        value="${strategyEscape(player.id)}"
+                                        ${String(player.id) === strategyInitialPlayerId ? 'selected' : ''}>
+                                        ${getStrategyProspectLabel(player)}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </label>
+
+                        <label class="block">
+                            <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                Development priority
+                            </span>
+                            ${renderStrategyIndividualPrioritySelect(
+                                'strategy-player-priority',
+                                'development',
+                                strategyInitialPlayerId,
+                                'playerPriorities'
+                            )}
+                        </label>
+                    </div>
+
+                    <p
+                        id="strategy-player-priority-status"
+                        class="mt-2 text-[9px] font-bold text-emerald-700"
+                        aria-live="polite">
+                    </p>
+                ` : `
+                    <p class="text-[10px] italic text-slate-500">
+                        No roster players are currently available.
+                    </p>
+                `}
+            </section>
+
+            <p class="mt-3 text-[10px] text-slate-500">
+                Changes are saved immediately. You can still override
+                individual staff assignments in the Workload tab.
+            </p>
+        </div>
 
         <div
             class="staff-hub-pane"
@@ -7612,176 +8780,8 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             if (!currentTeam) return;
 
             const plan = Game.ensureTeamStaffWorkPlan?.(currentTeam);
-            const coaches = Game.ensureTeamCoachingStaff?.(currentTeam) ||
-                currentTeam.coaches || [];
 
             if (!plan || !Array.isArray(plan.assignments)) return;
-
-            const taskSkills = {
-                scouting: [
-                    'evalPhysicals',
-                    'evalTechnique',
-                    'evalCharacter'
-                ],
-                training: [
-                    'teaching',
-                    'practiceDiscipline',
-                    'conditioning'
-                ],
-                offensePrep: [
-                    'offSchemeMastery',
-                    'gameplanInstinct',
-                    'inGameAdjustments'
-                ],
-                defensePrep: [
-                    'defSchemeMastery',
-                    'gameplanInstinct',
-                    'inGameAdjustments'
-                ]
-            };
-
-            const tasks = Object.keys(taskSkills);
-            const week = Math.max(0, Number(gs.currentWeek) || 0);
-
-            // Week 0 can also be the first regular-season week.
-            // Use lifecycle flags to identify the actual offseason.
-            const isOffseason =
-                !gs.draftCompleted || !gs.offseasonFACompleted;
-
-            // Prioritize scouting around the draft, and preparation
-            // during the regular season.
-            const taskNeeds = isOffseason
-                ? {
-                    scouting: 1.45,
-                    training: 1.00,
-                    offensePrep: 0.85,
-                    defensePrep: 0.85
-                }
-                : week <= 9
-                    ? {
-                        scouting: 0.85,
-                        training: 1.10,
-                        offensePrep: 1.25,
-                        defensePrep: 1.25
-                    }
-                    : {
-                        scouting: 1.15,
-                        training: 1.10,
-                        offensePrep: 0.85,
-                        defensePrep: 0.85
-                    };
-
-            const getTaskSkill = (coach, task) => {
-                const ratings = coach?.ratings || {};
-                const skills = taskSkills[task];
-
-                const values = skills.map(key => {
-                    const value = Number(ratings[key]);
-
-                    return Number.isFinite(value)
-                        ? Math.max(0, Math.min(100, value))
-                        : 50;
-                });
-
-                return values.reduce((sum, value) => sum + value, 0) /
-                    values.length;
-            };
-
-            const buildAssignments = () => {
-                const assignments = [];
-
-                coaches
-                    .filter(coach => coach?.id != null)
-                    .forEach(coach => {
-                        const capacity = getCoachWeeklyCapacity(coach);
-
-                        if (capacity <= 0) return;
-
-                        // Stronger coaches lean toward their specialties,
-                        // while every task can still receive some coverage.
-                        const weights = tasks.map(task => {
-                            const skillScore = getTaskSkill(coach, task);
-
-                            return {
-                                task,
-                                weight: taskNeeds[task] *
-                                    (0.5 + skillScore / 100)
-                            };
-                        });
-
-                        const totalWeight = weights.reduce(
-                            (sum, item) => sum + item.weight,
-                            0
-                        );
-
-                        if (totalWeight <= 0) return;
-
-                        const allocations = weights.map(item => {
-                            const exactHours =
-                                capacity * item.weight / totalWeight;
-
-                            return {
-                                task: item.task,
-                                hours: Math.floor(exactHours),
-                                remainder: exactHours -
-                                    Math.floor(exactHours)
-                            };
-                        });
-
-                        let remaining = capacity - allocations.reduce(
-                            (sum, item) => sum + item.hours,
-                            0
-                        );
-
-                        allocations
-                            .slice()
-                            .sort((a, b) => b.remainder - a.remainder)
-                            .forEach(item => {
-                                if (remaining <= 0) return;
-
-                                const allocation = allocations.find(
-                                    candidate => candidate.task === item.task
-                                );
-
-                                allocation.hours++;
-                                remaining--;
-                            });
-
-                        allocations.forEach(allocation => {
-                            if (allocation.hours <= 0) return;
-
-                            const assignment = {
-                                coachId: String(coach.id),
-                                task: allocation.task,
-                                hours: allocation.hours,
-                                focus: 'all'
-                            };
-
-                            if (allocation.task === 'scouting') {
-                                if (!gs.draftCompleted) {
-                                    // Before the draft, scout the incoming class.
-                                    assignment.focus = 'draft';
-                                } else if (!gs.offseasonFACompleted) {
-                                    // After the draft, scout unsigned free agents.
-                                    assignment.focus = 'freeAgents';
-                                } else {
-                                    // During the regular season, scout youth prospects.
-                                    assignment.focus = 'youth';
-                                }
-
-                                assignment.maxTargets = 2;
-                            }
-
-                            if (allocation.task === 'training') {
-                                assignment.maxTargets = 4;
-                            }
-
-                            assignments.push(assignment);
-                        });
-                    });
-
-                return assignments;
-            };
 
             showModal(
                 'Auto-assign staff workload?',
@@ -7793,8 +8793,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             and defensive preparation.
                         </p>
                         <p>
-                            Each coach's recorded weekly availability and
-                            skill ratings will guide the assignments.
+                            GM department priorities, coach skills, and each
+                            coach's available weekly hours will guide the
+                            assignments.
                         </p>
                         <p class="font-semibold text-amber-800">
                             Your existing workload assignments will be replaced.
@@ -7813,7 +8814,15 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         return;
                     }
 
-                    latestPlan.assignments = buildAssignments();
+                    const assignments =
+                        buildAutomatedStaffAssignmentsForTeam(
+                            latestTeam,
+                            latestState
+                        );
+
+                    if (!Array.isArray(assignments)) return;
+
+                    latestPlan.assignments = assignments;
 
                     latestPlan.autoAssignedFor = {
                         year: latestState.year ?? null,

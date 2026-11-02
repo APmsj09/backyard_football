@@ -2820,16 +2820,22 @@ export function processWeeklyPlayerGrowth() {
                     !focusedTrainingPlayers.has(player) &&
                     matchesTrainingFocus(
                         player,
-                        assignment.focus,
-                        team
+                        assignment.focus
                     )
                 )
                 .map(player => {
+                    const instructionPriority =
+                        getTeamDevelopmentPriority(team, player);
+
+                    if (instructionPriority.ignored) {
+                        return null;
+                    }
+
                     const skill = requestedSkill ||
-                        getAutomaticTrainingSkill(player, team);
+                        getAutomaticTrainingSkill(player);
 
                     const skillValue = skill
-                        ? getTrainingSkillValue(player, skill, team)
+                        ? getTrainingSkillValue(player, skill)
                         : null;
 
                     // A chosen skill at its cap does not silently turn into
@@ -2847,29 +2853,42 @@ export function processWeeklyPlayerGrowth() {
                         ? ageValue
                         : 14;
 
-                    const trainingTraits =
-                        getReportedTrainingTraits(player);
+                    const ethicValue = Number(
+                        player.personality?.workEthic
+                    );
 
-                    // Favor players with room to improve and developmental
-                    // runway, using only the team's available estimates.
+                    const workEthic = Number.isFinite(ethicValue)
+                        ? Math.max(0, Math.min(100, ethicValue))
+                        : 50;
+
+                    const potentialFactor = {
+                        A: 2.0,
+                        B: 1.5,
+                        C: 1.0,
+                        D: 0.5,
+                        F: 0
+                    }[player.potential] ?? 1.0;
+
+                    // Preserve the existing development assessment.
                     const priority =
                         (95 - skillValue) * 0.45 +
                         Math.max(0, 18 - age) * 1.1 +
-                        (trainingTraits.workEthic - 50) * 0.035 +
-                        trainingTraits.potentialPriority;
+                        (workEthic - 50) * 0.035 +
+                        potentialFactor;
 
                     return {
                         player,
                         skill,
                         skillValue,
-                        workEthic: trainingTraits.workEthic,
-                        potentialGrowthFactor:
-                            trainingTraits.potentialGrowthFactor,
-                        priority
+                        priority,
+                        instructionPriority: instructionPriority.rank
                     };
                 })
                 .filter(Boolean)
-                .sort((a, b) => b.priority - a.priority);
+                .sort((a, b) =>
+                    b.instructionPriority - a.instructionPriority ||
+                    b.priority - a.priority
+                );
 
             if (candidates.length === 0) return;
 
@@ -2887,15 +2906,43 @@ export function processWeeklyPlayerGrowth() {
                 index * 3
             );
 
-            const rotationOffset =
-                rotationSeed % candidatePool.length;
+            // Rotate within each priority tier rather than allowing
+            // lower-priority players to displace Must or High targets.
+            const priorityTiers = [
+                ...new Set(
+                    candidatePool.map(candidate =>
+                        candidate.instructionPriority
+                    )
+                )
+            ].sort((a, b) => b - a);
 
-            const rotatedPool = [
-                ...candidatePool.slice(rotationOffset),
-                ...candidatePool.slice(0, rotationOffset)
-            ];
+            const targets = [];
 
-            const targets = rotatedPool.slice(0, maxTargets);
+            for (const tier of priorityTiers) {
+                const tierCandidates = candidatePool.filter(
+                    candidate =>
+                        candidate.instructionPriority === tier
+                );
+
+                if (tierCandidates.length === 0) continue;
+
+                const rotationOffset =
+                    rotationSeed % tierCandidates.length;
+
+                const rotatedTier = [
+                    ...tierCandidates.slice(rotationOffset),
+                    ...tierCandidates.slice(0, rotationOffset)
+                ];
+
+                const remainingTargets =
+                    maxTargets - targets.length;
+
+                targets.push(
+                    ...rotatedTier.slice(0, remainingTargets)
+                );
+
+                if (targets.length >= maxTargets) break;
+            }
 
             targets.forEach(({
                 player,
@@ -3466,8 +3513,23 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
             );
         }
 
-        const isDelegated = t.isPlayerControlled &&
-            (t.gameplan.delegatePractice || t.gameplan.delegateGameplan);
+        const practiceAutonomy = String(
+            t.teamInstructions?.departments?.practice?.autonomy ??
+            (t.gameplan.delegatePractice ? 'delegate' : 'guided')
+        ).toLowerCase();
+
+        const gameplanAutonomy = String(
+            t.teamInstructions?.departments?.gameplan?.autonomy ??
+            (t.gameplan.delegateGameplan ? 'delegate' : 'guided')
+        ).toLowerCase();
+
+        const shouldDelegatePractice =
+            !t.isPlayerControlled ||
+            practiceAutonomy !== 'direct';
+
+        const shouldDelegateGameplan =
+            !t.isPlayerControlled ||
+            gameplanAutonomy !== 'direct';
 
         // Identify the upcoming opponent for every team, including
         // player-controlled teams managing their own preparation.
@@ -3517,14 +3579,14 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
             upcomingOpponent
         );
 
-        if (!t.isPlayerControlled || isDelegated) {
+        if (shouldDelegatePractice || shouldDelegateGameplan) {
             const directive = t.gameplan?.gmDirective || 'COACH_AUTONOMY';
 
-            if (!t.isPlayerControlled || t.gameplan?.delegateGameplan) {
+            if (shouldDelegateGameplan) {
                 aiBuildGameplan(t, upcomingOpponent, directive);
             }
 
-            if (!t.isPlayerControlled || t.gameplan?.delegatePractice) {
+            if (shouldDelegatePractice) {
                 t.gameplan.weeklyPractice = aiChooseWeeklyPractice(
                     t,
                     upcomingOpponent,
@@ -3534,23 +3596,28 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
         }
 
         processWeeklyPractice(t, game.gameLog);
-        // Apply effective staff capacity to scouting for this resolution
-        // without permanently changing the player's requested assignments.
-        const scoutingAssignments = (
+        // Apply effective staff capacity to every executable work type
+        // without permanently changing the requested assignments.
+        const weeklyWorkAssignments = (
             t.staffWorkPlan?.assignments || []
         ).filter(assignment =>
             assignment &&
-            assignment.task === 'scouting' &&
+            [
+                'scouting',
+                'training',
+                'offensePrep',
+                'defensePrep'
+            ].includes(assignment.task) &&
             assignment.coachId != null
         );
 
         // Calculate every assignment before modifying any requested hours.
-        const effectiveScoutingHours = scoutingAssignments.map(assignment => ({
+        const effectiveWorkHours = weeklyWorkAssignments.map(assignment => ({
             assignment,
             hours: getEffectiveStaffWorkHours(t, assignment)
         }));
 
-        const originalScoutingHours = scoutingAssignments.map(assignment => ({
+        const originalWorkHours = weeklyWorkAssignments.map(assignment => ({
             assignment,
             hadHours: Object.prototype.hasOwnProperty.call(
                 assignment,
@@ -3560,7 +3627,7 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
         }));
 
         try {
-            effectiveScoutingHours.forEach(({ assignment, hours }) => {
+            effectiveWorkHours.forEach(({ assignment, hours }) => {
                 assignment.hours = hours;
             });
 
@@ -3571,8 +3638,8 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
                 game.currentWeek
             );
         } finally {
-            // Restore the saved workload even if scouting throws an error.
-            originalScoutingHours.forEach(({
+            // Restore requested hours even if staff work processing fails.
+            originalWorkHours.forEach(({
                 assignment,
                 hadHours,
                 hours
@@ -7364,6 +7431,55 @@ function getTrainingOverallScore(player, position, team) {
     return low + ((high - low) / 2) * confidence;
 }
 
+const DEVELOPMENT_PRIORITY_RANKS = {
+    must: 5,
+    high: 4,
+    normal: 3,
+    monitor: 2,
+    ignore: 0
+};
+
+function getTeamDevelopmentPriority(team, player) {
+    const development =
+        team?.teamInstructions?.departments?.development || {};
+
+    const playerPriorities = development.playerPriorities || {};
+    const positionPriorities = development.positionPriorities || {};
+
+    const playerKey = String(player?.id ?? '');
+    const position = getTrainingPlayerPosition(player);
+
+    const hasPlayerPriority =
+        Object.prototype.hasOwnProperty.call(
+            playerPriorities,
+            playerKey
+        );
+
+    // Individual player instructions take precedence over
+    // the broader position-group instructions.
+    const rawPriority = hasPlayerPriority
+        ? playerPriorities[playerKey]
+        : position
+            ? positionPriorities[position]
+            : null;
+
+    const level = String(rawPriority || 'normal')
+        .toLowerCase()
+        .trim();
+
+    const rank =
+        DEVELOPMENT_PRIORITY_RANKS[level] ??
+        DEVELOPMENT_PRIORITY_RANKS.normal;
+
+    return {
+        level: DEVELOPMENT_PRIORITY_RANKS[level] === undefined
+            ? 'normal'
+            : level,
+        rank,
+        ignored: rank === 0
+    };
+}
+
 function getTrainingAssignmentTargetIds(team, assignment) {
     if (
         !team ||
@@ -7379,21 +7495,30 @@ function getTrainingAssignmentTargetIds(team, assignment) {
 
     const focus = String(assignment.focus || 'all');
 
-    const candidates = roster.filter(player => {
-        const position = getTrainingPlayerPosition(player, team);
+    const candidates = roster
+        .filter(player => {
+            const position = getTrainingPlayerPosition(player);
 
-        if (focus === 'all') return true;
+            if (focus === 'all') return true;
 
-        if (focus === 'offense') {
-            return TRAINING_OFFENSE_POSITIONS.has(position);
-        }
+            if (focus === 'offense') {
+                return TRAINING_OFFENSE_POSITIONS.has(position);
+            }
 
-        if (focus === 'defense') {
-            return TRAINING_DEFENSE_POSITIONS.has(position);
-        }
+            if (focus === 'defense') {
+                return TRAINING_DEFENSE_POSITIONS.has(position);
+            }
 
-        return position === focus;
-    });
+            return position === focus;
+        })
+        .map(player => ({
+            player,
+            instructionPriority:
+                getTeamDevelopmentPriority(team, player)
+        }))
+        .filter(candidate =>
+            !candidate.instructionPriority.ignored
+        );
 
     const rawMaxTargets = Number(assignment.maxTargets);
 
@@ -7405,36 +7530,38 @@ function getTrainingAssignmentTargetIds(team, assignment) {
     const skill = String(assignment.skill || '').trim();
 
     candidates.sort((a, b) => {
-        const positionA = getTrainingPlayerPosition(a, team);
-        const positionB = getTrainingPlayerPosition(b, team);
+        if (
+            a.instructionPriority.rank !==
+            b.instructionPriority.rank
+        ) {
+            return (
+                b.instructionPriority.rank -
+                a.instructionPriority.rank
+            );
+        }
+
+        const positionA =
+            getTrainingPlayerPosition(a.player) || 'WR';
+
+        const positionB =
+            getTrainingPlayerPosition(b.player) || 'WR';
 
         const scoreA = skill
-            ? getTrainingAttributeScore(a, skill, team)
-            : getTrainingOverallScore(a, positionA, team);
+            ? getTrainingAttributeScore(a.player, skill)
+            : calculateOverall(a.player, positionA);
 
         const scoreB = skill
-            ? getTrainingAttributeScore(b, skill, team)
-            : getTrainingOverallScore(b, positionB, team);
-
-        // When reports are equally incomplete, favor younger players
-        // and players with fewer recent snaps rather than hidden ratings.
-        const ageDifference =
-            (Number(a.age) || 14) - (Number(b.age) || 14);
-
-        const snapDifference =
-            (Number(a.snapsThisWeek) || 0) -
-            (Number(b.snapsThisWeek) || 0);
+            ? getTrainingAttributeScore(b.player, skill)
+            : calculateOverall(b.player, skill);
 
         return scoreA - scoreB ||
-            ageDifference ||
-            snapDifference ||
-            String(a.id).localeCompare(String(b.id));
+            String(a.player.id).localeCompare(String(b.player.id));
     });
 
     return new Set(
         candidates
             .slice(0, maxTargets)
-            .map(player => String(player.id))
+            .map(candidate => String(candidate.player.id))
     );
 }
 

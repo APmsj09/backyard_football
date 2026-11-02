@@ -310,8 +310,10 @@ export function aiSetDepthChart(team) {
 }
 
 export function assignPlayerToSlot(team, playerId, slot, side) {
-    if (!team || !['offense', 'defense'].includes(side)) return false;
+    if (!team) return false;
+    if (!['offense', 'defense'].includes(side)) return false;
 
+    // Only allow assignments to slots in the active formation.
     const formationMap = side === 'offense'
         ? offenseFormations
         : defenseFormations;
@@ -330,22 +332,39 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
 
     if (!activeSlots.includes(slot)) return false;
 
-    if (!team.depthChart) team.depthChart = { offense: {}, defense: {}, special: {} };
-    if (!team.depthChart.offense) team.depthChart.offense = {};
-    if (!team.depthChart.defense) team.depthChart.defense = {};
-    if (!team.depthChart.special) team.depthChart.special = {};
-    if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
-    if (!team.slotOverrides[side]) team.slotOverrides[side] = {};
+    if (!team.depthChart) {
+        team.depthChart = {
+            offense: {},
+            defense: {},
+            special: {}
+        };
+    }
 
-    // 1. CLEAR SLOT: Lock as explicitly empty
+    if (!team.depthChart[side]) {
+        team.depthChart[side] = {};
+    }
+
+    if (!team.slotOverrides) {
+        team.slotOverrides = {
+            offense: {},
+            defense: {}
+        };
+    }
+
+    if (!team.slotOverrides[side]) {
+        team.slotOverrides[side] = {};
+    }
+
+    // Explicitly vacate and lock the selected formation slot.
     if (!playerId || playerId === 'null' || playerId === '') {
         team.slotOverrides[side][slot] = null;
         team.depthChart[side][slot] = null;
+
         rebuildDepthChartFromOrder(team);
         return true;
     }
 
-    // 2. ASSIGN SLOT: Validate before locking the assignment.
+    // Only game-day eligible players can be assigned.
     const gameDayRoster = getGameDayRosterObjects(team);
 
     if (!gameDayRoster.some(
@@ -355,6 +374,7 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
     }
 
     let posKey = slot.replace(/\d+/g, '');
+
     if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
     if (posKey === 'FB') posKey = 'RB';
     if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
@@ -366,10 +386,15 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
         return false;
     }
 
-    // Remove this player from any other slot override on this side to prevent duplicate clones
-    Object.keys(team.slotOverrides[side] || {}).forEach(otherSlot => {
-        if (otherSlot !== slot && team.slotOverrides[side][otherSlot] === playerId) {
+    // Remove this player from any other manual slot assignment
+    // on this side to prevent duplicate assignments.
+    Object.keys(team.slotOverrides[side]).forEach(otherSlot => {
+        if (
+            otherSlot !== slot &&
+            team.slotOverrides[side][otherSlot] === playerId
+        ) {
             delete team.slotOverrides[side][otherSlot];
+
             if (team.depthChart[side][otherSlot] === playerId) {
                 team.depthChart[side][otherSlot] = null;
             }
@@ -387,9 +412,16 @@ export function assignPlayerToSlot(team, playerId, slot, side) {
 
 export function updateDepthChart(playerId, slotName, side) {
     const team = game?.playerTeam;
-    if (!team) return;
+    if (!team) return false;
 
-    assignPlayerToSlot(team, playerId, slotName, side);
+    // Keep all assignment paths subject to the same validation
+    // and preserve universal position rankings.
+    return assignPlayerToSlot(
+        team,
+        playerId,
+        slotName,
+        side
+    );
 }
 
 export function changeFormation(side, formationName) {

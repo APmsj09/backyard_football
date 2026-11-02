@@ -2427,15 +2427,150 @@ export function processCoachOffseasonRetention(
 }
 
 
-function buildDefaultAutomatedStaffAssignments(coaches) {
-    const specialtyTasks = [
-        'scouting',
-        'offensePrep',
-        'defensePrep'
-    ];
+function buildDefaultAutomatedStaffAssignments(
+    coaches,
+    instructions = null
+) {
+    const departments = instructions?.departments || {};
 
-    const taskScore = (coach, task) =>
-        getAiStaffTaskScore(coach, task);
+    const staffAutonomy =
+        departments.staff?.autonomy || 'guided';
+
+    // Direct control means the GM manages the assignments manually.
+    if (staffAutonomy === 'direct') {
+        return [];
+    }
+
+    const priorityWeights = {
+        must: 2.0,
+        high: 1.5,
+        normal: 1.0,
+        monitor: 0.5,
+        ignore: 0
+    };
+
+    const getPriorityWeight = value => {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return 0.5 + Math.max(0, Math.min(100, value)) / 100;
+        }
+
+        return priorityWeights[
+            String(value || 'normal').toLowerCase()
+        ] ?? 1.0;
+    };
+
+    const getMapPriorityWeight = maps => {
+        const values = maps.flatMap(map =>
+            map && typeof map === 'object' && !Array.isArray(map)
+                ? Object.values(map).filter(value => value != null)
+                : []
+        );
+
+        if (values.length === 0) return 1;
+
+        return values.reduce(
+            (total, value) => total + getPriorityWeight(value),
+            0
+        ) / values.length;
+    };
+
+    const getDepartmentWeight = (
+        department,
+        mapKeys = []
+    ) => {
+        if (!department) return 1;
+
+        const autonomy = department.autonomy || 'guided';
+
+        if (autonomy === 'direct') return 0;
+
+        const maps = mapKeys
+            .map(key => department[key])
+            .filter(map =>
+                map &&
+                typeof map === 'object' &&
+                !Array.isArray(map) &&
+                Object.keys(map).length > 0
+            );
+
+        const priorityWeight = getMapPriorityWeight(maps);
+
+        // Delegated coaches retain more discretion.
+        // Guided coaches follow GM priorities more closely.
+        if (autonomy === 'delegate') {
+            return 0.65 + priorityWeight * 0.35;
+        }
+
+        return priorityWeight;
+    };
+
+    const getCombinedDepartmentWeight = departmentsToCombine => {
+        const activeWeights = departmentsToCombine
+            .map(([department, mapKeys]) => {
+                if (department?.autonomy === 'direct') {
+                    return null;
+                }
+
+                return getDepartmentWeight(department, mapKeys);
+            })
+            .filter(weight => weight !== null);
+
+        if (activeWeights.length === 0) return 0;
+
+        return activeWeights.reduce(
+            (total, weight) => total + weight,
+            0
+        ) / activeWeights.length;
+    };
+
+    // Translate team-level priorities into department workload weights.
+    const scoutingWeight = getDepartmentWeight(
+        departments.scouting,
+        ['positionPriorities', 'prospectPriorities']
+    );
+
+    const developmentWeight = getDepartmentWeight(
+        departments.development,
+        ['positionPriorities', 'playerPriorities']
+    );
+
+    const offensePrepWeight = getCombinedDepartmentWeight([
+        [departments.practice, ['offenseEmphasis']],
+        [departments.gameplan, ['offenseEmphasis']]
+    ]);
+
+    const defensePrepWeight = getCombinedDepartmentWeight([
+        [departments.practice, ['defenseEmphasis']],
+        [departments.gameplan, ['defenseEmphasis']]
+    ]);
+
+    const tasks = [
+        { task: 'scouting', priority: scoutingWeight },
+        { task: 'training', priority: developmentWeight },
+        { task: 'offensePrep', priority: offensePrepWeight },
+        { task: 'defensePrep', priority: defensePrepWeight }
+    ].filter(item =>
+        Number.isFinite(item.priority) &&
+        item.priority > 0
+    );
+
+    if (tasks.length === 0) return [];
+
+    const taskScore = (coach, task) => {
+        const skills = COACH_DEVELOPMENT_TASK_SKILLS[task] || [];
+
+        if (skills.length === 0) return 50;
+
+        return skills.reduce((total, skill) => {
+            const value = Number(coach.ratings?.[skill]);
+
+            return total + (
+                Number.isFinite(value)
+                    ? Math.max(0, Math.min(100, value))
+                    : 50
+            );
+        }, 0) / skills.length;
+    };
 
     const eligibleCoaches = coaches
         .filter(coach => coach?.id != null)
@@ -2458,142 +2593,315 @@ function buildDefaultAutomatedStaffAssignments(coaches) {
         })
         .filter(item => item.capacity > 0);
 
-    const remainingCoaches = [...eligibleCoaches];
     const assignments = [];
-    const coveredTasks = new Set();
 
-    // Give the three core responsibilities a primary specialist first.
-    for (const task of specialtyTasks) {
-        if (remainingCoaches.length === 0) break;
+    // Every coach contributes hours according to their own abilities
+    // and the GM's priorities. Their total never exceeds availability.
+    for (const { coach, capacity } of eligibleCoaches) {
+        const weightedTasks = tasks.map(item => ({
+            task: item.task,
+            weight: item.priority *
+                (0.5 + taskScore(coach, item.task) / 100)
+        }));
 
-        remainingCoaches.sort(
-            (a, b) =>
-                taskScore(b.coach, task) -
-                taskScore(a.coach, task)
+        const totalWeight = weightedTasks.reduce(
+            (total, item) => total + item.weight,
+            0
         );
 
-        const { coach, capacity } = remainingCoaches.shift();
+        if (totalWeight <= 0) continue;
 
-        const specialtyHours = Math.max(
-            1,
-            Math.round(capacity * 0.70)
+        const allocations = weightedTasks.map(item => {
+            const exactHours =
+                capacity * item.weight / totalWeight;
+
+            const hours = Math.floor(exactHours);
+
+            return {
+                task: item.task,
+                hours,
+                remainder: exactHours - hours
+            };
+        });
+
+        let remainingHours = capacity - allocations.reduce(
+            (total, item) => total + item.hours,
+            0
         );
 
-        const trainingHours = capacity - specialtyHours;
+        // Distribute rounding remainder without exceeding capacity.
+        const remainderOrder = [...allocations].sort(
+            (a, b) => b.remainder - a.remainder
+        );
 
-        assignments.push({
-            coachId: String(coach.id),
-            task,
-            hours: specialtyHours,
-            focus: 'all',
-            ...(task === 'scouting' ? { maxTargets: 2 } : {})
-        });
+        for (const item of remainderOrder) {
+            if (remainingHours <= 0) break;
 
-        coveredTasks.add(task);
-
-        if (trainingHours > 0) {
-            assignments.push({
-                coachId: String(coach.id),
-                task: 'training',
-                hours: trainingHours,
-                focus: 'all',
-                maxTargets: 4
-            });
-        }
-    }
-
-    // Additional coaches can focus entirely on player development.
-    for (const { coach, capacity } of remainingCoaches) {
-        assignments.push({
-            coachId: String(coach.id),
-            task: 'training',
-            hours: capacity,
-            focus: 'all',
-            maxTargets: 4
-        });
-    }
-
-    // When there are fewer than three coaches, transfer some development
-    // hours into secondary coverage of the missing responsibilities.
-    const uncoveredTasks = specialtyTasks.filter(
-        task => !coveredTasks.has(task)
-    );
-
-    for (let taskIndex = 0; taskIndex < uncoveredTasks.length; taskIndex++) {
-        const task = uncoveredTasks[taskIndex];
-        const remainingTaskCount = uncoveredTasks.length - taskIndex;
-
-        const candidates = eligibleCoaches
-            .map(({ coach }) => {
-                const trainingAssignment = assignments.find(
-                    assignment =>
-                        assignment.task === 'training' &&
-                        String(assignment.coachId) === String(coach.id)
-                );
-
-                const existingSpecialtyCount = assignments.filter(
-                    assignment =>
-                        assignment.task !== 'training' &&
-                        String(assignment.coachId) === String(coach.id)
-                ).length;
-
-                return {
-                    coach,
-                    trainingAssignment,
-                    existingSpecialtyCount,
-                    fitScore: taskScore(coach, task)
-                };
-            })
-            .filter(candidate =>
-                candidate.trainingAssignment &&
-                Number(candidate.trainingAssignment.hours) > 0
-            )
-            .sort((a, b) =>
-                a.existingSpecialtyCount - b.existingSpecialtyCount ||
-                b.fitScore - a.fitScore
+            const allocation = allocations.find(
+                candidate => candidate.task === item.task
             );
 
-        const selected = candidates[0];
+            allocation.hours++;
+            remainingHours--;
+        }
 
-        if (!selected) continue;
+        allocations.forEach(allocation => {
+            if (allocation.hours <= 0) return;
 
-        const availableTrainingHours = Math.max(
-            0,
-            Math.floor(
-                Number(selected.trainingAssignment.hours) || 0
-            )
+            assignments.push({
+                coachId: String(coach.id),
+                task: allocation.task,
+                hours: allocation.hours,
+
+                ...(allocation.task === 'scouting'
+                    ? {
+                        focus: 'all',
+                        maxTargets: 2
+                    }
+                    : {}),
+
+                ...(allocation.task === 'training'
+                    ? {
+                        focus: 'all',
+                        maxTargets: 4
+                    }
+                    : {})
+            });
+        });
+    }
+
+    return assignments;
+}
+
+export const TEAM_AUTONOMY_LEVELS = Object.freeze([
+    'delegate',
+    'guided',
+    'direct'
+]);
+
+export const TEAM_PRIORITY_LEVELS = Object.freeze([
+    'must',
+    'high',
+    'normal',
+    'monitor',
+    'ignore'
+]);
+
+const TEAM_EXPERIENCE_PRESETS = Object.freeze([
+    'casual_gm',
+    'hands_on_gm',
+    'director_of_football_operations',
+    'custom'
+]);
+
+function ensureInstructionObject(parent, key) {
+    if (
+        !parent[key] ||
+        typeof parent[key] !== 'object' ||
+        Array.isArray(parent[key])
+    ) {
+        parent[key] = {};
+    }
+
+    return parent[key];
+}
+
+/**
+ * Creates and migrates persistent GM instructions.
+ *
+ * Instructions represent what the GM wants.
+ * Staff work plans represent how staff execute those instructions.
+ *
+ * Existing instructions and player-configured priorities are preserved.
+ */
+export function ensureTeamInstructions(team) {
+    if (!team) return null;
+
+    const instructions = ensureInstructionObject(
+        team,
+        'teamInstructions'
+    );
+
+    const version = Number(instructions.version);
+
+    instructions.version =
+        Number.isInteger(version) && version > 0
+            ? version
+            : 1;
+
+    if (!TEAM_EXPERIENCE_PRESETS.includes(
+        instructions.experiencePreset
+    )) {
+        instructions.experiencePreset = 'casual_gm';
+    }
+
+    const departments = ensureInstructionObject(
+        instructions,
+        'departments'
+    );
+
+    const ensureDepartment = (
+        key,
+        defaults,
+        legacyDelegation
+    ) => {
+        const department = ensureInstructionObject(
+            departments,
+            key
         );
 
-        // Preserve up to four hours for player development when possible.
-        // Distribute the remaining hours across uncovered responsibilities.
-        const protectedTrainingHours = Math.min(
-            4,
-            availableTrainingHours
-        );
+        if (!TEAM_AUTONOMY_LEVELS.includes(
+            department.autonomy
+        )) {
+            department.autonomy =
+                legacyDelegation === true
+                    ? 'delegate'
+                    : 'guided';
+        }
 
-        const distributableHours = Math.max(
-            0,
-            availableTrainingHours - protectedTrainingHours
-        );
+        if (typeof department.philosophy !== 'string') {
+            department.philosophy = defaults.philosophy;
+        }
 
-        const secondaryHours = Math.min(
-            8,
-            Math.floor(distributableHours / remainingTaskCount)
-        );
-
-        if (secondaryHours <= 0) continue;
-
-        selected.trainingAssignment.hours -= secondaryHours;
-
-        assignments.push({
-            coachId: String(selected.coach.id),
-            task,
-            hours: secondaryHours,
-            focus: 'all',
-            ...(task === 'scouting' ? { maxTargets: 2 } : {})
+        (defaults.maps || []).forEach(mapKey => {
+            ensureInstructionObject(department, mapKey);
         });
 
-        coveredTasks.add(task);
+        return department;
+    };
+
+    // Recruiting priorities are separate from scouting priorities.
+    const recruiting = ensureDepartment(
+        'recruiting',
+        {
+            philosophy: 'balanced',
+            maps: [
+                'positionPriorities',
+                'prospectPriorities'
+            ]
+        }
+    );
+
+    const automaticOfferPolicy = ensureInstructionObject(
+        recruiting,
+        'automaticOfferPolicy'
+    );
+
+    if (typeof automaticOfferPolicy.enabled !== 'boolean') {
+        automaticOfferPolicy.enabled = false;
+    }
+
+    if (
+        automaticOfferPolicy.minimumInterest !== null &&
+        automaticOfferPolicy.minimumInterest !== undefined
+    ) {
+        const threshold = Number(
+            automaticOfferPolicy.minimumInterest
+        );
+
+        automaticOfferPolicy.minimumInterest =
+            Number.isFinite(threshold)
+                ? Math.max(0, Math.min(100, threshold))
+                : null;
+    } else {
+        automaticOfferPolicy.minimumInterest = null;
+    }
+
+    // Scouting has its own priorities and information objectives.
+    ensureDepartment(
+        'scouting',
+        {
+            philosophy: 'roster_needs',
+            maps: [
+                'positionPriorities',
+                'prospectPriorities'
+            ]
+        }
+    );
+
+    // Player development is distinct from weekly practice planning.
+    ensureDepartment(
+        'development',
+        {
+            philosophy: 'balanced',
+            maps: [
+                'positionPriorities',
+                'playerPriorities'
+            ]
+        }
+    );
+
+    // Practice instructions guide the coaches' choice of drills and concepts.
+    ensureDepartment(
+        'practice',
+        {
+            philosophy: 'balanced',
+            maps: [
+                'offenseEmphasis',
+                'defenseEmphasis'
+            ]
+        },
+        team.gameplan?.delegatePractice
+    );
+
+    // Game planning remains distinct from practice.
+    ensureDepartment(
+        'gameplan',
+        {
+            philosophy: 'balanced',
+            maps: [
+                'offenseEmphasis',
+                'defenseEmphasis'
+            ]
+        },
+        team.gameplan?.delegateGameplan
+    );
+
+    // Staff autonomy governs how the workload itself is allocated.
+    ensureDepartment(
+        'staff',
+        {
+            philosophy: 'skills_and_capacity',
+            maps: []
+        }
+    );
+
+    return instructions;
+}
+
+/**
+ * Builds a fresh automated workload for a team using its persistent
+ * GM instructions, staff skills, and current offseason stage.
+ *
+ * This returns assignments without replacing the team's saved work plan.
+ */
+export function buildAutomatedStaffAssignmentsForTeam(
+    team,
+    gameState = null
+) {
+    if (!team) return [];
+
+    const instructions = ensureTeamInstructions(team);
+    const coaches = ensureTeamCoachingStaff(team);
+
+    const assignments = buildDefaultAutomatedStaffAssignments(
+        coaches,
+        instructions
+    );
+
+    // Preserve the recruiting/scouting stage behavior used by the staff UI.
+    if (gameState) {
+        const scoutingFocus = !gameState.draftCompleted
+            ? 'draft'
+            : !gameState.offseasonFACompleted
+                ? 'freeAgents'
+                : 'youth';
+
+        assignments.forEach(assignment => {
+            if (assignment.task === 'scouting') {
+                assignment.focus = scoutingFocus;
+            }
+        });
     }
 
     return assignments;
@@ -2605,6 +2913,9 @@ function buildDefaultAutomatedStaffAssignments(coaches) {
  */
 export function ensureTeamStaffWorkPlan(team) {
     if (!team) return null;
+
+    ensureTeamInstructions(team);
+
     // Migrate older saves and cover both legacy roles and the flexible
     // coaching group. De-duplicate staff who appear in both structures.
     const staffRecords = [
@@ -2636,7 +2947,8 @@ export function ensureTeamStaffWorkPlan(team) {
             version: 1,
             weeklyHoursPerCoach: WEEKLY_COACH_HOURS,
             assignments: buildDefaultAutomatedStaffAssignments(
-                ensureTeamCoachingStaff(team)
+                ensureTeamCoachingStaff(team),
+                team.teamInstructions
             ),
             defaultWorkloadSeeded: true
         };
@@ -2659,8 +2971,9 @@ export function ensureTeamStaffWorkPlan(team) {
         !plan.autoAssignedFor
     ) {
         plan.assignments = buildDefaultAutomatedStaffAssignments(
-        ensureTeamCoachingStaff(team)
-    );
+            ensureTeamCoachingStaff(team),
+            team.teamInstructions
+        );
         plan.defaultWorkloadSeeded = true;
     }
 
@@ -4481,11 +4794,32 @@ export function processAiRecruitingDay(gameState) {
     }
 
     const actions = [];
-    const teams = gameState.teams.filter(team =>
-        team &&
-        team.leagueType === 'main' &&
-        !team.isPlayerControlled
-    );
+
+    const playerTeamId = gameState.playerTeam?.id == null
+        ? null
+        : String(gameState.playerTeam.id);
+
+    const teams = gameState.teams.filter(team => {
+        if (!team || team.leagueType !== 'main') {
+            return false;
+        }
+
+        const isPlayerTeam =
+            team.isPlayerControlled === true ||
+            (
+                playerTeamId !== null &&
+                String(team.id) === playerTeamId
+            );
+
+        if (!isPlayerTeam) return true;
+
+        const autonomy = String(
+            team.teamInstructions?.departments?.recruiting?.autonomy ||
+            'guided'
+        ).toLowerCase();
+
+        return autonomy !== 'direct';
+    });
 
     for (const team of teams) {
         const teamKey = String(team.id);
@@ -4500,6 +4834,87 @@ export function processAiRecruitingDay(gameState) {
         }
 
         const teamWork = progress.teamDailyWork[teamKey];
+        const recruitingInstructions =
+            team.teamInstructions?.departments?.recruiting || {};
+
+        const prospectPriorities =
+            recruitingInstructions.prospectPriorities || {};
+
+        const positionPriorities =
+            recruitingInstructions.positionPriorities || {};
+
+        const recruitingAutonomy = String(
+            recruitingInstructions.autonomy || 'guided'
+        ).toLowerCase();
+
+        // Guided staff follow GM priorities more closely.
+        // Delegated staff retain somewhat more discretion.
+        const priorityInfluence =
+            recruitingAutonomy === 'delegate' ? 0.65 : 1;
+
+        const priorityAdjustments = {
+            must: 12,
+            high: 6,
+            normal: 0,
+            monitor: -6,
+            ignore: 0
+        };
+
+        const getRecruitingPriority = (player, position) => {
+            const playerKey = String(player?.id ?? '');
+
+            const hasProspectPriority =
+                Object.prototype.hasOwnProperty.call(
+                    prospectPriorities,
+                    playerKey
+                );
+
+            const rawPriority =
+                hasProspectPriority &&
+                prospectPriorities[playerKey] != null
+                    ? prospectPriorities[playerKey]
+                    : position
+                        ? positionPriorities[position]
+                        : null;
+
+            if (
+                typeof rawPriority === 'number' &&
+                Number.isFinite(rawPriority)
+            ) {
+                const normalized = Math.max(
+                    0,
+                    Math.min(100, rawPriority)
+                );
+
+                return {
+                    level: 'custom',
+                    adjustment: (normalized - 50) / 5,
+                    skip: false
+                };
+            }
+
+            const level = String(rawPriority || 'normal')
+                .trim()
+                .toLowerCase();
+
+            const isValidPriority =
+                Object.prototype.hasOwnProperty.call(
+                    priorityAdjustments,
+                    level
+                );
+
+            const normalizedLevel = isValidPriority
+                ? level
+                : 'normal';
+
+            return {
+                level: normalizedLevel,
+                adjustment: priorityAdjustments[normalizedLevel],
+                skip:
+                    normalizedLevel === 'monitor' ||
+                    normalizedLevel === 'ignore'
+            };
+        };
         const assignmentsForWeek = () =>
             Object.values(teamWork).flatMap(assignments =>
                 Array.isArray(assignments) ? assignments : []
@@ -4667,10 +5082,20 @@ export function processAiRecruitingDay(gameState) {
                 }
 
                 const position = getPlayerPosition(player, team);
+
+                const recruitingPriority = getRecruitingPriority(
+                    player,
+                    position
+                );
+
+                if (recruitingPriority.skip) {
+                    return null;
+                }
+
                 const peers = roster.filter(member =>
                     position &&
                     String(member?.pos || '').toUpperCase() === position
-                );  
+                );
 
                 const targetCount = positionTargets[position];
 
@@ -5071,6 +5496,7 @@ export function processAiRecruitingDay(gameState) {
                     scoutingAdjustment +
                     scoutingPreferenceAdjustment +
                     competitionAdjustment +
+                    recruitingPriority.adjustment * priorityInfluence +
                     targetJudgmentNoise;
 
                 // Evaluate the recruiting tactic against this particular
@@ -7673,6 +8099,17 @@ export function aiSetSituationalGameplan(team) {
 export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTONOMY') {
     if (!team || !team.gameplan) return;
 
+    ensureTeamInstructions(team);
+
+    const gameplanInstructions =
+        team.teamInstructions?.departments?.gameplan || {};
+
+    const offenseEmphasis =
+        gameplanInstructions.offenseEmphasis || {};
+
+    const defenseEmphasis =
+        gameplanInstructions.defenseEmphasis || {};
+
     aiSetSituationalGameplan(team);
 
     const offenseCoach = getTeamCoachingSpecialist(team, 'offensePrep');
@@ -7770,6 +8207,115 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         return Math.min(18, totalBonus);
     };
 
+        const instructionPriorityScores = {
+        must: 18,
+        high: 9,
+        normal: 0,
+        monitor: -8,
+        ignore: -24
+    };
+
+    const getInstructionPriorityScore = rawValue => {
+        const value = rawValue &&
+            typeof rawValue === 'object'
+                ? rawValue.priority ?? rawValue.level
+                : rawValue;
+
+        if (
+            typeof value === 'number' &&
+            Number.isFinite(value)
+        ) {
+            return (
+                Math.max(0, Math.min(100, value)) - 50
+            ) * 0.30;
+        }
+
+        const normalized = String(value ?? '')
+            .trim()
+            .toLowerCase();
+
+        if (
+            normalized !== '' &&
+            Number.isFinite(Number(normalized))
+        ) {
+            return (
+                Math.max(
+                    0,
+                    Math.min(100, Number(normalized))
+                ) - 50
+            ) * 0.30;
+        }
+
+        return instructionPriorityScores[normalized] ?? 0;
+    };
+
+    const getInstructionEmphasisScore = (
+        emphasis,
+        playKey,
+        play
+    ) => {
+        if (
+            !emphasis ||
+            typeof emphasis !== 'object' ||
+            Array.isArray(emphasis)
+        ) {
+            return 0;
+        }
+
+        const entries = Object.entries(emphasis);
+
+        const findEmphasisValue = key => {
+            const normalizedKey = String(key)
+                .trim()
+                .toLowerCase();
+
+            const entry = entries.find(
+                ([mapKey]) =>
+                    String(mapKey).trim().toLowerCase() ===
+                    normalizedKey
+            );
+
+            return entry?.[1];
+        };
+
+        // An individual play instruction takes precedence over
+        // broader type, concept, or tag instructions.
+        const exactPlayPriority = findEmphasisValue(playKey);
+
+        if (exactPlayPriority != null) {
+            return getInstructionPriorityScore(
+                exactPlayPriority
+            );
+        }
+
+        const descriptors = [
+            play?.type,
+            play?.concept,
+            ...(Array.isArray(play?.tags) ? play.tags : []),
+            ...(play?.blitz ? ['blitz'] : [])
+        ].filter(value =>
+            typeof value === 'string' && value.trim()
+        );
+
+        const matchingValues = [
+            ...new Set(
+                descriptors.map(value =>
+                    String(value).trim().toLowerCase()
+                )
+            )
+        ]
+            .map(findEmphasisValue)
+            .filter(value => value != null);
+
+        if (matchingValues.length === 0) return 0;
+
+        return matchingValues.reduce(
+            (total, value) =>
+                total + getInstructionPriorityScore(value),
+            0
+        ) / matchingValues.length;
+    };
+
     // Score offensive plays based on Coach Bias + Roster Fit + GM Directive
     const scoredOff = allOffKeys.map(key => {
         const play = offensivePlaybook[key];
@@ -7797,6 +8343,12 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
             if (oppDef.includes('4-2-2') && play.type === 'pass') score += 20; // Pass against run-heavy fronts
             if (oppDef.includes('3-0-5') && play.type === 'run') score += 20;  // Run against dime looks
         }
+
+        score += getInstructionEmphasisScore(
+            offenseEmphasis,
+            key,
+            play
+        );
 
         score += getPreparationScoreBonus('offensePrep', key);
 
@@ -7827,6 +8379,12 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
             if (oppOff.includes('Spread') && play.concept === 'Zone') score += 20;
             if (oppOff.includes('Power') && play.concept === 'Run') score += 25;
         }
+
+        score += getInstructionEmphasisScore(
+            defenseEmphasis,
+            key,
+            play
+        );
 
         score += getPreparationScoreBonus('defensePrep', key);
 
@@ -8244,6 +8802,183 @@ export function aiChooseWeeklyPractice(
     const lowerIntensityFocus = () =>
         hasUpcomingOpponent ? 'scouting' : 'chalk_talk';
 
+        const practiceInstructions =
+        team.teamInstructions?.departments?.practice || {};
+
+    const getPracticePriorityScore = rawValue => {
+        const value = rawValue &&
+            typeof rawValue === 'object'
+                ? rawValue.priority ?? rawValue.level
+                : rawValue;
+
+        if (
+            typeof value === 'number' &&
+            Number.isFinite(value)
+        ) {
+            return (
+                Math.max(0, Math.min(100, value)) - 50
+            ) / 25;
+        }
+
+        const normalized = String(value ?? '')
+            .trim()
+            .toLowerCase();
+
+        const priorityScores = {
+            must: 2,
+            high: 1,
+            normal: 0,
+            monitor: -0.5,
+            ignore: -1.5
+        };
+
+        if (
+            Object.prototype.hasOwnProperty.call(
+                priorityScores,
+                normalized
+            )
+        ) {
+            return priorityScores[normalized];
+        }
+
+        if (
+            normalized !== '' &&
+            Number.isFinite(Number(normalized))
+        ) {
+            return (
+                Math.max(
+                    0,
+                    Math.min(100, Number(normalized))
+                ) - 50
+            ) / 25;
+        }
+
+        return null;
+    };
+
+    const getSidePracticeEmphasis = side => {
+        const emphasis = side === 'offense'
+            ? practiceInstructions.offenseEmphasis
+            : practiceInstructions.defenseEmphasis;
+
+        if (
+            !emphasis ||
+            typeof emphasis !== 'object' ||
+            Array.isArray(emphasis)
+        ) {
+            return null;
+        }
+
+        const playbook = side === 'offense'
+            ? offensivePlaybook
+            : defensivePlaybook;
+
+        const foundationKeys = side === 'offense'
+            ? [
+                'Uni_InsideZone',
+                'Uni_StretchRight',
+                'Uni_QuickSlants',
+                'Uni_FourVerts'
+            ]
+            : [
+                'Cover_2_Zone_Base',
+                'Cover_1_Robber',
+                'Man_Blitz_Base',
+                'GoalLine_RunStuff'
+            ];
+
+        const installedKeys = side === 'offense'
+            ? team.gameplan.installedOffense || []
+            : team.gameplan.installedDefense || [];
+
+        const playKeys = [
+            ...new Set([
+                ...foundationKeys,
+                ...installedKeys
+            ])
+        ];
+
+        const entries = Object.entries(emphasis);
+
+        const findPriority = key => {
+            const normalizedKey = String(key)
+                .trim()
+                .toLowerCase();
+
+            const entry = entries.find(
+                ([mapKey]) =>
+                    String(mapKey).trim().toLowerCase() ===
+                    normalizedKey
+            );
+
+            return entry?.[1];
+        };
+
+        const playScores = [];
+
+        for (const playKey of playKeys) {
+            const play = playbook[playKey];
+
+            if (!play) continue;
+
+            // A direct play instruction overrides broader descriptions.
+            const exactPriority = findPriority(playKey);
+
+            if (exactPriority != null) {
+                const score = getPracticePriorityScore(exactPriority);
+
+                if (score !== null) {
+                    playScores.push(score);
+                }
+
+                continue;
+            }
+
+            const descriptors = [
+                play.type,
+                play.concept,
+                ...(Array.isArray(play.tags) ? play.tags : []),
+                ...(play.blitz ? ['blitz'] : [])
+            ].filter(value =>
+                typeof value === 'string' && value.trim()
+            );
+
+            const matchingScores = [
+                ...new Set(
+                    descriptors.map(value =>
+                        String(value).trim().toLowerCase()
+                    )
+                )
+            ]
+                .map(findPriority)
+                .filter(value => value != null)
+                .map(getPracticePriorityScore)
+                .filter(value => value !== null);
+
+            if (matchingScores.length > 0) {
+                playScores.push(
+                    matchingScores.reduce(
+                        (total, value) => total + value,
+                        0
+                    ) / matchingScores.length
+                );
+            }
+        }
+
+        if (playScores.length === 0) return null;
+
+        return playScores.reduce(
+            (total, value) => total + value,
+            0
+        ) / playScores.length;
+    };
+
+    const offensePracticeEmphasis =
+        getSidePracticeEmphasis('offense');
+
+    const defensePracticeEmphasis =
+        getSidePracticeEmphasis('defense');
+
     // Protect a tired roster from additional physical workload.
     // Only choose scrimmage as the recovery option when its expected
     // net fatigue change is neutral or negative.
@@ -8261,6 +8996,34 @@ export function aiChooseWeeklyPractice(
         Math.random() < 0.45
     ) {
         return 'hustle';
+    }
+
+        // Explicit practice priorities take precedence over broad GM directives
+    // and personality preferences, but not fatigue or financial safeguards.
+    const offenseEmphasisScore =
+        offensePracticeEmphasis ?? 0;
+
+    const defenseEmphasisScore =
+        defensePracticeEmphasis ?? 0;
+
+    const hasPracticeEmphasis =
+        offensePracticeEmphasis !== null ||
+        defensePracticeEmphasis !== null;
+
+    if (
+        hasPracticeEmphasis &&
+        Math.abs(
+            offenseEmphasisScore - defenseEmphasisScore
+        ) >= 0.5
+    ) {
+        if (
+            defenseEmphasisScore > offenseEmphasisScore &&
+            hasUpcomingOpponent
+        ) {
+            return 'scouting';
+        }
+
+        return 'chalk_talk';
     }
 
     // GM directives define the program's strategic priorities.

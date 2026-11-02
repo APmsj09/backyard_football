@@ -1,5 +1,6 @@
 import * as Game from '../game.js';
-import { getGameState, saveGameState } from '../game/state.js';
+import { getGameState, saveGameState, getGameDayRosterObjects } from '../game/state.js';
+import { isPlayerViableForPosition } from '../game/depth_chart.js';
 import { calculateOverall, estimateBestPosition } from '../game/player.js';
 import { showModal, hideModal } from '../ui.js';
 import { formatHeight } from '../utils.js';
@@ -29,6 +30,54 @@ export function renderDepthOrderPane(gameState) {
     const specChart = team.specialists;
 
     const depthOrder = team.depthOrder || {};
+
+        const starterSlotsByPosition = {
+        QB: new Map(),
+        RB: new Map(),
+        WR: new Map(),
+        TE: new Map(),
+        OL: new Map(),
+        DL: new Map(),
+        LB: new Map(),
+        DB: new Map()
+    };
+
+    const getCorePositionForSlot = slot => {
+        let posKey = String(slot).replace(/\d+/g, '');
+
+        if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
+        if (posKey === 'FB') posKey = 'RB';
+        if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
+        if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
+
+        return posKey;
+    };
+
+    const recordFormationStarters = (chart, validPositions) => {
+        Object.entries(chart || {}).forEach(([slot, playerId]) => {
+            const pos = getCorePositionForSlot(slot);
+
+            if (
+                playerId != null &&
+                validPositions.includes(pos)
+            ) {
+                starterSlotsByPosition[pos].set(
+                    String(playerId),
+                    slot
+                );
+            }
+        });
+    };
+
+    recordFormationStarters(
+        offChart,
+        ['QB', 'RB', 'WR', 'TE', 'OL']
+    );
+
+    recordFormationStarters(
+        defChart,
+        ['DL', 'LB', 'DB']
+    );
 
     const rosterById = new Map(
         roster.map(player => [String(player.id), player])
@@ -62,6 +111,13 @@ export function renderDepthOrderPane(gameState) {
                 <div class="max-h-[360px] overflow-y-auto divide-y divide-slate-100">
                     ${players.length ? players.map((player, index) => {
                         const ovr = calculateOverall(player, pos);
+                        const starterSlot = starterSlotsByPosition[pos]?.get(
+                            String(player.id)
+                        );
+
+                        const starterBadgeClass = isOffensePosition
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-rose-100 text-rose-800';
                         const energy = Math.max(
                             0,
                             Math.min(100, Math.round(100 - (player.fatigue || 0)))
@@ -78,10 +134,17 @@ export function renderDepthOrderPane(gameState) {
                                 </span>
 
                                 <div class="min-w-0">
-                                    <div class="flex items-center gap-1.5 min-w-0">
+                                    <div class="flex items-center gap-1.5 flex-wrap min-w-0">
                                         <span class="font-bold text-xs text-slate-900 truncate">
                                             ${player.name}
                                         </span>
+
+                                        ${starterSlot ? `
+                                            <span class="text-[9px] ${starterBadgeClass} rounded px-1 py-0.5 font-black shrink-0">
+                                                STARTER · ${starterSlot}
+                                            </span>
+                                        ` : ''}
+
                                         <span class="text-[9px] text-slate-400 font-mono shrink-0">
                                             #${player.number || '--'}
                                         </span>
@@ -154,18 +217,25 @@ export function renderDepthOrderPane(gameState) {
         else if (posKey === 'NCB') evalPosKey = 'DB';
 
         const isLocked = (side === 'specialTeams' || side === 'specialists')
-            ? Boolean(playerId)
+            ? Object.prototype.hasOwnProperty.call(
+                team.specialistOverrides || {},
+                slot
+            )
             : team.slotOverrides?.[side]?.[slot] !== undefined;
 
         if (!player) {
             return `
-                <div class="border-2 border-dashed border-rose-300 bg-rose-50/50 p-2.5 rounded flex justify-between items-center cursor-pointer hover:bg-rose-100 transition"
+                <div class="border-2 border-dashed ${isLocked ? 'border-amber-400 bg-amber-50' : 'border-rose-300 bg-rose-50/50'} p-2.5 rounded flex justify-between items-center cursor-pointer hover:bg-rose-100 transition"
                      onclick="window.openSlotPicker('${slot}', '${side}')">
                     <div>
                         <span class="font-black text-xs text-rose-800 uppercase">${slot}</span>
-                        <p class="text-[10px] text-rose-600 font-bold">⚠️ Unassigned — Click to Assign</p>
+                        <p class="text-[10px] ${isLocked ? 'text-amber-700' : 'text-rose-600'} font-bold">
+                            ${isLocked ? '🔒 Locked Vacant' : '⚠️ Unassigned — Click to Assign'}
+                        </p>
                     </div>
-                    <span class="text-xs bg-rose-200 text-rose-800 px-2 py-1 rounded font-bold">+ Pick</span>
+                    <span class="text-xs ${isLocked ? 'bg-amber-200 text-amber-900' : 'bg-rose-200 text-rose-800'} px-2 py-1 rounded font-bold">
+                        + Pick
+                    </span>
                 </div>`;
         }
 
@@ -210,8 +280,8 @@ export function renderDepthOrderPane(gameState) {
                 </span>
 
                 <p class="text-[10px] text-slate-400 mt-1">
-                    All eight core positions remain visible regardless of formation.
-                    Use the arrows to adjust player rankings.
+                    Rankings are universal. STARTER badges show assignments in the active formations.
+                    Use the arrows to adjust position priority.
                 </p>
 
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
@@ -459,12 +529,20 @@ window.openSlotPicker = function(arg1, arg2) {
     const team = gs?.playerTeam;
     if (!team || !side || !slot) return;
 
-    const roster = Game.getRosterObjects(team);
-    const posKey = slot.replace(/\d/g, '');
+    const isCoreFormationSlot = ['offense', 'defense'].includes(side);
+
+    const roster = getGameDayRosterObjects(team);
+
+    const posKey = slot.replace(/\d+/g, '');
     let evalPosKey = posKey;
-    if (posKey === 'PR' || posKey === 'SLOT') evalPosKey = 'WR';
+
+    if (['OT', 'OG', 'C'].includes(evalPosKey)) evalPosKey = 'OL';
+    else if (['DE', 'DT', 'NT'].includes(evalPosKey)) evalPosKey = 'DL';
+    else if (['CB', 'S', 'FS', 'SS'].includes(evalPosKey)) evalPosKey = 'DB';
+    else if (evalPosKey === 'FB') {
+        evalPosKey = isCoreFormationSlot ? 'RB' : 'TE';
+    } else if (posKey === 'PR' || posKey === 'SLOT') evalPosKey = 'WR';
     else if (posKey === 'P') evalPosKey = 'QB';
-    else if (posKey === 'FB') evalPosKey = 'TE';
     else if (posKey === 'NCB') evalPosKey = 'DB';
 
     let activeChart;
@@ -482,24 +560,101 @@ window.openSlotPicker = function(arg1, arg2) {
 
     const skillConfigs = POSITION_KEY_SKILLS[posKey] || POSITION_KEY_SKILLS[evalPosKey] || POSITION_KEY_SKILLS['WR'];
 
-    // Rank all players by suitability for this position
-    const candidates = roster.map(p => {
-        const ovr = calculateOverall(p, evalPosKey);
-        const isCurrentStarter = p.id === currentStarterId;
-        const existingSlotThisSide = Object.entries(activeChart).find(([s, id]) => id === p.id && s !== slot)?.[0] || null;
-        const startsOnOtherSide = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
-        const otherOvr = startsOnOtherSide ? calculateOverall(p, startsOnOtherSide.replace(/\d/g, '')) : null;
+        const getRating = (player, group, attribute, fallback = 50) => {
+        const value = Number(player.attributes?.[group]?.[attribute]);
+        return Number.isFinite(value) ? value : fallback;
+    };
 
-        return {
-            player: p,
-            ovr,
-            isCurrentStarter,
-            existingSlotThisSide,
-            startsOnOtherSide,
-            otherOvr,
-            delta: currentStarterOvr !== null && !isCurrentStarter ? (ovr - currentStarterOvr) : 0
-        };
-    }).sort((a, b) => b.ovr - a.ovr);
+    const getSpecialistFitScore = (player, specialistSlot) => {
+        switch (specialistSlot) {
+            case 'PR':
+                return (
+                    getRating(player, 'physical', 'speed') * 0.35 +
+                    getRating(player, 'physical', 'agility') * 0.25 +
+                    getRating(player, 'technical', 'catchingHands') * 0.30 +
+                    getRating(player, 'mental', 'playbookIQ') * 0.10
+                );
+
+            case 'P':
+                return (
+                    getRating(
+                        player,
+                        'technical',
+                        'throwPower',
+                        getRating(player, 'physical', 'strength')
+                    ) * 0.45 +
+                    getRating(player, 'technical', 'throwingAccuracy') * 0.35 +
+                    getRating(player, 'physical', 'strength') * 0.10 +
+                    getRating(player, 'mental', 'playbookIQ') * 0.10
+                );
+
+            case 'FB':
+                return (
+                    getRating(player, 'technical', 'blocking') * 0.45 +
+                    getRating(player, 'physical', 'strength') * 0.45 +
+                    getRating(player, 'mental', 'playbookIQ') * 0.10
+                );
+
+            case 'SLOT':
+                return (
+                    getRating(player, 'physical', 'agility') * 0.30 +
+                    getRating(player, 'technical', 'catchingHands') * 0.35 +
+                    getRating(player, 'physical', 'speed') * 0.25 +
+                    getRating(player, 'mental', 'playbookIQ') * 0.10
+                );
+
+            case 'NCB':
+                return (
+                    getRating(
+                        player,
+                        'technical',
+                        'coverage',
+                        getRating(player, 'technical', 'passCoverage')
+                    ) * 0.40 +
+                    getRating(player, 'physical', 'agility') * 0.25 +
+                    getRating(player, 'physical', 'speed') * 0.20 +
+                    getRating(player, 'technical', 'tackling') * 0.15
+                );
+
+            default:
+                return calculateOverall(player, evalPosKey);
+        }
+    };
+
+    // Rank all players by suitability for this position
+    const candidates = roster
+        .filter(p =>
+            p &&
+            isPlayerViableForPosition(p, evalPosKey)
+        )
+        .map(p => {
+            const ovr = calculateOverall(p, evalPosKey);
+
+            const fitScore = isCoreFormationSlot
+                ? ovr
+                : getSpecialistFitScore(p, posKey);
+
+            const isCurrentStarter = p.id === currentStarterId;
+            const existingSlotThisSide = Object.entries(activeChart).find(([s, id]) => id === p.id && s !== slot)?.[0] || null;
+            const startsOnOtherSide = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
+            const otherOvr = startsOnOtherSide ? calculateOverall(p, startsOnOtherSide.replace(/\d/g, '')) : null;
+
+            return {
+                player: p,
+                ovr,
+                fitScore,
+                isCurrentStarter,
+                existingSlotThisSide,
+                startsOnOtherSide,
+                otherOvr,
+                delta: currentStarterOvr !== null && !isCurrentStarter
+                    ? (ovr - currentStarterOvr)
+                    : 0
+            };
+        })
+        .sort((a, b) =>
+            b.fitScore - a.fitScore || b.ovr - a.ovr
+        );
 
     const modalHtml = `
         <div class="space-y-3 text-xs text-left font-sans">
@@ -529,7 +684,7 @@ window.openSlotPicker = function(arg1, arg2) {
 
             <!-- Candidate Roster List -->
             <div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1 pb-4">
-                ${candidates.map(({ player, ovr, isCurrentStarter, existingSlotThisSide, startsOnOtherSide, otherOvr, delta }) => {
+                ${candidates.map(({ player, ovr, fitScore, isCurrentStarter, existingSlotThisSide, startsOnOtherSide, otherOvr, delta }) => {
                     const natPos = player.pos || estimateBestPosition(player);
                     const energy = Math.max(0, Math.round(100 - (player.fatigue || 0)));
                     const energyColor = energy >= 75 ? 'bg-emerald-500' : (energy >= 50 ? 'bg-amber-500' : 'bg-rose-500');
@@ -619,6 +774,11 @@ window.openSlotPicker = function(arg1, arg2) {
                                     ${deltaBadge}
                                 </div>
                                 <span class="text-[9px] text-slate-400 font-bold uppercase block sm:-mt-1">${posKey} OVR</span>
+                                ${!isCoreFormationSlot ? `
+                                    <span class="text-[9px] text-indigo-700 font-black uppercase block">
+                                        Role Fit ${Math.round(fitScore)}
+                                    </span>
+                                ` : ''}
                             </div>
 
                             <button class="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-black px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition whitespace-nowrap"
@@ -645,16 +805,40 @@ window.commitSlotAssignment = function(playerId, slot, side) {
         const team = gs?.playerTeam;
         if (!team) return;
 
-        if (side === 'specialTeams') {
+        if (side === 'specialTeams' || side === 'specialists') {
+            if (!team.specialistOverrides) {
+                team.specialistOverrides = {};
+            }
+
             if (!team.specialTeams) team.specialTeams = {};
-            if (!playerId) delete team.specialTeams[slot];
-            else team.specialTeams[slot] = playerId;
-        } else if (side === 'specialists') {
             if (!team.specialists) team.specialists = {};
-            if (!playerId) delete team.specialists[slot];
-            else team.specialists[slot] = playerId;
+
+            // A manual assignment or explicit vacancy becomes a lock.
+            team.specialistOverrides[slot] = playerId || null;
+
+            const target = side === 'specialTeams'
+                ? team.specialTeams
+                : team.specialists;
+
+            if (!playerId) {
+                delete target[slot];
+            } else {
+                target[slot] = playerId;
+            }
         } else {
-            Game.assignPlayerToSlot(team, playerId, slot, side);
+            const assigned = Game.assignPlayerToSlot(
+                team,
+                playerId,
+                slot,
+                side
+            );
+
+            if (!assigned) {
+                window.alert(
+                    'That player is no longer eligible for this position. Please choose another player.'
+                );
+                return;
+            }
         }
 
         const stBackup = { ...(team.specialTeams || {}) };
@@ -683,56 +867,139 @@ window.autoOptimizeLineup = function() {
     if (!team) return;
 
     team.slotOverrides = { offense: {}, defense: {}, specialTeams: {} };
+
+    // Rebuild the eight core position rankings using coach evaluations.
     Game.populateNaturalDepthOrder(team);
     Game.rebuildDepthChartFromOrder(team);
 
-    const roster = Game.getRosterObjects(team);
-    if (roster.length > 0) {
-        // Special Teams
-        const bestReturner = [...roster].sort((a, b) => {
-            const scoreA = (a.attributes?.physical?.speed || 50) + (a.attributes?.physical?.agility || 50) + (a.attributes?.technical?.catchingHands || 50);
-            const scoreB = (b.attributes?.physical?.speed || 50) + (b.attributes?.physical?.agility || 50) + (b.attributes?.technical?.catchingHands || 50);
-            return scoreB - scoreA;
-        })[0];
+    // Specialist selections use the same game-day availability rules.
+    const roster = getGameDayRosterObjects(team);
 
-        const bestPunter = [...roster].sort((a, b) => {
-            const powA = a.attributes?.technical?.throwPower ?? a.attributes?.physical?.strength ?? 50;
-            const powB = b.attributes?.technical?.throwPower ?? b.attributes?.physical?.strength ?? 50;
-            return powB - powA;
-        })[0];
+    const getRating = (player, group, attribute, fallback = 50) => {
+        const value = Number(player.attributes?.[group]?.[attribute]);
+        return Number.isFinite(value) ? value : fallback;
+    };
 
-        // Situational Specialists
-        const bestFB = [...roster].sort((a, b) => {
-            const scoreA = (a.attributes?.physical?.strength || 50) + (a.attributes?.technical?.blocking || 50);
-            const scoreB = (b.attributes?.physical?.strength || 50) + (b.attributes?.technical?.blocking || 50);
-            return scoreB - scoreA;
-        })[0];
+    const pickSpecialist = (position, scorePlayer, minimumScore = 45) => {
+        return roster
+            .filter(player =>
+                player &&
+                isPlayerViableForPosition(player, position)
+            )
+            .map(player => ({
+                player,
+                score: scorePlayer(player)
+            }))
+            .filter(candidate =>
+                Number.isFinite(candidate.score) &&
+                candidate.score >= minimumScore
+            )
+            .sort((a, b) => b.score - a.score)[0]?.player || null;
+    };
 
-        const bestSlot = [...roster].sort((a, b) => {
-            const scoreA = (a.attributes?.physical?.agility || 50) + (a.attributes?.technical?.catchingHands || 50);
-            const scoreB = (b.attributes?.physical?.agility || 50) + (b.attributes?.technical?.catchingHands || 50);
-            return scoreB - scoreA;
-        })[0];
+    // Punt returner: speed, agility, hands, and awareness.
+    const bestReturner = pickSpecialist('WR', player =>
+        getRating(player, 'physical', 'speed') * 0.35 +
+        getRating(player, 'physical', 'agility') * 0.25 +
+        getRating(player, 'technical', 'catchingHands') * 0.30 +
+        getRating(player, 'mental', 'playbookIQ') * 0.10
+    );
 
-        const bestNCB = [...roster].sort((a, b) => {
-            const scoreA = ((a.attributes?.technical?.coverage || a.attributes?.technical?.passCoverage) || 50) + (a.attributes?.physical?.agility || 50);
-            const scoreB = ((b.attributes?.technical?.coverage || b.attributes?.technical?.passCoverage) || 50) + (b.attributes?.physical?.agility || 50);
-            return scoreB - scoreA;
-        })[0];
+    // Punter: power and accuracy matter more than general QB ability.
+    const bestPunter = pickSpecialist('QB', player =>
+        getRating(
+            player,
+            'technical',
+            'throwPower',
+            getRating(player, 'physical', 'strength')
+        ) * 0.45 +
+        getRating(player, 'technical', 'throwingAccuracy') * 0.35 +
+        getRating(player, 'physical', 'strength') * 0.10 +
+        getRating(player, 'mental', 'playbookIQ') * 0.10
+    );
 
-        team.specialTeams = {
-            PR: bestReturner?.id || null,
-            P: bestPunter?.id || null
-        };
-        team.specialists = {
-            FB: bestFB?.id || null,
-            SLOT: bestSlot?.id || null,
-            NCB: bestNCB?.id || null
-        };
+    // Fullback: prioritize blocking and strength.
+    const bestFB = pickSpecialist('TE', player =>
+        getRating(player, 'technical', 'blocking') * 0.45 +
+        getRating(player, 'physical', 'strength') * 0.45 +
+        getRating(player, 'mental', 'playbookIQ') * 0.10
+    );
 
-        if (!team.depthChart) team.depthChart = {};
-        team.depthChart.specialTeams = team.specialTeams;
-    }
+    // Slot receiver: agility and catching ability are central.
+    const bestSlot = pickSpecialist('WR', player =>
+        getRating(player, 'physical', 'agility') * 0.30 +
+        getRating(player, 'technical', 'catchingHands') * 0.35 +
+        getRating(player, 'physical', 'speed') * 0.25 +
+        getRating(player, 'mental', 'playbookIQ') * 0.10
+    );
+
+    // Nickel corner: coverage, agility, and speed.
+    const bestNCB = pickSpecialist('DB', player => {
+        const coverage = getRating(
+            player,
+            'technical',
+            'coverage',
+            getRating(player, 'technical', 'passCoverage')
+        );
+
+        return (
+            coverage * 0.40 +
+            getRating(player, 'physical', 'agility') * 0.25 +
+            getRating(player, 'physical', 'speed') * 0.20 +
+            getRating(player, 'technical', 'tackling') * 0.15
+        );
+    });
+
+    const specialistOverrides = team.specialistOverrides || {};
+
+    const currentRosterIds = new Set(
+        Game.getRosterObjects(team)
+            .filter(Boolean)
+            .map(player => String(player.id))
+    );
+
+    const hasManualOverride = slot =>
+        Object.prototype.hasOwnProperty.call(
+            specialistOverrides,
+            slot
+        );
+
+    const resolveSpecialist = (slot, automaticPlayer) => {
+        if (!hasManualOverride(slot)) {
+            return automaticPlayer?.id || null;
+        }
+
+        const lockedPlayerId = specialistOverrides[slot];
+
+        // Preserve an intentionally vacant specialist role.
+        if (lockedPlayerId == null) return null;
+
+        // Keep manual assignments while the player remains on the roster.
+        if (currentRosterIds.has(String(lockedPlayerId))) {
+            return lockedPlayerId;
+        }
+
+        // Clear stale locks when a player leaves the team.
+        delete specialistOverrides[slot];
+
+        return automaticPlayer?.id || null;
+    };
+
+    team.specialistOverrides = specialistOverrides;
+
+    team.specialTeams = {
+        PR: resolveSpecialist('PR', bestReturner),
+        P: resolveSpecialist('P', bestPunter)
+    };
+
+    team.specialists = {
+        FB: resolveSpecialist('FB', bestFB),
+        SLOT: resolveSpecialist('SLOT', bestSlot),
+        NCB: resolveSpecialist('NCB', bestNCB)
+    };
+
+    if (!team.depthChart) team.depthChart = {};
+    team.depthChart.specialTeams = team.specialTeams;
 
     saveGameState();
     renderDepthOrderPane(gs);
@@ -745,6 +1012,7 @@ window.resetDepthChartOverrides = function() {
     if (!team) return;
 
     team.slotOverrides = { offense: {}, defense: {}, specialTeams: {} };
+    team.specialistOverrides = {};
     team.specialTeams = {};
     team.specialists = {};
     if (team.depthChart) team.depthChart.specialTeams = {};

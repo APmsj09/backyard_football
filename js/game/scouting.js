@@ -1442,17 +1442,83 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
     const targetIds = getScoutingTargetIds(team, gameState, assignment);
     const focus = assignment.focus;
 
+    const hasExplicitTargets =
+        Array.isArray(assignment.targetPlayerIds);
+
     if (!SCOUTING_WORK_FOCI.has(focus)) return [];
 
-    // Youth scouting targets Pee Wee players aged 8–11.
-    // Other scouting focuses retain the team's normal age range.
-    const minAge = focus === 'youth'
-        ? 8
-        : Number.isFinite(team.ageMin) ? team.ageMin : 12;
+    const scoutingInstructions =
+        team.teamInstructions?.departments?.scouting || {};
 
-    const maxAge = focus === 'youth'
-        ? 11
-        : Number.isFinite(team.ageMax) ? team.ageMax : 18;
+    const prospectPriorities =
+        scoutingInstructions.prospectPriorities || {};
+
+    const positionPriorities =
+        scoutingInstructions.positionPriorities || {};
+
+    const priorityRanks = {
+        must: 5,
+        high: 4,
+        normal: 3,
+        monitor: 2,
+        ignore: 0
+    };
+
+    const positionAliases = {
+        OT: 'OL',
+        OG: 'OL',
+        C: 'OL',
+        G: 'OL',
+        T: 'OL',
+        DE: 'DL',
+        DT: 'DL',
+        NT: 'DL',
+        CB: 'DB',
+        S: 'DB',
+        FS: 'DB',
+        SS: 'DB'
+    };
+
+    const getPriority = player => {
+        const playerKey = String(player.id);
+
+        const publicPosition = String(player.pos || '')
+            .trim()
+            .toUpperCase();
+
+        const position =
+            positionAliases[publicPosition] || publicPosition;
+
+        const hasPlayerPriority =
+            Object.prototype.hasOwnProperty.call(
+                prospectPriorities,
+                playerKey
+            );
+
+        const rawPriority = hasPlayerPriority
+            ? prospectPriorities[playerKey]
+            : positionPriorities[position];
+
+        const level = String(rawPriority || 'normal')
+            .trim()
+            .toLowerCase();
+
+        const validLevel =
+            Object.prototype.hasOwnProperty.call(
+                priorityRanks,
+                level
+            );
+
+        return {
+            level: validLevel ? level : 'normal',
+            rank: validLevel
+                ? priorityRanks[level]
+                : priorityRanks.normal
+        };
+    };
+
+    const minAge = Number.isFinite(team.ageMin) ? team.ageMin : 12;
+    const maxAge = Number.isFinite(team.ageMax) ? team.ageMax : 18;
 
     const candidates = [];
 
@@ -1462,9 +1528,9 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
             !player.attributes ||
             player.teamId === team.id ||
             ownRoster.has(String(player.id)) ||
-            player.status?.type === 'retired' ||
-            player.status?.type === 'departed' ||
-            player.status?.type === 'temporary' ||
+            ['retired', 'departed', 'temporary'].includes(
+                player.status?.type
+            ) ||
             !Number.isFinite(player.age) ||
             player.age < minAge ||
             player.age > maxAge
@@ -1473,18 +1539,10 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
         }
 
         const isFreeAgent = !player.teamId;
+
         const otherTeam = player.teamId
             ? teamById.get(String(player.teamId))
             : null;
-
-        // Youth scouting targets enrolled Pee Wee players only.
-        // Do not mix in unrelated free agents or main-league players.
-        if (
-            focus === 'youth' &&
-            (!otherTeam || otherTeam.leagueType !== 'youth')
-        ) {
-            continue;
-        }
 
         if (focus === 'draft') {
             const isDraftTarget = targetIds
@@ -1496,10 +1554,6 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
             if (!isFreeAgent) continue;
         } else if (focus === 'opponents') {
             if (!otherTeam || otherTeam.leagueType !== 'main') continue;
-        } else if (focus === 'youth') {
-            // Scout players who are currently rostered in Pee Wee,
-            // not unrelated young free agents.
-            if (!otherTeam || otherTeam.leagueType !== 'youth') continue;
         } else if (focus === 'watchlist') {
             if (!targetIds?.has(String(player.id))) continue;
         }
@@ -1508,18 +1562,43 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
             if (!targetIds.has(String(player.id))) continue;
         }
 
+        const instructionPriority = getPriority(player);
+
+        const isManuallyTargeted =
+            hasExplicitTargets || focus === 'watchlist';
+
+        if (
+            instructionPriority.level === 'ignore' &&
+            !isManuallyTargeted
+        ) {
+            continue;
+        }
+
         const previous = getTeamScoutingReport(team, player.id);
 
         // Fully scouted players no longer consume routine scouting time.
         if ((Number(previous?.level) || 0) >= 4) continue;
 
-        candidates.push({ player, previous });
+        candidates.push({
+            player,
+            previous,
+            instructionPriority
+        });
     }
 
-    // Finish partially completed reports before starting new ones.
-    // Rotate the unscouted pool deterministically by week, avoiding repeated
-    // preference for the same early entries in gameState.players.
     candidates.sort((a, b) => {
+        // GM prospect and position priorities come first.
+        if (
+            a.instructionPriority.rank !==
+            b.instructionPriority.rank
+        ) {
+            return (
+                b.instructionPriority.rank -
+                a.instructionPriority.rank
+            );
+        }
+
+        // Finish partially completed reports before starting new ones.
         const aProgress = Number(a.previous?.progressPoints) || 0;
         const bProgress = Number(b.previous?.progressPoints) || 0;
 
@@ -1531,9 +1610,11 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
             return bProgress - aProgress;
         }
 
+        // Rotate prospects deterministically within each priority tier.
         const aOrder = stableNoise(
             `${team.id}|${a.player.id}|${year}|${week}|${focus}`
         );
+
         const bOrder = stableNoise(
             `${team.id}|${b.player.id}|${year}|${week}|${focus}`
         );
@@ -1840,7 +1921,21 @@ export function processWeeklyScoutingAssignments(
         team.staffWorkLastResolvedKey === weekKey ||
         team.scoutingWorkLastResolvedKey === weekKey
     ) {
-        return { playersUpdated: 0, hoursUsed: 0 };
+        const savedReport = (
+            Array.isArray(team.staffWorkReports)
+                ? team.staffWorkReports.find(existing =>
+                    existing?.key === weekKey
+                )
+                : null
+        ) || team.staffWeeklyReports?.[weekKey];
+
+        return savedReport || {
+            playersUpdated: 0,
+            hoursUsed: 0,
+            assignmentsProcessed: 0,
+            assignmentsWithProblems: 0,
+            assignmentResults: []
+        };
     }
 
     const staffById = getAvailableScoutingStaff(team);
@@ -1865,6 +1960,8 @@ export function processWeeklyScoutingAssignments(
     let attributesImproved = 0;
     let hoursUsed = 0;
 
+    const assignmentResults = [];
+
     for (const assignment of workAssignments) {
         if (
             !assignment?.coachId ||
@@ -1874,13 +1971,35 @@ export function processWeeklyScoutingAssignments(
         }
 
         const coachId = String(assignment.coachId);
-        const coach = staffById.get(coachId);
-
-        if (!coach) continue;
-
         const requestedHours = Number(assignment.hours);
 
         if (!Number.isFinite(requestedHours) || requestedHours <= 0) {
+            continue;
+        }
+
+        const coach = staffById.get(coachId);
+
+        if (!coach) {
+            assignmentResults.push({
+                coachId,
+                coachName: 'Unavailable coach',
+                task: assignment.task,
+                focus: assignment.focus || assignment.skill || 'all',
+                requestedHours,
+                allocatedHours: 0,
+                hoursApplied: 0,
+                hoursQueued: 0,
+                hoursLimited: true,
+                status: 'coach_unavailable',
+                playersTargeted: 0,
+                playersUpdated: 0,
+                playersTrained: 0,
+                attributesImproved: 0,
+                preparationPointsAdded: 0,
+                queuedTargets: 0,
+                targetPlayers: []
+            });
+
             continue;
         }
 
@@ -1888,9 +2007,53 @@ export function processWeeklyScoutingAssignments(
         const remaining = Math.max(0, weeklyHoursPerCoach - alreadyUsed);
         const allocatedHours = Math.min(requestedHours, remaining);
 
-        if (allocatedHours <= 0) continue;
+        if (allocatedHours <= 0) {
+            assignmentResults.push({
+                coachId,
+                coachName: coach.name || 'Coach',
+                task: assignment.task,
+                focus: assignment.focus || assignment.skill || 'all',
+                requestedHours,
+                allocatedHours: 0,
+                hoursApplied: 0,
+                hoursQueued: 0,
+                hoursLimited: true,
+                status: 'no_hours_available',
+                playersTargeted: 0,
+                playersUpdated: 0,
+                playersTrained: 0,
+                attributesImproved: 0,
+                preparationPointsAdded: 0,
+                queuedTargets: 0,
+                targetPlayers: []
+            });
 
-                // All recognized tasks count against the same weekly coach budget.
+            continue;
+        }
+
+        const assignmentResult = {
+            coachId,
+            coachName: coach.name || 'Coach',
+            task: assignment.task,
+            focus: assignment.focus || assignment.skill || 'all',
+            requestedHours,
+            allocatedHours,
+            hoursApplied: 0,
+            hoursQueued: 0,
+            hoursLimited: allocatedHours < requestedHours,
+            status: 'not_processed',
+            playersTargeted: 0,
+            playersUpdated: 0,
+            playersTrained: 0,
+            attributesImproved: 0,
+            preparationPointsAdded: 0,
+            queuedTargets: 0,
+            targetPlayers: []
+        };
+
+        assignmentResults.push(assignmentResult);
+
+        // All recognized tasks count against the same weekly coach budget.
         usedHoursByCoach.set(coachId, alreadyUsed + allocatedHours);
 
         if (assignment.task === 'training') {
@@ -1903,7 +2066,10 @@ export function processWeeklyScoutingAssignments(
                 week
             );
 
-            if (candidates.length === 0) continue;
+            if (candidates.length === 0) {
+                assignmentResult.status = 'no_eligible_players';
+                continue;
+            }
 
             const eligibleCandidates = candidates.filter(({ player, skill }) => {
                 const trainingKey = `${String(player.id)}:${skill}`;
@@ -1914,7 +2080,10 @@ export function processWeeklyScoutingAssignments(
                     MAX_WEEKLY_TRAINING_HOURS_PER_PLAYER_SKILL;
             });
 
-            if (eligibleCandidates.length === 0) continue;
+            if (eligibleCandidates.length === 0) {
+                assignmentResult.status = 'weekly_training_limit_reached';
+                continue;
+            }
 
             const requestedTargetCount = Number(assignment.maxTargets);
             const targetCount = Math.min(
@@ -1954,7 +2123,9 @@ export function processWeeklyScoutingAssignments(
 
                 trainedPlayerIds.add(String(player.id));
 
-                if (applyTrainingHours(
+                assignmentResult.hoursApplied += effectivePlayerHours;
+
+                const improved = applyTrainingHours(
                     team,
                     player,
                     coach,
@@ -1962,8 +2133,19 @@ export function processWeeklyScoutingAssignments(
                     category,
                     effectivePlayerHours,
                     trainedThisWeek
-                )) {
+                );
+
+                assignmentResult.targetPlayers.push({
+                    playerId: String(player.id),
+                    playerName: player.name || 'Player',
+                    skill,
+                    hours: effectivePlayerHours,
+                    improved
+                });
+
+                if (improved) {
                     attributesImproved++;
+                    assignmentResult.attributesImproved++;
 
                     // Successful player development teaches the coach.
                     const coachLearningSkills = [
@@ -1993,6 +2175,14 @@ export function processWeeklyScoutingAssignments(
                 }
             }
 
+            assignmentResult.playersTargeted =
+                assignmentResult.targetPlayers.length;
+
+            assignmentResult.playersTrained =
+                assignmentResult.targetPlayers.length;
+
+            assignmentResult.status = 'training_progress_recorded';
+
             hoursUsed += allocatedHours;
             continue;
         }
@@ -2001,7 +2191,7 @@ export function processWeeklyScoutingAssignments(
             assignment.task === 'offensePrep' ||
             assignment.task === 'defensePrep'
         ) {
-            applyWeeklyGamePreparation(
+            const preparationPoints = applyWeeklyGamePreparation(
                 team,
                 coach,
                 assignment,
@@ -2010,6 +2200,12 @@ export function processWeeklyScoutingAssignments(
                 week,
                 gameState
             );
+
+            assignmentResult.hoursApplied = allocatedHours;
+            assignmentResult.preparationPointsAdded = preparationPoints;
+            assignmentResult.status = preparationPoints > 0
+                ? 'preparation_completed'
+                : 'preparation_capacity_reached';
 
             hoursUsed += allocatedHours;
             continue;
@@ -2042,6 +2238,10 @@ export function processWeeklyScoutingAssignments(
                 week
             });
 
+            assignmentResult.hoursQueued = allocatedHours;
+            assignmentResult.queuedTargets = maxTargets;
+            assignmentResult.status = 'draft_scouting_queued';
+
             hoursUsed += allocatedHours;
             continue;
         }
@@ -2054,7 +2254,10 @@ export function processWeeklyScoutingAssignments(
             week
         );
 
-        if (candidates.length === 0) continue;
+        if (candidates.length === 0) {
+            assignmentResult.status = 'no_eligible_targets';
+            continue;
+        }
 
         const defaultTargetCount = Math.max(
             1,
@@ -2075,30 +2278,205 @@ export function processWeeklyScoutingAssignments(
         const hoursPerTarget = allocatedHours / selected.length;
 
         for (const { player } of selected) {
-            if (advanceTeamScoutingReport(
-                team,
-                player,
-                coach,
-                hoursPerTarget,
-                year,
-                week
-            )) {
+            const reportProgressed = Boolean(
+                advanceTeamScoutingReport(
+                    team,
+                    player,
+                    coach,
+                    hoursPerTarget,
+                    year,
+                    week
+                )
+            );
+
+            assignmentResult.targetPlayers.push({
+                playerId: String(player.id),
+                playerName: player.name || 'Player',
+                reportProgressed
+            });
+
+            if (reportProgressed) {
                 playersUpdated++;
+                assignmentResult.playersUpdated++;
             }
         }
 
+        assignmentResult.playersTargeted = selected.length;
+        assignmentResult.hoursApplied = allocatedHours;
+        assignmentResult.status = assignmentResult.playersUpdated > 0
+            ? 'reports_advanced'
+            : 'targets_reviewed';
+
         hoursUsed += allocatedHours;
+    }
+
+    const requestedHoursTotal = assignmentResults.reduce(
+        (sum, result) => sum + result.requestedHours,
+        0
+    );
+
+    const allocatedHoursTotal = assignmentResults.reduce(
+        (sum, result) => sum + result.allocatedHours,
+        0
+    );
+
+    const appliedHoursTotal = assignmentResults.reduce(
+        (sum, result) => sum + result.hoursApplied,
+        0
+    );
+
+    const queuedHoursTotal = assignmentResults.reduce(
+        (sum, result) => sum + result.hoursQueued,
+        0
+    );
+
+    const preparationPointsAdded = assignmentResults.reduce(
+        (sum, result) => sum + result.preparationPointsAdded,
+        0
+    );
+
+    const taskLabels = {
+        scouting: 'scouting',
+        training: 'player development',
+        offensePrep: 'offensive preparation',
+        defensePrep: 'defensive preparation'
+    };
+
+    const issues = [];
+
+    assignmentResults.forEach(result => {
+        const taskLabel = taskLabels[result.task] || result.task;
+        const coachName = result.coachName || 'A coach';
+
+        if (result.status === 'coach_unavailable') {
+            issues.push(
+                `${coachName} could not be found for ${taskLabel}.`
+            );
+        } else if (result.status === 'no_hours_available') {
+            issues.push(
+                `${coachName} had no remaining weekly hours for ${taskLabel}.`
+            );
+        } else if (result.hoursLimited) {
+            issues.push(
+                `${coachName}'s ${taskLabel} assignment was limited by the weekly time budget.`
+            );
+        }
+
+        if (
+            result.status === 'no_eligible_players' ||
+            result.status === 'no_eligible_targets'
+        ) {
+            issues.push(
+                `${coachName} had no eligible targets for ${taskLabel}.`
+            );
+        } else if (
+            result.status === 'weekly_training_limit_reached'
+        ) {
+            issues.push(
+                `${coachName} could not find players with remaining training capacity.`
+            );
+        } else if (
+            result.status === 'preparation_capacity_reached'
+        ) {
+            issues.push(
+                `${coachName}'s ${taskLabel} produced no additional preparation points.`
+            );
+        }
+    });
+
+    const recommendations = [];
+
+    if (assignmentResults.some(result =>
+        result.status === 'coach_unavailable' ||
+        result.status === 'no_hours_available' ||
+        result.hoursLimited
+    )) {
+        recommendations.push(
+            'Review the workload distribution and each coach’s weekly availability.'
+        );
+    }
+
+    if (assignmentResults.some(result =>
+        result.status === 'no_eligible_players' ||
+        result.status === 'no_eligible_targets'
+    )) {
+        recommendations.push(
+            'Review scouting and training focuses or target restrictions where no eligible players were found.'
+        );
+    }
+
+    if (assignmentResults.some(result =>
+        result.status === 'preparation_capacity_reached'
+    )) {
+        recommendations.push(
+            'Consider moving some preparation hours to another task if the weekly preparation limit has already been reached.'
+        );
+    }
+
+    const assignmentsWithProblems = assignmentResults.filter(result =>
+        result.hoursLimited ||
+        ![
+            'training_progress_recorded',
+            'preparation_completed',
+            'reports_advanced',
+            'targets_reviewed',
+            'draft_scouting_queued'
+        ].includes(result.status)
+    ).length;
+
+    const report = {
+        version: 1,
+        key: weekKey,
+        year,
+        week,
+
+        assignmentCount: assignmentResults.length,
+        assignmentsProcessed: assignmentResults.length,
+        assignmentsWithProblems,
+
+        requestedHours: requestedHoursTotal,
+        allocatedHours: allocatedHoursTotal,
+        appliedHours: appliedHoursTotal,
+        queuedHours: queuedHoursTotal,
+        hoursUsed,
+
+        playersScouted: playersUpdated,
+        playersUpdated,
+        playersTrained: trainedPlayerIds.size,
+        attributesImproved,
+        preparationPointsAdded,
+
+        assignments: assignmentResults,
+        issues,
+        recommendations
+    };
+
+    if (!Array.isArray(team.staffWorkReports)) {
+        team.staffWorkReports = [];
+    }
+
+    const existingReportIndex = team.staffWorkReports.findIndex(
+        existing => existing?.key === weekKey
+    );
+
+    if (existingReportIndex >= 0) {
+        team.staffWorkReports[existingReportIndex] = report;
+    } else {
+        team.staffWorkReports.push(report);
+    }
+
+    // Keep a useful recent history without allowing saves to grow indefinitely.
+    if (team.staffWorkReports.length > 36) {
+        team.staffWorkReports.splice(
+            0,
+            team.staffWorkReports.length - 36
+        );
     }
 
     team.staffWorkLastResolvedKey = weekKey;
     team.scoutingWorkLastResolvedKey = weekKey;
 
-    return {
-        playersUpdated,
-        hoursUsed,
-        playersTrained: trainedPlayerIds.size,
-        attributesImproved
-    };
+    return report;
 }
 
 /**
@@ -2177,17 +2555,20 @@ export function applyBankedDraftScoutingReports(
             maxTargets: work.maxTargets
         };
 
-        // This now resolves against the newly generated draft class.
-        // Existing reports and unfinished scouting progress are retained.
         const candidates = getScoutingCandidates(
             team,
             gameState,
             assignment,
-            evaluatedYear,
-            evaluatedWeek
+            year,
+            week
         );
 
         if (candidates.length === 0) continue;
+
+        const defaultTargetCount = Math.max(
+            1,
+            Math.floor(hours / 4)
+        );
 
         const requestedTargetCount = Number(work.maxTargets);
 
@@ -2197,13 +2578,10 @@ export function applyBankedDraftScoutingReports(
             Number.isInteger(requestedTargetCount) &&
                 requestedTargetCount > 0
                 ? requestedTargetCount
-                : Math.max(1, Math.floor(hours / 4))
+                : defaultTargetCount
         );
 
         const selected = candidates.slice(0, targetCount);
-
-        if (selected.length === 0) continue;
-
         const hoursPerTarget = hours / selected.length;
 
         for (const { player } of selected) {
