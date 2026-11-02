@@ -179,6 +179,10 @@ export function rebuildDepthChartFromOrder(team) {
 
     pruneUnnaturalDepthOrder(team);
 
+    const rosterIds = new Set(
+        getGameDayRosterObjects(team).map(player => player.id)
+    );
+
     // Remove players who are no longer eligible for this game-day roster.
     Object.keys(team.depthOrder).forEach(pos => {
         if (!Array.isArray(team.depthOrder[pos])) return;
@@ -188,9 +192,6 @@ export function rebuildDepthChartFromOrder(team) {
         );
     });
 
-    const rosterIds = new Set(
-        getGameDayRosterObjects(team).map(player => player.id)
-    );
     const offFormKey = normalizeFormationKey(offenseFormations, team.formations.offense, 'Balanced');
     team.formations.offense = offFormKey;
     const offSlots = offenseFormations[offFormKey]?.slots || [];
