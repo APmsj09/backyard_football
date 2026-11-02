@@ -4139,9 +4139,6 @@ export function applyRecruitingSweetener(
         };
     }
 
-    const recruitingPush =
-        record.recruitingPushByTeam[teamKey];
-
     recruitingPush.cashSpent =
         Math.max(0, Number(recruitingPush.cashSpent) || 0) +
         cost;
