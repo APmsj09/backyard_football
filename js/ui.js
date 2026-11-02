@@ -3357,7 +3357,7 @@ export function renderOffseasonFAPool(gameState) {
             </div>
 
             <div class="border-t border-slate-200 bg-slate-50 px-3 py-2 text-[9px] text-slate-500">
-                Rival interest is an estimate based on recorded recruiting effort, not access to another school's internal interest score.
+                Rival interest is an estimate based on recorded recruiting effort, not access to another team's internal interest score.
                 Your team's interest is shown exactly.
             </div>
         </section>
@@ -3506,7 +3506,7 @@ export function renderOffseasonFAPool(gameState) {
                     <th class="py-2 px-2 text-center">Scout Status</th>
                     <th class="py-2 px-2 text-center">OFF Estimate</th>
                     <th class="py-2 px-2 text-center">DEF Estimate</th>
-                    <th class="py-2 px-3 text-left font-sans">Blacktop Grapevine & Suitors</th>
+                    <th class="py-2 px-3 text-left font-sans">Team Interest & Recruiting Intel</th>
                     <th class="py-2 px-3 text-right font-sans">Action</th>
                 </tr>
             </thead>
@@ -3860,8 +3860,8 @@ window.app_toggleRecruitingQuickSelection = function(playerId, checked) {
     const button = document.getElementById('fa-quick-assign-button');
 
     if (button) {
-        button.textContent =
-            `Quick Assign (${recruitingQuickSelectedIds.size})`;
+button.textContent =
+    `Assign (${recruitingQuickSelectedIds.size})`;
     }
 
     const count = document.querySelector(
@@ -3892,7 +3892,7 @@ window.app_selectVisibleRecruitingTargets = function() {
 
     if (button) {
         button.textContent =
-            `Quick Assign (${recruitingQuickSelectedIds.size})`;
+            `Assign (${recruitingQuickSelectedIds.size})`;
     }
 };
 
@@ -3908,7 +3908,7 @@ window.app_clearRecruitingTargetSelection = function() {
     const button = document.getElementById('fa-quick-assign-button');
 
     if (button) {
-        button.textContent = 'Quick Assign (0)';
+        button.textContent = 'Assign (0)';
     }
 
     const count = document.querySelector(
