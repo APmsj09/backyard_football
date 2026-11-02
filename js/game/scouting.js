@@ -1906,15 +1906,6 @@ export function processWeeklyScoutingAssignments(
         return true;
     });
 
-    if (!workAssignments.some(assignment =>
-        assignment.task === 'scouting' ||
-        assignment.task === 'training' ||
-        assignment.task === 'offensePrep' ||
-        assignment.task === 'defensePrep'
-    )) {
-        return { playersUpdated: 0, hoursUsed: 0 };
-    }
-
     const weekKey = `${year}:${week}`;
 
     if (
@@ -1936,6 +1927,15 @@ export function processWeeklyScoutingAssignments(
             assignmentsWithProblems: 0,
             assignmentResults: []
         };
+    }
+
+    if (!workAssignments.some(assignment =>
+        assignment.task === 'scouting' ||
+        assignment.task === 'training' ||
+        assignment.task === 'offensePrep' ||
+        assignment.task === 'defensePrep'
+    )) {
+        return { playersUpdated: 0, hoursUsed: 0 };
     }
 
     const staffById = getAvailableScoutingStaff(team);

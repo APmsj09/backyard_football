@@ -5755,6 +5755,25 @@ export function processAiRecruitingDay(gameState) {
                 offerExtended
             });
 
+            const observedCompetitionPressure = Math.max(
+                0,
+                Number(target.observedCompetitionPressure) || 0
+            );
+
+            const remainingRecruitingDays = Math.max(
+                0,
+                totalDays - day
+            );
+
+            const shouldConsiderSweetener =
+                Number(result.interestAfter) >= 18 &&
+                (
+                    observedCompetitionPressure >= 3 ||
+                    remainingRecruitingDays <= 1
+                );
+
+            let sweetenerResult = null;
+
             if (shouldConsiderSweetener) {
                 const balance = Number(team.finances?.balance);
 
@@ -5782,7 +5801,7 @@ export function processAiRecruitingDay(gameState) {
                 if (
                     availableFavorTokens > 0 &&
                     day >= totalDays - 1 &&
-                    competitionPressure >= 4
+                    observedCompetitionPressure >= 4
                 ) {
                     favorAttempted = true;
 
