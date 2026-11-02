@@ -2400,7 +2400,9 @@ export function renderFreeAgentsTab(gameState) {
                 ),
 
                 activitySummary:
-                    activityParts.join(' · ') || 'Recorded contact'
+                    activityParts.join(' · ') || 'Recorded contact',
+
+                recentActivity: schoolActivities
             };
         }).sort((a, b) => b.midpoint - a.midpoint);
 
@@ -4611,106 +4613,17 @@ window.app_openRecruitingSweetenerModal = function(playerId) {
 };
 
 window.app_openBidModal = function(playerId) {
-    const gs = getGameState();
-    if (!gs?.playerTeam) return;
+    if (
+        typeof window.app_openRecruitingActionModal !== 'function'
+    ) {
+        showModal(
+            'Recruiting Unavailable',
+            '<p>The recruiting action interface could not be opened.</p>'
+        );
+        return;
+    }
 
-    const player = Game.getPlayer(playerId) || gs.players.find(p => p.id === playerId);
-    if (!player) return;
-
-    const team = gs.playerTeam;
-    const pos = player.pos || estimateBestPosition(player);
-    const scouting = getFreeAgentScoutingView(team, player);
-    const existingBid = offseasonFABids.find(b => b.playerId === playerId);
-
-    const availableTokens = (team.socialProfile?.favorTokens || 0) -
-        offseasonFABids.filter(b => b.playerId !== playerId).reduce((sum, b) => sum + (b.offer.tokensOffered || 0), 0);
-
-    const intel = Game.getPlayerMarketIntel ? Game.getPlayerMarketIntel(player, gs) : { heat: 'QUIET', rumorText: 'No other active suitors.' };
-
-    const modalHtml = `
-        <div class="space-y-3.5 text-left text-xs">
-            <!-- Prospect Snapshot Header -->
-            <div class="bg-slate-900 text-white p-3 rounded flex justify-between items-center shadow-sm">
-                <div>
-                    <div class="flex items-center gap-2">
-                        <h4 class="font-black text-sm text-white">${player.name}</h4>
-                        <span class="bg-slate-800 text-amber-400 font-bold px-1.5 py-0.5 rounded text-[10px]">${player.age}yo • ${pos}</span>
-                    </div>
-                    <p class="text-[11px] text-slate-400 mt-0.5">
-                        Scouting: ${scouting.status} · ${scouting.progressLabel}
-                    </p>
-                </div>
-                <div class="text-right shrink-0">
-                    <span class="text-[9px] uppercase tracking-wider text-slate-400 block">Estimated Fit</span>
-                    <span class="block font-bold text-xs text-amber-400">
-                        OFF ${formatFreeAgentScoutingFit(scouting.offense)}
-                    </span>
-                    <span class="block font-bold text-xs text-amber-400 mt-0.5">
-                        DEF ${formatFreeAgentScoutingFit(scouting.defense)}
-                    </span>
-                </div>
-            </div>
-
-            <!-- Market Intel Banner -->
-            <div class="p-2.5 rounded border ${intel.heat === 'HOT' ? 'bg-rose-50 border-rose-300 text-rose-950' : 'bg-slate-50 border-slate-200 text-slate-700'} text-[11px]">
-                <span class="font-bold uppercase tracking-wider block text-[9px] text-slate-500 mb-0.5">Blacktop Grapevine</span>
-                <p class="italic">"${intel.rumorText || 'Listening to pitches across the neighborhood.'}"</p>
-            </div>
-
-            <!-- Pitch Parameters -->
-            <div class="space-y-3 bg-white p-3 border border-slate-200 rounded">
-                <div>
-                    <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
-                        Promised Roster Role
-                    </label>
-                    <select id="fa-pitch-role" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
-                        <option value="STARTER" ${(existingBid?.offer?.role === 'STARTER' || !existingBid) ? 'selected' : ''}>Guaranteed Starter (High attraction for top players)</option>
-                        <option value="ROTATIONAL" ${existingBid?.offer?.role === 'ROTATIONAL' ? 'selected' : ''}>Key Rotational Reserve / Two-Way Specialist</option>
-                        <option value="DEVELOPMENTAL" ${existingBid?.offer?.role === 'DEVELOPMENTAL' ? 'selected' : ''}>Developmental Prospect (Low expectation)</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
-                        Offensive Focal Point Guarantee
-                    </label>
-                    <select id="fa-pitch-touches" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
-                        <option value="BALANCED" ${(existingBid?.offer?.promiseTouches === 'BALANCED' || !existingBid) ? 'selected' : ''}>Team-First / Balanced Touch Distribution</option>
-                        <option value="FEATURED" ${existingBid?.offer?.promiseTouches === 'FEATURED' ? 'selected' : ''}>Featured Weapon (High targets & handoff share)</option>
-                    </select>
-                </div>
-
-                <div>
-                    <div class="flex justify-between items-center mb-1">
-                        <label class="text-[10px] font-black uppercase tracking-wider text-slate-600">
-                            Favor Token Sweetener
-                        </label>
-                        <span class="text-[10px] text-slate-500 font-mono">Available: <b>${Math.max(0, availableTokens)}</b></span>
-                    </div>
-                    <select id="fa-pitch-tokens" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
-                        <option value="0" ${(!existingBid || existingBid?.offer?.tokensOffered === 0) ? 'selected' : ''}>0 Tokens (Standard pitch)</option>
-                        ${availableTokens >= 1 ? `<option value="1" ${existingBid?.offer?.tokensOffered === 1 ? 'selected' : ''}>1 Token (Bike lend, new gloves, playground concessions)</option>` : ''}
-                        ${availableTokens >= 2 ? `<option value="2" ${existingBid?.offer?.tokensOffered === 2 ? 'selected' : ''}>2 Tokens (Substantial commitment & personal favors)</option>` : ''}
-                        ${availableTokens >= 3 ? `<option value="3" ${existingBid?.offer?.tokensOffered === 3 ? 'selected' : ''}>3 Tokens (All-in neighborhood recruit)</option>` : ''}
-                    </select>
-                </div>
-            </div>
-        </div>
-    `;
-
-    showModal(`Recruit Prospect: ${player.name}`, modalHtml, () => {
-        const role = document.getElementById('fa-pitch-role')?.value || 'STARTER';
-        const promiseTouches = document.getElementById('fa-pitch-touches')?.value || 'BALANCED';
-        const tokensOffered = parseInt(document.getElementById('fa-pitch-tokens')?.value || '0', 10);
-
-        addOffseasonFABid({
-            playerId: player.id,
-            teamId: team.id,
-            offer: { role, promiseTouches, tokensOffered }
-        });
-
-        renderOffseasonFAScreen(gs);
-    }, existingBid ? "Update Offer" : "Submit Contract Offer");
+    window.app_openRecruitingActionModal(playerId);
 };
 
 let staffWorkloadExpanded = false;
