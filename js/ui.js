@@ -3558,6 +3558,24 @@ export function renderOffseasonFAPool(gameState) {
                         )
                     );
 
+                    const userOffer =
+                        recruitingRecord?.offersByTeam?.[teamKey] || null;
+
+                    const hasActiveOffer =
+                        userOffer?.status === 'active';
+
+                    const offerStatusHtml = hasActiveOffer
+                        ? `
+                            <span class="border border-emerald-300 bg-emerald-50 text-emerald-800 font-black px-1.5 py-0.5 rounded text-[9px]">
+                                Roster Invitation Active
+                            </span>
+                        `
+                        : `
+                            <span class="text-[9px] text-slate-500">
+                                No active roster invitation
+                            </span>
+                        `;
+
                     // Show the actual resources invested by our program.
                     // Missing values are normal for older recruiting records.
                     const recruitingPush =
