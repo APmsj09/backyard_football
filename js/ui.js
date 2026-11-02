@@ -2229,428 +2229,6 @@ export function renderFreeAgentsTab(gameState) {
         return;
     }
 
-    // Build the Recruiting Battle Board from observable activity.
-    // User-team interest is shown exactly; rival interest stays estimated.
-    const battleBoardEntries = pool.map(player => {
-        const intel = Game.getPlayerMarketIntel(player, gameState);
-
-        const recordedSchools = Array.isArray(intel?.suitorDetails)
-            ? intel.suitorDetails
-            : [];
-
-        if (recordedSchools.length === 0) return null;
-
-        const playerRecord =
-            progress.recruits?.[String(player.id)];
-
-        const userTeamId = String(gameState.playerTeam?.id ?? '');
-
-        const battleActivities = Array.isArray(progress.dailyActivity)
-            ? progress.dailyActivity
-            : [];
-
-        const userInterest = Math.max(
-            0,
-            Math.min(
-                100,
-                Number(
-                    playerRecord?.interestByTeam?.[userTeamId]
-                ) || 0
-            )
-        );
-
-        const schools = recordedSchools.map(detail => {
-            const teamId = detail.teamId ?? detail.team?.id;
-
-            const schoolActivities = battleActivities
-                .filter(activity =>
-                    String(activity.playerId) === String(player.id) &&
-                    String(activity.teamId) === String(teamId) &&
-                    Number(activity.year) === Number(gameState.year) &&
-                    [
-                        'recruiting_action',
-                        'recruiting_sweetener'
-                    ].includes(activity.type)
-                )
-                .sort((a, b) =>
-                    (Number(a.day) || 0) - (Number(b.day) || 0)
-                )
-                .slice(-3)
-                .reverse()
-                .map(activity => {
-                    const actionLabels = {
-                        outreach: 'Personal outreach',
-                        teammateConnection: 'Teammate connection',
-                        roleDiscussion: 'Role discussion',
-                        practiceInvitation: 'Practice invitation'
-                    };
-
-                    const isSweetener =
-                        activity.type === 'recruiting_sweetener';
-
-                    const description = isSweetener
-                        ? activity.label || 'Gift or favor used'
-                        : actionLabels[activity.action] ||
-                          activity.label ||
-                          'Recruiting contact';
-
-                    const hours = Math.max(
-                        0,
-                        Number(activity.hours) || 0
-                    );
-
-                    return {
-                        day: Math.max(0, Number(activity.day) || 0),
-                        description,
-                        effort: !isSweetener && hours > 0
-                            ? `${hours}h`
-                            : ''
-                    };
-                });
-
-            const isUserTeam =
-                teamId != null &&
-                String(teamId) === userTeamId;
-
-            const rawRange = detail.estimatedInterestRange || {};
-
-            const low = isUserTeam
-                ? userInterest
-                : Math.max(
-                    0,
-                    Math.min(100, Math.floor(Number(rawRange.low) || 0))
-                );
-
-            const high = isUserTeam
-                ? userInterest
-                : Math.max(
-                    low,
-                    Math.min(100, Math.ceil(Number(rawRange.high) || low))
-                );
-
-            const midpoint = isUserTeam
-                ? userInterest
-                : Math.round((low + high) / 2);
-
-            const actionCount = Math.max(
-                0,
-                Number(detail.actionCount) || 0
-            );
-
-            const sweetenerCount = Math.max(
-                0,
-                Number(detail.sweetenerCount) || 0
-            );
-
-            const totalHours = Math.max(
-                0,
-                Number(detail.totalHours) || 0
-            );
-
-            const activityParts = [];
-
-            if (actionCount > 0) {
-                activityParts.push(
-                    `${actionCount} staff action${actionCount === 1 ? '' : 's'}`
-                );
-            }
-
-            if (sweetenerCount > 0) {
-                activityParts.push(
-                    `${sweetenerCount} gift/favor`
-                );
-            }
-
-            if (totalHours > 0) {
-                activityParts.push(`${totalHours} staff hrs`);
-            }
-
-            return {
-                teamName:
-                    detail.teamName ||
-                    detail.team?.name ||
-                    'Unknown Team',
-
-                isUserTeam,
-                low,
-                high,
-                midpoint,
-
-                momentum: detail.momentum || 'Unknown',
-                momentumScore: Math.max(
-                    0,
-                    Math.min(100, Number(detail.momentumScore) || 0)
-                ),
-                activeDaysCount: Math.max(
-                    0,
-                    Number(detail.activeDaysCount) || 0
-                ),
-
-                activityLevel: detail.activityLevel || 'Recorded',
-                confidence: isUserTeam
-                    ? 'Exact'
-                    : detail.confidence || 'Low',
-
-                lastActivityDay:
-                    Number(detail.lastActivityDay) || 0,
-
-                daysSinceContact: Math.max(
-                    0,
-                    Number(detail.daysSinceContact) || 0
-                ),
-
-                activitySummary:
-                    activityParts.join(' · ') || 'Recorded contact',
-
-                recentActivity: schoolActivities
-            };
-        }).sort((a, b) => b.midpoint - a.midpoint);
-
-        const leader = [...schools].sort(
-            (a, b) => b.midpoint - a.midpoint
-        )[0];
-
-        const runnerUp = [...schools]
-            .filter(school => school !== leader)
-            .sort((a, b) => b.midpoint - a.midpoint)[0] || null;
-
-        const momentumLeader = [...schools].sort(
-            (a, b) =>
-                b.momentumScore - a.momentumScore ||
-                b.activeDaysCount - a.activeDaysCount
-        )[0];
-
-        let leadSummary = 'Only recorded pursuing team';
-
-        if (runnerUp) {
-            leadSummary =
-                leader.low > runnerUp.high
-                    ? `Estimated interest lead: ${leader.teamName}`
-                    : 'Estimated interest race is close or uncertain';
-        }
-
-        const momentumSummary = momentumLeader
-            ? `Strongest momentum: ${momentumLeader.teamName} (${momentumLeader.momentum})`
-            : 'No momentum estimate';
-
-        return {
-            playerName: player.name || 'Unknown Prospect',
-            position: getFreeAgentDisplayPosition(
-                gameState.playerTeam,
-                player
-            ),
-            schools,
-            leadSummary,
-            momentumSummary
-        };
-    })
-        .filter(Boolean)
-        .sort((a, b) =>
-            b.schools.length - a.schools.length ||
-            b.schools[0].midpoint - a.schools[0].midpoint
-        );
-
-    const contestedBattleCount = battleBoardEntries.filter(
-        entry => entry.schools.length >= 2
-    ).length;
-
-    const battleBoardHtml = `
-        <section class="mb-4 rounded-xl border border-slate-300 bg-white shadow-sm overflow-hidden">
-
-            <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-900 px-4 py-3 text-white">
-                <div>
-                    <h3 class="text-sm font-black uppercase tracking-wide">
-                        Recruiting Battle Board
-                    </h3>
-                    <p class="mt-0.5 text-[10px] text-slate-300">
-                        Observed recruiting activity and estimated school interest
-                    </p>
-                </div>
-
-                <div class="text-right">
-                    <div class="text-lg font-black">
-                        ${contestedBattleCount}
-                    </div>
-                    <div class="text-[9px] uppercase tracking-wide text-slate-300">
-                        Contested Prospects
-                    </div>
-                </div>
-            </div>
-
-            <div class="p-3 space-y-2">
-
-                ${
-                    battleBoardEntries.length > 0
-                        ? battleBoardEntries.map((entry, index) => `
-                            <details
-                                class="rounded-lg border border-slate-200 bg-slate-50"
-                                ${index === 0 ? 'open' : ''}>
-
-                                <summary class="cursor-pointer list-none p-3">
-                                    <div class="flex flex-wrap items-center justify-between gap-2">
-
-                                        <div class="min-w-0">
-                                            <div class="font-bold text-xs text-slate-900">
-                                                ${quickEscapeHtml(entry.playerName)}
-                                                <span class="ml-1 rounded bg-slate-200 px-1.5 py-0.5 text-[9px]">
-                                                    ${quickEscapeHtml(entry.position)}
-                                                </span>
-                                            </div>
-
-                                            <div class="mt-1 text-[10px] font-semibold text-slate-700">
-                                                ${quickEscapeHtml(entry.leadSummary)}
-                                            </div>
-
-                                            <div class="mt-0.5 text-[10px] text-indigo-700">
-                                                ${quickEscapeHtml(entry.momentumSummary)}
-                                            </div>
-                                        </div>
-
-                                        <span class="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 text-[9px] font-bold text-slate-700">
-                                            ${entry.schools.length} school${entry.schools.length === 1 ? '' : 's'} pursuing
-                                        </span>
-
-                                    </div>
-                                </summary>
-
-                                <div class="border-t border-slate-200 bg-white p-3 space-y-3">
-
-                                    ${entry.schools.map((school, schoolIndex) => `
-                                        <div>
-                                            <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
-
-                                                <div class="flex items-center gap-2">
-                                                    <span class="text-[10px] font-black text-slate-400">
-                                                        ${schoolIndex + 1}.
-                                                    </span>
-
-                                                    <span class="text-xs font-bold text-slate-900">
-                                                        ${quickEscapeHtml(school.teamName)}
-                                                    </span>
-
-                                                    ${
-                                                        school.isUserTeam
-                                                            ? `<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[8px] font-black uppercase text-emerald-800">Your Team</span>`
-                                                            : ''
-                                                    }
-                                                </div>
-
-                                                <span class="font-mono text-xs font-black ${
-                                                    school.isUserTeam
-                                                        ? 'text-emerald-700'
-                                                        : 'text-indigo-700'
-                                                }">
-                                                    ${
-                                                        school.isUserTeam
-                                                            ? `${school.midpoint}/100`
-                                                            : `${school.low}–${school.high}/100`
-                                                    }
-                                                </span>
-                                            </div>
-
-                                            <div class="h-2 overflow-hidden rounded-full bg-slate-100">
-                                                <div
-                                                    class="h-full rounded-full ${
-                                                        school.isUserTeam
-                                                            ? 'bg-emerald-600'
-                                                            : 'bg-indigo-500'
-                                                    }"
-                                                    style="width: ${school.midpoint}%">
-                                                </div>
-                                            </div>
-                                            <div class="mt-1 flex flex-wrap items-center justify-between gap-2">
-                                                <span class="rounded px-1.5 py-0.5 text-[9px] font-bold ${
-                                                    school.momentum === 'Surging'
-                                                        ? 'bg-emerald-100 text-emerald-800'
-                                                        : school.momentum === 'Building'
-                                                            ? 'bg-blue-100 text-blue-800'
-                                                            : school.momentum === 'Active'
-                                                                ? 'bg-indigo-100 text-indigo-800'
-                                                                : school.momentum === 'Cooling'
-                                                                    ? 'bg-amber-100 text-amber-800'
-                                                                    : 'bg-slate-100 text-slate-600'
-                                                }">
-                                                    Momentum: ${quickEscapeHtml(school.momentum)}
-                                                </span>
-
-                                                <span class="text-[9px] font-mono text-slate-500">
-                                                    ${school.activeDaysCount} recruiting day${school.activeDaysCount === 1 ? '' : 's'} active
-                                                </span>
-                                            </div>
-
-                                            <div class="mt-1 flex flex-wrap justify-between gap-1 text-[9px] text-slate-500">
-                                                <span>
-                                                    ${quickEscapeHtml(school.activityLevel)} activity
-                                                    · ${quickEscapeHtml(school.activitySummary)}
-                                                </span>
-
-                                                <span>
-                                                    ${school.isUserTeam
-                                                        ? 'Actual interest'
-                                                        : `${quickEscapeHtml(school.confidence)} confidence`}
-                                                    · Day ${school.lastActivityDay}
-                                                </span>
-                                            </div>
-
-                                            <div class="mt-0.5 text-[9px] text-slate-400">
-                                                ${
-                                                    school.daysSinceContact === 0
-                                                        ? 'Contact recorded this recruiting day'
-                                                        : `Last contact ${school.daysSinceContact} recruiting day${school.daysSinceContact === 1 ? '' : 's'} ago`
-                                                }
-                                            </div>
-
-                                            ${
-                                                school.recentActivity.length > 0
-                                                    ? `
-                                                        <div class="mt-2 border-t border-slate-100 pt-2">
-                                                            <div class="mb-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
-                                                                Recent Recruiting Activity
-                                                            </div>
-
-                                                            <div class="space-y-1">
-                                                                ${school.recentActivity.map(activity => `
-                                                                    <div class="flex items-center justify-between gap-2 text-[10px]">
-                                                                        <span class="text-slate-600">
-                                                                            Day ${activity.day} · ${quickEscapeHtml(activity.description)}
-                                                                        </span>
-                                                                        <span class="shrink-0 font-mono text-slate-400">
-                                                                            ${quickEscapeHtml(activity.effort)}
-                                                                        </span>
-                                                                    </div>
-                                                                `).join('')}
-                                                            </div>
-                                                        </div>
-                                                    `
-                                                    : ''
-                                            }
-                                        </div>
-                                    `).join('')}
-
-                                </div>
-                            </details>
-                        `).join('')
-                        : `
-                            <div class="rounded-lg border border-dashed border-slate-300 p-5 text-center">
-                                <div class="text-xs font-bold text-slate-600">
-                                    No recorded recruiting battles yet
-                                </div>
-                                <p class="mt-1 text-[10px] text-slate-500">
-                                    Schools appear here after observable recruiting actions or gifts are recorded.
-                                </p>
-                            </div>
-                        `
-                }
-
-            </div>
-
-            <div class="border-t border-slate-200 bg-slate-50 px-3 py-2 text-[9px] text-slate-500">
-                Rival interest is an estimate based on recorded recruiting effort, not access to another school's internal interest score.
-                Your team's interest is shown exactly.
-            </div>
-        </section>
-    `;
-
     container.innerHTML = `
         <table class="min-w-full text-xs font-mono">
             <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
@@ -3361,6 +2939,429 @@ export function renderOffseasonFAPool(gameState) {
         container.innerHTML = `<p class="p-8 text-center text-slate-400 italic text-xs">No free agents available matching this filter.</p>`;
         return;
     }
+
+    // Build the Recruiting Battle Board from observable activity.
+    // User-team interest is shown exactly; rival interest stays estimated.
+    const battleBoardEntries = pool.map(player => {
+        const intel = Game.getPlayerMarketIntel(player, gameState);
+
+        const recordedSchools = Array.isArray(intel?.suitorDetails)
+            ? intel.suitorDetails
+            : [];
+
+        if (recordedSchools.length === 0) return null;
+
+        const playerRecord =
+            progress.recruits?.[String(player.id)];
+
+        const userTeamId = String(gameState.playerTeam?.id ?? '');
+
+        const battleActivities = Array.isArray(progress.dailyActivity)
+            ? progress.dailyActivity
+            : [];
+
+        const userInterest = Math.max(
+            0,
+            Math.min(
+                100,
+                Number(
+                    playerRecord?.interestByTeam?.[userTeamId]
+                ) || 0
+            )
+        );
+
+        const schools = recordedSchools.map(detail => {
+            const teamId = detail.teamId ?? detail.team?.id;
+
+            const schoolActivities = battleActivities
+                .filter(activity =>
+                    String(activity.playerId) === String(player.id) &&
+                    String(activity.teamId) === String(teamId) &&
+                    Number(activity.year) === Number(gameState.year) &&
+                    [
+                        'recruiting_action',
+                        'recruiting_sweetener'
+                    ].includes(activity.type)
+                )
+                .sort((a, b) =>
+                    (Number(a.day) || 0) - (Number(b.day) || 0)
+                )
+                .slice(-3)
+                .reverse()
+                .map(activity => {
+                    const actionLabels = {
+                        outreach: 'Personal outreach',
+                        teammateConnection: 'Teammate connection',
+                        roleDiscussion: 'Role discussion',
+                        practiceInvitation: 'Practice invitation'
+                    };
+
+                    const isSweetener =
+                        activity.type === 'recruiting_sweetener';
+
+                    const description = isSweetener
+                        ? activity.label || 'Gift or favor used'
+                        : actionLabels[activity.action] ||
+                          activity.label ||
+                          'Recruiting contact';
+
+                    const hours = Math.max(
+                        0,
+                        Number(activity.hours) || 0
+                    );
+
+                    return {
+                        day: Math.max(0, Number(activity.day) || 0),
+                        description,
+                        effort: !isSweetener && hours > 0
+                            ? `${hours}h`
+                            : ''
+                    };
+                });
+
+            const isUserTeam =
+                teamId != null &&
+                String(teamId) === userTeamId;
+
+            const rawRange = detail.estimatedInterestRange || {};
+
+            const low = isUserTeam
+                ? userInterest
+                : Math.max(
+                    0,
+                    Math.min(100, Math.floor(Number(rawRange.low) || 0))
+                );
+
+            const high = isUserTeam
+                ? userInterest
+                : Math.max(
+                    low,
+                    Math.min(100, Math.ceil(Number(rawRange.high) || low))
+                );
+
+            const midpoint = isUserTeam
+                ? userInterest
+                : Math.round((low + high) / 2);
+
+            const actionCount = Math.max(
+                0,
+                Number(detail.actionCount) || 0
+            );
+
+            const sweetenerCount = Math.max(
+                0,
+                Number(detail.sweetenerCount) || 0
+            );
+
+            const totalHours = Math.max(
+                0,
+                Number(detail.totalHours) || 0
+            );
+
+            const activityParts = [];
+
+            if (actionCount > 0) {
+                activityParts.push(
+                    `${actionCount} staff action${actionCount === 1 ? '' : 's'}`
+                );
+            }
+
+            if (sweetenerCount > 0) {
+                activityParts.push(
+                    `${sweetenerCount} gift/favor`
+                );
+            }
+
+            if (totalHours > 0) {
+                activityParts.push(`${totalHours} staff hrs`);
+            }
+
+            return {
+                teamName:
+                    detail.teamName ||
+                    detail.team?.name ||
+                    'Unknown Team',
+
+                isUserTeam,
+                low,
+                high,
+                midpoint,
+
+                momentum: detail.momentum || 'Unknown',
+                momentumScore: Math.max(
+                    0,
+                    Math.min(100, Number(detail.momentumScore) || 0)
+                ),
+                activeDaysCount: Math.max(
+                    0,
+                    Number(detail.activeDaysCount) || 0
+                ),
+
+                activityLevel: detail.activityLevel || 'Recorded',
+                confidence: isUserTeam
+                    ? 'Exact'
+                    : detail.confidence || 'Low',
+
+                lastActivityDay:
+                    Number(detail.lastActivityDay) || 0,
+
+                daysSinceContact: Math.max(
+                    0,
+                    Number(detail.daysSinceContact) || 0
+                ),
+
+                activitySummary:
+                    activityParts.join(' · ') || 'Recorded contact',
+
+                recentActivity: schoolActivities
+            };
+        }).sort((a, b) => b.midpoint - a.midpoint);
+
+        const leader = [...schools].sort(
+            (a, b) => b.midpoint - a.midpoint
+        )[0];
+
+        const runnerUp = [...schools]
+            .filter(school => school !== leader)
+            .sort((a, b) => b.midpoint - a.midpoint)[0] || null;
+
+        const momentumLeader = [...schools].sort(
+            (a, b) =>
+                b.momentumScore - a.momentumScore ||
+                b.activeDaysCount - a.activeDaysCount
+        )[0];
+
+        let leadSummary = 'Only recorded pursuing team';
+
+        if (runnerUp) {
+            leadSummary =
+                leader.low > runnerUp.high
+                    ? `Estimated interest lead: ${leader.teamName}`
+                    : 'Estimated interest race is close or uncertain';
+        }
+
+        const momentumSummary = momentumLeader
+            ? `Strongest momentum: ${momentumLeader.teamName} (${momentumLeader.momentum})`
+            : 'No momentum estimate';
+
+        return {
+            playerName: player.name || 'Unknown Prospect',
+            position: getFreeAgentDisplayPosition(
+                gameState.playerTeam,
+                player
+            ),
+            schools,
+            leadSummary,
+            momentumSummary
+        };
+    })
+        .filter(Boolean)
+        .sort((a, b) =>
+            b.schools.length - a.schools.length ||
+            b.schools[0].midpoint - a.schools[0].midpoint
+        );
+
+    const contestedBattleCount = battleBoardEntries.filter(
+        entry => entry.schools.length >= 2
+    ).length;
+
+    const battleBoardHtml = `
+        <section class="mb-4 rounded-xl border border-slate-300 bg-white shadow-sm overflow-hidden">
+
+            <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-900 px-4 py-3 text-white">
+                <div>
+                    <h3 class="text-sm font-black uppercase tracking-wide">
+                        Recruiting Battle Board
+                    </h3>
+                    <p class="mt-0.5 text-[10px] text-slate-300">
+                        Observed recruiting activity and estimated school interest
+                    </p>
+                </div>
+
+                <div class="text-right">
+                    <div class="text-lg font-black">
+                        ${contestedBattleCount}
+                    </div>
+                    <div class="text-[9px] uppercase tracking-wide text-slate-300">
+                        Contested Prospects
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-3 space-y-2">
+
+                ${
+                    battleBoardEntries.length > 0
+                        ? battleBoardEntries.map((entry, index) => `
+                            <details
+                                class="rounded-lg border border-slate-200 bg-slate-50"
+                                ${index === 0 ? 'open' : ''}>
+
+                                <summary class="cursor-pointer list-none p-3">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+
+                                        <div class="min-w-0">
+                                            <div class="font-bold text-xs text-slate-900">
+                                                ${quickEscapeHtml(entry.playerName)}
+                                                <span class="ml-1 rounded bg-slate-200 px-1.5 py-0.5 text-[9px]">
+                                                    ${quickEscapeHtml(entry.position)}
+                                                </span>
+                                            </div>
+
+                                            <div class="mt-1 text-[10px] font-semibold text-slate-700">
+                                                ${quickEscapeHtml(entry.leadSummary)}
+                                            </div>
+
+                                            <div class="mt-0.5 text-[10px] text-indigo-700">
+                                                ${quickEscapeHtml(entry.momentumSummary)}
+                                            </div>
+                                        </div>
+
+                                        <span class="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 text-[9px] font-bold text-slate-700">
+                                            ${entry.schools.length} school${entry.schools.length === 1 ? '' : 's'} pursuing
+                                        </span>
+
+                                    </div>
+                                </summary>
+
+                                <div class="border-t border-slate-200 bg-white p-3 space-y-3">
+
+                                    ${entry.schools.map((school, schoolIndex) => `
+                                        <div>
+                                            <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+
+                                                <div class="flex items-center gap-2">
+                                                    <span class="text-[10px] font-black text-slate-400">
+                                                        ${schoolIndex + 1}.
+                                                    </span>
+
+                                                    <span class="text-xs font-bold text-slate-900">
+                                                        ${quickEscapeHtml(school.teamName)}
+                                                    </span>
+
+                                                    ${
+                                                        school.isUserTeam
+                                                            ? `<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[8px] font-black uppercase text-emerald-800">Your Team</span>`
+                                                            : ''
+                                                    }
+                                                </div>
+
+                                                <span class="font-mono text-xs font-black ${
+                                                    school.isUserTeam
+                                                        ? 'text-emerald-700'
+                                                        : 'text-indigo-700'
+                                                }">
+                                                    ${
+                                                        school.isUserTeam
+                                                            ? `${school.midpoint}/100`
+                                                            : `${school.low}–${school.high}/100`
+                                                    }
+                                                </span>
+                                            </div>
+
+                                            <div class="h-2 overflow-hidden rounded-full bg-slate-100">
+                                                <div
+                                                    class="h-full rounded-full ${
+                                                        school.isUserTeam
+                                                            ? 'bg-emerald-600'
+                                                            : 'bg-indigo-500'
+                                                    }"
+                                                    style="width: ${school.midpoint}%">
+                                                </div>
+                                            </div>
+                                            <div class="mt-1 flex flex-wrap items-center justify-between gap-2">
+                                                <span class="rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                                                    school.momentum === 'Surging'
+                                                        ? 'bg-emerald-100 text-emerald-800'
+                                                        : school.momentum === 'Building'
+                                                            ? 'bg-blue-100 text-blue-800'
+                                                            : school.momentum === 'Active'
+                                                                ? 'bg-indigo-100 text-indigo-800'
+                                                                : school.momentum === 'Cooling'
+                                                                    ? 'bg-amber-100 text-amber-800'
+                                                                    : 'bg-slate-100 text-slate-600'
+                                                }">
+                                                    Momentum: ${quickEscapeHtml(school.momentum)}
+                                                </span>
+
+                                                <span class="text-[9px] font-mono text-slate-500">
+                                                    ${school.activeDaysCount} recruiting day${school.activeDaysCount === 1 ? '' : 's'} active
+                                                </span>
+                                            </div>
+
+                                            <div class="mt-1 flex flex-wrap justify-between gap-1 text-[9px] text-slate-500">
+                                                <span>
+                                                    ${quickEscapeHtml(school.activityLevel)} activity
+                                                    · ${quickEscapeHtml(school.activitySummary)}
+                                                </span>
+
+                                                <span>
+                                                    ${school.isUserTeam
+                                                        ? 'Actual interest'
+                                                        : `${quickEscapeHtml(school.confidence)} confidence`}
+                                                    · Day ${school.lastActivityDay}
+                                                </span>
+                                            </div>
+
+                                            <div class="mt-0.5 text-[9px] text-slate-400">
+                                                ${
+                                                    school.daysSinceContact === 0
+                                                        ? 'Contact recorded this recruiting day'
+                                                        : `Last contact ${school.daysSinceContact} recruiting day${school.daysSinceContact === 1 ? '' : 's'} ago`
+                                                }
+                                            </div>
+
+                                            ${
+                                                school.recentActivity.length > 0
+                                                    ? `
+                                                        <div class="mt-2 border-t border-slate-100 pt-2">
+                                                            <div class="mb-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                                                Recent Recruiting Activity
+                                                            </div>
+
+                                                            <div class="space-y-1">
+                                                                ${school.recentActivity.map(activity => `
+                                                                    <div class="flex items-center justify-between gap-2 text-[10px]">
+                                                                        <span class="text-slate-600">
+                                                                            Day ${activity.day} · ${quickEscapeHtml(activity.description)}
+                                                                        </span>
+                                                                        <span class="shrink-0 font-mono text-slate-400">
+                                                                            ${quickEscapeHtml(activity.effort)}
+                                                                        </span>
+                                                                    </div>
+                                                                `).join('')}
+                                                            </div>
+                                                        </div>
+                                                    `
+                                                    : ''
+                                            }
+                                        </div>
+                                    `).join('')}
+
+                                </div>
+                            </details>
+                        `).join('')
+                        : `
+                            <div class="rounded-lg border border-dashed border-slate-300 p-5 text-center">
+                                <div class="text-xs font-bold text-slate-600">
+                                    No recorded recruiting battles yet
+                                </div>
+                                <p class="mt-1 text-[10px] text-slate-500">
+                                    Schools appear here after observable recruiting actions or gifts are recorded.
+                                </p>
+                            </div>
+                        `
+                }
+
+            </div>
+
+            <div class="border-t border-slate-200 bg-slate-50 px-3 py-2 text-[9px] text-slate-500">
+                Rival interest is an estimate based on recorded recruiting effort, not access to another school's internal interest score.
+                Your team's interest is shown exactly.
+            </div>
+        </section>
+    `;
+
 
     container.innerHTML = `
         ${battleBoardHtml}
