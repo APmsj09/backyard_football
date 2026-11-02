@@ -8170,9 +8170,6 @@ function processCoachCareerRetirement(
             Math.min(3, 3 - activeNpcCount)
         );
 
-        // Reconcile legacy references without automatically filling
-        // intentional vacancies.
-        ensureTeamCoachingStaff(team);
     }
 
     return retirements;
