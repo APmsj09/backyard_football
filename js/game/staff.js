@@ -3784,14 +3784,15 @@ export function executeRecruitingAction(
 /**
  * Uses a Favor Token or a cash-funded gift to improve a recruit's interest.
  *
- * Sweeteners do not consume staff hours. Each team can use one favor and
- * purchase up to three gifts for a recruit during a recruiting week.
+ * Sweeteners do not consume staff hours. Each team can use one favor per
+ * recruit and spend any affordable amount on recruiting gifts.
  */
 export function applyRecruitingSweetener(
     gameState,
     teamId,
     playerId,
-    sweetenerType
+    sweetenerType,
+    giftAmount = null
 ) {
     const state = gameState?.offseasonState;
     const progress = state?.recruitingProgress;
@@ -3909,26 +3910,14 @@ export function applyRecruitingSweetener(
     let label = '';
     let category = '';
     let tokensSpent = 0;
+    let normalizedSweetenerType = sweetenerType;
 
-    const gifts = {
-        gift_small: {
-            cost: 5,
-            interest: 6,
-            label: 'Small recruiting gift',
-            category: 'recruitingGiftSmall'
-        },
-        gift_medium: {
-            cost: 10,
-            interest: 10,
-            label: 'Generous recruiting gift',
-            category: 'recruitingGiftMedium'
-        },
-        gift_large: {
-            cost: 20,
-            interest: 14,
-            label: 'Premium recruiting gift',
-            category: 'recruitingGiftLarge'
-        }
+    // Legacy amounts remain supported while older UI references are
+    // replaced with the new custom-amount gift control.
+    const legacyGiftAmounts = {
+        gift_small: 5,
+        gift_medium: 10,
+        gift_large: 20
     };
 
     if (sweetenerType === 'favor') {
@@ -3962,31 +3951,76 @@ export function applyRecruitingSweetener(
         label = 'Called in a recruiting favor';
         category = 'recruitingFavor';
 
+    } else if (
+        sweetenerType === 'gift' ||
+        Object.prototype.hasOwnProperty.call(
+            legacyGiftAmounts,
+            sweetenerType
+        )
+    ) {
+        normalizedSweetenerType = 'gift';
+
+        const requestedAmount = sweetenerType === 'gift'
+            ? Number(giftAmount)
+            : legacyGiftAmounts[sweetenerType];
+
+        if (
+            !Number.isFinite(requestedAmount) ||
+            requestedAmount <= 0
+        ) {
+            return {
+                success: false,
+                message: 'Enter a valid gift amount greater than zero.'
+            };
+        }
+
+        cost = Math.round(requestedAmount * 100) / 100;
+
+        if (!Number.isFinite(cost) || cost <= 0) {
+            return {
+                success: false,
+                message: 'The gift amount must be at least $0.01.'
+            };
+        }
+
+        // Add all previous gift spending for this team and prospect.
+        // This also recognizes gifts recorded under the previous tier names.
+        const previousGiftSpend = teamSweeteners
+            .filter(entry =>
+                entry.sweetenerType === 'gift' ||
+                String(entry.sweetenerType || '').startsWith('gift_')
+            )
+            .reduce(
+                (total, entry) =>
+                    total + Math.max(
+                        0,
+                        Number(entry.cashSpent) || 0
+                    ),
+                0
+            );
+
+        // Each additional dollar has less impact than the previous dollar.
+        // Calculating the difference from cumulative spending means that
+        // splitting a large gift into smaller gifts provides no advantage.
+        const giftImpactBefore =
+            6 * Math.log2(1 + previousGiftSpend / 5);
+
+        const giftImpactAfter =
+            6 * Math.log2(1 + (previousGiftSpend + cost) / 5);
+
+        baseGain = Math.max(
+            0,
+            giftImpactAfter - giftImpactBefore
+        );
+
+        label = `Recruiting gift ($${cost.toFixed(2)})`;
+        category = 'recruitingGift';
+
     } else {
-        const gift = gifts[sweetenerType];
-
-        if (!gift) {
-            return {
-                success: false,
-                message: 'Invalid recruiting sweetener.'
-            };
-        }
-
-        const giftsAlreadyPurchased = teamSweeteners.filter(
-            entry => String(entry.sweetenerType).startsWith('gift_')
-        ).length;
-
-        if (giftsAlreadyPurchased >= 3) {
-            return {
-                success: false,
-                message: 'You have reached the three-gift limit for this recruit.'
-            };
-        }
-
-        cost = gift.cost;
-        baseGain = gift.interest;
-        label = gift.label;
-        category = gift.category;
+        return {
+            success: false,
+            message: 'Invalid recruiting sweetener.'
+        };
     }
 
     const finances = team.finances || {
@@ -4008,13 +4042,7 @@ export function applyRecruitingSweetener(
         };
     }
 
-    // Repeated gifts of the same size have diminishing returns.
-    const sameGiftCount = teamSweeteners.filter(
-        entry => entry.sweetenerType === sweetenerType
-    ).length;
-
-    let interestGain = baseGain *
-        Math.pow(0.65, sameGiftCount);
+    let interestGain = baseGain;
 
     if (currentInterest >= 90) {
         interestGain *= 0.35;
@@ -4022,7 +4050,20 @@ export function applyRecruitingSweetener(
         interestGain *= 0.65;
     }
 
-    interestGain = Math.max(1, Math.round(interestGain));
+    interestGain = Math.round(interestGain);
+
+    // Favor Tokens retain their original minimum impact.
+    // A cash gift that produces no additional interest should not charge
+    // the team's balance.
+    if (normalizedSweetenerType === 'favor') {
+        interestGain = Math.max(1, interestGain);
+    } else if (interestGain <= 0) {
+        return {
+            success: false,
+            message:
+                'That gift amount is too small to make a meaningful impression at this level of investment.'
+        };
+    }
 
     const newInterest = Math.min(
         100,
@@ -4046,6 +4087,29 @@ export function applyRecruitingSweetener(
 
     record.interestByTeam = record.interestByTeam || {};
     record.interestByTeam[teamKey] = newInterest;
+
+    record.recruitingPushByTeam =
+        record.recruitingPushByTeam &&
+        typeof record.recruitingPushByTeam === 'object'
+            ? record.recruitingPushByTeam
+            : {};
+
+    const recruitingPush =
+        record.recruitingPushByTeam[teamKey] || {};
+
+    recruitingPush.cashSpent = Math.round(
+        (
+            (Number(recruitingPush.cashSpent) || 0) +
+            cost
+        ) * 100
+    ) / 100;
+
+    recruitingPush.favorTokensSpent =
+        (Number(recruitingPush.favorTokensSpent) || 0) +
+        tokensSpent;
+
+    record.recruitingPushByTeam[teamKey] = recruitingPush;
+
     record.history = history;
 
     // Track gifts and favors separately from staff recruiting effort.
@@ -4116,7 +4180,7 @@ export function applyRecruitingSweetener(
         teamName: team.name,
         playerId: player.id,
         playerName: player.name,
-        sweetenerType,
+        sweetenerType: normalizedSweetenerType,
         label,
         cashSpent: cost,
         tokensSpent,

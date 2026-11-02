@@ -27,7 +27,8 @@ import {
 } from './game/scouting.js';
 
 import {
-    getEffectiveStaffWorkHours
+    getEffectiveStaffWorkHours,
+    applyRecruitingSweetener
 } from './game/staff.js';
 
 let gameState = null;

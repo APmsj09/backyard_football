@@ -5092,9 +5092,34 @@ export function resolveRecruitingDay(gameState = game) {
 
         const rosterSize = rosterIds.length;
         const rosterLimit = getCurrentRosterLimit(gameState);
+        const teamKey = String(team.id);
 
-        return rosterSize < rosterLimit ? team : null;
-    };
+        // Active offers to other available prospects reserve roster spots.
+        const otherActiveReservations = Object.entries(
+            progress.recruits || {}
+        ).reduce((total, [reservedPlayerId, reservedRecord]) => {
+            if (
+                String(reservedPlayerId) === String(player?.id) ||
+                reservedRecord?.status !== 'available' ||
+                reservedRecord.committedTeamId != null
+            ) {
+                return total;
+            }
+
+            const offer =
+                reservedRecord?.offersByTeam?.[teamKey];
+
+            return total + (
+            offer?.status === 'active'
+                ? 1
+                : 0
+        );
+    }, 0);
+
+    return rosterSize + otherActiveReservations < rosterLimit
+        ? team
+        : null;
+};
 
     const protectedDraftIds = new Set(
         (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
@@ -5156,6 +5181,218 @@ export function resolveRecruitingDay(gameState = game) {
         return Number.isFinite(value)
             ? Math.max(0, Math.min(100, value))
             : 0;
+    };
+
+    const getPlayerRecruitingFit = (player, team) => {
+        const preferences = player?.recruitingPreferences || {};
+        const roster = getRosterObjects(team);
+
+        const clamp = (value, min = 0, max = 100) =>
+            Math.max(min, Math.min(max, value));
+
+        const getPriority = key => {
+            const value = Number(preferences[key]);
+
+            return Number.isFinite(value)
+                ? clamp(value, 5, 95)
+                : 50;
+        };
+
+        // 1. Playing-time opportunity.
+        // This uses positional competition, not hidden player ratings.
+        const preferredPositions = [
+            player?.pos,
+            player?.favoriteOffensivePosition,
+            player?.favoriteDefensivePosition
+        ]
+            .filter(Boolean)
+            .map(position => String(position).toUpperCase());
+
+        const positionalCompetitors = roster.filter(member => {
+            const memberPositions = [
+                member?.pos,
+                member?.favoriteOffensivePosition,
+                member?.favoriteDefensivePosition
+            ]
+                .filter(Boolean)
+                .map(position => String(position).toUpperCase());
+
+            return memberPositions.some(position =>
+                preferredPositions.includes(position)
+            );
+        }).length;
+
+        const roleFit = preferredPositions.length > 0
+            ? clamp(90 - positionalCompetitors * 14, 15, 90)
+            : 50;
+
+        // 2. Relationships and chemistry.
+        const bestFriendId = player?.social?.bestFriendId;
+
+        const hasBestFriend = bestFriendId != null &&
+            roster.some(member =>
+                String(member?.id) === String(bestFriendId)
+            );
+
+        const goodFriendIds = Array.isArray(player?.social?.goodFriendIds)
+            ? player.social.goodFriendIds.map(String)
+            : [];
+
+        const friendsOnTeam = roster.filter(member =>
+            goodFriendIds.includes(String(member?.id))
+        ).length;
+
+        const rivalIds = Array.isArray(player?.social?.rivalIds)
+            ? player.social.rivalIds.map(String)
+            : [];
+
+        const rivalsOnTeam = roster.filter(member =>
+            rivalIds.includes(String(member?.id))
+        ).length;
+
+        const relationshipFit = clamp(
+            50 +
+                (hasBestFriend ? 30 : 0) +
+                Math.min(20, friendsOnTeam * 10) -
+                Math.min(45, rivalsOnTeam * 35)
+        );
+
+        // 3. Development environment.
+        // The player can value the quality of the coaching staff.
+        const trainingCoach = getTeamCoachingSpecialist(
+            team,
+            'training'
+        );
+
+        const teaching = Number(trainingCoach?.ratings?.teaching);
+        const practiceDiscipline = Number(
+            trainingCoach?.ratings?.practiceDiscipline
+        );
+
+        const developmentRatings = [
+            teaching,
+            practiceDiscipline
+        ].filter(Number.isFinite);
+
+        const developmentFit = developmentRatings.length > 0
+            ? developmentRatings.reduce((sum, value) =>
+                sum + clamp(value), 0
+            ) / developmentRatings.length
+            : 50;
+
+        // 4. Winning environment.
+        const wins = Math.max(0, Number(team.wins) || 0);
+        const losses = Math.max(0, Number(team.losses) || 0);
+        const ties = Math.max(0, Number(team.ties) || 0);
+        const gamesPlayed = wins + losses + ties;
+
+        const winningPercentage = gamesPlayed > 0
+            ? (wins + ties * 0.5) / gamesPlayed
+            : 0.5;
+
+        const winningFit = 20 + winningPercentage * 60;
+
+        // 5. Program reputation.
+        const rawStreetCred = Number(team.socialProfile?.streetCred);
+
+        const streetCred = Number.isFinite(rawStreetCred)
+            ? clamp(rawStreetCred)
+            : team.tier === 1 ? 60 : 35;
+
+        const prestigeFit = streetCred;
+
+        // 6. Scheme preference.
+        // Formation names are only used when they provide a recognizable
+        // style. Unknown formations receive a neutral score.
+        const offenseName = [
+            team.formations?.offense,
+            team.coach?.preferredOffense
+        ].filter(Boolean).join(' ').toLowerCase();
+
+        const defenseName = [
+            team.formations?.defense,
+            team.coach?.preferredDefense
+        ].filter(Boolean).join(' ').toLowerCase();
+
+        const getOffenseStyle = name => {
+            if (/(spread|shotgun|air|vertical|passing)/.test(name)) {
+                return 'spread_passing';
+            }
+
+            if (/(power|run|heavy|jumbo|wing)/.test(name)) {
+                return 'power_run';
+            }
+
+            if (/balanced/.test(name)) {
+                return 'balanced';
+            }
+
+            return null;
+        };
+
+        const getDefenseStyle = name => {
+            if (/(pressure|blitz|attack)/.test(name)) {
+                return 'pressure';
+            }
+
+            if (/(coverage|cover|zone|quarters|nickel|dime)/.test(name)) {
+                return 'coverage';
+            }
+
+            if (/(balanced|3-2-3|3-1-3|base)/.test(name)) {
+                return 'balanced';
+            }
+
+            return null;
+        };
+
+        const preferredStyle = preferences.schemeStyle || {};
+
+        const teamOffenseStyle = getOffenseStyle(offenseName);
+        const teamDefenseStyle = getDefenseStyle(defenseName);
+
+        const offenseSchemeFit =
+            teamOffenseStyle && preferredStyle.offense
+                ? (teamOffenseStyle === preferredStyle.offense ? 90 : 30)
+                : 50;
+
+        const defenseSchemeFit =
+            teamDefenseStyle && preferredStyle.defense
+                ? (teamDefenseStyle === preferredStyle.defense ? 90 : 30)
+                : 50;
+
+        const primarySide = String(
+            player?.primarySide || ''
+        ).toLowerCase();
+
+        const schemeFit = primarySide.includes('off')
+            ? offenseSchemeFit
+            : primarySide.includes('def')
+                ? defenseSchemeFit
+                : (offenseSchemeFit + defenseSchemeFit) / 2;
+
+        // Give greater influence to the things this individual player
+        // actually values. Missing preferences receive neutral weight.
+        const weightedFactors = [
+            [getPriority('roleOpportunity'), roleFit],
+            [getPriority('relationships'), relationshipFit],
+            [getPriority('development'), developmentFit],
+            [getPriority('winning'), winningFit],
+            [getPriority('programPrestige'), prestigeFit],
+            [getPriority('schemeFit'), schemeFit]
+        ];
+
+        const totalPriority = weightedFactors.reduce(
+            (sum, [priority]) => sum + priority,
+            0
+        );
+
+        if (totalPriority <= 0) return 50;
+
+        return weightedFactors.reduce(
+            (sum, [priority, fit]) => sum + priority * fit,
+            0
+        ) / totalPriority;
     };
 
         /**
@@ -5557,7 +5794,9 @@ export function resolveRecruitingDay(gameState = game) {
         interest,
         fitScore = 50,
         fitMultiplier = 1,
-        pushMultiplier = 1
+        pushMultiplier = 1,
+        preferenceFit = 50,
+        decisionScore = interest
     ) => {
         if (
             !player ||
@@ -5636,6 +5875,34 @@ export function resolveRecruitingDay(gameState = game) {
             }
         );
 
+        const normalizedPreferenceFit =
+            preferenceFit != null &&
+            String(preferenceFit).trim() !== '' &&
+            Number.isFinite(Number(preferenceFit))
+                ? Math.max(
+                    0,
+                    Math.min(100, Math.round(Number(preferenceFit)))
+                )
+                : 50;
+
+        const normalizedDecisionScore =
+            decisionScore != null &&
+            String(decisionScore).trim() !== '' &&
+            Number.isFinite(Number(decisionScore))
+                ? Math.max(
+                    0,
+                    Math.min(120, Math.round(Number(decisionScore) * 10) / 10)
+                )
+                : Number.isFinite(Number(interest))
+                    ? Math.max(0, Math.min(100, Number(interest)))
+                    : 0;
+
+        const decisionSummary = normalizedPreferenceFit >= 65
+            ? 'Strong personal program fit influenced the choice.'
+            : normalizedPreferenceFit <= 35
+                ? 'Recruiting interest outweighed a weaker personal fit.'
+                : 'Recruiting interest and personal program fit both contributed.';
+
         const commitment = {
             playerId: player.id,
             playerName: player.name,
@@ -5679,6 +5946,9 @@ export function resolveRecruitingDay(gameState = game) {
                         Math.min(1.17, Number(pushMultiplier))
                     )
                     : 1,
+            preferenceFitAtCommit: normalizedPreferenceFit,
+            decisionScoreAtCommit: normalizedDecisionScore,
+            decisionSummary,
         };
 
         // Preserve successful recruiting campaigns on the player
@@ -5764,6 +6034,29 @@ export function resolveRecruitingDay(gameState = game) {
                 )
                 : 1;
 
+            const preferenceFit =
+                candidate.preferenceFit != null &&
+                String(candidate.preferenceFit).trim() !== '' &&
+                Number.isFinite(Number(candidate.preferenceFit))
+                    ? Math.max(
+                        0,
+                        Math.min(100, Number(candidate.preferenceFit))
+                    )
+                    : 50;
+
+            const decisionScore =
+                candidate.decisionScore != null &&
+                String(candidate.decisionScore).trim() !== '' &&
+                Number.isFinite(Number(candidate.decisionScore))
+                    ? Math.max(
+                        0,
+                        Math.min(120, Number(candidate.decisionScore))
+                    )
+                    : (
+                        Number(candidate.interest) +
+                        (preferenceFit - 50) * 0.35
+                    );
+
             // Player-program fit matters substantially.
             // Additional recruiting effort helps, but has diminishing returns.
             const decisionMultiplier =
@@ -5775,7 +6068,7 @@ export function resolveRecruitingDay(gameState = game) {
                 weight: Math.pow(
                     Math.max(
                         1,
-                        candidate.interest - seriousInterestThreshold
+                        decisionScore - seriousInterestThreshold
                     ),
                     1.6
                 ) * decisionMultiplier
@@ -6099,15 +6392,61 @@ export function resolveRecruitingDay(gameState = game) {
             .filter(([, offer]) =>
                 offer?.status === 'active'
             )
-            .map(([teamId]) => ({
-                team: getEligibleTeam(teamId),
-                interest: getInterest(record, teamId)
-            }))
+            .map(([teamId]) => {
+                const team = getEligibleTeam(teamId, player);
+                const interest = getInterest(record, teamId);
+
+                const playerFit = team
+                    ? calculatePlayerRecruitingFit(
+                        player,
+                        record,
+                        team
+                    )
+                    : null;
+
+                const fitScore =
+                    Number.isFinite(Number(playerFit?.fitScore))
+                        ? Math.max(
+                            0,
+                            Math.min(100, Number(playerFit.fitScore))
+                        )
+                        : 50;
+
+                const fitMultiplier =
+                    Number.isFinite(Number(playerFit?.fitMultiplier))
+                        ? Math.max(
+                            0.8,
+                            Math.min(1.2, Number(playerFit.fitMultiplier))
+                        )
+                        : 1;
+
+                // Staff recruiting actions and sweeteners already
+                // contribute to interest. Keep this neutral until a
+                // separate recruiting-push calculation is established.
+                const pushMultiplier = 1;
+
+                const preferenceFit = fitScore;
+
+                const decisionScore =
+                    interest + (preferenceFit - 50) * 0.35;
+
+                return {
+                    team,
+                    interest,
+                    fitScore,
+                    fitMultiplier,
+                    pushMultiplier,
+                    preferenceFit,
+                    decisionScore
+                };
+            })
             .filter(candidate =>
                 candidate.team &&
                 candidate.interest >= seriousInterestThreshold
             )
-            .sort((a, b) => b.interest - a.interest);
+            .sort((a, b) =>
+                b.decisionScore - a.decisionScore
+            );
 
         if (contenders.length === 0) {
             if (finalDay) {
@@ -6129,8 +6468,8 @@ export function resolveRecruitingDay(gameState = game) {
             const leader = contenders[0];
             const runnerUp = contenders[1] || null;
 
-            const leadMargin = leader.interest -
-                (runnerUp?.interest || 0);
+        const leadMargin = leader.decisionScore -
+            (runnerUp?.decisionScore || 0);
 
             const hasFewAlternatives = contenders.length === 1;
             const strongLead = leadMargin >= 18;
@@ -6182,7 +6521,9 @@ export function resolveRecruitingDay(gameState = game) {
             winner.interest,
             winner.fitScore,
             winner.fitMultiplier,
-            winner.pushMultiplier
+            winner.pushMultiplier,
+            winner.preferenceFit,
+            winner.decisionScore
         );
 
         if (!commitment) continue;

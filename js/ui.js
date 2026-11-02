@@ -2344,6 +2344,8 @@ export function renderOffseasonFAScreen(gameState) {
     const roundIndicator = document.getElementById('fa-round-indicator');
     const userTokensEl = document.getElementById('fa-user-tokens');
     const userRosterEl = document.getElementById('fa-user-roster-count');
+    const userCashEl = document.getElementById('fa-user-cash');
+    const userStaffHoursEl = document.getElementById('fa-user-staff-hours');
     const advanceBtn = document.getElementById('fa-advance-day-btn');
 
     const state = gameState.offseasonState || {};
@@ -2377,6 +2379,67 @@ export function renderOffseasonFAScreen(gameState) {
 
     const rosterSize = Game.getRosterObjects(team).length;
     const rosterLimit = Game.getCurrentRosterLimit?.(gameState) || 18;
+
+    const teamBalance = Number(team.finances?.balance);
+
+    const recruitingCash = Number.isFinite(teamBalance)
+        ? teamBalance
+        : 0;
+
+    const staffBudgets =
+        Game.getRecruitingStaffHourBudget?.(team) || [];
+
+    const teamWork =
+        progress.teamDailyWork?.[String(team.id)] || {};
+
+    const recruitingAssignments = Object.values(teamWork).flatMap(
+        assignments => Array.isArray(assignments) ? assignments : []
+    );
+
+    const staffHours = staffBudgets.reduce(
+        (totals, coach) => {
+            const coachId = String(coach.coachId);
+            const weeklyHours = Math.max(
+                0,
+                Number(coach.weeklyHours) || 0
+            );
+
+            const usedHours = recruitingAssignments
+                .filter(assignment =>
+                    String(assignment.coachId) === coachId
+                )
+                .reduce(
+                    (total, assignment) =>
+                        total + Math.max(
+                            0,
+                            Number(assignment.hours) || 0
+                        ),
+                    0
+                );
+
+            totals.total += weeklyHours;
+            totals.remaining += Math.max(
+                0,
+                weeklyHours - usedHours
+            );
+
+            return totals;
+        },
+        { total: 0, remaining: 0 }
+    );
+
+    const formatStaffHours = value =>
+        (Math.round(value * 10) / 10).toString();
+
+    if (userCashEl) {
+        userCashEl.textContent = recruitingCash.toFixed(2);
+    }
+
+    if (userStaffHoursEl) {
+        userStaffHoursEl.textContent =
+            `${formatStaffHours(staffHours.remaining)} / ` +
+            `${formatStaffHours(staffHours.total)}h`;
+    }
 
     if (roundIndicator) {
         if (isRosterFinalization) {
@@ -2814,6 +2877,10 @@ export function renderOffseasonFAPool(gameState) {
     const filterPos =
         document.getElementById('fa-minigame-filter-pos')?.value || '';
 
+    const searchTerm = (
+        document.getElementById('fa-minigame-search')?.value || ''
+    ).trim().toLowerCase();
+
     const protectedDraftIds = new Set(
         (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
             .filter(prospect => prospect?.id != null)
@@ -2857,6 +2924,20 @@ export function renderOffseasonFAPool(gameState) {
             );
         });
 
+    if (searchTerm) {
+        pool = pool.filter(player => {
+            const playerName = String(
+                player.name ||
+                [
+                    player.firstName,
+                    player.lastName
+                ].filter(Boolean).join(' ')
+            ).toLowerCase();
+
+            return playerName.includes(searchTerm);
+        });
+    }
+
     if (filterPos) {
         pool = pool.filter(p =>
             matchesFreeAgentPositionFilter(
@@ -2865,6 +2946,15 @@ export function renderOffseasonFAPool(gameState) {
                 filterPos
             )
         );
+    }
+
+    const resultCountEl = document.getElementById(
+        'fa-minigame-result-count'
+    );
+
+    if (resultCountEl) {
+        resultCountEl.textContent =
+            `${pool.length} matching prospect${pool.length === 1 ? '' : 's'}`;
     }
 
     pool.sort((a, b) =>
@@ -3526,7 +3616,8 @@ export function renderOffseasonFAPool(gameState) {
                     <th class="py-2 px-2 text-center">Scout Status</th>
                     <th class="py-2 px-2 text-center">OFF Estimate</th>
                     <th class="py-2 px-2 text-center">DEF Estimate</th>
-                    <th class="py-2 px-3 text-left font-sans">Team Interest & Recruiting Intel</th>
+                    <th class="py-2 px-3 text-left font-sans">Your Program</th>
+                    <th class="py-2 px-3 text-left font-sans">Market Intel & Suitors</th>
                     <th class="py-2 px-3 text-right font-sans">Action</th>
                 </tr>
             </thead>
@@ -3632,27 +3723,54 @@ export function renderOffseasonFAPool(gameState) {
                             : 'bg-slate-100 text-slate-600 border-slate-200';
 
                     const marketStatusHtml = `
-                        <div class="flex flex-col items-start gap-1">
+                        <div class="flex flex-col items-start gap-1.5">
                             <div class="flex items-center gap-1.5 flex-wrap">
                                 <span class="border ${interestColor} font-black px-1.5 py-0.5 rounded text-[9px]">
                                     Your Interest: ${userInterest}/100
                                 </span>
-                                <span class="text-[9px] text-slate-500">
-                                    ${investmentSummary}
-                                </span>
                             </div>
+                            <span class="text-[9px] text-slate-500">
+                                ${investmentSummary}
+                            </span>
                             ${offerStatusHtml}
+                        </div>
+                    `;
+
+                    const marketIntelHtml = `
+                        <div class="flex flex-col items-start gap-1">
                             <span
-                                class="text-[10px] text-slate-500 truncate italic"
-                                title="${intel.rumorText}"
-                            >
+                                class="text-[10px] text-slate-600 italic"
+                                title="${intel.rumorText}">
                                 ${intel.rumorText}
                             </span>
+                            ${
+                                Array.isArray(intel.suitorNames) &&
+                                intel.suitorNames.length > 0
+                                    ? `
+                                        <span class="text-[9px] font-bold text-amber-700">
+                                            Other suitors:
+                                            ${intel.suitorNames.map(name =>
+                                                name.replace('The ', '')
+                                            ).join(', ')}
+                                        </span>
+                                    `
+                                    : `
+                                        <span class="text-[9px] text-slate-400">
+                                            No known competing teams
+                                        </span>
+                                    `
+                            }
                         </div>
                     `;
 
                     return `
-                    <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
+                    <tr class="${
+                        hasActiveOffer
+                            ? 'bg-emerald-50 hover:bg-emerald-100'
+                            : userInterest >= 70
+                                ? 'bg-amber-50/60 hover:bg-amber-50'
+                                : 'hover:bg-slate-50'
+                    } transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
                         <td class="py-2 px-2 text-center" onclick="event.stopPropagation()">
                             <input
                                 type="checkbox"
@@ -3669,7 +3787,7 @@ export function renderOffseasonFAPool(gameState) {
                         <td class="text-center py-2 px-2">
                             <span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span>
                         </td>
-                        <td class="text-center py-2 px-2 font-sans text-[10px] min-w-[140px]">
+                        <td class="text-center py-2 px-2 font-sans text-[10px] min-w-0">
                             <span class="${
                                 scouting.level >= 3
                                     ? 'text-emerald-700'
@@ -3701,29 +3819,32 @@ export function renderOffseasonFAPool(gameState) {
                         <td class="text-center py-2 px-2 font-mono text-slate-700">
                             ${formatFreeAgentScoutingFit(scouting.defense)}
                         </td>
-                        <td class="py-2 px-3 font-sans">
-                            <div class="max-w-[260px]">
-                                ${marketStatusHtml}
-                            </div>
+                        <td class="py-2 px-3 font-sans min-w-0 whitespace-normal break-words">
+                            ${marketStatusHtml}
                         </td>
-                        <td class="text-right py-2 px-3 font-sans whitespace-nowrap" onclick="event.stopPropagation()">
-                            <div class="flex flex-col items-end gap-1">
+                        <td class="py-2 px-3 font-sans min-w-0 whitespace-normal break-words">
+                            ${marketIntelHtml}
+                        </td>
+                        <td class="py-2 px-3 font-sans text-right" onclick="event.stopPropagation()">
+                            <div class="grid grid-cols-2 gap-1.5 min-w-[156px]">
                                 <button
                                     class="${
                                         hasActiveOffer
                                             ? 'bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300'
                                             : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                                    } font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition"
+                                    } col-span-2 w-full font-bold px-2 py-1.5 rounded text-[10px] uppercase tracking-wider transition"
                                     onclick="window.app_setRecruitingOffer('${p.id}', '${hasActiveOffer ? 'withdraw' : 'extend'}')">
                                     ${hasActiveOffer ? 'Withdraw Offer' : 'Offer Spot'}
                                 </button>
+
                                 <button
-                                    class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition shadow-sm"
+                                    class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold px-2 py-1.5 rounded text-[10px] uppercase tracking-wider transition shadow-sm"
                                     onclick="window.app_openRecruitingActionModal('${p.id}')">
                                     Recruit
                                 </button>
+
                                 <button
-                                    class="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-3 py-1 rounded text-[10px] uppercase tracking-wider transition"
+                                    class="w-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-2 py-1.5 rounded text-[10px] uppercase tracking-wider transition"
                                     onclick="window.app_openRecruitingSweetenerModal('${p.id}')">
                                     Gift / Favor
                                 </button>
@@ -4840,6 +4961,366 @@ window.app_openRecruitingSweetenerModal = function(playerId) {
                     result.message ||
                     'Your recruiting support was applied successfully.'
                 )}</p>`,
+                null,
+                'Continue'
+            );
+        },
+        'Apply Recruiting Support'
+    );
+};
+
+window.app_openRecruitingSweetenerModal = function(playerId) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+
+    if (!team) return;
+
+    const state = gs.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    const normalizedPhase = String(state?.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    if (
+        normalizedPhase !== 'recruiting' ||
+        !progress ||
+        progress.initialized !== true ||
+        progress.completed === true ||
+        Number(progress.seasonYear) !== Number(gs.year)
+    ) {
+        showModal(
+            'Recruiting Unavailable',
+            '<p>The seven-day recruiting week is not active.</p>'
+        );
+        return;
+    }
+
+    const player = Game.getPlayer(playerId) ||
+        gs.players?.find(
+            candidate =>
+                String(candidate?.id) === String(playerId)
+        );
+
+    const record = progress.recruits?.[String(playerId)];
+
+    if (
+        !player ||
+        player.teamId != null ||
+        !record ||
+        record.status !== 'available' ||
+        record.committedTeamId != null
+    ) {
+        showModal(
+            'Recruit Unavailable',
+            '<p>This prospect is no longer available for a recruiting gift or favor.</p>'
+        );
+        return;
+    }
+
+    const teamKey = String(team.id);
+
+    const currentInterest = Math.max(
+        0,
+        Math.min(
+            100,
+            Number(record.interestByTeam?.[teamKey]) || 0
+        )
+    );
+
+    if (currentInterest >= 100) {
+        showModal(
+            'Interest Already Maximized',
+            `<p>Your team has already maximized ${player.name}'s recruiting interest.</p>`
+        );
+        return;
+    }
+
+    const finances = team.finances || {
+        balance: 10,
+        waivedDues: [],
+        autoSnack: 'none'
+    };
+
+    const rawBalance = Number(finances.balance);
+
+    const availableCash = Number.isFinite(rawBalance)
+        ? Math.max(0, rawBalance)
+        : 0;
+
+    const history = Array.isArray(record.history)
+        ? record.history
+        : [];
+
+    const teamSweeteners = history.filter(entry =>
+        entry?.type === 'recruiting_sweetener' &&
+        String(entry.teamId) === teamKey
+    );
+
+    const favorAlreadyUsed = teamSweeteners.some(
+        entry => entry.sweetenerType === 'favor'
+    );
+
+    const favorTokens = Math.max(
+        0,
+        Math.floor(
+            Number(team.socialProfile?.favorTokens) || 0
+        )
+    );
+
+    const canUseFavor =
+        !favorAlreadyUsed &&
+        favorTokens > 0;
+
+    const canSendGift = availableCash >= 0.01;
+
+    if (!canUseFavor && !canSendGift) {
+        showModal(
+            'No Recruiting Resources Available',
+            `<p>Your team does not have enough cash or an available Favor Token to support ${player.name}.</p>`
+        );
+        return;
+    }
+
+    const initialType =
+        !canSendGift && canUseFavor
+            ? 'favor'
+            : 'gift';
+
+    const initialGiftAmount = Math.min(
+        10,
+        availableCash
+    );
+
+    const escapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    const modalHtml = `
+        <div class="space-y-4 text-left text-xs">
+
+            <div class="rounded bg-slate-900 p-3 text-white">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <h4 class="font-black text-sm">
+                            ${escapeHtml(player.name)}
+                        </h4>
+                        <p class="mt-1 text-slate-300">
+                            Age ${Number(player.age) || '—'} ·
+                            Recruiting interest: ${currentInterest}/100
+                        </p>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-[9px] uppercase tracking-wider text-slate-400">
+                            Available Resources
+                        </div>
+                        <div class="mt-1 font-bold text-emerald-300">
+                            $${availableCash.toFixed(2)}
+                        </div>
+                        <div class="font-bold text-amber-300">
+                            ${favorTokens} Favor Token${favorTokens === 1 ? '' : 's'}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <label
+                    for="recruiting-sweetener-type"
+                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                    Recruiting Support
+                </label>
+
+                <select
+                    id="recruiting-sweetener-type"
+                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                    onchange="
+                        document.getElementById('recruiting-gift-amount-wrap')
+                            ?.classList.toggle('hidden', this.value !== 'gift')
+                    ">
+                    <option
+                        value="gift"
+                        ${initialType === 'gift' ? 'selected' : ''}
+                        ${!canSendGift ? 'disabled' : ''}>
+                        Cash Gift
+                    </option>
+                    <option
+                        value="favor"
+                        ${initialType === 'favor' ? 'selected' : ''}
+                        ${!canUseFavor ? 'disabled' : ''}>
+                        Use a Favor Token
+                    </option>
+                </select>
+            </div>
+
+            <div
+                id="recruiting-gift-amount-wrap"
+                class="${initialType === 'favor' ? 'hidden' : ''}">
+
+                <label
+                    for="recruiting-gift-amount"
+                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                    Gift Amount
+                </label>
+
+                <div class="relative">
+                    <span class="absolute left-3 top-2 text-slate-500 font-bold">
+                        $
+                    </span>
+                    <input
+                        id="recruiting-gift-amount"
+                        type="number"
+                        min="0.01"
+                        max="${availableCash.toFixed(2)}"
+                        step="0.01"
+                        value="${initialGiftAmount.toFixed(2)}"
+                        class="w-full rounded border border-slate-300 bg-white p-2 pl-7 text-sm font-bold"
+                        ${!canSendGift ? 'disabled' : ''}>
+                </div>
+
+                <p class="mt-1 text-[10px] text-slate-500">
+                    Enter any amount up to your available team balance.
+                    The amount will be deducted from team finances.
+                </p>
+            </div>
+
+            <div class="rounded border border-amber-200 bg-amber-50 p-3">
+                <p class="font-bold text-amber-900 text-[11px]">
+                    Recruiting investment has diminishing returns
+                </p>
+                <p class="mt-1 text-[10px] text-amber-800">
+                    Larger gifts can make a stronger impression, but repeated
+                    spending on the same prospect produces progressively
+                    smaller interest gains. A gift does not guarantee a commitment.
+                </p>
+            </div>
+
+            <p class="text-[10px] text-slate-500">
+                A Favor Token can only be used once for this prospect during
+                the recruiting week.
+            </p>
+        </div>
+    `;
+
+    showModal(
+        `Gift / Favor: ${player.name}`,
+        modalHtml,
+        () => {
+            const sweetenerType = document.getElementById(
+                'recruiting-sweetener-type'
+            )?.value;
+
+            const giftAmount = sweetenerType === 'gift'
+                ? Number(
+                    document.getElementById(
+                        'recruiting-gift-amount'
+                    )?.value
+                )
+                : null;
+
+            const currentState = getGameState();
+            const currentTeam = currentState?.playerTeam;
+            const currentOffseason = currentState?.offseasonState;
+            const currentProgress =
+                currentOffseason?.recruitingProgress;
+
+            const currentPhase = String(
+                currentOffseason?.phase || ''
+            ).toLowerCase().replace(/[^a-z]/g, '');
+
+            const currentRecord =
+                currentProgress?.recruits?.[String(playerId)];
+
+            const currentPlayer = currentState?.players?.find(
+                candidate =>
+                    String(candidate?.id) === String(playerId)
+            );
+
+            if (
+                currentPhase !== 'recruiting' ||
+                !currentProgress?.initialized ||
+                currentProgress.completed === true ||
+                Number(currentProgress.seasonYear) !==
+                    Number(currentState?.year) ||
+                !currentTeam ||
+                !currentRecord ||
+                currentRecord.status !== 'available' ||
+                currentRecord.committedTeamId != null ||
+                !currentPlayer ||
+                currentPlayer.teamId != null
+            ) {
+                showModal(
+                    'Recruiting Sweetener Unavailable',
+                    '<p>This prospect is no longer available, or the recruiting period has ended. Refresh the recruiting screen and try again.</p>'
+                );
+                return;
+            }
+
+            if (!['gift', 'favor'].includes(sweetenerType)) {
+                showModal(
+                    'Invalid Recruiting Support',
+                    '<p>Choose either a cash gift or a Favor Token.</p>'
+                );
+                return;
+            }
+
+            if (
+                sweetenerType === 'gift' &&
+                (
+                    !Number.isFinite(giftAmount) ||
+                    giftAmount <= 0
+                )
+            ) {
+                showModal(
+                    'Invalid Gift Amount',
+                    '<p>Enter a valid gift amount greater than zero.</p>'
+                );
+                return;
+            }
+
+            const result = applyRecruitingSweetener(
+                currentState,
+                currentTeam.id,
+                currentPlayer.id,
+                sweetenerType,
+                giftAmount
+            );
+
+            if (!result?.success) {
+                showModal(
+                    'Recruiting Support Failed',
+                    `<p>${escapeHtml(
+                        result?.message ||
+                        'The recruiting gift or favor could not be completed.'
+                    )}</p>`
+                );
+                return;
+            }
+
+            Game.saveGameState?.('backyardFootballGameState');
+
+            renderOffseasonFAScreen(getGameState());
+
+            showModal(
+                'Recruiting Support Complete',
+                `<p>${escapeHtml(
+                    result.message ||
+                    'Your recruiting support was applied successfully.'
+                )}</p>
+                <p class="mt-2 text-[10px] text-slate-500">
+                    Interest: ${result.interestBefore}/100 →
+                    ${result.interestAfter}/100
+                    ${result.cashSpent > 0
+                        ? ` · Cash spent: $${Number(result.cashSpent).toFixed(2)}`
+                        : ''}
+                </p>`,
                 null,
                 'Continue'
             );
@@ -6699,34 +7180,34 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </span>
             </div>
 
-            <div class="grid grid-cols-3 gap-2">
-                <div class="flex flex-wrap items-center gap-x-6 gap-y-1 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] text-slate-600">
-                <span>
-                    STAFF
-                    <b class="ml-1 text-slate-900">${npcCoachCount}/3</b>
-                </span>
+            <div class="grid grid-cols-1 2xl:grid-cols-[minmax(190px,0.55fr)_minmax(0,2fr)] gap-3">
 
-                <span>
-                    AVG SKILLS
-                    <b class="ml-1 text-slate-900">${overviewAverage ?? '—'}</b>
-                </span>
+                <div class="grid grid-cols-1 sm:grid-cols-3 2xl:grid-cols-1 gap-2">
+                    <div class="flex items-center justify-between gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[10px]">
+                        <span class="font-bold text-slate-600">STAFF</span>
+                        <b class="text-slate-900">${npcCoachCount}/3</b>
+                    </div>
 
-                <span>
-                    ASSIGNED HOURS
-                    <b class="ml-1 text-slate-900">${totalAssignedHours}</b>
-                </span>
-            </div>
-            </div>
+                    <div class="flex items-center justify-between gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[10px]">
+                        <span class="font-bold text-slate-600">AVG SKILLS</span>
+                        <b class="text-slate-900">${overviewAverage ?? '—'}</b>
+                    </div>
 
-            <div class="space-y-2">
+                    <div class="flex items-center justify-between gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[10px]">
+                        <span class="font-bold text-slate-600">ASSIGNED HOURS</span>
+                        <b class="text-slate-900">${totalAssignedHours}</b>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 2xl:grid-cols-2 gap-2">
                 ${overviewCoaches.map(entry => `
                     <button
                         type="button"
-                        class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        class="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         onclick="app.openCoachCard('${entry.coachId}')"
                         aria-label="Open profile for ${overviewEscape(entry.coach.name)}">
 
-                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.8fr)_auto] sm:items-center sm:gap-4">
+                        <div class="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.8fr)_auto] lg:items-center lg:gap-4">
 
                             <div class="min-w-0">
                                 <div class="flex flex-wrap items-center gap-2">
@@ -6739,18 +7220,18 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     </span>
                                 </div>
 
-                                <p class="mt-1 truncate text-[10px] text-slate-500">
+                                <p class="mt-1 whitespace-normal break-words text-[10px] leading-snug text-slate-500">
                                     ${overviewEscape(entry.styleSummary)}
                                 </p>
                             </div>
 
-                            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]">
-                                <span class="text-slate-600">
+                            <div class="min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]">
+                                <span class="min-w-0 break-words text-slate-600">
                                     <b class="uppercase text-emerald-700">Strengths</b>
                                     ${overviewEscape(entry.strengthsSummary)}
                                 </span>
 
-                                <span class="text-slate-600">
+                                <span class="min-w-0 break-words text-slate-600">
                                     <b class="uppercase text-amber-700">Lowest</b>
                                     ${overviewEscape(entry.lowestSkillSummary)}
                                 </span>
@@ -6767,7 +7248,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 </div>
 
                                 <div class="flex shrink-0 items-center gap-1">
-                                    <div class="text-right">
+                                    <div class="shrink-0 text-right">
                                         <span class="block text-[9px] uppercase text-slate-400">
                                             Overall
                                         </span>
@@ -6781,6 +7262,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         </div>
                     </button>
                 `).join('')}
+                </div>
             </div>
         </section>
     `;
@@ -6824,7 +7306,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </div>
             </section>
 
-            <div class="space-y-3">
+            <div class="grid grid-cols-1 2xl:grid-cols-2 gap-3">
                 ${staffCareerHistoryHtml}
             </div>
 
@@ -6839,7 +7321,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         </p>
                     </div>
 
-                    ${freeAgentCareerHistoryHtml}
+                    <div class="grid grid-cols-1 2xl:grid-cols-2 gap-3">
+                        ${freeAgentCareerHistoryHtml}
+                    </div>
                 </section>
             ` : ''}
 
@@ -6854,7 +7338,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         </p>
                     </div>
 
-                    ${retiredCareerHistoryHtml}
+                    <div class="grid grid-cols-1 2xl:grid-cols-2 gap-3">
+                        ${retiredCareerHistoryHtml}
+                    </div>
                 </section>
             ` : ''}
 
@@ -6869,7 +7355,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         </p>
                     </div>
 
-                    ${coachMarketExitHistoryHtml}
+                    <div class="grid grid-cols-1 2xl:grid-cols-2 gap-3">
+                        ${coachMarketExitHistoryHtml}
+                    </div>
                 </section>
             ` : ''}
 
@@ -7640,17 +8128,19 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </summary>
 
                 <div class="border-t border-slate-200 p-3">
-                    <div class="mb-3 flex justify-end">
-                        <button
-                            type="button"
-                            class="shrink-0 rounded bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
-                            onclick="app_autoAssignStaffWorkload()"
-                            title="Allocate each coach's available hours across scouting, development, and preparation">
-                            Auto-assign workload
-                        </button>
-                    </div>
+                    <div class="grid grid-cols-1 2xl:grid-cols-[minmax(280px,0.75fr)_minmax(0,2fr)] 2xl:gap-5">
+                        <section class="min-w-0">
+                            <div class="mb-3 flex justify-end">
+                                <button
+                                    type="button"
+                                    class="shrink-0 rounded bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
+                                    onclick="app_autoAssignStaffWorkload()"
+                                    title="Allocate each coach's available hours across scouting, development, and preparation">
+                                    Auto-assign workload
+                                </button>
+                            </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 mb-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-2 gap-2 mb-4">
                     ${workCoaches.map(coach => {
                         const assigned = getCoachHours(coach.id);
                         const capacity = getCoachWeeklyCapacity(coach);
@@ -7688,8 +8178,10 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             </div>`;
                     }).join('')}
                 </div>
+                        </section>
 
-                <div class="space-y-2">
+                        <section class="min-w-0">
+                            <div class="space-y-2">
                     ${workPlan.assignments.map((assignment, index) => {
                         const task = taskLabels[assignment.task]
                             ? assignment.task
@@ -7743,7 +8235,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         ];
 
                         return `
-                            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-2 items-end border border-slate-200 rounded p-3">
+                            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-end border border-slate-200 rounded p-3">
                                 <label class="block min-w-0">
                                     <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Coach</span>
                                     <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
@@ -7849,7 +8341,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     </button>
                                 </div>
                                 ${prepPlayOptions.length > 0 ? `
-                                    <div class="md:col-span-2 xl:col-span-6 rounded border border-slate-200 bg-slate-50 p-3">
+                                    <div class="md:col-span-2 xl:col-span-3 rounded border border-slate-200 bg-slate-50 p-3">
                                         <div class="flex flex-wrap justify-between items-start gap-2 mb-2">
                                             <div>
                                                 <span class="block text-[10px] font-bold uppercase tracking-wide text-slate-700">
@@ -7900,6 +8392,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         + Add Assignment
                     </button>
                 </div>
+                            </div>
+                        </section>
+                    </div>
                 </div>
             </details>
         `;
@@ -9037,6 +9532,44 @@ function renderMyTeamTab(gameState) {
     if (!elements.myTeamRoster || !gameState?.playerTeam) return;
     const roster = getUIRosterObjects(gameState.playerTeam);
 
+    const team = gameState.playerTeam;
+
+    const unavailableCount = roster.filter(
+        player => Number(player.status?.duration) > 0
+    ).length;
+
+    const readyCount = roster.length - unavailableCount;
+
+    const offenseStarterIds = new Set(
+        Object.values(team.depthChart?.offense || {})
+            .filter(id => id != null)
+            .map(id => String(id))
+    );
+
+    const defenseStarterIds = new Set(
+        Object.values(team.depthChart?.defense || {})
+            .filter(id => id != null)
+            .map(id => String(id))
+    );
+
+    const twoWayStarterCount = roster.filter(player =>
+        offenseStarterIds.has(String(player.id)) &&
+        defenseStarterIds.has(String(player.id))
+    ).length;
+
+    const averageRosterEnergy = roster.length
+        ? Math.round(
+            roster.reduce((sum, player) => {
+                const fatigue = Number(player.fatigue) || 0;
+
+                return sum + Math.max(
+                    0,
+                    Math.min(100, 100 - fatigue)
+                );
+            }, 0) / roster.length
+        )
+        : null;
+
     const sortedRoster = [...roster].sort((a, b) => {
         const fitsA = getBestTwoWayFits(a);
         const fitsB = getBestTwoWayFits(b);
@@ -9082,27 +9615,85 @@ function renderMyTeamTab(gameState) {
     }
 
         const viewTabs = `
-        <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white border-b border-slate-200">
-            <div class="flex flex-wrap gap-1 rounded border border-slate-300 bg-slate-100 p-1 text-[11px] font-bold">
-                <button
-                    class="px-3 py-1.5 rounded transition ${myRosterView === 'skills' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
-                    onclick="app_setMyRosterView('skills')">
-                    Skills
-                </button>
-                <button
-                    class="px-3 py-1.5 rounded transition ${myRosterView === 'season' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-600 hover:bg-white'}"
-                    onclick="app_setMyRosterView('season')">
-                    Season Stats
-                </button>
-                <button
-                    class="px-3 py-1.5 rounded transition ${myRosterView === 'career' ? 'bg-blue-700 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
-                    onclick="app_setMyRosterView('career')">
-                    Career Stats
-                </button>
+        <div class="space-y-3 bg-white border-b border-slate-200 p-3">
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                    <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                        Rostered
+                    </span>
+                    <span class="block text-xl font-black tabular-nums text-slate-900">
+                        ${roster.length}
+                    </span>
+                    <span class="text-[9px] text-slate-500">
+                        Total players
+                    </span>
+                </div>
+
+                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                    <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                        Available
+                    </span>
+                    <span class="block text-xl font-black tabular-nums ${
+                        readyCount >= 14 ? 'text-emerald-700' : 'text-amber-700'
+                    }">
+                        ${readyCount}
+                    </span>
+                    <span class="text-[9px] text-slate-500">
+                        ${unavailableCount} unavailable
+                    </span>
+                </div>
+
+                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                    <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                        Two-Way Starters
+                    </span>
+                    <span class="block text-xl font-black tabular-nums text-amber-700">
+                        ${twoWayStarterCount}
+                    </span>
+                    <span class="text-[9px] text-slate-500">
+                        Starting both sides
+                    </span>
+                </div>
+
+                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                    <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                        Average Energy
+                    </span>
+                    <span class="block text-xl font-black tabular-nums text-slate-900">
+                        ${averageRosterEnergy !== null
+                            ? `${averageRosterEnergy}%`
+                            : '—'}
+                    </span>
+                    <span class="text-[9px] text-slate-500">
+                        Squad-wide
+                    </span>
+                </div>
             </div>
-            <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                ${roster.length} players
-            </span>
+
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex flex-wrap gap-1 rounded border border-slate-300 bg-slate-100 p-1 text-[11px] font-bold">
+                    <button
+                        class="px-3 py-1.5 rounded transition ${myRosterView === 'skills' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                        onclick="app_setMyRosterView('skills')">
+                        Skills
+                    </button>
+                    <button
+                        class="px-3 py-1.5 rounded transition ${myRosterView === 'season' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                        onclick="app_setMyRosterView('season')">
+                        Season Stats
+                    </button>
+                    <button
+                        class="px-3 py-1.5 rounded transition ${myRosterView === 'career' ? 'bg-blue-700 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                        onclick="app_setMyRosterView('career')">
+                        Career Stats
+                    </button>
+                </div>
+
+                <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+                    Select a player to open their profile
+                </span>
+            </div>
         </div>`;
 
     if (myRosterView === 'season' || myRosterView === 'career') {
@@ -9382,7 +9973,18 @@ function renderPositionalOveralls() {
 
         <!-- Master 8-Way Versatility Matrix Table -->
         <div class="bg-white rounded border border-slate-200 shadow-sm overflow-x-auto">
-            <table class="min-w-full text-xs font-mono">
+        <table class="w-full min-w-[820px] table-fixed text-xs font-mono">
+            <colgroup>
+                <col style="width: 4%">
+                <col style="width: 12%">
+                <col style="width: 5%">
+                <col style="width: 15%">
+                <col style="width: 6%">
+                <col style="width: 6%">
+                <col style="width: 16%">
+                <col style="width: 17%">
+                <col style="width: 19%">
+            </colgroup>
                 <thead class="bg-slate-900 text-white uppercase text-[10px] tracking-wider select-none">
                     <tr>
                         <th class="py-2.5 px-3 text-left font-sans">Player</th>
@@ -9702,109 +10304,6 @@ function renderDepthChartSide(side, gameState) {
     tableHtml += `</tbody></table></div>`;
     benchTable.innerHTML = tableHtml;
 }
-
-/*window.app_openSlotModal = function (side, slotId) {
-    const gs = getGameState();
-    if (!gs?.playerTeam) return;
-    const team = gs.playerTeam;
-    const roster = getUIRosterObjects(team);
-    const currentChart = team.depthChart[side] || {};
-    const otherSide = side === 'offense' ? 'defense' : 'offense';
-    const otherChart = team.depthChart[otherSide] || {};
-    const currentId = currentChart[slotId];
-
-    let posKey = slotId.replace(/\d+/g, '');
-    if (['OT', 'OG', 'C'].includes(posKey)) posKey = 'OL';
-    if (posKey === 'FB') posKey = 'RB';
-    if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
-    if (['CB', 'S', 'FS', 'SS'].includes(posKey)) posKey = 'DB';
-
-    // Show all roster players so the coach is never locked out of making a choice
-    const candidates = [...roster].filter(Boolean);
-    candidates.sort((a, b) => calculateOverall(b, posKey) - calculateOverall(a, posKey));
-
-    window.app_assignSlot = function (s, targetSlot, selectedPid) {
-        if (!team.slotOverrides) team.slotOverrides = { offense: {}, defense: {} };
-        if (!team.slotOverrides[s]) team.slotOverrides[s] = {};
-
-        if (!selectedPid) {
-            // Explicitly clear slot
-            team.slotOverrides[s][targetSlot] = null;
-            team.depthChart[s][targetSlot] = null;
-        } else {
-            // Check if player already starts in another slot on THIS side (Trigger clean swap)
-            const existingSlot = Object.entries(team.depthChart[s] || {})
-                .find(([sl, id]) => id === selectedPid && sl !== targetSlot)?.[0];
-            const displacedPid = team.depthChart[s][targetSlot] || null;
-
-            if (existingSlot) {
-                if (displacedPid) {
-                    team.slotOverrides[s][existingSlot] = displacedPid;
-                    team.depthChart[s][existingSlot] = displacedPid;
-                } else {
-                    delete team.slotOverrides[s][existingSlot];
-                    delete team.depthChart[s][existingSlot];
-                }
-            }
-
-            team.slotOverrides[s][targetSlot] = selectedPid;
-            team.depthChart[s][targetSlot] = selectedPid;
-        }
-
-        rebuildDepthChartFromOrder(team);
-        saveGameState();
-        renderDepthChartTab(gs);
-        hideModal();
-    };
-    
-    let modalHtml = `
-    <div class="mb-3 p-2 bg-slate-100 rounded text-xs text-slate-600 flex justify-between items-center">
-        <span>Target: <b class="text-slate-900">${side.toUpperCase()} ${slotId}</b> (${posKey})</span>
-        <button class="px-2.5 py-1 bg-rose-100 text-rose-800 border border-rose-300 rounded font-bold hover:bg-rose-200 transition-colors" onclick="app_assignSlot('${side}', '${slotId}', '')">
-            Clear Slot
-        </button>
-    </div>
-    <div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1 pb-2">
-        ${candidates.map(p => {
-        const slotOvr = calculateOverall(p, posKey);
-        const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
-        const isUnavailable = p.status?.duration > 0;
-        const otherSlot = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
-        const isCurrent = p.id === currentId;
-
-        const existingStarterSlotThisSide = Object.entries(currentChart).find(([sl, id]) => id === p.id && sl !== slotId)?.[0];
-        let borderClass = isCurrent ? 'bg-amber-50 border-amber-400' : 'bg-white border-slate-200 hover:border-slate-400';
-        let energyColor = energy >= 75 ? 'text-emerald-600' : (energy >= 50 ? 'text-amber-600' : 'text-rose-600 font-bold');
-
-        return `
-            <button class="w-full text-left p-3 border rounded-sm shadow-sm flex justify-between items-center transition-all ${borderClass}" onclick="app_assignSlot('${side}', '${slotId}', '${p.id}')">
-                <div class="flex flex-col truncate pr-2">
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold text-slate-900 text-sm truncate">${p.name}</span>
-                        ${isCurrent ? '<span class="text-[9px] bg-amber-200 text-amber-900 px-1 rounded font-bold uppercase">Current Starter</span>' : ''}
-                        ${existingStarterSlotThisSide ? `<span class="text-[9px] bg-blue-100 text-blue-900 border border-blue-300 px-1 rounded font-bold uppercase">⇄ Swap from ${existingStarterSlotThisSide}</span>` : ''}
-                        ${isUnavailable ? `<span class="text-[9px] bg-rose-100 text-rose-800 px-1 rounded font-bold">🩹 Out ${p.status.duration}w</span>` : ''}
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 mt-1 font-mono">
-                        <span>Age: ${p.age}</span>
-                        <span>•</span>
-                        <span class="${energyColor}">⚡ ${energy}% Energy</span>
-                        <span>•</span>
-                        ${otherSlot
-                ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1 rounded font-sans font-black text-[10px]" title="Already starting on ${otherSide}">⚡ Starts at ${otherSlot} (${otherSide.substring(0, 3)})</span>`
-                : `<span class="text-slate-400 font-sans">🪑 Free on ${otherSide}</span>`}
-                    </div>
-                </div>
-                <div class="text-right shrink-0">
-                    <span class="text-xl font-black ${slotOvr >= 40 ? 'text-emerald-700' : (slotOvr >= 30 ? 'text-slate-900' : 'text-slate-500')}">${slotOvr}</span>
-                    <span class="text-[9px] text-slate-400 uppercase font-bold block -mt-1">${posKey} OVR</span>
-                </div>
-            </button>`;
-    }).join('')}
-    </div>`;
-
-    showModal(`Assign Slot: ${side.toUpperCase()} ${slotId}`, modalHtml);
-};*/
 
 window.app_openSlotModal = window.openSlotPicker;
 

@@ -80,7 +80,7 @@
 
 <body class="bg-gray-100 text-gray-900 antialiased h-screen overflow-hidden flex flex-col">
 
-    <div id="app-shell" class="container mx-auto p-4 flex-grow flex flex-col overflow-hidden min-h-0">
+    <div id="app-shell" class="w-full max-w-none mx-auto p-3 sm:p-4 lg:px-5 flex-grow flex flex-col overflow-hidden min-h-0">
 
         <section id="start-screen" class="screen text-center flex flex-col items-center justify-center h-full">
             <h1 class="font-display text-7xl text-slate-800 mb-4 tracking-wider">Backyard GM</h1>
@@ -489,12 +489,27 @@
                     </div>
                     <p class="text-[11px] text-slate-400 mt-0.5">Use staff time, team funds, and Favor Tokens to build relationships with unsigned neighborhood players over seven recruiting days.</p>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2 flex-wrap">
                     <div class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
-                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Budget & Roster</span>
-                        <span class="font-bold text-white"><span id="fa-user-tokens">3</span> Tokens • <span
-                                id="fa-user-roster-count">0/18</span></span>
+                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Team Funds</span>
+                        <span class="font-bold text-emerald-400">$<span id="fa-user-cash">—</span></span>
                     </div>
+
+                    <div class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
+                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Favor Tokens</span>
+                        <span class="font-bold text-white" id="fa-user-tokens">3</span>
+                    </div>
+
+                    <div class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
+                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Roster</span>
+                        <span class="font-bold text-white" id="fa-user-roster-count">0/18</span>
+                    </div>
+
+                    <div class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
+                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Staff Hours Left</span>
+                        <span class="font-bold text-white" id="fa-user-staff-hours">—</span>
+                    </div>
+
                     <button id="fa-advance-day-btn"
                         class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition"
                         onclick="app.advanceOffseasonFADay()">
@@ -507,32 +522,60 @@
             <div class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-hidden min-h-0">
                 <!-- Available Prospects Pool (8 cols) -->
                 <div
-                    class="lg:col-span-8 bg-white border border-slate-300 rounded-sm shadow-sm flex flex-col overflow-hidden min-h-0">
-                    <div class="p-2 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
-                        <span class="font-bold text-xs uppercase tracking-wider text-slate-700">Available Neighborhood
-                            Prospects</span>
-                        <select id="fa-minigame-filter-pos"
-                            class="p-1 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none"
-                            onchange="app.renderFAPool()">
-                            <option value="">All Positions</option>
-                            <option value="QB">QB</option>
-                            <option value="RB">RB</option>
-                            <option value="WR">WR</option>
-                            <option value="TE">TE</option>
-                            <option value="OL">OL</option>
-                            <option value="DL">DL</option>
-                            <option value="LB">LB</option>
-                            <option value="DB">DB</option>
-                        </select>
+                    class="lg:col-span-8 xl:col-span-9 min-w-0 bg-white border border-slate-300 rounded-sm shadow-sm flex flex-col overflow-hidden min-h-0">
+                    <div class="p-2 border-b border-slate-200 bg-slate-50 flex flex-wrap justify-between items-center gap-2 shrink-0">
+                        <span class="font-bold text-xs uppercase tracking-wider text-slate-700">
+                            Available Neighborhood Prospects
+                        </span>
+
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span
+                                id="fa-minigame-result-count"
+                                class="text-[10px] font-bold text-slate-500 whitespace-nowrap">
+                                Prospects
+                            </span>
+
+                            <input
+                                type="text"
+                                id="fa-minigame-search"
+                                placeholder="Search prospects..."
+                                class="w-40 sm:w-52 p-1.5 border border-slate-300 rounded text-xs bg-white outline-none focus:border-emerald-500"
+                                oninput="app.renderFAPool()">
+
+                            <button
+                                type="button"
+                                class="px-2 py-1.5 border border-slate-300 rounded text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-100"
+                                onclick="
+                                    document.getElementById('fa-minigame-search').value = '';
+                                    document.getElementById('fa-minigame-filter-pos').value = '';
+                                    app.renderFAPool();
+                                ">
+                                Clear
+                            </button>
+
+                            <select id="fa-minigame-filter-pos"
+                                class="p-1.5 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none"
+                                onchange="app.renderFAPool()">
+                                <option value="">All Positions</option>
+                                <option value="QB">QB</option>
+                                <option value="RB">RB</option>
+                                <option value="WR">WR</option>
+                                <option value="TE">TE</option>
+                                <option value="OL">OL</option>
+                                <option value="DL">DL</option>
+                                <option value="LB">LB</option>
+                                <option value="DB">DB</option>
+                            </select>
+                        </div>
                     </div>
-                    <div id="fa-minigame-pool-tbody" class="flex-grow overflow-y-auto min-h-0"></div>
+                    <div id="fa-minigame-pool-tbody" class="flex-grow overflow-auto min-h-0"></div>
                 </div>
 
                 <!-- Active Bids & Day Recap (4 cols) -->
-                <div class="lg:col-span-4 flex flex-col gap-3 min-h-0">
+                <div class="lg:col-span-4 xl:col-span-3 min-w-0 flex flex-col gap-3 min-h-0">
                     <!-- Your Active Day Bids -->
                     <div
-                        class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col shrink-0 max-h-56">
+                        class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col shrink-0 max-h-[38vh]">
                         <div class="flex justify-between items-center border-b border-slate-200 pb-1 mb-2">
                             <h4 class="font-bold text-xs uppercase tracking-wider text-slate-800">Your Recruiting Activity</h4>
                             <span id="fa-bids-count" class="text-[10px] font-mono text-slate-500 font-bold">0
@@ -950,15 +993,15 @@
             </div>
         </section>
 
-        <section id="offseason-screen" class="screen hidden h-full flex flex-col p-8 bg-white overflow-y-auto">
-            <div class="max-w-4xl mx-auto w-full">
+        <section id="offseason-screen" class="screen hidden h-full flex flex-col p-4 sm:p-5 bg-white overflow-y-auto">
+            <div class="w-full max-w-none">
                 <h2 class="text-4xl font-bold mb-6 text-gray-800 border-b pb-4">Offseason Report: Year <span
                         id="offseason-year">?</span></h2>
 
                 <div class="space-y-8">
                     <div class="bg-green-50 p-6 rounded-xl border border-green-100">
                         <h3 class="text-xl font-bold text-green-800 mb-4">Player Development</h3>
-                        <div id="player-development-container" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
+                        <div id="player-development-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3"></div>
                     </div>
 
                     <div class="grid md:grid-cols-2 gap-6">
