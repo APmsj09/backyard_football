@@ -5741,20 +5741,6 @@ export function processAiRecruitingDay(gameState) {
                 }
             }
 
-            actions.push({
-                teamId: team.id,
-                teamName: team.name,
-                coachId: coach.id,
-                coachName: coach.name || 'Coach',
-                playerId: target.player.id,
-                playerName: target.player.name,
-                action: selectedAction.type,
-                hours: hoursToday,
-                interestGain: result.interestGain,
-                interestAfter: result.interestAfter,
-                offerExtended
-            });
-
             const observedCompetitionPressure = Math.max(
                 0,
                 Number(target.observedCompetitionPressure) || 0
@@ -5843,7 +5829,7 @@ export function processAiRecruitingDay(gameState) {
                     !favorAttempted &&
                     availableFavorTokens > 0 &&
                     day >= Math.max(2, totalDays - 2) &&
-                    competitionPressure >= 3
+                    observedCompetitionPressure >= 3
                 ) {
                     sweetenerResult = applyRecruitingSweetener(
                         gameState,
@@ -5867,6 +5853,7 @@ export function processAiRecruitingDay(gameState) {
                 playerName: target.player.name,
                 action: selectedAction.type,
                 hours: hoursToday,
+                offerExtended,
 
                 interestGain:
                     result.interestGain +
