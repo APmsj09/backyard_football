@@ -8,13 +8,15 @@ import { positionOverallWeights, estimateBestPosition, calculateOverall, getPros
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';
-import { applyRecruitingSweetener } from './game/staff.js';
+import { applyRecruitingSweetener, buildAutomatedStaffAssignmentsForTeam } from './game/staff.js';
 import { DEFAULT_PLAYBACK_INTERVAL_MS, getPlaybackIntervalMs } from './game/simulation_config.js';
 import {
     getCurrentRosterLimit,
     setRecruitingOffer
 } from './game/season.js';
-import { buildAutomatedStaffAssignmentsForTeam } from './game/staff.js';
+import {
+    acceptCommunityFavor as acceptCommunityFavorAction
+} from './game/community.js';
 
 let elements = {};
 let selectedPlayerId = null;
@@ -1968,6 +1970,7 @@ export function switchTab(tabId, gameState) {
             }
             break;
         case 'free-agents': renderFreeAgentsTab(gameState); break;
+        case 'community': renderCommunityTab(gameState); break;
         case 'messages': renderMessagesTab(gameState); break;
         
         case 'front-office': {
@@ -2004,6 +2007,558 @@ export function switchTab(tabId, gameState) {
     }
 }
 
+/**
+ * Renders the shared community request board for the player's team.
+ */
+export function renderCommunityFavorsTab(gameState) {
+    const container = document.getElementById(
+        'community-favors-container'
+    );
+
+    if (!container) return;
+
+    const team = gameState?.playerTeam;
+
+    if (!team) {
+        container.innerHTML = `
+            <p class="p-6 text-center text-slate-400">
+                Team information is unavailable.
+            </p>
+        `;
+        return;
+    }
+
+    const escapeHtml = value => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const community = gameState.community || {};
+    const teamKey = String(team.id);
+
+    const reputationValue = Number(
+        community.teamReputations?.[teamKey]?.score
+    );
+
+    const reputation = Number.isFinite(reputationValue)
+        ? Math.max(0, Math.min(100, reputationValue))
+        : 50;
+
+    const year = Number(gameState.year);
+    const week = Number(gameState.currentWeek);
+
+    const absoluteWeek =
+        Number.isInteger(year) && Number.isInteger(week)
+            ? ((year - 1) * 9) + week
+            : null;
+
+    const favors = Array.isArray(community.favors)
+        ? community.favors.filter(Boolean)
+        : [];
+
+    const openFavors = favors
+        .filter(favor =>
+            favor.status === 'open' &&
+            (
+                absoluteWeek === null ||
+                !Number.isFinite(Number(favor.deadlineWeek)) ||
+                Number(favor.deadlineWeek) >= absoluteWeek
+            )
+        )
+        .sort((a, b) =>
+            Number(a.deadlineWeek || Infinity) -
+            Number(b.deadlineWeek || Infinity)
+        );
+
+    const acceptedFavors = favors
+        .filter(favor =>
+            favor.status === 'accepted' &&
+            String(favor.acceptedByTeamId) === teamKey
+        );
+
+    const resolvedStatuses = new Set([
+        'completed',
+        'partial',
+        'unsuccessful'
+    ]);
+
+    const recentHistory = favors
+        .filter(favor =>
+            resolvedStatuses.has(favor.status) &&
+            String(favor.acceptedByTeamId) === teamKey
+        )
+        .sort((a, b) =>
+            Number(b.resolvedWeek ?? b.completedWeek ?? 0) -
+            Number(a.resolvedWeek ?? a.completedWeek ?? 0)
+        )
+        .slice(0, 5);
+
+    const reputationColor = reputation >= 70
+        ? 'text-emerald-700'
+        : reputation >= 40
+            ? 'text-amber-700'
+            : 'text-rose-700';
+
+    const formatHours = value =>
+        `${Math.max(0, Number(value) || 0).toFixed(1)} hours`;
+
+    const openRequestsHtml = openFavors.length > 0
+        ? openFavors.map(favor => {
+            const hours = formatHours(favor.estimatedHours);
+
+            const expense = Math.max(
+                0,
+                Number(favor.estimatedCashExpense) || 0
+            );
+
+            const deadline = Number(favor.deadlineWeek);
+
+            const dueLabel = Number.isFinite(deadline) &&
+                absoluteWeek !== null
+                    ? deadline === absoluteWeek
+                        ? 'Due this week'
+                        : `Due in ${deadline - absoluteWeek} week(s)`
+                    : 'Deadline not specified';
+
+            return `
+                <article class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+                    <div class="flex flex-wrap justify-between gap-2">
+                        <div>
+                            <h4 class="font-black text-slate-900">
+                                ${escapeHtml(favor.title || 'Community request')}
+                            </h4>
+                            <p class="text-[11px] text-slate-500 mt-1">
+                                Requested by ${escapeHtml(
+                                    favor.requesterName || 'Community contact'
+                                )}
+                            </p>
+                        </div>
+
+                        <span class="text-[10px] font-bold uppercase text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                            Open request
+                        </span>
+                    </div>
+
+                    <p class="text-sm text-slate-700 mt-3">
+                        ${escapeHtml(favor.description || '')}
+                    </p>
+
+                    <div class="flex flex-wrap gap-x-5 gap-y-2 mt-3 text-xs text-slate-500">
+                        <span>🕒 ${hours}</span>
+                        <span>💵 Estimated expense: $${expense.toFixed(2)}</span>
+                        <span>📅 ${escapeHtml(dueLabel)}</span>
+                    </div>
+
+                    <div class="mt-4">
+                        <button
+                            type="button"
+                            class="bg-slate-900 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wide px-4 py-2 rounded transition"
+                            onclick="window.app_acceptCommunityFavor('${escapeHtml(favor.id)}')">
+                            Accept Request
+                        </button>
+                    </div>
+                </article>
+            `;
+        }).join('')
+        : `
+            <div class="bg-white border border-slate-200 rounded-lg p-6 text-center">
+                <div class="text-2xl mb-2">🌱</div>
+                <h4 class="font-bold text-slate-700">
+                    No open community requests
+                </h4>
+                <p class="text-xs text-slate-500 mt-1">
+                    New opportunities appear periodically. Some weeks there may be none.
+                </p>
+            </div>
+        `;
+
+    const acceptedHtml = acceptedFavors.length > 0
+        ? `
+            <section class="space-y-2">
+                <h3 class="text-xs font-black uppercase tracking-wider text-slate-700">
+                    Your Team's Commitments
+                </h3>
+
+                ${acceptedFavors.map(favor => `
+                    <article class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <div class="flex flex-wrap justify-between gap-2">
+                            <strong class="text-sm text-slate-800">
+                                ${escapeHtml(favor.title)}
+                            </strong>
+                            <span class="text-[10px] font-bold uppercase text-blue-800">
+                                Accepted
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-600 mt-1">
+                            ${escapeHtml(favor.requesterName)}
+                        </p>
+                        <p class="text-xs text-slate-500 mt-2">
+                            Assigned to ${escapeHtml(
+                                favor.assignedStaffName || 'Assigned staff'
+                            )}
+                            · ${formatHours(favor.committedVolunteerHours)}
+                        </p>
+                    </article>
+                `).join('')}
+            </section>
+        `
+        : '';
+
+    const historyHtml = recentHistory.length > 0
+        ? `
+            <section class="space-y-2">
+                <h3 class="text-xs font-black uppercase tracking-wider text-slate-700">
+                    Recent Service History
+                </h3>
+
+                ${recentHistory.map(favor => {
+                    const statusLabels = {
+                        completed: 'Completed',
+                        partial: 'Partially completed',
+                        unsuccessful: 'Unsuccessful'
+                    };
+
+                    const statusColors = {
+                        completed: 'text-emerald-700',
+                        partial: 'text-amber-700',
+                        unsuccessful: 'text-rose-700'
+                    };
+
+                    return `
+                        <article class="bg-white border border-slate-200 rounded-lg p-3">
+                            <div class="flex justify-between gap-2">
+                                <strong class="text-sm text-slate-800">
+                                    ${escapeHtml(favor.title)}
+                                </strong>
+                                <span class="text-[10px] font-bold ${
+                                    statusColors[favor.status]
+                                }">
+                                    ${statusLabels[favor.status]}
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-500 mt-1">
+                                ${escapeHtml(favor.requesterName)}
+                            </p>
+                            <p class="text-xs text-slate-600 mt-2">
+                                ${escapeHtml(favor.outcome || '')}
+                            </p>
+                        </article>
+                    `;
+                }).join('')}
+            </section>
+        `
+        : '';
+
+    container.innerHTML = `
+        <section class="bg-slate-900 text-white rounded-lg p-4 flex flex-wrap justify-between items-center gap-3">
+            <div>
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                    Community standing
+                </p>
+                <h3 class="text-lg font-black mt-1">
+                    ${escapeHtml(team.name)}
+                </h3>
+                <p class="text-xs text-slate-400 mt-1">
+                    Reputation built through consistent local involvement.
+                </p>
+            </div>
+
+            <div class="text-right">
+                <span class="text-3xl font-black ${reputationColor}">
+                    ${reputation}
+                </span>
+                <span class="block text-[9px] text-slate-400 uppercase tracking-wider">
+                    Reputation / 100
+                </span>
+            </div>
+        </section>
+
+        <section class="space-y-3">
+            <div>
+                <h3 class="text-xs font-black uppercase tracking-wider text-slate-700">
+                    Available Requests
+                </h3>
+                <p class="text-xs text-slate-500 mt-1">
+                    Accepting a request commits staff time from your shared weekly work budget.
+                </p>
+            </div>
+
+            ${openRequestsHtml}
+        </section>
+
+        ${acceptedHtml}
+        ${historyHtml}
+    `;
+}
+
+/**
+ * Accepts a community request for the player's team.
+ */
+window.app_acceptCommunityFavor = function(favorId) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+
+    if (!gs || !team) return;
+
+    const year = Number(gs.year);
+    const week = Number(gs.currentWeek);
+
+    if (
+        !Number.isInteger(year) ||
+        !Number.isInteger(week)
+    ) {
+        return;
+    }
+
+    const absoluteWeek = ((year - 1) * 9) + week;
+
+    const acceptedFavor = acceptCommunityFavor(
+        gs,
+        favorId,
+        team.id,
+        absoluteWeek
+    );
+
+    if (!acceptedFavor) {
+        showModal(
+            'Request Not Accepted',
+            `<p class="text-sm text-slate-600">
+                This request may have expired, already been accepted by another team,
+                or your staff may not have enough available time.
+            </p>`,
+            null,
+            'Close'
+        );
+
+        renderCommunityFavorsTab(gs);
+        return;
+    }
+
+    saveGameState();
+
+    renderCommunityFavorsTab(gs);
+
+    showModal(
+        'Community Request Accepted',
+        `<p class="text-sm text-slate-600">
+            Your team accepted <strong>${String(
+                acceptedFavor.title || 'the community request'
+            ).replace(/[&<>"']/g, character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[character])}</strong>.
+            The assigned staff member's time is now committed to this work.
+        </p>`,
+        null,
+        'Close'
+    );
+};
+
+
+export function renderCommunityTab(gameState) {
+    const container = document.getElementById('community-favors-container');
+    const playerTeam = gameState?.playerTeam;
+
+    if (!container || !gameState || !playerTeam) return;
+
+    const community = gameState.community;
+    const favors = Array.isArray(community?.favors)
+        ? community.favors.filter(Boolean)
+        : [];
+
+    const contacts = Array.isArray(community?.contacts)
+        ? community.contacts.filter(Boolean)
+        : [];
+
+    const teamId = String(playerTeam.id);
+
+    const escapeHtml = value => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    // Show all available requests and the player's own favor history.
+    // Requests accepted by another team are no longer available here.
+    const visibleFavors = favors.filter(favor => {
+        if (favor.status === 'open') return true;
+
+        return (
+            favor.acceptedByTeamId != null &&
+            String(favor.acceptedByTeamId) === teamId
+        );
+    });
+
+    const statusInfo = {
+        open: {
+            label: 'Available',
+            classes: 'bg-emerald-100 text-emerald-800 border-emerald-200'
+        },
+        accepted: {
+            label: 'In Progress',
+            classes: 'bg-blue-100 text-blue-800 border-blue-200'
+        },
+        completed: {
+            label: 'Completed',
+            classes: 'bg-emerald-100 text-emerald-800 border-emerald-200'
+        },
+        partial: {
+            label: 'Partially Completed',
+            classes: 'bg-amber-100 text-amber-800 border-amber-200'
+        },
+        unsuccessful: {
+            label: 'Unsuccessful',
+            classes: 'bg-rose-100 text-rose-800 border-rose-200'
+        }
+    };
+
+    const statusOrder = {
+        open: 0,
+        accepted: 1,
+        partial: 2,
+        completed: 3,
+        unsuccessful: 4
+    };
+
+    visibleFavors.sort((a, b) =>
+        (statusOrder[a.status] ?? 5) -
+        (statusOrder[b.status] ?? 5)
+    );
+
+    if (visibleFavors.length === 0) {
+        container.innerHTML = `
+            <div class="rounded-lg border border-slate-200 bg-white p-8 text-center">
+                <div class="text-3xl mb-3">🤝</div>
+                <h3 class="font-bold text-slate-700">
+                    No community requests right now
+                </h3>
+                <p class="text-sm text-slate-500 mt-1">
+                    Local residents and organizations may need help in future weeks.
+                    Check back as your community's needs change.
+                </p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = visibleFavors.map(favor => {
+        const contact = contacts.find(candidate =>
+            String(candidate.id) === String(favor.contactId)
+        );
+
+        const title = escapeHtml(
+            favor.title ||
+            favor.requestTitle ||
+            favor.favorType ||
+            'Community request'
+        );
+
+        const description = escapeHtml(
+            favor.description ||
+            favor.details ||
+            favor.summary ||
+            'A local community member is requesting help.'
+        );
+
+        const contactName = escapeHtml(
+            contact?.name ||
+            contact?.organization ||
+            favor.contactName ||
+            'Local contact'
+        );
+
+        const category = escapeHtml(
+            favor.category ||
+            favor.favorType ||
+            'Community Service'
+        );
+
+        const hours = Number(favor.estimatedHours);
+        const hoursLabel = Number.isFinite(hours)
+            ? `${hours} estimated staff hours`
+            : 'Staff time required';
+
+        const cashExpense = Number(favor.estimatedCashExpense);
+        const cashLabel = Number.isFinite(cashExpense) && cashExpense > 0
+            ? `$${cashExpense.toFixed(2)} estimated expense`
+            : 'No estimated cash expense';
+
+        const status = statusInfo[favor.status] || {
+            label: escapeHtml(favor.status || 'Unknown'),
+            classes: 'bg-slate-100 text-slate-700 border-slate-200'
+        };
+
+        const actionHtml = favor.status === 'open'
+            ? `
+                <div class="mt-3 pt-3 border-t border-slate-100 flex justify-end">
+                    <button
+                        type="button"
+                        data-community-favor-accept="${escapeHtml(favor.id)}"
+                        class="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded shadow-sm transition">
+                        Accept Request
+                    </button>
+                </div>
+            `
+            : '';
+
+        return `
+            <article class="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div class="p-4">
+                    <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+                        <div class="min-w-0">
+                            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                ${category}
+                            </div>
+                            <h4 class="font-black text-slate-900 text-base mt-1">
+                                ${title}
+                            </h4>
+                        </div>
+                        <span class="shrink-0 text-[10px] font-bold uppercase px-2 py-1 rounded border ${status.classes}">
+                            ${status.label}
+                        </span>
+                    </div>
+
+                    <p class="text-sm text-slate-600 leading-relaxed">
+                        ${description}
+                    </p>
+
+                    <div class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-500">
+                        <span>
+                            <b class="text-slate-700">Contact:</b>
+                            ${contactName}
+                        </span>
+                        <span>
+                            <b class="text-slate-700">Time:</b>
+                            ${escapeHtml(hoursLabel)}
+                        </span>
+                        <span>
+                            <b class="text-slate-700">Cost:</b>
+                            ${escapeHtml(cashLabel)}
+                        </span>
+                    </div>
+                    ${actionHtml}
+                </div>
+            </article>
+        `;
+    }).join('');
+
+    container.querySelectorAll('[data-community-favor-accept]')
+        .forEach(button => {
+            button.addEventListener('click', () => {
+                const favorId = button.dataset.communityFavorAccept;
+
+                if (!favorId) return;
+
+                window.app?.acceptCommunityFavor?.(favorId);
+            });
+        });
+}
 
 function getFreeAgentScoutingView(team, player) {
     const report = Game.getTeamScoutingReport?.(
@@ -6000,6 +6555,102 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     gameState.availableStaff.push(outgoingStaff);
                 };
 
+                // Transfer existing assignments when a staff member is
+                // replaced. Accepted community favors must also update
+                // their authoritative assigned-staff reference.
+                const transferStaffWorkAssignments = (
+                    outgoingStaff,
+                    incomingStaff
+                ) => {
+                    if (
+                        !outgoingStaff ||
+                        outgoingStaff.id == null ||
+                        !incomingStaff ||
+                        incomingStaff.id == null ||
+                        String(outgoingStaff.id) ===
+                            String(incomingStaff.id)
+                    ) {
+                        return;
+                    }
+
+                    const assignments =
+                        team.staffWorkPlan?.assignments;
+
+                    if (!Array.isArray(assignments)) return;
+
+                    const outgoingId = String(outgoingStaff.id);
+                    const incomingId = String(incomingStaff.id);
+                    const incomingName =
+                        incomingStaff.name || 'Coach';
+
+                    for (const assignment of assignments) {
+                        if (
+                            !assignment ||
+                            String(assignment.coachId) !== outgoingId
+                        ) {
+                            continue;
+                        }
+
+                        let favor = null;
+
+                        if (
+                            assignment.task === 'communityService'
+                        ) {
+                            if (assignment.favorId == null) continue;
+
+                            const community = latestState?.community;
+
+                            favor = (
+                                Array.isArray(community?.favors)
+                                    ? community.favors
+                                    : []
+                            ).find(entry =>
+                                entry?.status === 'accepted' &&
+                                entry.staffWorkResolved !== true &&
+                                String(entry.id) ===
+                                    String(assignment.favorId) &&
+                                String(entry.acceptedByTeamId) ===
+                                    String(team.id) &&
+                                String(entry.assignedStaffId) === outgoingId
+                            );
+
+                            // Never transfer a workload record without
+                            // its matching authoritative favor.
+                            if (!favor) continue;
+                        }
+
+                        assignment.coachId = incomingId;
+
+                        if ('coachName' in assignment) {
+                            assignment.coachName = incomingName;
+                        }
+
+                        if (!favor) continue;
+
+                        favor.assignedStaffId = incomingId;
+                        favor.assignedStaffName = incomingName;
+
+                        const community = latestState?.community;
+
+                        const contact = community?.contacts?.find(
+                            entry =>
+                                String(entry.id) ===
+                                String(favor.contactId)
+                        );
+
+                        const historyEntry =
+                            contact?.favorHistory?.find(entry =>
+                                String(entry.favorId) ===
+                                String(favor.id)
+                            );
+
+                        if (historyEntry) {
+                            historyEntry.assignedStaffId = incomingId;
+                            historyEntry.assignedStaffName = incomingName;
+                        }
+                    }
+                };
+
                 if (roleKey === 'coach') {
                     returnToMarket(outgoingCoach);
 
@@ -6182,21 +6833,10 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         team.staff.trainer
                     );
 
-                    const assignments = team.staffWorkPlan?.assignments;
-
-                    if (
-                        Array.isArray(assignments) &&
-                        outgoingCoach?.id != null
-                    ) {
-                        assignments.forEach(assignment => {
-                            if (
-                                String(assignment.coachId) ===
-                                String(outgoingCoach.id)
-                            ) {
-                                assignment.coachId = String(staff.id);
-                            }
-                        });
-                    }
+                    transferStaffWorkAssignments(
+                        outgoingCoach,
+                        staff
+                    );
 
                     if (
                         schemePromise === 'COACH_CHOICE' &&
@@ -6247,22 +6887,12 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         3 - activeNpcCoaches.length
                     );
 
-                    // Transfer the outgoing coach's assigned workload.
-                    const assignments = team.staffWorkPlan?.assignments;
-
-                    if (
-                        Array.isArray(assignments) &&
-                        oldStaff?.id != null
-                    ) {
-                        assignments.forEach(assignment => {
-                            if (
-                                String(assignment.coachId) ===
-                                String(oldStaff.id)
-                            ) {
-                                assignment.coachId = String(staff.id);
-                            }
-                        });
-                    }
+                    // Transfer the outgoing coach's assigned workload,
+                    // including any accepted community-service obligation.
+                    transferStaffWorkAssignments(
+                        oldStaff,
+                        staff
+                    );
 
                     // Reconcile legacy role references with the updated group.
                     Game.ensureTeamCoachingStaff?.(team);
@@ -8553,8 +9183,17 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             scouting: 'Prospect Scouting',
             training: 'Player Development',
             offensePrep: 'Offensive Preparation',
-            defensePrep: 'Defensive Preparation'
+            defensePrep: 'Defensive Preparation',
+            communityService: 'Community Service'
         };
+
+        // Community service is a committed assignment, not a task
+        // that can be created through the regular workload editor.
+        const editableTaskLabels = Object.fromEntries(
+            Object.entries(taskLabels).filter(
+                ([task]) => task !== 'communityService'
+            )
+        );
 
         const focusOptions = {
             scouting: [
@@ -8814,6 +9453,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         return;
                     }
 
+                    // Accepted community requests are committed obligations.
+                    // Preserve them when rebuilding the ordinary workload.
+                    const committedCommunityAssignments =
+                        latestPlan.assignments.filter(assignment =>
+                            assignment?.task === 'communityService'
+                        );
+
                     const assignments =
                         buildAutomatedStaffAssignmentsForTeam(
                             latestTeam,
@@ -8822,7 +9468,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                     if (!Array.isArray(assignments)) return;
 
-                    latestPlan.assignments = assignments;
+                    latestPlan.assignments = [
+                        ...assignments.filter(
+                            assignment =>
+                                assignment?.task !== 'communityService'
+                        ),
+                        ...committedCommunityAssignments
+                    ];
 
                     latestPlan.autoAssignedFor = {
                         year: latestState.year ?? null,
@@ -8897,6 +9549,11 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 return;
             }
 
+            // Accepted community commitments cannot be manually removed.
+            if (plan.assignments[index]?.task === 'communityService') {
+                return;
+            }
+
             plan.assignments.splice(index, 1);
             saveGameState();
             renderStaffTab(gs);
@@ -8915,6 +9572,12 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             }
 
             const assignment = plan.assignments[index];
+
+            // Preserve the coach, hours, and task attached to an accepted favor.
+            if (assignment?.task === 'communityService') {
+                return;
+            }
+
             const allowedFields = new Set([
                 'coachId',
                 'task',
@@ -8935,7 +9598,10 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                 assignment.coachId = String(value);
             } else if (field === 'task') {
-                if (!Object.prototype.hasOwnProperty.call(taskLabels, value)) {
+                if (!Object.prototype.hasOwnProperty.call(
+                    editableTaskLabels,
+                    value
+                )) {
                     return;
                 }
                 assignment.task = value;
@@ -9214,6 +9880,18 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 String(assignment.coachId)
                         );
 
+                        const isCommunityService =
+                            assignment.task === 'communityService';
+
+                        const communityFavor = isCommunityService
+                            ? (
+                                gameState.community?.favors || []
+                            ).find(favor =>
+                                String(favor.id) ===
+                                String(assignment.favorId)
+                            )
+                            : null;
+
                         const capacity = getCoachWeeklyCapacity(assignedCoach);
                         const currentHours = workHours(assignment);
 
@@ -9245,31 +9923,70 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                         return `
                             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-end border border-slate-200 rounded p-3">
-                                <label class="block min-w-0">
-                                    <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Coach</span>
-                                    <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
-                                        aria-label="Assigned coach"
-                                        onchange="app_updateStaffWorkAssignment(${index}, 'coachId', this.value)">
-                                        ${renderOptions(
-                                            coachOptions,
-                                            assignment.coachId
-                                        )}
-                                    </select>
-                                </label>
+                                ${isCommunityService ? `
+                                    <div class="min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">
+                                            Assigned Coach
+                                        </span>
+                                        <div class="rounded border border-slate-200 bg-slate-50 p-2 text-xs font-semibold text-slate-700">
+                                            ${overviewEscape(
+                                                assignedCoach?.name || 'Assigned staff member'
+                                            )}
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <label class="block min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Coach</span>
+                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                            aria-label="Assigned coach"
+                                            onchange="app_updateStaffWorkAssignment(${index}, 'coachId', this.value)">
+                                            ${renderOptions(
+                                                coachOptions,
+                                                assignment.coachId
+                                            )}
+                                        </select>
+                                    </label>
+                                `}
 
-                                <label class="block min-w-0">
-                                    <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Task</span>
-                                    <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
-                                        aria-label="Staff task"
-                                        onchange="app_updateStaffWorkAssignment(${index}, 'task', this.value)">
-                                        ${renderOptions(
-                                            Object.entries(taskLabels),
-                                            task
-                                        )}
-                                    </select>
-                                </label>
+                                ${isCommunityService ? `
+                                    <div class="min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">
+                                            Task
+                                        </span>
+                                        <div class="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs font-bold text-emerald-800">
+                                            Community Service
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <label class="block min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Task</span>
+                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                            aria-label="Staff task"
+                                            onchange="app_updateStaffWorkAssignment(${index}, 'task', this.value)">
+                                            ${renderOptions(
+                                                Object.entries(editableTaskLabels),
+                                                task
+                                            )}
+                                        </select>
+                                    </label>
+                                `}
 
-                                ${focusList.length > 0 ? `
+                                ${isCommunityService ? `
+                                    <div class="min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">
+                                            Request
+                                        </span>
+                                        <div class="rounded border border-slate-200 bg-slate-50 p-2 text-[10px] text-slate-700">
+                                            ${overviewEscape(
+                                                communityFavor?.title ||
+                                                'Accepted community request'
+                                            )}
+                                            <span class="block mt-1 text-[9px] font-semibold text-emerald-700">
+                                                Committed assignment
+                                            </span>
+                                        </div>
+                                    </div>
+                                ` : focusList.length > 0 ? `
                                     <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Focus</span>
                                         <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
@@ -9327,28 +10044,39 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     </label>
                                 ` : '<div></div>'}
 
-                                                                <div class="flex items-end gap-2">
-                                    <label class="block flex-1 min-w-0">
-                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Hours</span>
-                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
-                                            aria-label="Assigned hours"
-                                            onchange="app_updateStaffWorkAssignment(${index}, 'hours', this.value)">
-                                            ${renderOptions(
-                                                hoursOptions.map(hours => [
-                                                    hours,
-                                                    `${hours} hrs`
-                                                ]),
-                                                workHours(assignment)
-                                            )}
-                                        </select>
-                                    </label>
-                                    <button class="px-2 py-2 text-xs font-bold text-rose-600 border border-rose-200 rounded hover:bg-rose-50"
-                                        title="Remove assignment"
-                                        aria-label="Remove assignment"
-                                        onclick="app_removeStaffWorkAssignment(${index})">
-                                        ×
-                                    </button>
-                                </div>
+                                ${isCommunityService ? `
+                                    <div class="min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">
+                                            Committed Hours
+                                        </span>
+                                        <div class="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs font-bold text-emerald-800">
+                                            ${currentHours} hrs · Locked
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <div class="flex items-end gap-2">
+                                        <label class="block flex-1 min-w-0">
+                                            <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Hours</span>
+                                            <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                                aria-label="Assigned hours"
+                                                onchange="app_updateStaffWorkAssignment(${index}, 'hours', this.value)">
+                                                ${renderOptions(
+                                                    hoursOptions.map(hours => [
+                                                        hours,
+                                                        `${hours} hrs`
+                                                    ]),
+                                                    workHours(assignment)
+                                                )}
+                                            </select>
+                                        </label>
+                                        <button class="px-2 py-2 text-xs font-bold text-rose-600 border border-rose-200 rounded hover:bg-rose-50"
+                                            title="Remove assignment"
+                                            aria-label="Remove assignment"
+                                            onclick="app_removeStaffWorkAssignment(${index})">
+                                            ×
+                                        </button>
+                                    </div>
+                                `}
                                 ${prepPlayOptions.length > 0 ? `
                                     <div class="md:col-span-2 xl:col-span-3 rounded border border-slate-200 bg-slate-50 p-3">
                                         <div class="flex flex-wrap justify-between items-start gap-2 mb-2">

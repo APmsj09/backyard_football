@@ -694,6 +694,9 @@
                     <button class="tab-button whitespace-nowrap" data-tab="front-office"><span class="text-base mr-1">🏢</span> Front Office</button>
                     <button class="tab-button whitespace-nowrap" data-tab="free-agents"><span class="text-base mr-1">🏃</span> Free Agents</button>
                     <button class="tab-button whitespace-nowrap" data-tab="league"><span class="text-base mr-1">🏆</span> League</button>
+                    <button class="tab-button whitespace-nowrap" data-tab="community">
+                        <span class="text-base mr-1">🤝</span> Community
+                    </button>
                     <button class="tab-button relative whitespace-nowrap" data-tab="messages">
                         <span class="text-base mr-1">📩</span> Messages
                         <span id="messages-notification-dot" class="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-gray-100 hidden shadow-sm animate-pulse"></span>
@@ -867,7 +870,22 @@
                         </div>
                     </div>
 
-                    <!-- 6. Messages -->
+                    <!-- 6. Community -->
+                    <div id="tab-content-community" class="tab-pane hidden flex flex-col h-full min-h-0">
+                        <div class="p-3 border-b border-slate-200 bg-slate-50 shrink-0">
+                            <h3 class="text-sm font-black uppercase tracking-wider text-slate-800">
+                                🤝 Community Service
+                            </h3>
+                            <p class="text-xs text-slate-500 mt-1">
+                                Help local residents and organizations. Build relationships through volunteer work.
+                            </p>
+                        </div>
+                        <div id="community-favors-container"
+                            class="flex-grow overflow-y-auto p-4 space-y-3 min-h-0">
+                        </div>
+                    </div>
+
+                    <!-- 7. Messages -->
                     <div id="tab-content-messages" class="tab-pane hidden flex flex-col h-full min-h-0">
                         <div id="messages-list" class="p-4 overflow-y-auto space-y-2 flex-grow min-h-0"></div>
                     </div>

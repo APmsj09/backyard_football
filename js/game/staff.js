@@ -773,6 +773,225 @@ export function getEffectiveStaffWorkHours(team, assignment) {
     return Math.max(0, effectiveHours);
 }
 
+/**
+ * Assigns a community favor to a team staff member.
+ *
+ * Community service competes with the staff member's existing work.
+ * If the combined workload exceeds availability, the existing effective
+ * hours calculation proportionally reduces the output of all assignments.
+ */
+export function assignCommunityServiceStaffHours(
+    team,
+    favorId,
+    requestedHours,
+    year,
+    week,
+    gameState = null
+) {
+    if (
+        !team ||
+        team.leagueType !== 'main' ||
+        favorId == null ||
+        !Number.isFinite(Number(requestedHours)) ||
+        Number(requestedHours) <= 0 ||
+        !Number.isInteger(year) ||
+        year < 1 ||
+        !Number.isInteger(week) ||
+        week < 0
+    ) {
+        return {
+            success: false,
+            message: 'Invalid community-service assignment.'
+        };
+    }
+
+    const planningGameState =
+        gameState && typeof gameState === 'object'
+            ? gameState
+            : {
+                year,
+                currentWeek: week
+            };
+
+    const plan = team.isPlayerControlled
+        ? ensureTeamStaffWorkPlan(team, year, week)
+        : ensureAiStaffWorkPlan(
+            team,
+            planningGameState,
+            year,
+            week
+        );
+
+    if (!plan || !Array.isArray(plan.assignments)) {
+        return {
+            success: false,
+            message: 'The team workload could not be initialized.'
+        };
+    }
+
+    const favorKey = String(favorId);
+    const weekKey = `${year}:${week}`;
+
+    if (plan.activeWeekKey !== weekKey) {
+        return {
+            success: false,
+            message: 'The staff workload does not match the requested week.'
+        };
+    }
+
+    const existingAssignment = plan.assignments.find(assignment =>
+        assignment?.task === STAFF_WORK_TASKS.COMMUNITY_SERVICE &&
+        String(assignment.favorId) === favorKey &&
+        assignment.weekKey === weekKey
+    );
+
+    if (existingAssignment) {
+        return {
+            success: true,
+            assignment: existingAssignment,
+            duplicate: true,
+            effectiveHours: getEffectiveStaffWorkHours(
+                team,
+                existingAssignment
+            )
+        };
+    }
+
+    const staffMembers = ensureTeamCoachingStaff(team)
+        .filter(member =>
+            member?.id != null &&
+            !member.isRetired &&
+            (team.isPlayerControlled || !member.isUserCoach)
+        );
+
+    if (staffMembers.length === 0) {
+        return {
+            success: false,
+            message: 'There are no available staff members.'
+        };
+    }
+
+    const getWeeklyCapacity = member => {
+        const availability = ensureStaffAvailability(member);
+        const rawHours = Number(availability?.weeklyHours);
+
+        const availableHours = Math.max(
+            0,
+            Math.min(
+                WEEKLY_COACH_HOURS,
+                Number.isFinite(rawHours) ? rawHours : 8
+            )
+        );
+
+        const availableDays = Array.isArray(availability?.availableDays)
+            ? availability.availableDays.filter(
+                day => typeof day === 'string' && day.trim()
+            )
+            : [];
+
+        const isFlexibleSchedule =
+            availability.scheduleType === 'flexible' ||
+            availableDays.includes('Flexible');
+
+        const hoursPerDay =
+            availability.timeWindow === 'mixed' ? 6 : 4;
+
+        const scheduleCapacity =
+            !isFlexibleSchedule && availableDays.length > 0
+                ? availableDays.length * hoursPerDay
+                : availableHours;
+
+        const planCapacity = Math.max(
+            0,
+            Math.min(
+                WEEKLY_COACH_HOURS,
+                Number(plan.weeklyHoursPerCoach) ||
+                    WEEKLY_COACH_HOURS
+            )
+        );
+
+        return Math.min(
+            availableHours,
+            scheduleCapacity,
+            planCapacity
+        );
+    };
+
+    const getRequestedHours = coachId =>
+        plan.assignments.reduce((total, assignment) => {
+            if (
+                String(assignment?.coachId) !== String(coachId) ||
+                !Number.isFinite(Number(assignment?.hours))
+            ) {
+                return total;
+            }
+
+            return total + Math.max(0, Number(assignment.hours));
+        }, 0);
+
+    // Prefer the staff member whose existing workload uses the
+    // smallest proportion of their actual weekly availability.
+    const selectedStaff = staffMembers
+        .map(member => {
+            const capacity = getWeeklyCapacity(member);
+            const requested = getRequestedHours(member.id);
+            const projectedRequested =
+                requested + Number(requestedHours);
+
+            return {
+                member,
+                capacity,
+                requested,
+                projectedRequested,
+                projectedUtilization: capacity > 0
+                    ? projectedRequested / capacity
+                    : Number.POSITIVE_INFINITY
+            };
+        })
+        .filter(item => item.capacity > 0)
+        .sort((a, b) =>
+            a.projectedUtilization - b.projectedUtilization ||
+            a.projectedRequested - b.projectedRequested
+        )[0];
+
+    if (!selectedStaff) {
+        return {
+            success: false,
+            message: 'No staff member has usable weekly availability.'
+        };
+    }
+
+    const assignment = {
+        coachId: String(selectedStaff.member.id),
+        task: STAFF_WORK_TASKS.COMMUNITY_SERVICE,
+        hours: Number(requestedHours),
+        focus: 'all',
+
+        favorId: favorKey,
+        year,
+        week,
+        weekKey,
+
+        source: 'community_favor'
+    };
+
+    plan.assignments.push(assignment);
+
+    return {
+        success: true,
+        assignment,
+        coachId: String(selectedStaff.member.id),
+        coachName: selectedStaff.member.name || 'Staff Member',
+
+        requestedHours: Number(requestedHours),
+
+        effectiveHours: getEffectiveStaffWorkHours(
+            team,
+            assignment
+        )
+    };
+}
+
 export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, formerPlayer = null) {
     const firstName = formerPlayer ? formerPlayer.name.split(' ')[0] : getRandom(firstNames);
     const lastName = formerPlayer ? formerPlayer.name.split(' ').slice(1).join(' ') : getRandom(lastNames);
@@ -962,7 +1181,9 @@ export const STAFF_WORK_TASKS = Object.freeze({
     SCOUTING: 'scouting',
     TRAINING: 'training',
     OFFENSE_PREP: 'offensePrep',
-    DEFENSE_PREP: 'defensePrep'
+    DEFENSE_PREP: 'defensePrep',
+    COMMUNITY_SERVICE: 'communityService',
+    RECRUITING: 'recruiting'
 });
 
 const COACH_DEVELOPMENT_SKILLS = [
@@ -1123,7 +1344,9 @@ const COACH_DEVELOPMENT_TASK_SKILLS = {
         'defSchemeMastery',
         'gameplanInstinct',
         'inGameAdjustments'
-    ]
+    ],
+    communityService: [],
+    recruiting: []
 };
 
 /**
@@ -1456,15 +1679,14 @@ export function processWeeklyCoachDevelopment(team, year, week) {
         if (!workload) continue;
 
         const task = assignment.task;
-        if (!COACH_DEVELOPMENT_TASK_SKILLS[task]) continue;
 
-        const requestedHours = Number(assignment.hours);
-        if (!Number.isFinite(requestedHours) || requestedHours <= 0) {
+        if (!Object.prototype.hasOwnProperty.call(
+            COACH_DEVELOPMENT_TASK_SKILLS,
+            task
+        )) {
             continue;
         }
 
-        // Development reflects work the coach could realistically deliver,
-        // not merely the hours assigned on paper.
         const effectiveHours = getEffectiveStaffWorkHours(
             team,
             assignment
@@ -1487,7 +1709,7 @@ export function processWeeklyCoachDevelopment(team, year, week) {
             availableHours
         );
 
-        workload[task] += allocatedHours;
+        workload[task] = (workload[task] || 0) + allocatedHours;
         workload.total += allocatedHours;
     }
 
@@ -1532,7 +1754,7 @@ export function processWeeklyCoachDevelopment(team, year, week) {
             COACH_DEVELOPMENT_TASK_SKILLS
         )) {
             const taskHours = workload?.[task] || 0;
-            if (taskHours <= 0) continue;
+            if (taskHours <= 0 || skillKeys.length === 0) continue;
 
             // Hours are shared across the discipline's related skills.
             const hoursPerSkill = taskHours / skillKeys.length;
@@ -2313,7 +2535,22 @@ export function processCoachOffseasonRetention(
         const voluntaryDeparture = !lifeEvent &&
             random() < voluntaryDepartureRisk;
 
-        if (!lifeEvent && !voluntaryDeparture) continue;
+        // A coach cannot leave while an accepted community commitment
+        // assigned to them remains unresolved.
+        const hasPendingCommunityCommitment =
+            gameState?.community?.favors?.some(favor =>
+                favor?.status === 'accepted' &&
+                favor.staffWorkResolved !== true &&
+                String(favor.acceptedByTeamId) === String(team.id) &&
+                String(favor.assignedStaffId) === String(coach.id)
+            ) || false;
+
+        if (
+            hasPendingCommunityCommitment ||
+            (!lifeEvent && !voluntaryDeparture)
+        ) {
+            continue;
+        }
 
         let reason;
 
@@ -2911,7 +3148,11 @@ export function buildAutomatedStaffAssignmentsForTeam(
  * Creates a persisted default work plan for existing and new teams.
  * Existing player-configured assignments are preserved.
  */
-export function ensureTeamStaffWorkPlan(team) {
+export function ensureTeamStaffWorkPlan(
+    team,
+    year = null,
+    week = null
+) {
     if (!team) return null;
 
     ensureTeamInstructions(team);
@@ -2989,7 +3230,242 @@ export function ensureTeamStaffWorkPlan(team) {
 
     plan.version = 1;
 
+    if (
+        Number.isInteger(year) &&
+        Number.isInteger(week)
+    ) {
+        const activeWeekKey = `${year}:${week}`;
+
+        // Community service assignments are temporary weekly commitments.
+        // Regular staff workload assignments remain in place.
+        plan.assignments = plan.assignments.filter(assignment =>
+            !assignment?.weekKey ||
+            assignment.weekKey === activeWeekKey
+        );
+
+        plan.activeWeekKey = activeWeekKey;
+    }
+
     return plan;
+}
+
+/**
+ * Assigns a staff member to a community-service request.
+ *
+ * Community service uses the same persisted weekly workload as
+ * scouting, training, preparation, and recruiting. It does not
+ * receive a separate volunteer-hours allowance.
+ */
+export function assignCommunityServiceStaffHours(
+    team,
+    favorId,
+    requestedHours,
+    year,
+    week,
+    gameState
+) {
+    if (
+        !team ||
+        team.leagueType !== 'main' ||
+        favorId == null ||
+        !Number.isInteger(year) ||
+        year < 1 ||
+        !Number.isInteger(week) ||
+        week < 0 ||
+        !gameState
+    ) {
+        return {
+            success: false,
+            message: 'Invalid community-service assignment.'
+        };
+    }
+
+    const hours = Math.round(
+        Math.max(0, Number(requestedHours) || 0) * 100
+    ) / 100;
+
+    if (hours <= 0) {
+        return {
+            success: false,
+            message: 'Community-service hours must be positive.'
+        };
+    }
+
+    const weekKey = `${year}:${week}`;
+
+    // Initialize or retrieve the actual plan for this exact week.
+    const plan = team.isPlayerControlled
+        ? ensureTeamStaffWorkPlan(team, year, week)
+        : ensureAiStaffWorkPlan(
+            team,
+            gameState,
+            year,
+            week
+        );
+
+    if (
+        !plan ||
+        !Array.isArray(plan.assignments) ||
+        plan.activeWeekKey !== weekKey
+    ) {
+        return {
+            success: false,
+            message: 'The team workload could not be initialized for the current week.'
+        };
+    }
+
+    // Prevent a repeated acceptance attempt from assigning the same
+    // request to multiple staff members.
+    const existingAssignment = plan.assignments.find(assignment =>
+        assignment?.task === 'communityService' &&
+        String(assignment.favorId) === String(favorId) &&
+        (
+            assignment.weekKey === weekKey ||
+            (
+                Number(assignment.year) === year &&
+                Number(assignment.week) === week
+            )
+        )
+    );
+
+    const coaches = ensureTeamCoachingStaff(team)
+        .filter(coach => coach?.id != null);
+
+    if (existingAssignment) {
+        const existingCoach = coaches.find(
+            coach =>
+                String(coach.id) === String(existingAssignment.coachId)
+        );
+
+        if (!existingCoach) {
+            return {
+                success: false,
+                message: 'The assigned staff member is no longer available.'
+            };
+        }
+
+        return {
+            success: true,
+            assignment: existingAssignment,
+            coachId: String(existingCoach.id),
+            coachName: existingCoach.name || 'Coach',
+            requestedHours: Number(existingAssignment.hours) || 0,
+            effectiveHours: Math.max(
+                0,
+                Number(
+                    getEffectiveStaffWorkHours(
+                        team,
+                        existingAssignment
+                    )
+                ) || 0
+            ),
+            weekKey,
+            alreadyAssigned: true
+        };
+    }
+
+    if (coaches.length === 0) {
+        return {
+            success: false,
+            message: 'The team has no active staff members.'
+        };
+    }
+
+    // Evaluate each coach using the existing workload calculation.
+    // Temporary assignments are removed immediately after evaluation.
+    const candidates = coaches.map(coach => {
+        const assignment = {
+            year,
+            week,
+            weekKey,
+            teamId: team.id,
+            coachId: String(coach.id),
+            coachName: coach.name || 'Coach',
+            task: 'communityService',
+            favorId: String(favorId),
+            source: 'community',
+            focus: 'all',
+            hours
+        };
+
+        const assignedHours = plan.assignments
+            .filter(item =>
+                item &&
+                String(item.coachId) === String(coach.id)
+            )
+            .reduce(
+                (total, item) =>
+                    total + Math.max(0, Number(item.hours) || 0),
+                0
+            );
+
+        plan.assignments.push(assignment);
+
+        const effectiveHours = Math.max(
+            0,
+            Number(
+                getEffectiveStaffWorkHours(team, assignment)
+            ) || 0
+        );
+
+        plan.assignments.pop();
+
+        return {
+            coach,
+            assignment,
+            assignedHours,
+            effectiveHours
+        };
+    }).filter(candidate =>
+        candidate.effectiveHours > 0
+    );
+
+    if (candidates.length === 0) {
+        return {
+            success: false,
+            message: 'No staff member has effective hours available for this request.'
+        };
+    }
+
+    // Prefer the coach who can deliver the most effective service.
+    // Existing workload breaks ties.
+    candidates.sort((a, b) =>
+        b.effectiveHours - a.effectiveHours ||
+        a.assignedHours - b.assignedHours
+    );
+
+    const chosen = candidates[0];
+    const assignment = chosen.assignment;
+
+    plan.assignments.push(assignment);
+
+    const effectiveHours = Math.max(
+        0,
+        Number(
+            getEffectiveStaffWorkHours(team, assignment)
+        ) || 0
+    );
+
+    if (effectiveHours <= 0) {
+        plan.assignments = plan.assignments.filter(
+            item => item !== assignment
+        );
+
+        return {
+            success: false,
+            message: 'The selected staff member has no effective hours available.'
+        };
+    }
+
+    return {
+        success: true,
+        assignment,
+        coachId: String(chosen.coach.id),
+        coachName: chosen.coach.name || 'Coach',
+        requestedHours: assignment.hours,
+        effectiveHours,
+        weekKey
+    };
 }
 
 /**
@@ -3235,6 +3711,34 @@ export function recordRecruitingStaffAssignment(
         };
     }
 
+        const assignmentYear = Number(gameState.year);
+
+    const assignmentWeek = Number.isInteger(
+        Number(gameState.currentWeek)
+    )
+        ? Number(gameState.currentWeek)
+        : 0;
+
+    if (!Number.isInteger(assignmentYear)) {
+        return {
+            success: false,
+            message: 'The current season is invalid.'
+        };
+    }
+
+    const staffPlan = ensureTeamStaffWorkPlan(
+        team,
+        assignmentYear,
+        assignmentWeek
+    );
+
+    if (!staffPlan || !Array.isArray(staffPlan.assignments)) {
+        return {
+            success: false,
+            message: 'The team workload could not be initialized.'
+        };
+    }
+
     if (!progress.teamDailyWork || typeof progress.teamDailyWork !== 'object') {
         progress.teamDailyWork = {};
     }
@@ -3275,17 +3779,80 @@ export function recordRecruitingStaffAssignment(
         };
     }
 
+    // Recruiting uses the offseason's shared weekly workload.
+    const workYear = Number(gameState.year);
+    const workWeek = 0;
+    const workWeekKey = `${workYear}:${workWeek}`;
+
+    if (!Number.isInteger(workYear)) {
+        return {
+            success: false,
+            message: 'The recruiting work period is invalid.'
+        };
+    }
+
+    if (team.isPlayerControlled) {
+        ensureTeamStaffWorkPlan(team, workYear, workWeek);
+    } else {
+        ensureAiStaffWorkPlan(
+            team,
+            gameState,
+            workYear,
+            workWeek
+        );
+    }
+
+    const staffWorkPlan = team.staffWorkPlan;
+
+    if (!staffWorkPlan || !Array.isArray(staffWorkPlan.assignments)) {
+        return {
+            success: false,
+            message: 'The team staff work plan is unavailable.'
+        };
+    }
+
     const assignment = {
-        year: Number(gameState.year),
+        year: workYear,
+        week: workWeek,
+        weekKey: workWeekKey,
         day,
         teamId: team.id,
         coachId: coachKey,
         coachName: coachBudget.coachName,
         playerId: player.id,
+        task: STAFF_WORK_TASKS.RECRUITING,
         action: actionType,
+        source: 'recruiting',
         hours: requestedHours
     };
 
+    staffWorkPlan.assignments.push(assignment);
+
+    const effectiveHours = getEffectiveStaffWorkHours(
+        team,
+        assignment
+    );
+
+    if (
+        !Number.isFinite(effectiveHours) ||
+        effectiveHours <= 0
+    ) {
+        staffWorkPlan.assignments =
+            staffWorkPlan.assignments.filter(
+                item => item !== assignment
+            );
+
+        return {
+            success: false,
+            message: `${coachBudget.coachName} has no effective staff time available for recruiting.`
+        };
+    }
+
+    // Recruiting is already recorded in the shared weekly staff plan
+    // above. Do not insert the same assignment a second time.
+
+    // Keep the daily recruiting record for the seven-day recruiting UI
+    // and activity history. It is no longer the sole workload record.
     const dayKey = String(day);
 
     if (!Array.isArray(teamWork[dayKey])) {
@@ -3326,6 +3893,7 @@ export function recordRecruitingStaffAssignment(
     return {
         success: true,
         assignment,
+        effectiveHours,
         remainingHours: remainingHours - requestedHours
     };
 }
@@ -3688,7 +4256,12 @@ export function executeRecruitingAction(
 
     // Better-suited coaches get more interest from the same time investment.
     const skillMultiplier = 0.65 + (averageSkill / 100) * 0.7;
-    const assignedHours = Number(hours);
+    const assignedHours = Number(assignmentResult.effectiveHours);
+
+    const effectiveHours = Math.max(
+        0,
+        Number(assignmentResult.effectiveHours) || 0
+    );
 
     // Repeating the same tactic has diminishing returns. Teams benefit
     // from varying their approach instead of spamming one action.
@@ -3759,10 +4332,56 @@ export function executeRecruitingAction(
     );
 
     let contextBonus = 0;
-    let roleDiscussionSnapshot = null;
-
     const roster = getRosterObjects(team);
     const recruitId = String(player.id);
+
+    // Community relationships only influence recruiting when a contact
+    // has an explicitly recorded connection to this particular player.
+    // General community reputation never creates a blanket recruiting bonus.
+    const linkedCommunityScores = (
+        gameState.community?.contacts || []
+    )
+        .filter(contact =>
+            Array.isArray(contact?.relatedPlayerIds) &&
+            contact.relatedPlayerIds.some(
+                relatedId => String(relatedId) === recruitId
+            )
+        )
+        .map(contact => {
+            const relationship =
+                contact?.teamRelationships?.[teamKey];
+
+            if (!relationship || relationship.score == null) {
+                return null;
+            }
+
+            const score = Number(relationship.score);
+
+            return Number.isFinite(score)
+                ? Math.max(0, Math.min(100, score))
+                : null;
+        })
+        .filter(score => score !== null);
+
+    if (linkedCommunityScores.length > 0) {
+        const averageRelationship =
+            linkedCommunityScores.reduce(
+                (total, score) => total + score,
+                0
+            ) / linkedCommunityScores.length;
+
+        // A strong connection helps; a damaged relationship can hurt.
+        // The maximum adjustment is deliberately limited to 3 points.
+        const communityConnectionBonus = Math.max(
+            -3,
+            Math.min(
+                3,
+                (averageRelationship - 50) * 0.06
+            )
+        );
+
+        contextBonus += communityConnectionBonus;
+    }
 
     if (actionType === 'teammateConnection') {
         // Relationship bonuses require evidence recorded in this team's
@@ -3934,7 +4553,7 @@ export function executeRecruitingAction(
     }
 
     let interestGain = (
-        assignedHours *
+        effectiveHours *
             profile.pointsPerHour *
             skillMultiplier *
             repetitionMultiplier +
@@ -4061,6 +4680,7 @@ export function executeRecruitingAction(
             }
             : null,
         hours: assignedHours,
+        effectiveHours,
         skillMultiplier,
         repetitionMultiplier,
         effectiveEffort,
@@ -6207,8 +6827,25 @@ export function ensureAiStaffWorkPlan(
 
     const weekKey = `${year}:${week}`;
 
+    // The same calendar week can be used during the offseason carousel
+    // and again when the regular season begins. Keep those plans separate.
+    const offseasonPhase = String(
+        gameState?.offseasonState?.phase || ''
+    )
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    const isOffseason =
+        offseasonPhase !== '' &&
+        offseasonPhase !== 'regularseason';
+
+    const planPhaseKey = isOffseason
+        ? 'offseason'
+        : 'regularseason';
+
     if (
         team.aiStaffWorkPlanKey === weekKey &&
+        team.aiStaffWorkPlanPhaseKey === planPhaseKey &&
         Array.isArray(team.staffWorkPlan?.assignments)
     ) {
         return team.staffWorkPlan;
@@ -6219,6 +6856,68 @@ export function ensureAiStaffWorkPlan(
         .slice(0, 3);
 
     if (coaches.length === 0) return null;
+
+    // Preserve accepted community commitments when rebuilding the
+    // ordinary AI workload for this week.
+    const activeCoachIds = new Set(
+        coaches.map(coach => String(coach.id))
+    );
+
+    const communityFavors = Array.isArray(gameState.community?.favors)
+        ? gameState.community.favors
+        : [];
+
+    const previousAssignments = Array.isArray(
+        team.staffWorkPlan?.assignments
+    )
+        ? team.staffWorkPlan.assignments
+        : [];
+
+    const pendingCommunityAssignments = [];
+    const preservedFavorIds = new Set();
+
+    for (const assignment of previousAssignments) {
+        if (
+            assignment?.task !== 'communityService' ||
+            assignment.favorId == null ||
+            assignment.coachId == null
+        ) {
+            continue;
+        }
+
+        const favorId = String(assignment.favorId);
+        const coachId = String(assignment.coachId);
+
+        if (
+            preservedFavorIds.has(favorId) ||
+            !activeCoachIds.has(coachId) ||
+            String(
+                assignment.weekKey ||
+                `${assignment.year}:${assignment.week}`
+            ) !== weekKey
+        ) {
+            continue;
+        }
+
+        const favor = communityFavors.find(candidate =>
+            String(candidate?.id) === favorId
+        );
+
+        if (
+            !favor ||
+            favor.status !== 'accepted' ||
+            favor.staffWorkResolved === true ||
+            String(favor.acceptedByTeamId) !== String(team.id) ||
+            String(favor.assignedStaffId) !== coachId ||
+            Number(favor.staffAssignmentYear) !== year ||
+            Number(favor.staffAssignmentWeek) !== week
+        ) {
+            continue;
+        }
+
+        pendingCommunityAssignments.push(assignment);
+        preservedFavorIds.add(favorId);
+    }
 
     const gm = team.aiGmProfile || team.staff?.gm || null;
 
@@ -6257,7 +6956,7 @@ export function ensureAiStaffWorkPlan(
             ((50 - gmDiscipline) / 50) * 1.25
         )
     );
-    const isOffseason = week === 0;
+
     const hasDraftClass =
         Array.isArray(gameState?.draftClass) &&
         gameState.draftClass.length > 0;
@@ -6286,7 +6985,10 @@ export function ensureAiStaffWorkPlan(
     ];
 
     const availableCoaches = [...coaches];
-    const assignments = [];
+
+    // Community-service hours are already committed and must remain
+    // part of the shared workload after the ordinary plan is regenerated.
+    const assignments = [...pendingCommunityAssignments];
 
     for (const specialty of specialties) {
         if (availableCoaches.length === 0) break;
@@ -6533,10 +7235,12 @@ export function ensureAiStaffWorkPlan(
     team.staffWorkPlan = {
         version: 1,
         weeklyHoursPerCoach: WEEKLY_COACH_HOURS,
-        assignments
+        assignments,
+        activeWeekKey: weekKey
     };
 
     team.aiStaffWorkPlanKey = weekKey;
+    team.aiStaffWorkPlanPhaseKey = planPhaseKey;
 
     return team.staffWorkPlan;
 }
@@ -6866,9 +7570,6 @@ function enforceCoachMarketCapacity(gameState, maxCandidates = 18) {
 
 /**
  * Resolves AI coaching vacancies through a shared offseason market.
-
-/**
- * Resolves AI coaching vacancies through a shared offseason market.
  *
  * Each candidate can be signed by only one team. Teams evaluate candidates
  * using staff skills, scheme fit, GM priorities, league tier, and affordability.
@@ -6945,6 +7646,22 @@ export function resolveCoachCarousel(
                 .filter(coach => coach?.id != null)
                 .map(coach => String(coach.id))
         )
+    );
+
+    // Do not hire a coach away from an unresolved accepted community
+    // commitment, even if a stale market record lists them as available.
+    const pendingCommunityCommitmentCoachIds = new Set(
+        (
+            Array.isArray(gameState.community?.favors)
+                ? gameState.community.favors
+                : []
+        )
+            .filter(favor =>
+                favor?.status === 'accepted' &&
+                favor.staffWorkResolved !== true &&
+                favor.assignedStaffId != null
+            )
+            .map(favor => String(favor.assignedStaffId))
     );
 
     const rating = (coach, key) => {
@@ -7529,6 +8246,7 @@ export function resolveCoachCarousel(
                     candidate?.id != null &&
                     candidate.teamId == null &&
                     !employedCoachIds.has(String(candidate.id)) &&
+                    !pendingCommunityCommitmentCoachIds.has(String(candidate.id)) &&
                     !rejectedCandidateIds.has(String(candidate.id)) &&
                     (
                         candidate.role === 'coach' ||

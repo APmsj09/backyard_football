@@ -48,6 +48,13 @@ import {
     applyBankedDraftScoutingReports,
     initializeInheritedScoutingReports
 } from './scouting.js';
+import {
+    createCommunityState,
+    initializeCommunityContacts,
+    generateCommunityFavorRequests,
+    processAiCommunityFavorDecisions,
+    resolveCommunityFavorOutcomes
+} from './community.js';
 
 export const ROSTER_LIMIT = 18;
 export const REGULAR_SEASON_ROSTER_LIMIT = 18;
@@ -55,6 +62,8 @@ export const SUMMER_ROSTER_LIMIT = 24;
 export const MIN_HEALTHY_PLAYERS = 8;
 export const TEMPORARY_HELP_THRESHOLD = 12;
 export const SEASON_DUES_PER_PLAYER = 9;
+
+const COMMUNITY_WEEKS_PER_SEASON = 9;
 
 export const COACH_CAROUSEL_DAYS = 2;
 export const FREE_AGENCY_RECRUITING_DAYS = 7;
@@ -438,6 +447,30 @@ export function transitionOffseasonPhase(
     if (nextPhase === OFFSEASON_PHASES.REGULAR_SEASON) {
         state.completed = true;
         gameState.offseasonFACompleted = true;
+
+        // Publish the opening community requests before the first
+        // regular-season game. Historical seasons are excluded.
+        const regularSeasonYear = Number(gameState.year);
+        const regularSeasonWeek = Number(gameState.currentWeek);
+
+        if (
+            Number.isInteger(regularSeasonYear) &&
+            regularSeasonYear >= 5 &&
+            regularSeasonWeek === 0
+        ) {
+            const openingAbsoluteWeek =
+                (regularSeasonYear - 1) *
+                COMMUNITY_WEEKS_PER_SEASON;
+
+            generateCommunityFavorRequests(
+                gameState,
+                {
+                    absoluteWeek: openingAbsoluteWeek,
+                    season: 'autumn',
+                    maxRequests: 3
+                }
+            );
+        }
     }
 
     return {
@@ -1257,6 +1290,7 @@ export async function initializeLeague(onProgress) {
         currentWeek: 0, draftOrder: [], currentPick: 0, hallOfFame: [],
         gameResults: [], messages: [], relationships: new Map(),
         pickHistory: [], history: { seasons: [] },
+        community: createCommunityState(),
         availableStaff: generateStaffPool(6),
         coachCareerArchive: [],
         coachMarketArchive: [],
@@ -1517,12 +1551,14 @@ export async function initializeLeague(onProgress) {
     tier1Teams.forEach(team => fillInitialRoster(team, 1));
     tier2Teams.forEach(team => fillInitialRoster(team, 2));
 
-    if (onProgress) onProgress(1.0);
-    addMessage("Ready!", "League generated. Time to create your team.");
-
     game.teams.forEach(team => {
         if (team) assignTeamCaptain(team);
     });
+
+    initializeCommunityContacts(game);
+
+    if (onProgress) onProgress(1.0);
+    addMessage("Ready!", "League generated. Time to create your team.");
 }
 
 export function createPlayerTeam(teamName, options = {}) {
@@ -3455,6 +3491,46 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
         return;
     }
 
+    // AI teams consider requests published for the current week.
+    // Requests were generated at the end of the previous week, giving
+    // the player the same opportunity to accept them.
+    const communityYear = Number(game.year);
+    const communityWeek = Number(game.currentWeek);
+
+    const hasValidCommunityWeek =
+        Number.isInteger(communityYear) &&
+        communityYear >= 5 &&
+        Number.isInteger(communityWeek) &&
+        communityWeek >= 0 &&
+        communityWeek < COMMUNITY_WEEKS_PER_SEASON;
+
+    const communityAbsoluteWeek = hasValidCommunityWeek
+        ? (
+            (communityYear - 1) * COMMUNITY_WEEKS_PER_SEASON +
+            communityWeek
+        )
+        : null;
+
+    if (hasValidCommunityWeek) {
+        initializeCommunityContacts(game);
+
+        const community = game.community;
+        const communityWeekKey =
+            `${communityYear}:${communityWeek}`;
+
+        if (
+            community &&
+            community.lastProcessedWeekKey !== communityWeekKey
+        ) {
+            processAiCommunityFavorDecisions(
+                game,
+                communityAbsoluteWeek
+            );
+
+            community.lastProcessedWeekKey = communityWeekKey;
+        }
+    }
+
     // Retire legacy in-season bidding records.
     // Permanent player additions are handled during offseason recruiting.
     // Emergency in-season help is managed separately through temporary friends.
@@ -3503,7 +3579,11 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
 
         // Establish each team's workload before the gameplan is rebuilt.
         if (t.id === game.playerTeam?.id) {
-            ensureTeamStaffWorkPlan(t);
+            ensureTeamStaffWorkPlan(
+                t,
+                game.year,
+                game.currentWeek
+            );
         } else {
             ensureAiStaffWorkPlan(
                 t,
@@ -3661,7 +3741,121 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
         );
     });
 
-    // Record closing balances after weekly practice and scouting work.
+    // Resolve accepted community favors exactly once, after all weekly
+    // staff work and coach development have been processed.
+    if (hasValidCommunityWeek) {
+        resolveCommunityFavorOutcomes(
+            game,
+            {
+                year: communityYear,
+                week: communityWeek,
+                absoluteWeek: communityAbsoluteWeek
+            }
+        );
+    }
+
+    // Charge completed community-favor expenses before recording
+    // each team's weekly closing balance.
+    if (hasValidCommunityWeek) {
+        for (const favor of game.community?.favors || []) {
+            if (
+                !favor ||
+                favor.cashExpensePendingLedger !== true ||
+                favor.cashExpenseLedgered === true ||
+                Number(favor.cashExpenseYear) !== communityYear ||
+                Number(favor.cashExpenseWeek) !== communityWeek
+            ) {
+                continue;
+            }
+
+            const team = mainTeams.find(candidate =>
+                String(candidate.id) ===
+                String(favor.acceptedByTeamId)
+            );
+
+            if (!team?.finances) continue;
+
+            const expense = Math.round(
+                Math.max(
+                    0,
+                    Number(favor.actualCashExpense) || 0
+                ) * 100
+            ) / 100;
+
+            if (expense <= 0) {
+                favor.cashExpensePaid = 0;
+                favor.cashExpenseShortfall = 0;
+                favor.cashExpensePendingLedger = false;
+                favor.cashExpenseLedgered = true;
+                continue;
+            }
+
+            const balanceValue = Number(team.finances.balance);
+            const availableBalance = Number.isFinite(balanceValue)
+                ? Math.max(0, balanceValue)
+                : 0;
+
+            const cashPaid = Math.min(
+                availableBalance,
+                expense
+            );
+
+            team.finances.balance = Math.round(
+                (availableBalance - cashPaid) * 100
+            ) / 100;
+
+            if (cashPaid > 0) {
+                recordFinanceLedgerEntry(
+                    team,
+                    game,
+                    `community_favor_${favor.id}`,
+                    `Community service: ${favor.title || 'Community favor'}`,
+                    -cashPaid
+                );
+            }
+
+            favor.cashExpensePaid = cashPaid;
+            favor.cashExpenseShortfall = Math.round(
+                (expense - cashPaid) * 100
+            ) / 100;
+
+            favor.cashExpensePendingLedger = false;
+            favor.cashExpenseLedgered = true;
+        }
+    }
+
+    // Publish requests for the upcoming week only after this week's
+    // commitments have been resolved.
+    const nextCommunityWeek = communityWeek + 1;
+
+    if (
+        hasValidCommunityWeek &&
+        nextCommunityWeek < COMMUNITY_WEEKS_PER_SEASON
+    ) {
+        const nextAbsoluteWeek =
+            communityAbsoluteWeek + 1;
+
+        const community = game.community;
+
+        // Prevent duplicate generation if weekly processing is repeated.
+        if (
+            community &&
+            Number(community.lastGeneratedAbsoluteWeek) !==
+                nextAbsoluteWeek
+        ) {
+            generateCommunityFavorRequests(
+                game,
+                {
+                    absoluteWeek: nextAbsoluteWeek,
+                    season: 'autumn',
+                    maxRequests: 3
+                }
+            );
+        }
+    }
+
+    // Record closing balances after weekly practice, scouting,
+    // and community-favor expenses.
     // Neighborhood Hustle can earn money during practice.
     mainTeams.forEach(team => {
         const openingBalance = financeOpeningBalances.get(

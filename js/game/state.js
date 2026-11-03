@@ -1629,6 +1629,11 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
             decompressSaveText(saved)
         );
         game = loaded;
+
+        // Active simulation callbacks cannot survive a page reload.
+        // Clear any saved lock so the current week can be resumed.
+        delete game.weekSimulationInProgressKey;
+
         game._activeFaMarket = restoreActiveFaMarket(game._activeFaMarket);
 
         // Reconnect compacted coach aliases to the canonical team.coaches records.

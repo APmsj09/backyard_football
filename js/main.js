@@ -30,6 +30,9 @@ import {
     getEffectiveStaffWorkHours,
     applyRecruitingSweetener
 } from './game/staff.js';
+import {
+    acceptCommunityFavor as acceptCommunityFavorAction
+} from './game/community.js';
 
 let gameState = null;
 let selectedPlayerId = null;
@@ -2985,17 +2988,54 @@ async function handleAdvanceWeek() {
 
 function simulateRestOfWeek() {
     if (!gameState) return;
+
     if (gameState.currentWeek >= WEEKS_IN_SEASON) {
         handleAdvanceWeek();
         return;
     }
+
+    const simulationWeekKey =
+        `${Number(gameState.year)}:${Number(gameState.currentWeek)}`;
+
+    // Prevent another simulation from starting while this week's
+    // results are already being processed.
+    if (
+        gameState.weekSimulationInProgressKey === simulationWeekKey
+    ) {
+        return;
+    }
+
+    gameState.weekSimulationInProgressKey = simulationWeekKey;
+
     const results = Game.simulateWeek({ fastSim: true });
-    finishWeekSimulation(results || []);
+
+    finishWeekSimulation(
+        results || [],
+        simulationWeekKey
+    );
 }
 
-function finishWeekSimulation(results) {
+function finishWeekSimulation(results, expectedWeekKey) {
+    if (!gameState || expectedWeekKey == null) return;
+
+    const currentWeekKey =
+        `${Number(gameState.year)}:${Number(gameState.currentWeek)}`;
+
+    // Reject stale or duplicate callbacks from an earlier simulation.
+    if (
+        String(expectedWeekKey) !== currentWeekKey ||
+        gameState.weekSimulationInProgressKey !== currentWeekKey ||
+        gameState.lastFinishedWeekKey === currentWeekKey
+    ) {
+        return;
+    }
+
     Game.processEndOfWeek();
+
+    gameState.lastFinishedWeekKey = currentWeekKey;
     gameState.currentWeek++;
+
+    delete gameState.weekSimulationInProgressKey;
 
     // 1. Purge transient match telemetry from schedule matches to prevent storage bloat
     if (Array.isArray(gameState.schedule)) {
@@ -3046,6 +3086,18 @@ function finishWeekSimulation(results) {
 
 async function startLiveGame(playerGameMatch) {
     if (!gameState) return;
+
+    const simulationWeekKey =
+        `${Number(gameState.year)}:${Number(gameState.currentWeek)}`;
+
+    if (
+        gameState.currentWeek >= WEEKS_IN_SEASON ||
+        gameState.weekSimulationInProgressKey === simulationWeekKey
+    ) {
+        return;
+    }
+
+    gameState.weekSimulationInProgressKey = simulationWeekKey;
 
     // Simulate CPU games for this week
     const gamesPerWeek = gameState.teams.length / 2;
@@ -3135,7 +3187,11 @@ async function startLiveGame(playerGameMatch) {
         }
 
         const combined = [...otherResults, finalResult];
-        finishWeekSimulation(combined);
+
+        finishWeekSimulation(
+            combined,
+            simulationWeekKey
+        );
     });
 }
 
@@ -5173,6 +5229,72 @@ window.app = {
         if (gameState) {
             renderSocialNetworkTab(gameState);
         }
+    },
+    acceptCommunityFavor: (favorId) => {
+        const gs = Game.getGameState();
+        const team = gs?.playerTeam;
+
+        if (!gs || !team || favorId == null) return;
+
+        const favor = (gs.community?.favors || []).find(
+            candidate =>
+                candidate &&
+                String(candidate.id) === String(favorId)
+        );
+
+        // The request may have expired or another team may have accepted it.
+        if (!favor || favor.status !== 'open') {
+            window.alert('This community request is no longer available.');
+            UI.renderCommunityTab(gs);
+            return;
+        }
+
+        const year = Number(gs.year);
+        const week = Number(gs.currentWeek);
+
+        if (
+            !Number.isInteger(year) ||
+            year < 1 ||
+            !Number.isInteger(week) ||
+            week < 0 ||
+            week >= WEEKS_IN_SEASON
+        ) {
+            window.alert(
+                'Community requests can only be accepted during the regular season.'
+            );
+            UI.renderCommunityTab(gs);
+            return;
+        }
+
+        // currentWeek is zero-based, so Year 1 Week 1 is absolute week 0.
+        const absoluteWeek =
+            ((year - 1) * WEEKS_IN_SEASON) + week;
+
+        const acceptedFavor = acceptCommunityFavorAction(
+            gs,
+            favorId,
+            team.id,
+            absoluteWeek
+        );
+
+        if (
+            !acceptedFavor ||
+            acceptedFavor.status !== 'accepted' ||
+            String(acceptedFavor.acceptedByTeamId) !== String(team.id)
+        ) {
+            window.alert(
+                'Your team could not accept this request. The request may have expired, or your staff may not have enough available work hours.'
+            );
+            UI.renderCommunityTab(gs);
+            return;
+        }
+
+        gameState = gs;
+
+        Game.saveGameState(activeSaveKey);
+        UI.renderCommunityTab(gs);
+
+        return acceptedFavor;
     },
     renderFAPool: () => {
         if (gameState) UI.renderOffseasonFAPool(gameState);
