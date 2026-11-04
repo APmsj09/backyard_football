@@ -448,11 +448,64 @@ export function transitionOffseasonPhase(
         state.completed = true;
         gameState.offseasonFACompleted = true;
 
-        // Publish the opening community requests before the first
-        // regular-season game. Historical seasons are excluded.
         const regularSeasonYear = Number(gameState.year);
         const regularSeasonWeek = Number(gameState.currentWeek);
 
+        // Restore the player's normal training workload after
+        // the temporary recruiting-hour reserve is no longer needed.
+        const playerTeam = gameState.playerTeam ||
+            gameState.teams.find(team =>
+                team?.isPlayerControlled === true &&
+                team.leagueType === 'main'
+            );
+
+        const seasonWorkWeek =
+            Number.isInteger(regularSeasonWeek) &&
+            regularSeasonWeek >= 0
+                ? regularSeasonWeek
+                : 0;
+
+        if (Number.isInteger(regularSeasonYear)) {
+            if (playerTeam) {
+                ensureTeamStaffWorkPlan(
+                    playerTeam,
+                    regularSeasonYear,
+                    seasonWorkWeek,
+                    false
+                );
+            }
+
+            // Rebuild every AI team's workload for the regular season.
+            // This removes offseason recruiting work while preserving
+            // valid pending community-service commitments.
+            const playerTeamId = playerTeam?.id == null
+                ? null
+                : String(playerTeam.id);
+
+            gameState.teams.forEach(team => {
+                if (
+                    !team ||
+                    team.leagueType !== 'main' ||
+                    team.isPlayerControlled === true ||
+                    (
+                        playerTeamId !== null &&
+                        String(team.id) === playerTeamId
+                    )
+                ) {
+                    return;
+                }
+
+                ensureAiStaffWorkPlan(
+                    team,
+                    gameState,
+                    regularSeasonYear,
+                    seasonWorkWeek
+                );
+            });
+        }
+
+        // Publish the opening community requests before the first
+        // regular-season game. Historical seasons are excluded.
         if (
             Number.isInteger(regularSeasonYear) &&
             regularSeasonYear >= 5 &&
