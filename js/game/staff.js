@@ -4901,11 +4901,6 @@ export function applyRecruitingSweetener(
         cashSpent: cost,
         tokensSpent,
         baseInterestGain: baseGain,
-        sameGiftCount,
-        diminishingReturnMultiplier: Math.pow(
-            0.65,
-            sameGiftCount
-        ),
         interestBefore: currentInterest,
         interestGain: newInterest - currentInterest,
         interestAfter: newInterest
