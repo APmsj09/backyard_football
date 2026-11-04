@@ -4116,6 +4116,8 @@ export function executeRecruitingAction(
     );
 
     let contextBonus = 0;
+    let roleDiscussionSnapshot = null;
+
     const roster = getRosterObjects(team);
     const recruitId = String(player.id);
 
