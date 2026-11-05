@@ -114,6 +114,27 @@ export function renderDepthOrderPane(gameState) {
                         const starterSlot = starterSlotsByPosition[pos]?.get(
                             String(player.id)
                         );
+                        const sameSidePositions = isOffensePosition
+                            ? ['QB', 'RB', 'WR', 'TE', 'OL']
+                            : ['DL', 'LB', 'DB'];
+                        const otherStarterSlots = Object.entries(
+                            starterSlotsByPosition
+                        )
+                            .filter(([otherPosition, playerSlots]) =>
+                                otherPosition !== pos &&
+                                sameSidePositions.includes(otherPosition) &&
+                                playerSlots.has(String(player.id))
+                            )
+                            .map(([otherPosition, playerSlots]) =>
+                                `${otherPosition} ${playerSlots.get(String(player.id))}`
+                            );
+                        const multiStartBadge = otherStarterSlots.length > 0
+                            ? `
+                                <span class="text-[9px] bg-amber-100 text-amber-900 rounded px-1 py-0.5 font-black shrink-0" title="Starts at multiple ${isOffensePosition ? 'offensive' : 'defensive'} positions: ${otherStarterSlots.join(', ')}">
+                                    MULTI-${isOffensePosition ? 'OFF' : 'DEF'} · ${otherStarterSlots.join(', ')}
+                                </span>
+                            `
+                            : '';
 
                         const starterBadgeClass = isOffensePosition
                             ? 'bg-blue-100 text-blue-800'
@@ -144,6 +165,8 @@ export function renderDepthOrderPane(gameState) {
                                                 STARTER · ${starterSlot}
                                             </span>
                                         ` : ''}
+
+                                        ${multiStartBadge}
 
                                         <span class="text-[9px] text-slate-400 font-mono shrink-0">
                                             #${player.number || '--'}
@@ -276,12 +299,11 @@ export function renderDepthOrderPane(gameState) {
         <div class="mb-4 bg-slate-900 text-white rounded p-3 flex flex-wrap justify-between items-center gap-3 shrink-0">
             <div class="min-w-0">
                 <span class="font-black text-sm uppercase tracking-wider">
-                    Universal Position Rankings
+                    Position Depth Order
                 </span>
 
                 <p class="text-[10px] text-slate-400 mt-1">
-                    Rankings are universal. STARTER badges show assignments in the active formations.
-                    Use the arrows to adjust position priority.
+                    Order players by position. STARTER badges reflect the active formations.
                 </p>
 
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">

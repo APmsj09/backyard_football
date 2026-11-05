@@ -465,26 +465,147 @@ function promptCoachCreation(teamId) {
     const team = gameState.teams.find(t => t.id === teamId);
     if (!team) return;
 
-    const buildOptions = (items) => items.map((item, index) =>
-        `<option value="${item.id}" ${index === 0 ? 'selected' : ''}>${item.name}</option>`
-    ).join('');
+    const escapeBuilderText = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
 
-    const backgroundOptions = buildOptions(gmBackgrounds);
-    const archetypeOptions = buildOptions(gmArchetypes);
-    const expertiseOptions = buildOptions(footballExpertises);
+    const renderBuilderPicker = (
+        controlId,
+        options,
+        selectedValue,
+        placeholder
+    ) => {
+        const selected = options.find(option =>
+            String(option.value) === String(selectedValue)
+        );
+        const popoverId = `${controlId}-popover`;
+
+        return `
+            <input type="hidden" id="${controlId}" value="${escapeBuilderText(selectedValue)}">
+            <div class="relative">
+                <button type="button" id="${controlId}-trigger" aria-expanded="false" aria-controls="${popoverId}" onclick="window.app_toggleGMBuilderPicker('${controlId}')" class="flex w-full items-center justify-between gap-3 rounded border border-slate-300 bg-white px-2.5 py-2 text-left text-xs font-bold text-slate-800 hover:border-amber-500">
+                    <span id="${controlId}-label" class="truncate">${escapeBuilderText(selected?.label || placeholder)}</span>
+                    <span aria-hidden="true" class="text-slate-400">▾</span>
+                </button>
+                <div id="${popoverId}" class="gm-builder-popover absolute left-0 top-full z-40 mt-1 hidden max-h-80 w-[min(48rem,90vw)] overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
+                    <input type="search" data-gm-builder-search="${controlId}" placeholder="Search ${escapeBuilderText(placeholder.toLowerCase())}..." oninput="window.app_filterGMBuilderPicker('${controlId}')" class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-amber-500">
+                    <div class="overflow-hidden rounded-sm border border-slate-200">
+                        <div class="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-2 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                            <span>Choice</span><span>Effect / Personnel</span><span>Trade-off / Style</span>
+                        </div>
+                        ${options.map(option => `
+                            <button type="button" data-gm-builder-option="${controlId}" data-gm-builder-value="${escapeBuilderText(option.value)}" data-gm-builder-label="${escapeBuilderText(option.label)}" data-gm-builder-search-text="${escapeBuilderText(`${option.label} ${option.detail || ''} ${option.extra || ''}`)}" aria-pressed="${String(option.value) === String(selectedValue)}" onclick="window.app_selectGMBuilderOption(this)" class="grid w-full grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-2 border-t border-slate-100 px-2 py-2 text-left text-[10px] ${String(option.value) === String(selectedValue) ? 'bg-amber-50' : 'hover:bg-slate-50'}">
+                                <span class="font-bold text-slate-800">${escapeBuilderText(option.label)}</span>
+                                <span class="text-slate-600">${escapeBuilderText(option.detail || '—')}</span>
+                                <span class="text-amber-800">${escapeBuilderText(option.extra || '—')}</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const builderFormationChoices = (formationMap, excludedKey) =>
+        Object.entries(formationMap)
+            .filter(([key]) => key !== excludedKey)
+            .map(([key, formation]) => ({
+                value: key,
+                label: formation.name || key,
+                detail: Object.entries(formation.personnel || {})
+                    .filter(([, count]) => Number(count) > 0)
+                    .map(([position, count]) => `${count} ${position}`)
+                    .join(' · ') || 'Standard personnel',
+                extra: key
+            }));
+
+    window.app_toggleGMBuilderPicker = controlId => {
+        const popover = document.getElementById(`${controlId}-popover`);
+        const trigger = document.getElementById(`${controlId}-trigger`);
+        if (!popover || !trigger) return;
+
+        const isOpening = popover.classList.contains('hidden');
+        document.querySelectorAll('.gm-builder-popover').forEach(panel =>
+            panel.classList.add('hidden')
+        );
+        document.querySelectorAll('[aria-controls$="-popover"]').forEach(button =>
+            button.setAttribute('aria-expanded', 'false')
+        );
+
+        if (isOpening) {
+            popover.classList.remove('hidden');
+            trigger.setAttribute('aria-expanded', 'true');
+            popover.querySelector('input[type="search"]')?.focus();
+        }
+    };
+
+    window.app_filterGMBuilderPicker = controlId => {
+        const query = String(
+            document.querySelector(`[data-gm-builder-search="${controlId}"]`)?.value || ''
+        ).trim().toLowerCase();
+
+        document.querySelectorAll(`[data-gm-builder-option="${controlId}"]`).forEach(button => {
+            button.hidden = !String(button.dataset.gmBuilderSearchText || '')
+                .toLowerCase()
+                .includes(query);
+        });
+    };
+
+    window.app_selectGMBuilderOption = button => {
+        const controlId = button?.dataset.gmBuilderOption;
+        const input = controlId
+            ? document.getElementById(controlId)
+            : null;
+        const label = controlId
+            ? document.getElementById(`${controlId}-label`)
+            : null;
+        const value = button?.dataset.gmBuilderValue;
+
+        if (!input || !label || value == null) return;
+
+        input.value = value;
+        label.textContent = button.dataset.gmBuilderLabel || value;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById(`${controlId}-popover`)?.classList.add('hidden');
+        document.getElementById(`${controlId}-trigger`)?.setAttribute('aria-expanded', 'false');
+    };
 
     const currentOffense = team.coach?.preferredOffense || team.formations?.offense;
     const currentDefense = team.coach?.preferredDefense || team.formations?.defense;
 
-    const offOptions = Object.keys(offenseFormations)
-        .filter(k => k !== 'Punt')
-        .map(k => `<option value="${k}" ${k === currentOffense ? 'selected' : ''}>${offenseFormations[k].name}</option>`)
-        .join('');
-
-    const defOptions = Object.keys(defenseFormations)
-        .filter(k => k !== 'Punt_Return')
-        .map(k => `<option value="${k}" ${k === currentDefense ? 'selected' : ''}>${defenseFormations[k].name}</option>`)
-        .join('');
+    const backgroundChoices = gmBackgrounds.map(item => ({
+        value: item.id,
+        label: item.name,
+        detail: item.effect,
+        extra: item.tradeoff || item.lore
+    }));
+    const archetypeChoices = gmArchetypes.map(item => ({
+        value: item.id,
+        label: item.name,
+        detail: item.effect,
+        extra: item.tradeoff || item.lore
+    }));
+    const expertiseChoices = footballExpertises.map(item => ({
+        value: item.id,
+        label: item.name,
+        detail: item.effect,
+        extra: item.tradeoff || item.lore
+    }));
+    const offenseChoices = builderFormationChoices(offenseFormations, 'Punt');
+    const defenseChoices = builderFormationChoices(defenseFormations, 'Punt_Return');
+    const initialOffense = offenseChoices.some(option => option.value === currentOffense)
+        ? currentOffense
+        : offenseChoices[0]?.value || '';
+    const initialDefense = defenseChoices.some(option => option.value === currentDefense)
+        ? currentDefense
+        : defenseChoices[0]?.value || '';
 
     const coachSkillBudget = 330;
     const coachSkillValues = [35, 40, 45, 50, 55, 60, 65, 70, 75, 80];
@@ -553,10 +674,7 @@ function promptCoachCreation(teamId) {
                 <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
                     1. Your Roots
                 </label>
-                <select id="new-gm-background"
-                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
-                    ${backgroundOptions}
-                </select>
+                ${renderBuilderPicker('new-gm-background', backgroundChoices, gmBackgrounds[0]?.id || '', 'Search roots')}
                 <div id="gm-background-summary"
                     class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
             </div>
@@ -565,10 +683,7 @@ function promptCoachCreation(teamId) {
                 <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
                     2. Management Archetype
                 </label>
-                <select id="new-gm-archetype"
-                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
-                    ${archetypeOptions}
-                </select>
+                ${renderBuilderPicker('new-gm-archetype', archetypeChoices, gmArchetypes[0]?.id || '', 'Search archetypes')}
                 <div id="gm-archetype-summary"
                     class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
             </div>
@@ -577,10 +692,7 @@ function promptCoachCreation(teamId) {
                 <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
                     3. Football Expertise
                 </label>
-                <select id="new-gm-expertise"
-                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
-                    ${expertiseOptions}
-                </select>
+                ${renderBuilderPicker('new-gm-expertise', expertiseChoices, footballExpertises[0]?.id || '', 'Search expertise')}
                 <div id="gm-expertise-summary"
                     class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
             </div>
@@ -589,18 +701,12 @@ function promptCoachCreation(teamId) {
                 <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
                     Offensive Identity
                 </label>
-                <select id="new-coach-offense"
-                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
-                    ${offOptions}
-                </select>
+                ${renderBuilderPicker('new-coach-offense', offenseChoices, initialOffense, 'Offensive scheme')}
 
                 <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mt-3 mb-1">
                     Defensive Identity
                 </label>
-                <select id="new-coach-defense"
-                    class="w-full p-2 border border-slate-300 rounded outline-none focus:border-amber-500">
-                    ${defOptions}
-                </select>
+                ${renderBuilderPicker('new-coach-defense', defenseChoices, initialDefense, 'Defensive scheme')}
 
                 <p class="text-xs text-slate-500 mt-2 leading-relaxed">
                     These choices set your team's preferred schemes and update
@@ -2200,6 +2306,20 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
     isExitInterviewFlowActive = true;
     const totalInterviews = retentions.length;
 
+    window.app_setExitInterviewChoice = (controlId, value) => {
+        const input = document.getElementById(controlId);
+        if (!input) return;
+
+        input.value = String(value);
+        document.querySelectorAll(
+            `[data-exit-choice-control="${controlId}"]`
+        ).forEach(button => {
+            const selected = button.dataset.exitChoiceValue === String(value);
+            button.setAttribute('aria-pressed', String(selected));
+            button.className = `rounded-sm border px-2 py-1.5 text-left ${selected ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`;
+        });
+    };
+
     gameState = Game.getGameState();
     gameState.pendingRetentions = retentions;
 
@@ -2328,16 +2448,6 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                 : 'ROTATION';
 
         const focusPromise = pitchOptions.focusPromise;
-        const promiseOptionsHtml = focusPromise
-            ? `<option value="${escapeExitHtml(focusPromise.value)}">${escapeExitHtml(focusPromise.label)}</option>`
-            : '';
-
-        const tokenOptionsHtml = [1, 2]
-            .filter(amount => amount <= tokensAvailable)
-            .map(amount =>
-                `<option value="${amount}">${amount} Token${amount > 1 ? 's' : ''}</option>`
-            )
-            .join('');
 
         const modalHtml = `
             <div class="space-y-3.5 text-left text-xs font-sans">
@@ -2379,32 +2489,32 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                     </h5>
 
                     <div>
-                        <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                        <div class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
                             Role Commitment
-                        </label>
-                        <select id="retention-role"
-                            class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white">
-                            <option value="STARTER" ${defaultRole === 'STARTER' ? 'selected' : ''}>
-                                ${escapeExitHtml(pitchOptions.starterRoleLabel)} — Guaranteed
-                            </option>
-                            <option value="ROTATION" ${defaultRole === 'ROTATION' ? 'selected' : ''}>
-                                ${escapeExitHtml(pitchOptions.rotationRoleLabel)} — Earn Your Reps
-                            </option>
-                        </select>
+                        </div>
+                        <input type="hidden" id="retention-role" value="${defaultRole}">
+                        <div class="grid grid-cols-2 gap-1" role="group" aria-label="Role commitment">
+                            ${[
+                                ['STARTER', pitchOptions.starterRoleLabel, 'Guaranteed starting role'],
+                                ['ROTATION', pitchOptions.rotationRoleLabel, 'Earn the role in practice']
+                            ].map(([value, label, detail]) => `
+                                <button type="button" data-exit-choice-control="retention-role" data-exit-choice-value="${value}" aria-pressed="${defaultRole === value}" onclick="window.app_setExitInterviewChoice('retention-role', '${value}')" class="rounded-sm border px-2 py-1.5 text-left ${defaultRole === value ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"><span class="block text-[10px] font-bold">${escapeExitHtml(label)}</span><span class="mt-0.5 block text-[9px] text-slate-500">${detail}</span></button>
+                            `).join('')}
+                        </div>
                         <p class="text-[10px] text-slate-500 mt-1">
                             A starting-role promise is a real commitment that will be checked next offseason.
                         </p>
                     </div>
 
                     <div>
-                        <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                        <div class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
                             Position-Specific Commitment
-                        </label>
-                        <select id="retention-promise"
-                            class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white">
-                            <option value="NONE">No additional workload guarantee</option>
-                            ${promiseOptionsHtml}
-                        </select>
+                        </div>
+                        <input type="hidden" id="retention-promise" value="NONE">
+                        <div class="grid grid-cols-1 gap-1 sm:grid-cols-2" role="group" aria-label="Position-specific commitment">
+                            <button type="button" data-exit-choice-control="retention-promise" data-exit-choice-value="NONE" aria-pressed="true" onclick="window.app_setExitInterviewChoice('retention-promise', 'NONE')" class="rounded-sm border border-emerald-700 bg-emerald-50 px-2 py-1.5 text-left text-emerald-900"><span class="block text-[10px] font-bold">No promise</span><span class="mt-0.5 block text-[9px] text-slate-500">No extra workload guarantee</span></button>
+                            ${focusPromise ? `<button type="button" data-exit-choice-control="retention-promise" data-exit-choice-value="${escapeExitHtml(focusPromise.value)}" aria-pressed="false" onclick="window.app_setExitInterviewChoice('retention-promise', '${escapeExitHtml(focusPromise.value)}')" class="rounded-sm border border-slate-200 bg-white px-2 py-1.5 text-left text-slate-700 hover:bg-slate-50"><span class="block text-[10px] font-bold">${escapeExitHtml(focusPromise.label)}</span><span class="mt-0.5 block text-[9px] text-slate-500">${escapeExitHtml(focusPromise.description)}</span></button>` : ''}
+                        </div>
                         <p class="text-[10px] text-slate-500 mt-1">
                             ${escapeExitHtml(
                                 focusPromise
@@ -2415,14 +2525,15 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                     </div>
 
                     <div>
-                        <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                        <div class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
                             Favor Token Sweetener
-                        </label>
-                        <select id="retention-tokens"
-                            class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white">
-                            <option value="0">0 Tokens</option>
-                            ${tokenOptionsHtml}
-                        </select>
+                        </div>
+                        <input type="hidden" id="retention-tokens" value="0">
+                        <div class="flex flex-wrap gap-1" role="group" aria-label="Favor token sweetener">
+                            ${[0, ...[1, 2].filter(amount => amount <= tokensAvailable)].map(amount => `
+                                <button type="button" data-exit-choice-control="retention-tokens" data-exit-choice-value="${amount}" aria-pressed="${amount === 0}" onclick="window.app_setExitInterviewChoice('retention-tokens', '${amount}')" class="rounded-sm border px-3 py-1.5 text-[10px] font-bold ${amount === 0 ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">${amount} token${amount === 1 ? '' : 's'}</button>
+                            `).join('')}
+                        </div>
                         <p class="text-[10px] text-slate-500 mt-1">
                             ${tokensAvailable} token${tokensAvailable === 1 ? '' : 's'} available.
                             Tokens are spent only if the player accepts.
@@ -5220,6 +5331,48 @@ function renderSocialNetworkTab(gameState) {
     container.innerHTML = html;
 }
 
+window.app_toggleFinanceCategoryPicker = function() {
+    const popover = document.getElementById(
+        'finance-ledger-category-popover'
+    );
+    const trigger = document.getElementById(
+        'finance-ledger-category-trigger'
+    );
+    if (!popover || !trigger) return;
+
+    const isOpening = popover.classList.contains('hidden');
+    popover.classList.toggle('hidden', !isOpening);
+    trigger.setAttribute('aria-expanded', String(isOpening));
+
+    if (isOpening) {
+        document.getElementById('finance-ledger-category-search')?.focus();
+    }
+};
+
+window.app_filterFinanceCategories = function() {
+    const query = String(
+        document.getElementById('finance-ledger-category-search')?.value || ''
+    ).trim().toLowerCase();
+
+    document.querySelectorAll('[data-finance-category-search]').forEach(button => {
+        button.hidden = !String(button.dataset.financeCategorySearch || '')
+            .toLowerCase()
+            .includes(query);
+    });
+};
+
+window.app_setFinanceLedgerCategory = function(category, label) {
+    const input = document.getElementById('finance-ledger-category');
+    const triggerLabel = document.getElementById('finance-ledger-category-label');
+    if (!input || !triggerLabel) return;
+
+    input.value = String(category);
+    triggerLabel.textContent = label || 'All categories';
+    document.getElementById('finance-ledger-category-popover')?.classList.add('hidden');
+    document.getElementById('finance-ledger-category-trigger')?.setAttribute('aria-expanded', 'false');
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+};
+
 window.app = {
     startNewGame,
     handleLoadGame,
@@ -5333,6 +5486,19 @@ window.app = {
         const currentPos = p.pos || Game.estimateBestPosition(p);
         const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'].filter(pos => pos !== currentPos);
         const tokens = gameState?.playerTeam?.socialProfile?.favorTokens || 0;
+        const initialTargetPosition = positions[0] || '';
+
+        window.app_setTargetPositionChoice = position => {
+            const input = document.getElementById('target-pos-select');
+            if (!input) return;
+
+            input.value = position;
+            document.querySelectorAll('[data-target-position]').forEach(button => {
+                const selected = button.dataset.targetPosition === position;
+                button.setAttribute('aria-pressed', String(selected));
+                button.className = `rounded-sm border px-2 py-2 text-left ${selected ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`;
+            });
+        };
 
         const modalHtml = `
             <div class="space-y-3.5 text-left text-xs">
@@ -5346,9 +5512,20 @@ window.app = {
 
                 <div>
                     <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">Proposed New Position</label>
-                    <select id="target-pos-select" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
-                        ${positions.map(pos => `<option value="${pos}">${pos} (${Game.calculateOverall(p, pos)} OVR suitability)</option>`).join('')}
-                    </select>
+                    <input type="hidden" id="target-pos-select" value="${initialTargetPosition}">
+                    <div class="grid grid-cols-2 gap-1 sm:grid-cols-4" role="group" aria-label="Proposed new position">
+                        ${positions.map((pos, index) => `
+                            <button
+                                type="button"
+                                data-target-position="${pos}"
+                                aria-pressed="${pos === initialTargetPosition}"
+                                onclick="window.app_setTargetPositionChoice('${pos}')"
+                                class="rounded-sm border px-2 py-2 text-left ${pos === initialTargetPosition ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                                <span class="block text-xs font-black">${pos}</span>
+                                <span class="block text-[9px] text-slate-500">${Game.calculateOverall(p, pos)} OVR</span>
+                            </button>
+                        `).join('')}
+                    </div>
                 </div>
 
                 <div class="p-2.5 bg-amber-50 border border-amber-200 rounded text-slate-700 italic text-[11px]">
@@ -6176,7 +6353,7 @@ window.app = {
                 .replace(/[_-]+/g, ' ')
                 .replace(/\b[a-z]/g, letter => letter.toUpperCase());
 
-        const ledgerCategoryOptions = [
+        const ledgerCategories = [
             ...new Set(ledger.map(entry =>
                 normalizeLedgerCategory(entry.category)
             ))
@@ -6185,13 +6362,24 @@ window.app = {
                 getLedgerCategoryLabel(a).localeCompare(
                     getLedgerCategoryLabel(b)
                 )
-            )
-            .map(category => `
-                <option value="${category}">
-                    ${escapeHtml(getLedgerCategoryLabel(category))}
-                </option>
-            `)
-            .join('');
+            );
+
+        const ledgerCategoryRows = ledgerCategories.map(category => {
+            const entries = ledger.filter(entry =>
+                normalizeLedgerCategory(entry.category) === category
+            );
+            const net = entries.reduce(
+                (total, entry) => total + (Number(entry.amount) || 0),
+                0
+            );
+
+            return {
+                category,
+                label: getLedgerCategoryLabel(category),
+                count: entries.length,
+                net
+            };
+        });
 
         const recordedIncome = ledger.reduce((sum, entry) => {
             const amount = Number(entry.amount) || 0;
@@ -6496,18 +6684,26 @@ window.app = {
                             >
                         </label>
 
-                        <label class="sm:w-64">
+                        <div class="relative sm:w-72">
                             <span class="block text-xs font-bold text-slate-600 mb-1">
                                 Category
                             </span>
-                            <select
-                                id="finance-ledger-category"
-                                class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500"
-                            >
-                                <option value="all">All categories</option>
-                                ${ledgerCategoryOptions}
-                            </select>
-                        </label>
+                            <input type="hidden" id="finance-ledger-category" value="all">
+                            <button type="button" id="finance-ledger-category-trigger" aria-expanded="false" aria-controls="finance-ledger-category-popover" onclick="window.app_toggleFinanceCategoryPicker()" class="flex w-full items-center justify-between gap-3 rounded-md border border-slate-300 bg-white px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:border-slate-500">
+                                <span id="finance-ledger-category-label">All categories</span>
+                                <span aria-hidden="true" class="text-slate-400">▾</span>
+                            </button>
+                            <div id="finance-ledger-category-popover" class="absolute right-0 top-full z-30 mt-1 hidden w-96 max-w-[90vw] rounded border border-slate-300 bg-white p-2 shadow-xl">
+                                <input id="finance-ledger-category-search" type="search" placeholder="Search categories..." oninput="window.app_filterFinanceCategories()" class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
+                                <div class="overflow-hidden rounded-sm border border-slate-200">
+                                    <div class="grid grid-cols-[minmax(0,1fr)_4.5rem_6rem] gap-2 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500"><span>Category</span><span class="text-right">Entries</span><span class="text-right">Net</span></div>
+                                    <button type="button" data-finance-category-option="all" data-finance-category-search="all categories" onclick="window.app_setFinanceLedgerCategory('all', 'All categories')" class="grid w-full grid-cols-[minmax(0,1fr)_4.5rem_6rem] gap-2 px-2 py-1.5 text-left text-[10px] font-bold text-slate-700 hover:bg-slate-50"><span>All categories</span><span class="text-right">${ledger.length}</span><span class="text-right">$${recordedNet.toFixed(2)}</span></button>
+                                    ${ledgerCategoryRows.map(row => `
+                                        <button type="button" data-finance-category-option="${escapeHtml(row.category)}" data-finance-category-search="${escapeHtml(row.label)}" onclick="window.app_setFinanceLedgerCategory('${escapeHtml(row.category)}', '${escapeHtml(row.label)}')" class="grid w-full grid-cols-[minmax(0,1fr)_4.5rem_6rem] gap-2 border-t border-slate-100 px-2 py-1.5 text-left text-[10px] text-slate-700 hover:bg-slate-50"><span class="truncate">${escapeHtml(row.label)}</span><span class="text-right">${row.count}</span><span class="text-right font-mono ${row.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}">$${row.net.toFixed(2)}</span></button>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="overflow-x-auto">

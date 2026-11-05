@@ -96,6 +96,58 @@ body {
     scrollbar-width: none;
 }
 
+.position-filter-button {
+    flex: 0 0 auto;
+    border-radius: 2px;
+    padding: 0.25rem 0.375rem;
+    color: #475569;
+    font-size: 0.5625rem;
+    font-weight: 900;
+    line-height: 1.1;
+}
+
+.position-filter-button:hover {
+    background: #f1f5f9;
+}
+
+.position-filter-button.is-active {
+    background: #0f172a;
+    color: #fff;
+}
+
+.stats-league-button {
+    flex: 0 0 auto;
+    border-radius: 2px;
+    padding: 0.375rem 0.625rem;
+    color: #475569;
+    font-size: 0.6875rem;
+    font-weight: 700;
+}
+
+.stats-league-button:hover {
+    background: #f1f5f9;
+}
+
+.stats-league-button.is-active {
+    background: #0f172a;
+    color: #fff;
+}
+
+.stats-popover-option {
+    width: 100%;
+    border-radius: 2px;
+    padding: 0.375rem 0.5rem;
+    color: #334155;
+    font-size: 0.75rem;
+    text-align: left;
+}
+
+.stats-popover-option:hover,
+.stats-popover-option:focus-visible {
+    background: #f1f5f9;
+    outline: none;
+}
+
 /* --- 5. DEPTH CHART VISUAL FIELD --- */
 .visual-field-container {
     position: relative;

@@ -438,6 +438,40 @@ export function transitionOffseasonPhase(
 
         gameState.offseasonFACompleted = false;
         gameState._faDay = 1;
+
+        const playerTeamId = gameState.playerTeam?.id == null
+            ? null
+            : String(gameState.playerTeam.id);
+
+        recruitingTeams.forEach(team => {
+            const isPlayerTeam =
+                team.isPlayerControlled === true ||
+                (
+                    playerTeamId !== null &&
+                    String(team.id) === playerTeamId
+                );
+
+            if (isPlayerTeam) {
+                const recruitingAutonomy = String(
+                    team.teamInstructions?.departments?.recruiting?.autonomy ||
+                    'guided'
+                ).toLowerCase();
+
+                ensureTeamStaffWorkPlan(
+                    team,
+                    Number(gameState.year),
+                    0,
+                    recruitingAutonomy === 'direct' ? null : true
+                );
+            } else {
+                ensureAiStaffWorkPlan(
+                    team,
+                    gameState,
+                    Number(gameState.year),
+                    0
+                );
+            }
+        });
     }
 
     if (nextPhase === OFFSEASON_PHASES.ROSTER_FINALIZATION) {
@@ -3293,6 +3327,21 @@ function recordFinanceWeeklySummary(
 export function processEndOfWeek({ financesOnly = false } = {}) {
     if (!game) return;
 
+    const processingYear = Number(game.year);
+    const processingWeek = Number(game.currentWeek);
+    const processingWeekKey =
+        Number.isInteger(processingYear) &&
+        Number.isInteger(processingWeek)
+            ? `${processingYear}:${processingWeek}`
+            : null;
+
+    if (
+        processingWeekKey &&
+        game.lastProcessedEndOfWeekKey === processingWeekKey
+    ) {
+        return false;
+    }
+
     // === PROCESS FINANCES & SNACK FUND (UNIVERSAL AI & PLAYER) ===
     const mainTeams = game.teams.filter(t => t.leagueType === 'main');
     const financeOpeningBalances = new Map();
@@ -3541,7 +3590,11 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
     // Historical simulation can reuse the established finance rules without
     // running live-week bidding, events, practice, scouting, or other systems.
     if (financesOnly) {
-        return;
+        if (processingWeekKey) {
+            game.lastProcessedEndOfWeekKey = processingWeekKey;
+        }
+
+        return true;
     }
 
     // AI teams consider requests published for the current week.
@@ -3926,6 +3979,12 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
     processWeeklyPlayerGrowth();
 
     endOfWeekCleanup();
+
+    if (processingWeekKey) {
+        game.lastProcessedEndOfWeekKey = processingWeekKey;
+    }
+
+    return true;
 }
 
 export function processSeasonStartDues(gameState = game) {

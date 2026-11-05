@@ -2982,41 +2982,25 @@ export function renderOffseasonFAScreen(gameState) {
         : 0;
 
     const staffBudgets =
-        Game.getRecruitingStaffHourBudget?.(team) || [];
-
-    const teamWork =
-        progress.teamDailyWork?.[String(team.id)] || {};
-
-    const recruitingAssignments = Object.values(teamWork).flatMap(
-        assignments => Array.isArray(assignments) ? assignments : []
-    );
+        Game.getRecruitingStaffHourBudget?.(team, gameState) || [];
 
     const staffHours = staffBudgets.reduce(
         (totals, coach) => {
-            const coachId = String(coach.coachId);
-            const weeklyHours = Math.max(
+            const weeklyCapacity = Math.max(
                 0,
-                Number(coach.weeklyHours) || 0
+                Number(
+                    coach.weeklyCapacity ?? coach.weeklyHours
+                ) || 0
+            );
+            const remainingHours = Math.max(
+                0,
+                Number(
+                    coach.remainingHours ?? weeklyCapacity
+                ) || 0
             );
 
-            const usedHours = recruitingAssignments
-                .filter(assignment =>
-                    String(assignment.coachId) === coachId
-                )
-                .reduce(
-                    (total, assignment) =>
-                        total + Math.max(
-                            0,
-                            Number(assignment.hours) || 0
-                        ),
-                    0
-                );
-
-            totals.total += weeklyHours;
-            totals.remaining += Math.max(
-                0,
-                weeklyHours - usedHours
-            );
+            totals.total += weeklyCapacity;
+            totals.remaining += remainingHours;
 
             return totals;
         },
@@ -3122,14 +3106,7 @@ function renderRecruitingActivityPanel(gameState) {
         })[character]
     );
 
-    const teamWork = progress.teamDailyWork?.[teamId] || {};
-    const assignments = Object.values(teamWork).flatMap(
-        dailyAssignments => Array.isArray(dailyAssignments)
-            ? dailyAssignments
-            : []
-    );
-
-    const budget = Game.getRecruitingStaffHourBudget?.(team);
+    const budget = Game.getRecruitingStaffHourBudget?.(team, gameState);
     const coaches = Array.isArray(budget) ? budget : [];
 
     const coachRows = coaches.map(entry => {
@@ -3142,15 +3119,30 @@ function renderRecruitingActivityPanel(gameState) {
 
         const weeklyHours = Math.max(
             0,
-            Number(entry?.weeklyHours ?? entry?.hours ?? entry?.availableHours) || 0
+            Number(
+                entry?.weeklyCapacity ??
+                entry?.weeklyHours ??
+                entry?.hours ??
+                entry?.availableHours
+            ) || 0
         );
 
-        const usedHours = assignments.reduce((total, assignment) => {
-            if (String(assignment?.coachId) !== coachId) return total;
-            return total + Math.max(0, Number(assignment?.hours) || 0);
-        }, 0);
-
-        const remainingHours = Math.max(0, weeklyHours - usedHours);
+        const remainingHours = Math.max(
+            0,
+            Number(entry?.remainingHours ?? weeklyHours) || 0
+        );
+        const assignedHours = Math.max(
+            0,
+            Number(entry?.assignedHours ?? weeklyHours - remainingHours) || 0
+        );
+        const recruitingHours = Math.max(
+            0,
+            Number(entry?.recruitingHours) || 0
+        );
+        const otherHours = Math.max(
+            0,
+            Number(entry?.otherAssignedHours ?? assignedHours - recruitingHours) || 0
+        );
 
         return `
             <div class="flex items-center justify-between gap-3 py-2 border-b border-gray-700/50">
@@ -3163,10 +3155,11 @@ function renderRecruitingActivityPanel(gameState) {
                     </div>
                 </div>
                 <div class="text-sm text-right whitespace-nowrap">
-                    <span class="text-gray-300">${usedHours}</span>
-                    <span class="text-gray-500">/ ${weeklyHours} hrs</span>
+                    <div class="text-[10px] text-gray-400">
+                        Recruiting ${recruitingHours}h · Other work ${otherHours}h
+                    </div>
                     <div class="text-xs ${remainingHours > 0 ? 'text-emerald-400' : 'text-amber-400'}">
-                        ${remainingHours} remaining
+                        ${remainingHours}h available for recruiting / ${weeklyHours}h total
                     </div>
                 </div>
             </div>
@@ -3562,31 +3555,46 @@ export function renderOffseasonFAPool(gameState) {
     // Build the shared quick-assignment coach list using remaining
     // weekly hours, not just each coach's original capacity.
     const quickBudget =
-        Game.getRecruitingStaffHourBudget?.(gameState.playerTeam) || [];
+        Game.getRecruitingStaffHourBudget?.(
+            gameState.playerTeam,
+            gameState
+        ) || [];
 
-    const quickTeamWork =
-        progress.teamDailyWork?.[String(gameState.playerTeam.id)] || {};
-
-    const quickPreviousAssignments = Object.values(quickTeamWork).flatMap(
-        assignments => Array.isArray(assignments) ? assignments : []
-    );
+    const quickCoachRecords = [
+        ...(Array.isArray(gameState.playerTeam.coaches)
+            ? gameState.playerTeam.coaches
+            : []),
+        ...Object.values(gameState.playerTeam.staff || {})
+    ];
 
     const quickAssignCoaches = quickBudget.map(coach => {
-        const usedHours = quickPreviousAssignments
-            .filter(assignment =>
-                String(assignment.coachId) === String(coach.coachId)
-            )
-            .reduce(
-                (total, assignment) =>
-                    total + Math.max(0, Number(assignment.hours) || 0),
-                0
-            );
+        const profile = quickCoachRecords.find(candidate =>
+            String(candidate?.id) === String(coach.coachId)
+        );
+        const recruitingSkills = [
+            'teaching',
+            'evalCharacter',
+            'gameplanInstinct',
+            'conditioning'
+        ].map(key => Number(profile?.ratings?.[key]))
+            .filter(Number.isFinite);
 
         return {
             ...coach,
+            role: profile?.role || 'Volunteer coach',
+            skillEstimate: recruitingSkills.length > 0
+                ? Math.round(
+                    recruitingSkills.reduce((total, value) => total + value, 0) /
+                    recruitingSkills.length
+                )
+                : 50,
             remainingHours: Math.max(
                 0,
-                Number(coach.weeklyHours) - usedHours
+                Number(
+                    coach.remainingHours ??
+                    coach.weeklyCapacity ??
+                    coach.weeklyHours
+                ) || 0
             )
         };
     }).filter(coach => coach.remainingHours > 0);
@@ -4093,47 +4101,70 @@ export function renderOffseasonFAPool(gameState) {
             <div class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
                 <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-12 gap-2 items-end">
 
-                    <div class="xl:col-span-3">
+                    <div class="relative xl:col-span-3">
                         <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
                             Coach
                         </label>
-                        <select
-                            id="fa-quick-coach"
-                            onchange="window.app_updateRecruitingQuickDefaults()"
-                            class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                        <input type="hidden" id="fa-quick-coach" value="${quickEscapeHtml(recruitingQuickAssignDefaults.coachId)}">
+                        <button
+                            type="button"
+                            id="fa-quick-coach-trigger"
+                            aria-expanded="false"
+                            aria-controls="fa-quick-coach-options"
+                            onclick="window.app_toggleRecruitingCoachPicker()"
+                            class="flex w-full items-center justify-between gap-2 rounded-sm border border-slate-300 bg-white px-2 py-2 text-left text-xs hover:border-emerald-600 disabled:opacity-50"
                             ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
+                            <span id="fa-quick-coach-label" class="truncate">
+                                ${quickEscapeHtml(quickSelectedCoach?.coachName || 'No available coach')}
+                                ${quickSelectedCoach ? ` · ${quickSelectedCoach.remainingHours}h` : ''}
+                            </span>
+                            <span aria-hidden="true" class="text-slate-400">▾</span>
+                        </button>
+                        <div
+                            id="fa-quick-coach-options"
+                            class="absolute left-0 top-full z-30 mt-1 hidden max-h-56 w-[min(22rem,90vw)] overflow-y-auto rounded-sm border border-slate-300 bg-white p-1 shadow-xl">
                             ${quickAssignCoaches.map(coach => `
-                                <option
-                                    value="${quickEscapeHtml(coach.coachId)}"
+                                <button
+                                    type="button"
+                                    data-quick-coach-id="${quickEscapeHtml(coach.coachId)}"
                                     data-remaining-hours="${coach.remainingHours}"
-                                    ${String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId) ? 'selected' : ''}>
-                                    ${quickEscapeHtml(coach.coachName)} · ${coach.remainingHours}h left
-                                </option>
-                            `).join('')}
-                        </select>
+                                    aria-pressed="${String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId)}"
+                                    onclick="window.app_selectRecruitingQuickCoach('${quickEscapeHtml(coach.coachId)}')"
+                                    class="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-2 text-left hover:bg-emerald-50 ${String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId) ? 'bg-emerald-50' : ''}">
+                                    <span class="min-w-0">
+                                        <span class="block truncate text-xs font-bold text-slate-800">${quickEscapeHtml(coach.coachName)}</span>
+                                        <span class="block text-[10px] text-slate-500">${quickEscapeHtml(coach.role)} · Recruiting skill ${coach.skillEstimate}</span>
+                                    </span>
+                                    <span class="shrink-0 text-[10px] font-black text-emerald-800">${coach.remainingHours}h left</span>
+                                </button>
+                            `).join('') || '<div class="p-2 text-xs text-slate-500">No recruiting hours remain.</div>'}
+                        </div>
                     </div>
 
-                    <div class="xl:col-span-3">
+                    <div class="xl:col-span-5">
                         <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
                             Recruiting Action
                         </label>
-                        <select
-                            id="fa-quick-action"
-                            onchange="window.app_updateRecruitingQuickDefaults()"
-                            class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
-                            <option value="outreach" ${recruitingQuickAssignDefaults.actionType === 'outreach' ? 'selected' : ''}>
-                                Personal outreach
-                            </option>
-                            <option value="teammateConnection" ${recruitingQuickAssignDefaults.actionType === 'teammateConnection' ? 'selected' : ''}>
-                                Teammate connection
-                            </option>
-                            <option value="roleDiscussion" ${recruitingQuickAssignDefaults.actionType === 'roleDiscussion' ? 'selected' : ''}>
-                                Role discussion
-                            </option>
-                            <option value="practiceInvitation" ${recruitingQuickAssignDefaults.actionType === 'practiceInvitation' ? 'selected' : ''}>
-                                Practice invitation
-                            </option>
-                        </select>
+                        <input type="hidden" id="fa-quick-action" value="${quickEscapeHtml(recruitingQuickAssignDefaults.actionType)}">
+                        <div class="grid grid-cols-2 gap-1" role="group" aria-label="Recruiting action">
+                            ${[
+                                ['outreach', 'Outreach', 'Build familiarity'],
+                                ['teammateConnection', 'Teammate', 'Use known connections'],
+                                ['roleDiscussion', 'Role fit', 'Discuss playing opportunity'],
+                                ['practiceInvitation', 'Practice', 'Show development fit']
+                            ].map(([value, label, detail]) => `
+                                <button
+                                    type="button"
+                                    data-quick-action="${value}"
+                                    aria-pressed="${recruitingQuickAssignDefaults.actionType === value}"
+                                    title="${detail}"
+                                    onclick="window.app_selectRecruitingQuickAction('${value}')"
+                                    class="rounded-sm border px-2 py-1.5 text-left ${recruitingQuickAssignDefaults.actionType === value ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                                    <span class="block text-[10px] font-black">${label}</span>
+                                    <span class="block truncate text-[9px] opacity-70">${detail}</span>
+                                </button>
+                            `).join('')}
+                        </div>
                     </div>
 
                     <div class="xl:col-span-1">
@@ -4152,31 +4183,25 @@ export function renderOffseasonFAPool(gameState) {
                             ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
                     </div>
 
-                    <div class="xl:col-span-2">
+                    <div class="grid grid-cols-3 gap-1 xl:col-span-3">
                         <button
                             type="button"
                             onclick="window.app_selectVisibleRecruitingTargets()"
-                            class="w-full rounded border border-slate-300 bg-white px-2 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-100 whitespace-nowrap">
-                            Select Visible
+                            class="w-full rounded-sm border border-slate-300 bg-white px-2 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-100 whitespace-nowrap">
+                            Select
                         </button>
-                    </div>
-
-                    <div class="xl:col-span-1">
                         <button
                             type="button"
                             onclick="window.app_clearRecruitingTargetSelection()"
-                            class="w-full rounded border border-slate-300 bg-white px-2 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-100">
+                            class="w-full rounded-sm border border-slate-300 bg-white px-2 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-100">
                             Clear
                         </button>
-                    </div>
-
-                    <div class="xl:col-span-2">
                         <button
                             type="button"
                             id="fa-quick-assign-button"
                             onclick="window.app_quickAssignSelectedRecruitingTargets()"
                             ${quickAssignCoaches.length === 0 ? 'disabled' : ''}
-                            class="w-full rounded bg-emerald-700 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap">
+                            class="w-full rounded-sm bg-emerald-700 px-2 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap">
                             Assign (${recruitingQuickSelectedIds.size})
                         </button>
                     </div>
@@ -4670,13 +4695,14 @@ window.app_setRecruitingTab = function(tab) {
 };
 
 window.app_updateRecruitingQuickDefaults = function() {
-    const coachSelect = document.getElementById('fa-quick-coach');
-    const actionSelect = document.getElementById('fa-quick-action');
+    const coachInput = document.getElementById('fa-quick-coach');
+    const actionInput = document.getElementById('fa-quick-action');
     const hoursInput = document.getElementById('fa-quick-hours');
 
-    if (!coachSelect || !actionSelect || !hoursInput) return;
+    if (!coachInput || !actionInput || !hoursInput) return;
 
-    const selectedOption = coachSelect.selectedOptions?.[0];
+    const selectedOption = [...document.querySelectorAll('[data-quick-coach-id]')]
+        .find(button => button.dataset.quickCoachId === coachInput.value);
     const maxHours = Math.max(
         0,
         Math.floor(Number(selectedOption?.dataset.remainingHours) || 0)
@@ -4691,10 +4717,197 @@ window.app_updateRecruitingQuickDefaults = function() {
     );
 
     recruitingQuickAssignDefaults = {
-        coachId: coachSelect.value,
-        actionType: actionSelect.value,
+        coachId: coachInput.value,
+        actionType: actionInput.value,
         hours: Number(hoursInput.value)
     };
+};
+
+window.app_toggleRecruitingCoachPicker = function() {
+    const panel = document.getElementById('fa-quick-coach-options');
+    const trigger = document.getElementById('fa-quick-coach-trigger');
+
+    if (!panel || !trigger) return;
+
+    const isOpening = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !isOpening);
+    trigger.setAttribute('aria-expanded', String(isOpening));
+};
+
+window.app_selectRecruitingQuickCoach = function(coachId) {
+    const input = document.getElementById('fa-quick-coach');
+    const label = document.getElementById('fa-quick-coach-label');
+    const selectedButton = [...document.querySelectorAll('[data-quick-coach-id]')]
+        .find(button => button.dataset.quickCoachId === String(coachId));
+
+    if (!input || !selectedButton) return;
+
+    input.value = String(coachId);
+    document.querySelectorAll('[data-quick-coach-id]').forEach(button => {
+        const selected = button.dataset.quickCoachId === String(coachId);
+        button.setAttribute('aria-pressed', String(selected));
+        button.className = `flex w-full items-center justify-between gap-3 rounded-sm px-2 py-2 text-left hover:bg-emerald-50 ${selected ? 'bg-emerald-50' : ''}`;
+    });
+
+    if (label) {
+        const name = selectedButton.querySelector('.text-xs.font-bold')?.textContent || 'Coach';
+        label.textContent = `${name} · ${selectedButton.dataset.remainingHours}h`;
+    }
+
+    document.getElementById('fa-quick-coach-options')?.classList.add('hidden');
+    document.getElementById('fa-quick-coach-trigger')?.setAttribute('aria-expanded', 'false');
+    window.app_updateRecruitingQuickDefaults();
+};
+
+window.app_selectRecruitingQuickAction = function(actionType) {
+    const input = document.getElementById('fa-quick-action');
+    if (!input) return;
+
+    input.value = actionType;
+    document.querySelectorAll('[data-quick-action]').forEach(button => {
+        const selected = button.dataset.quickAction === actionType;
+        button.setAttribute('aria-pressed', String(selected));
+        button.className = `rounded-sm border px-2 py-1.5 text-left ${selected ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`;
+    });
+
+    window.app_updateRecruitingQuickDefaults();
+};
+
+window.app_setStaffPitchChoice = function(controlId, value) {
+    const input = document.getElementById(controlId);
+    if (!input) return;
+
+    input.value = String(value);
+    document.querySelectorAll(
+        `[data-staff-pitch-control="${controlId}"]`
+    ).forEach(button => {
+        const selected = button.dataset.staffPitchValue === String(value);
+        button.setAttribute('aria-pressed', String(selected));
+        button.className = `rounded-sm border px-2 py-1.5 text-left text-[10px] font-bold ${selected ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`;
+    });
+};
+
+window.app_selectRecruitingSweetenerType = function(value, showGiftAmount = false) {
+    const input = document.getElementById('recruiting-sweetener-type');
+    if (!input) return;
+
+    input.value = String(value);
+    document.querySelectorAll('[data-recruiting-sweetener-option]').forEach(button => {
+        const selected = button.dataset.sweetenerValue === String(value);
+        const isFavor = String(value) === 'favor';
+
+        button.setAttribute('aria-pressed', String(selected));
+        button.className = `rounded-sm border px-2 py-2 text-left disabled:cursor-not-allowed disabled:opacity-40 ${selected ? (isFavor ? 'border-amber-600 bg-amber-50 text-amber-900' : 'border-emerald-700 bg-emerald-50 text-emerald-900') : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`;
+    });
+
+    if (showGiftAmount) {
+        document.getElementById('recruiting-gift-amount-wrap')
+            ?.classList.toggle('hidden', String(value) !== 'gift');
+    }
+};
+
+window.app_toggleStaffReplacementPicker = function() {
+    const popover = document.getElementById(
+        'staff-replacement-coach-popover'
+    );
+    const trigger = document.getElementById(
+        'staff-replacement-coach-trigger'
+    );
+    if (!popover || !trigger) return;
+
+    const isOpening = popover.classList.contains('hidden');
+    popover.classList.toggle('hidden', !isOpening);
+    trigger.setAttribute('aria-expanded', String(isOpening));
+};
+
+window.app_selectStaffReplacementCoach = function(button) {
+    const input = document.getElementById('staff-replacement-coach');
+    const label = document.getElementById('staff-replacement-coach-label');
+    if (!input || !button) return;
+
+    input.value = button.dataset.replacementCoachId || '';
+    if (label) {
+        label.textContent = button.dataset.replacementCoachName || 'Choose a coach to replace';
+    }
+
+    document.querySelectorAll('[data-replacement-coach-id]').forEach(option => {
+        const selected = option === button;
+        option.setAttribute('aria-pressed', String(selected));
+        option.className = `grid w-full grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] gap-2 border-t border-slate-100 px-2 py-2 text-left text-[10px] ${selected ? 'bg-blue-50' : 'hover:bg-slate-50'}`;
+    });
+
+    document.getElementById('staff-replacement-coach-popover')?.classList.add('hidden');
+    document.getElementById('staff-replacement-coach-trigger')?.setAttribute('aria-expanded', 'false');
+};
+
+window.app_selectRecruitingActionChoice = function(controlId, value) {
+    const input = document.getElementById(controlId);
+    if (!input) return;
+
+    input.value = String(value);
+    document.querySelectorAll(
+        `[data-recruiting-choice-control="${controlId}"]`
+    ).forEach(button => {
+        const selected =
+            button.dataset.recruitingChoiceValue === String(value);
+        button.setAttribute('aria-pressed', String(selected));
+        button.className = `rounded-sm border px-2 py-1.5 text-left ${selected ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`;
+    });
+
+    if (controlId === 'recruiting-action-coach') {
+        const option = [...document.querySelectorAll(
+            '[data-recruiting-choice-control="recruiting-action-coach"]'
+        )].find(button =>
+            button.dataset.recruitingChoiceValue === String(value)
+        );
+        const hoursInput = document.getElementById(
+            'recruiting-action-hours'
+        );
+
+        if (option && hoursInput) {
+            const maxHours = Math.max(
+                1,
+                Number(option.dataset.remainingHours) || 1
+            );
+            hoursInput.max = String(maxHours);
+            hoursInput.value = String(Math.min(
+                maxHours,
+                Math.max(1, Number(hoursInput.value) || 1)
+            ));
+        }
+    }
+};
+
+window.app_setRecruitingPositionFilter = function(position) {
+    const input = document.getElementById('fa-minigame-filter-pos');
+    if (!input) return;
+
+    input.value = position;
+    document.querySelectorAll('[data-fa-position]').forEach(button => {
+        const selected = button.dataset.faPosition === position;
+        button.setAttribute('aria-pressed', String(selected));
+        button.className = `shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${selected ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`;
+    });
+
+    const currentState = getGameState();
+    if (currentState) renderOffseasonFAPool(currentState);
+};
+
+window.app_setPositionFilter = function(inputId, position) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    input.value = position;
+
+    document.querySelectorAll(
+        `[data-position-filter="${inputId}"]`
+    ).forEach(button => {
+        const selected = button.dataset.position === position;
+        button.setAttribute('aria-pressed', String(selected));
+        button.className = `position-filter-button ${selected ? 'is-active' : ''}`;
+    });
+
+    input.dispatchEvent(new Event('change', { bubbles: true }));
 };
 
 window.app_toggleRecruitingQuickSelection = function(playerId, checked) {
@@ -4981,34 +5194,18 @@ window.app_openRecruitingActionModal = function(playerId) {
         return;
     }
 
-    const budget = Game.getRecruitingStaffHourBudget?.(team) || [];
-
-    const teamWork =
-        progress.teamDailyWork?.[String(team.id)] || {};
-
-    const previousAssignments = Object.values(teamWork).flatMap(
-        assignments => Array.isArray(assignments) ? assignments : []
-    );
+    const budget = Game.getRecruitingStaffHourBudget?.(team, gs) || [];
 
     const coaches = budget.map(coach => {
-        const usedHours = previousAssignments
-            .filter(assignment =>
-                String(assignment.coachId) === String(coach.coachId)
-            )
-            .reduce(
-                (total, assignment) =>
-                    total + Math.max(
-                        0,
-                        Number(assignment.hours) || 0
-                    ),
-                0
-            );
-
         return {
             ...coach,
             remainingHours: Math.max(
                 0,
-                coach.weeklyHours - usedHours
+                Number(
+                    coach.remainingHours ??
+                    coach.weeklyCapacity ??
+                    coach.weeklyHours
+                ) || 0
             )
         };
     }).filter(coach => coach.remainingHours > 0);
@@ -5045,26 +5242,44 @@ window.app_openRecruitingActionModal = function(playerId) {
         })[character]
     );
 
-    const coachOptions = coaches.map(coach => `
-        <option value="${escapeHtml(coach.coachId)}">
-            ${escapeHtml(coach.coachName)}
-            · ${coach.remainingHours} hrs left
-        </option>
-    `).join('');
+    const coachProfiles = [
+        ...(Array.isArray(team.coaches) ? team.coaches : []),
+        ...Object.values(team.staff || {})
+    ];
+    const coachChoices = coaches.map(coach => {
+        const profile = coachProfiles.find(candidate =>
+            String(candidate?.id) === String(coach.coachId)
+        );
+        const recruitingSkills = [
+            'teaching',
+            'evalCharacter',
+            'gameplanInstinct',
+            'conditioning'
+        ].map(key => Number(profile?.ratings?.[key]))
+            .filter(Number.isFinite);
 
-    const actionOptions = [
-        ['outreach', 'Personal outreach'],
-        ['teammateConnection', 'Teammate connection'],
-        ['roleDiscussion', 'Role discussion'],
-        ['practiceInvitation', 'Pickup practice invitation']
-    ].map(([value, label]) => `
-        <option value="${value}">${label}</option>
-    `).join('');
-
+        return {
+            ...coach,
+            role: profile?.role || 'Volunteer coach',
+            skillEstimate: recruitingSkills.length > 0
+                ? Math.round(
+                    recruitingSkills.reduce((total, value) => total + value, 0) /
+                    recruitingSkills.length
+                )
+                : 50
+        };
+    });
+    const initialCoach = coachChoices[0];
     const initialHours = Math.min(
         4,
-        Math.max(...coaches.map(coach => coach.remainingHours))
+        initialCoach.remainingHours
     );
+    const actionOptions = [
+        ['outreach', 'Outreach', 'Build familiarity'],
+        ['teammateConnection', 'Teammate', 'Use known connections'],
+        ['roleDiscussion', 'Role fit', 'Discuss playing opportunity'],
+        ['practiceInvitation', 'Practice', 'Show development fit']
+    ];
 
     const modalHtml = `
         <div class="space-y-4 text-left text-xs">
@@ -5107,28 +5322,50 @@ window.app_openRecruitingActionModal = function(playerId) {
             </div>
 
             <div>
-                <label for="recruiting-action-coach"
-                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                <div class="mb-1 font-black uppercase tracking-wide text-slate-600">
                     Assign Coach
-                </label>
-                <select id="recruiting-action-coach"
-                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
-                    ${coachOptions}
-                </select>
+                </div>
+                <input type="hidden" id="recruiting-action-coach" value="${escapeHtml(initialCoach.coachId)}">
+                <div class="grid grid-cols-1 gap-1 sm:grid-cols-3" role="group" aria-label="Assign recruiting coach">
+                    ${coachChoices.map((coach, index) => `
+                        <button
+                            type="button"
+                            data-recruiting-choice-control="recruiting-action-coach"
+                            data-recruiting-choice-value="${escapeHtml(coach.coachId)}"
+                            data-remaining-hours="${coach.remainingHours}"
+                            aria-pressed="${index === 0}"
+                            onclick="window.app_selectRecruitingActionChoice('recruiting-action-coach', '${escapeHtml(coach.coachId)}')"
+                            class="rounded-sm border px-2 py-1.5 text-left ${index === 0 ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                            <span class="block truncate text-[10px] font-black">${escapeHtml(coach.coachName)}</span>
+                            <span class="block truncate text-[9px] opacity-70">${escapeHtml(coach.role)} · Skill ${coach.skillEstimate}</span>
+                            <span class="mt-0.5 block text-[9px] font-bold">${coach.remainingHours}h available</span>
+                        </button>
+                    `).join('')}
+                </div>
             </div>
 
             <div>
-                <label for="recruiting-action-type"
-                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                <div class="mb-1 font-black uppercase tracking-wide text-slate-600">
                     Recruiting Action
-                </label>
-                <select id="recruiting-action-type"
-                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
-                    ${actionOptions}
-                </select>
+                </div>
+                <input type="hidden" id="recruiting-action-type" value="outreach">
+                <div class="grid grid-cols-2 gap-1" role="group" aria-label="Recruiting action">
+                    ${actionOptions.map(([value, label, detail], index) => `
+                        <button
+                            type="button"
+                            data-recruiting-choice-control="recruiting-action-type"
+                            data-recruiting-choice-value="${value}"
+                            aria-pressed="${index === 0}"
+                            title="${detail}"
+                            onclick="window.app_selectRecruitingActionChoice('recruiting-action-type', '${value}')"
+                            class="rounded-sm border px-2 py-1.5 text-left ${index === 0 ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                            <span class="block text-[10px] font-black">${label}</span>
+                            <span class="block truncate text-[9px] opacity-70">${detail}</span>
+                        </button>
+                    `).join('')}
+                </div>
                 <p class="mt-1 text-[10px] text-slate-500">
-                    The coach's relevant skills affect how much interest the action generates.
-                    Repeating an action becomes less effective.
+                    Matching staff skills and varying approaches improves the pitch.
                 </p>
             </div>
 
@@ -5137,17 +5374,14 @@ window.app_openRecruitingActionModal = function(playerId) {
                     class="mb-1 block font-black uppercase tracking-wide text-slate-600">
                     Staff Hours
                 </label>
-                <select id="recruiting-action-hours"
-                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
-                    ${Array.from(
-                        { length: initialHours },
-                        (_, index) => index + 1
-                    ).map(hours => `
-                        <option value="${hours}" ${hours === Math.min(2, initialHours) ? 'selected' : ''}>
-                            ${hours} hour${hours === 1 ? '' : 's'}
-                        </option>
-                    `).join('')}
-                </select>
+                <input
+                    type="number"
+                    id="recruiting-action-hours"
+                    min="1"
+                    max="${initialCoach.remainingHours}"
+                    step="1"
+                    value="${Math.min(2, initialHours)}"
+                    class="w-24 rounded-sm border border-slate-300 bg-white p-2 text-xs">
             </div>
 
             <p class="text-[10px] text-slate-500">
@@ -5417,15 +5651,7 @@ window.app_openRecruitingSweetenerModal = function(playerId) {
         return;
     }
 
-    const optionHtml = availableOptions.map(option => `
-        <option value="${option.value}">
-            ${escapeHtml(option.label)}
-            ${option.value === 'favor'
-                ? '· 1 Favor Token'
-                : `· $${option.cost.toFixed(2)}`
-            }
-        </option>
-    `).join('');
+    const initialSweetenerType = availableOptions[0]?.value || '';
 
     const modalHtml = `
         <div class="space-y-4 text-left text-xs">
@@ -5476,11 +5702,21 @@ window.app_openRecruitingSweetenerModal = function(playerId) {
                     Recruiting Support
                 </label>
 
-                <select
-                    id="recruiting-sweetener-type"
-                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs">
-                    ${optionHtml}
-                </select>
+                <input type="hidden" id="recruiting-sweetener-type" value="${escapeHtml(initialSweetenerType)}">
+                <div class="grid grid-cols-1 gap-1 sm:grid-cols-2" role="group" aria-label="Recruiting support">
+                    ${availableOptions.map((option, index) => `
+                        <button
+                            type="button"
+                            data-recruiting-sweetener-option
+                            data-sweetener-value="${escapeHtml(option.value)}"
+                            aria-pressed="${index === 0}"
+                            onclick="window.app_selectRecruitingSweetenerType('${escapeHtml(option.value)}')"
+                            class="rounded-sm border px-2 py-2 text-left ${index === 0 ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                            <span class="block text-[10px] font-black">${escapeHtml(option.label)}</span>
+                            <span class="mt-0.5 block text-[9px] text-slate-500">${option.value === 'favor' ? '1 Favor Token' : `$${option.cost.toFixed(2)}`}</span>
+                        </button>
+                    `).join('')}
+                </div>
             </div>
 
             <div class="text-[10px] text-slate-500">
@@ -5716,26 +5952,11 @@ window.app_openRecruitingSweetenerModal = function(playerId) {
                     Recruiting Support
                 </label>
 
-                <select
-                    id="recruiting-sweetener-type"
-                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
-                    onchange="
-                        document.getElementById('recruiting-gift-amount-wrap')
-                            ?.classList.toggle('hidden', this.value !== 'gift')
-                    ">
-                    <option
-                        value="gift"
-                        ${initialType === 'gift' ? 'selected' : ''}
-                        ${!canSendGift ? 'disabled' : ''}>
-                        Cash Gift
-                    </option>
-                    <option
-                        value="favor"
-                        ${initialType === 'favor' ? 'selected' : ''}
-                        ${!canUseFavor ? 'disabled' : ''}>
-                        Use a Favor Token
-                    </option>
-                </select>
+                <input type="hidden" id="recruiting-sweetener-type" value="${initialType}">
+                <div class="grid grid-cols-2 gap-1" role="group" aria-label="Recruiting support">
+                    <button type="button" data-recruiting-sweetener-option data-sweetener-value="gift" aria-pressed="${initialType === 'gift'}" ${!canSendGift ? 'disabled' : ''} onclick="window.app_selectRecruitingSweetenerType('gift', true)" class="rounded-sm border px-2 py-2 text-left disabled:cursor-not-allowed disabled:opacity-40 ${initialType === 'gift' ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"><span class="block text-[10px] font-black">Cash gift</span><span class="mt-0.5 block text-[9px] text-slate-500">Spend from team funds</span></button>
+                    <button type="button" data-recruiting-sweetener-option data-sweetener-value="favor" aria-pressed="${initialType === 'favor'}" ${!canUseFavor ? 'disabled' : ''} onclick="window.app_selectRecruitingSweetenerType('favor', true)" class="rounded-sm border px-2 py-2 text-left disabled:cursor-not-allowed disabled:opacity-40 ${initialType === 'favor' ? 'border-amber-600 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"><span class="block text-[10px] font-black">Favor Token</span><span class="mt-0.5 block text-[9px] text-slate-500">${favorTokens} available</span></button>
+                </div>
             </div>
 
             <div
@@ -6203,22 +6424,36 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         Replace Which Coach?
                     </label>
 
-                    <select
-                        id="staff-replacement-coach"
-                        class="w-full p-2 border border-blue-300 rounded bg-white text-xs font-bold text-slate-800">
-                        ${currentStaffCoaches.map((coach, index) => {
+                    <input type="hidden" id="staff-replacement-coach" value="${currentStaffCoaches[0]?.id || ''}">
+                    <button
+                        type="button"
+                        id="staff-replacement-coach-trigger"
+                        aria-expanded="false"
+                        aria-controls="staff-replacement-coach-popover"
+                        onclick="window.app_toggleStaffReplacementPicker()"
+                        class="flex w-full items-center justify-between gap-3 rounded border border-blue-300 bg-white px-2 py-2 text-left text-xs font-bold text-slate-800 hover:border-blue-500">
+                        <span id="staff-replacement-coach-label" class="truncate">${overviewEscape(currentStaffCoaches[0]?.name || 'Choose a coach to replace')}</span>
+                        <span aria-hidden="true" class="text-slate-400">▾</span>
+                    </button>
+                    <div id="staff-replacement-coach-popover" class="absolute left-3 right-3 z-30 mt-1 hidden max-h-56 overflow-y-auto rounded border border-blue-300 bg-white p-2 shadow-xl">
+                        <div class="overflow-hidden rounded-sm border border-slate-200">
+                            <div class="grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] gap-2 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                <span>Coach</span><span class="text-right">Skill avg</span><span class="text-right">General fit</span>
+                            </div>
+                            ${currentStaffCoaches.map((coach, index) => {
                             const skillAverage = getCoachSkillAverage(coach);
                             const generalFit = getCoachRoleFit(coach, 'general');
 
                             return `
-                                <option value="${coach.id}">
-                                    ${coach.name || `Staff Coach ${index + 1}`}
-                                    — Avg ${skillAverage ?? '—'}
-                                    · Fit ${generalFit ?? '—'}
-                                </option>
+                                <button type="button" data-replacement-coach-id="${overviewEscape(coach.id)}" data-replacement-coach-name="${overviewEscape(coach.name || `Staff Coach ${index + 1}`)}" aria-pressed="${index === 0}" onclick="window.app_selectStaffReplacementCoach(this)" class="grid w-full grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] gap-2 border-t border-slate-100 px-2 py-2 text-left text-[10px] ${index === 0 ? 'bg-blue-50' : 'hover:bg-slate-50'}">
+                                    <span class="truncate font-semibold">${overviewEscape(coach.name || `Staff Coach ${index + 1}`)}</span>
+                                    <span class="text-right">${skillAverage ?? '—'}</span>
+                                    <span class="text-right">${generalFit ?? '—'}</span>
+                                </button>
                             `;
                         }).join('')}
-                    </select>
+                        </div>
+                    </div>
 
                     <p class="text-[10px] text-blue-800 mt-2">
                         The selected coach will return to the free-agent market
@@ -6244,21 +6479,27 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
                             Scheme Autonomy & Play-Calling Rights
                         </label>
-                        <select id="staff-scheme-promise" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
-                            <option value="COACH_CHOICE" selected>Full Autonomy: Coach sets offensive/defensive gameplan (+Interest)</option>
-                            <option value="GM_CHOICE">GM Override: Front office dictates formations</option>
-                        </select>
+                        <input type="hidden" id="staff-scheme-promise" value="COACH_CHOICE">
+                        <div class="grid grid-cols-1 gap-1 sm:grid-cols-2" role="group" aria-label="Scheme autonomy">
+                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="COACH_CHOICE" aria-pressed="true" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'COACH_CHOICE')" class="rounded-sm border border-emerald-700 bg-emerald-50 px-2 py-2 text-left text-[10px] font-bold text-emerald-900">Coach autonomy<span class="mt-0.5 block text-[9px] font-normal text-slate-600">Coach sets the gameplan · improves pitch</span></button>
+                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="GM_CHOICE" aria-pressed="false" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'GM_CHOICE')" class="rounded-sm border border-slate-200 bg-white px-2 py-2 text-left text-[10px] font-bold text-slate-700">GM control<span class="mt-0.5 block text-[9px] font-normal text-slate-500">Front office sets both formations</span></button>
+                        </div>
                     </div>` : ''}
 
                     <div>
                         <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
                             Program Practice Focus & Sideline Culture
                         </label>
-                        <select id="staff-practice-focus" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
-                            <option value="CONDITIONING">Grit & Conditioning (Tree runs, tire drills; favors tough coaches)</option>
-                            <option value="CHALK_TALK">Chalk Talks & Film (Napkin route design, high playbook IQ study)</option>
-                            <option value="FUN_SCRIMMAGE">Sandlot Chemistry (Scrimmages, freeze-pop breaks; favors player coaches)</option>
-                        </select>
+                        <input type="hidden" id="staff-practice-focus" value="CONDITIONING">
+                        <div class="grid grid-cols-1 gap-1 sm:grid-cols-3" role="group" aria-label="Practice focus">
+                            ${[
+                                ['CONDITIONING', 'Conditioning', 'Favors stamina and grit'],
+                                ['CHALK_TALK', 'Film & playbook', 'Favors tactical learning'],
+                                ['FUN_SCRIMMAGE', 'Team chemistry', 'Favors morale and relationships']
+                            ].map(([value, label, detail], index) => `
+                                <button type="button" data-staff-pitch-control="staff-practice-focus" data-staff-pitch-value="${value}" aria-pressed="${index === 0}" onclick="window.app_setStaffPitchChoice('staff-practice-focus', '${value}')" class="rounded-sm border px-2 py-2 text-left text-[10px] font-bold ${index === 0 ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">${label}<span class="mt-0.5 block text-[9px] font-normal text-slate-500">${detail}</span></button>
+                            `).join('')}
+                        </div>
                     </div>
 
                     <div>
@@ -6287,11 +6528,16 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
                             Favor Token Sweetener (Available: ${tokensAvailable})
                         </label>
-                        <select id="staff-pitch-tokens" class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 bg-white text-xs outline-none">
-                            <option value="0">0 Tokens (Handshake & standard program pitch)</option>
-                            ${tokensAvailable >= 1 ? '<option value="1">1 Token (Lend your bike, extra equipment)</option>' : ''}
-                            ${tokensAvailable >= 2 ? '<option value="2">2 Tokens (Major favors, mowing park field, big concessions)</option>' : ''}
-                        </select>
+                        <input type="hidden" id="staff-pitch-tokens" value="0">
+                        <div class="grid grid-cols-1 gap-1 sm:grid-cols-3" role="group" aria-label="Favor token sweetener">
+                            ${[
+                                ['0', 'No tokens', 'Standard pitch'],
+                                ...(tokensAvailable >= 1 ? [['1', '1 token', 'Small favor']] : []),
+                                ...(tokensAvailable >= 2 ? [['2', '2 tokens', 'Major favor']] : [])
+                            ].map(([value, label, detail], index) => `
+                                <button type="button" data-staff-pitch-control="staff-pitch-tokens" data-staff-pitch-value="${value}" aria-pressed="${index === 0}" onclick="window.app_setStaffPitchChoice('staff-pitch-tokens', '${value}')" class="rounded-sm border px-2 py-1.5 text-left text-[10px] font-bold ${index === 0 ? 'border-amber-600 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">${label}<span class="mt-0.5 block text-[9px] font-normal text-slate-500">${detail}</span></button>
+                            `).join('')}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -7127,22 +7373,22 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         const currentValue = getStrategyAutonomy(department);
 
         return `
-            <label class="block">
+            <div>
                 <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                     Staff autonomy
                 </span>
-                <select
-                    class="w-full rounded border border-slate-300 bg-white p-2 text-xs font-semibold text-slate-800"
-                    onchange="app_setTeamStrategySetting('${department}', 'autonomy', '', this.value)">
+                <div class="flex rounded border border-slate-300 bg-white p-0.5" role="group" aria-label="Staff autonomy">
                     ${strategyAutonomyOptions.map(([value, label]) => `
-                        <option
-                            value="${value}"
-                            ${currentValue === value ? 'selected' : ''}>
+                        <button
+                            type="button"
+                            aria-pressed="${currentValue === value}"
+                            onclick="app_setTeamStrategySetting('${department}', 'autonomy', '', '${value}')"
+                            class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold ${currentValue === value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">
                             ${label}
-                        </option>
+                        </button>
                     `).join('')}
-                </select>
-            </label>
+                </div>
+            </div>
         `;
     };
 
@@ -7155,23 +7401,37 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         position
                     );
 
+                    const menuId = `strategy-priority-menu-${department}-${position}`;
+                    const currentLabel = strategyPriorityOptions.find(
+                        ([value]) => value === currentValue
+                    )?.[1] || 'Normal';
+
                     return `
-                        <label class="block min-w-0">
+                        <div class="relative min-w-0">
                             <span class="mb-1 block text-[9px] font-black uppercase text-slate-500">
                                 ${position}
                             </span>
-                            <select
-                                class="w-full rounded border border-slate-300 bg-white p-2 text-[10px] font-semibold text-slate-800"
-                                onchange="app_setTeamStrategySetting('${department}', 'positionPriority', '${position}', this.value)">
+                            <button
+                                type="button"
+                                id="${menuId}-trigger"
+                                aria-expanded="false"
+                                aria-controls="${menuId}"
+                                onclick="window.app_toggleStrategyPriorityMenu('${menuId}')"
+                                class="flex w-full items-center justify-between gap-1 rounded-sm border border-slate-300 bg-white px-2 py-1.5 text-left text-[10px] font-semibold text-slate-700 hover:border-slate-500">
+                                <span class="truncate">${currentLabel}</span>
+                                <span aria-hidden="true" class="text-slate-400">▾</span>
+                            </button>
+                            <div id="${menuId}" data-strategy-priority-popover class="absolute left-0 top-full z-30 mt-1 hidden min-w-40 rounded-sm border border-slate-300 bg-white p-1 shadow-xl">
                                 ${strategyPriorityOptions.map(([value, label]) => `
-                                    <option
-                                        value="${value}"
-                                        ${currentValue === value ? 'selected' : ''}>
+                                    <button
+                                        type="button"
+                                        onclick="app_setTeamStrategySetting('${department}', 'positionPriority', '${position}', '${value}')"
+                                        class="block w-full rounded-sm px-2 py-1.5 text-left text-[10px] font-semibold ${currentValue === value ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}">
                                         ${label}
-                                    </option>
+                                    </button>
                                 `).join('')}
-                            </select>
-                        </label>
+                            </div>
+                        </div>
                     `;
                 }).join('')}
             </div>
@@ -7336,19 +7596,84 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         );
 
         return `
-            <select
-                id="${id}"
-                class="w-full rounded border border-slate-300 bg-white p-2 text-[10px] font-semibold text-slate-800"
-                ${targetId ? '' : 'disabled'}
-                onchange="app_setTeamStrategyIndividualPriority('${department}', this.value)">
+            <input type="hidden" id="${id}" value="${currentValue}">
+            <div class="grid grid-cols-3 gap-1" role="group" aria-label="Individual strategy priority">
                 ${strategyIndividualPriorityOptions.map(([value, label]) => `
-                    <option
-                        value="${value}"
-                        ${currentValue === value ? 'selected' : ''}>
-                        ${label}
-                    </option>
+                    <button
+                        type="button"
+                        data-strategy-priority-control="${id}"
+                        data-strategy-priority-value="${value}"
+                        aria-pressed="${currentValue === value}"
+                        ${targetId ? '' : 'disabled'}
+                        title="${label}"
+                        onclick="window.app_setStrategyIndividualPriorityChoice('${id}', '${department}', '${value}')"
+                        class="rounded-sm border px-1.5 py-1 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${currentValue === value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}">
+                        ${value === 'inherit' ? 'Inherit' : label.replace(' priority', '')}
+                    </button>
                 `).join('')}
-            </select>
+            </div>
+        `;
+    };
+
+    const renderStrategyTargetPicker = (
+        id,
+        players,
+        selectedId,
+        targetType,
+        label
+    ) => {
+        const selectedPlayer = players.find(player =>
+            String(player.id) === String(selectedId)
+        );
+
+        return `
+            <input type="hidden" id="${id}" value="${strategyEscape(selectedId)}">
+            <div class="relative">
+                <button
+                    type="button"
+                    id="${id}-trigger"
+                    aria-expanded="false"
+                    aria-controls="${id}-popover"
+                    onclick="window.app_toggleStrategyListPicker('${id}')"
+                    class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-2 text-left text-xs font-semibold text-slate-800 hover:border-slate-500">
+                    <span id="${id}-label" class="truncate">
+                        ${selectedPlayer ? strategyEscape(getStrategyProspectLabel(selectedPlayer)) : label}
+                    </span>
+                    <span aria-hidden="true" class="text-slate-400">▾</span>
+                </button>
+                <div
+                    id="${id}-popover"
+                    class="strategy-list-popover absolute left-0 top-full z-30 mt-1 hidden max-h-80 w-full min-w-64 overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
+                    <input
+                        type="search"
+                        data-strategy-list-search="${id}"
+                        placeholder="Search ${label.toLowerCase()}..."
+                        oninput="window.app_filterStrategyList('${id}')"
+                        class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
+                    <div class="overflow-hidden rounded-sm border border-slate-200" role="listbox" aria-label="${label}">
+                        <div class="grid grid-cols-[minmax(0,1fr)_3.25rem_3.5rem] gap-2 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                            <span>Player</span>
+                            <span>Pos</span>
+                            <span>Age</span>
+                        </div>
+                        ${players.map(player => `
+                            <button
+                                type="button"
+                                data-strategy-list-option="${id}"
+                                data-strategy-list-value="${strategyEscape(player.id)}"
+                                data-strategy-list-label="${strategyEscape(getStrategyProspectLabel(player))}"
+                                data-strategy-list-search-text="${strategyEscape(getStrategyProspectLabel(player))}"
+                                aria-pressed="${String(player.id) === String(selectedId)}"
+                                onclick="window.app_selectStrategyListTarget(this, '${targetType}')"
+                                class="grid w-full grid-cols-[minmax(0,1fr)_3.25rem_3.5rem] gap-2 border-t border-slate-100 px-2 py-1.5 text-left text-xs ${String(player.id) === String(selectedId) ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}">
+                                <span class="truncate font-semibold">${strategyEscape(player.name || 'Unnamed player')}</span>
+                                <span class="text-[10px]">${strategyEscape(String(player.pos || 'ATH').toUpperCase())}</span>
+                                <span class="text-[10px]">${Number.isFinite(Number(player.age)) ? `Age ${Number(player.age)}` : '—'}</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
         `;
     };
 
@@ -7504,17 +7829,33 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
         const hasOptions = optionGroups.length > 0;
 
+        const selectedTargetOption = optionGroups
+            .flatMap(group => group.options)
+            .find(option =>
+                String(option.value) === String(savedTarget || '').toLowerCase()
+            );
+
         const targetOptionsHtml = optionGroups.map(group => `
-            <optgroup label="${group.label}">
-                ${group.options.map(option => `
-                    <option
-                        value="${strategyEscape(option.value)}"
-                        ${String(option.value) === String(savedTarget || '')
-                            .toLowerCase() ? 'selected' : ''}>
-                        ${strategyEscape(option.label)}
-                    </option>
-                `).join('')}
-            </optgroup>
+            <section class="mb-2 last:mb-0">
+                <h5 class="px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-400">
+                    ${strategyEscape(group.label)}
+                </h5>
+                <div class="grid grid-cols-1 gap-0.5 sm:grid-cols-2">
+                    ${group.options.map(option => `
+                        <button
+                            type="button"
+                            data-strategy-target-option="${targetId}"
+                            data-strategy-target-value="${strategyEscape(option.value)}"
+                            data-strategy-target-label="${strategyEscape(option.label)}"
+                            data-strategy-target-search="${strategyEscape(`${group.label} ${option.label}`)}"
+                            aria-pressed="${String(option.value) === String(savedTarget || '').toLowerCase()}"
+                            onclick="window.app_selectStrategyTargetFromButton(this)"
+                            class="rounded-sm px-2 py-1.5 text-left text-[10px] ${String(option.value) === String(savedTarget || '').toLowerCase() ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}">
+                            ${strategyEscape(option.label)}
+                        </button>
+                    `).join('')}
+                </div>
+            </section>
         `).join('');
 
         const selectedPriority = savedTarget != null
@@ -7525,37 +7866,59 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
         return `
             <div class="space-y-2">
-                <label class="block">
+                <div class="relative">
                     <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                         Concept or play
                     </span>
-                    <select
-                        id="${targetId}"
-                        class="w-full rounded border border-slate-300 bg-white p-2 text-[10px] font-semibold text-slate-800"
-                        ${hasOptions ? '' : 'disabled'}
-                        onchange="app_syncTeamStrategyEmphasis('${department}', '${side}')">
-                        <option value="">Choose a concept or play...</option>
-                        ${targetOptionsHtml}
-                    </select>
-                </label>
+                    <input type="hidden" id="${targetId}" value="${strategyEscape(savedTarget || '')}">
+                    <button
+                        type="button"
+                        id="${targetId}-trigger"
+                        aria-expanded="false"
+                        aria-controls="${targetId}-popover"
+                        onclick="window.app_toggleStrategyTargetPopover('${targetId}')"
+                        class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-[10px] font-semibold text-slate-700 hover:border-slate-500 disabled:opacity-50"
+                        ${hasOptions ? '' : 'disabled'}>
+                        <span id="${targetId}-label" class="truncate">
+                            ${strategyEscape(selectedTargetOption?.label || 'Choose a concept or play...')}
+                        </span>
+                        <span aria-hidden="true" class="text-slate-400">▾</span>
+                    </button>
+                    <div
+                        id="${targetId}-popover"
+                        class="strategy-target-popover absolute left-0 top-full z-30 mt-1 hidden max-h-80 w-full min-w-64 overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
+                        <input
+                            type="search"
+                            data-strategy-target-search-input="${targetId}"
+                            placeholder="Search concepts and plays..."
+                            oninput="window.app_filterStrategyTargets('${targetId}')"
+                            class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
+                        <div data-strategy-target-options="${targetId}" role="listbox" aria-label="Choose a concept or play">
+                            ${targetOptionsHtml || '<p class="p-2 text-xs text-slate-500">No concepts or plays available.</p>'}
+                        </div>
+                    </div>
+                </div>
 
                 <label class="block">
                     <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                         Priority
                     </span>
-                    <select
-                        id="${priorityId}"
-                        class="w-full rounded border border-slate-300 bg-white p-2 text-[10px] font-semibold text-slate-800"
-                        ${savedTarget != null ? '' : 'disabled'}
-                        onchange="app_setTeamStrategyEmphasis('${department}', '${side}', this.value)">
+                    <input type="hidden" id="${priorityId}" value="${selectedPriority}">
+                    <div class="grid grid-cols-3 gap-1" role="group" aria-label="Concept priority">
                         ${strategyEmphasisPriorityOptions.map(([value, label]) => `
-                            <option
-                                value="${value}"
-                                ${selectedPriority === value ? 'selected' : ''}>
-                                ${label}
-                            </option>
+                            <button
+                                type="button"
+                                data-strategy-emphasis-control="${priorityId}"
+                                data-strategy-emphasis-value="${value}"
+                                aria-pressed="${selectedPriority === value}"
+                                ${savedTarget != null ? '' : 'disabled'}
+                                title="${label}"
+                                onclick="window.app_setStrategyEmphasisPriority('${department}', '${side}', '${value}')"
+                                class="rounded-sm border px-1.5 py-1 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${selectedPriority === value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}">
+                                ${value === 'inherit' ? 'Inherit' : label.replace(' priority', '')}
+                            </button>
                         `).join('')}
-                    </select>
+                    </div>
                 </label>
 
                 <p
@@ -7565,6 +7928,103 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </p>
             </div>
         `;
+    };
+
+    window.app_toggleStrategyListPicker = targetId => {
+        const popover = document.getElementById(`${targetId}-popover`);
+        const trigger = document.getElementById(`${targetId}-trigger`);
+        if (!popover || !trigger) return;
+
+        const isOpening = popover.classList.contains('hidden');
+        document.querySelectorAll('.strategy-list-popover').forEach(panel =>
+            panel.classList.add('hidden')
+        );
+        document.querySelectorAll('[aria-controls$="-popover"]').forEach(button =>
+            button.setAttribute('aria-expanded', 'false')
+        );
+
+        if (isOpening) {
+            popover.classList.remove('hidden');
+            trigger.setAttribute('aria-expanded', 'true');
+            popover.querySelector('input[type="search"]')?.focus();
+        }
+    };
+
+    window.app_filterStrategyList = targetId => {
+        const query = String(
+            document.querySelector(
+                `[data-strategy-list-search="${targetId}"]`
+            )?.value || ''
+        ).trim().toLowerCase();
+
+        document.querySelectorAll(
+            `[data-strategy-list-option="${targetId}"]`
+        ).forEach(button => {
+            button.hidden = !String(
+                button.dataset.strategyListSearchText || ''
+            ).toLowerCase().includes(query);
+        });
+    };
+
+    window.app_selectStrategyListTarget = (button, targetType) => {
+        const targetId = button?.dataset.strategyListOption;
+        const input = targetId
+            ? document.getElementById(targetId)
+            : null;
+        const label = targetId
+            ? document.getElementById(`${targetId}-label`)
+            : null;
+        const value = button?.dataset.strategyListValue;
+
+        if (!input || !label || value == null) return;
+
+        input.value = value;
+        label.textContent = button.dataset.strategyListLabel || value;
+
+        document.querySelectorAll(
+            `[data-strategy-list-option="${targetId}"]`
+        ).forEach(option => {
+            const selected = option.dataset.strategyListValue === value;
+            option.setAttribute('aria-pressed', String(selected));
+            option.className = `block w-full rounded-sm px-2 py-1.5 text-left text-xs ${selected ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}`;
+        });
+
+        document.getElementById(`${targetId}-popover`)?.classList.add('hidden');
+        document.getElementById(`${targetId}-trigger`)?.setAttribute('aria-expanded', 'false');
+        window.app_syncTeamStrategyIndividualPriority(targetType);
+    };
+
+    window.app_updateStrategyPriorityButtons = (
+        controlId,
+        value,
+        disabled = false
+    ) => {
+        document.querySelectorAll(
+            `[data-strategy-priority-control="${controlId}"]`
+        ).forEach(button => {
+            const selected =
+                button.dataset.strategyPriorityValue === value;
+
+            button.disabled = disabled;
+            button.setAttribute('aria-pressed', String(selected));
+            button.className = `rounded-sm border px-1.5 py-1 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${selected ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}`;
+        });
+    };
+
+    window.app_setStrategyIndividualPriorityChoice = (
+        controlId,
+        department,
+        value
+    ) => {
+        const input = document.getElementById(controlId);
+        if (!input) return;
+
+        input.value = value;
+        window.app_setTeamStrategyIndividualPriority(
+            department,
+            value
+        );
+        window.app_updateStrategyPriorityButtons(controlId, value);
     };
 
     window.app_syncTeamStrategyIndividualPriority = targetType => {
@@ -7603,6 +8063,11 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     )
                         ? value
                         : 'inherit';
+                window.app_updateStrategyPriorityButtons(
+                    prioritySelect.id,
+                    prioritySelect.value,
+                    !targetId
+                );
             }
         } else if (targetType === 'player') {
             const targetId = document.getElementById(
@@ -7629,6 +8094,11 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     )
                         ? value
                         : 'inherit';
+                window.app_updateStrategyPriorityButtons(
+                    prioritySelect.id,
+                    prioritySelect.value,
+                    !targetId
+                );
             }
         }
     };
@@ -7679,12 +8149,127 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 : 'inherit';
 
         priority.disabled = !target.value;
+        window.app_updateStrategyEmphasisButtons(
+            priority.id,
+            priority.value,
+            priority.disabled
+        );
 
         const status = document.getElementById(
             `strategy-emphasis-status-${department}-${side}`
         );
 
         if (status) status.textContent = '';
+    };
+
+    window.app_toggleStrategyTargetPopover = targetId => {
+        const popover = document.getElementById(
+            `${targetId}-popover`
+        );
+        const trigger = document.getElementById(
+            `${targetId}-trigger`
+        );
+        if (!popover || !trigger) return;
+
+        const isOpening = popover.classList.contains('hidden');
+        document.querySelectorAll('.strategy-target-popover').forEach(panel =>
+            panel.classList.add('hidden')
+        );
+        document.querySelectorAll('[aria-controls$="-popover"]').forEach(button =>
+            button.setAttribute('aria-expanded', 'false')
+        );
+
+        if (isOpening) {
+            popover.classList.remove('hidden');
+            trigger.setAttribute('aria-expanded', 'true');
+            popover.querySelector('input[type="search"]')?.focus();
+        }
+    };
+
+    window.app_filterStrategyTargets = targetId => {
+        const query = String(
+            document.querySelector(
+                `[data-strategy-target-search-input="${targetId}"]`
+            )?.value || ''
+        ).trim().toLowerCase();
+
+        document.querySelectorAll(
+            `[data-strategy-target-option="${targetId}"]`
+        ).forEach(button => {
+            button.hidden = !String(
+                button.dataset.strategyTargetSearch || ''
+            ).toLowerCase().includes(query);
+        });
+    };
+
+    window.app_selectStrategyTargetFromButton = button => {
+        const targetId = button?.dataset.strategyTargetOption;
+        if (!targetId) return;
+
+        const target = document.getElementById(targetId);
+        const label = document.getElementById(`${targetId}-label`);
+        const value = button.dataset.strategyTargetValue || '';
+
+        if (!target || !label) return;
+
+        target.value = value;
+        label.textContent = button.dataset.strategyTargetLabel || value;
+
+        document.querySelectorAll(
+            `[data-strategy-target-option="${targetId}"]`
+        ).forEach(option => {
+            const selected =
+                option.dataset.strategyTargetValue === value;
+            option.setAttribute('aria-pressed', String(selected));
+            option.classList.toggle('bg-slate-900', selected);
+            option.classList.toggle('text-white', selected);
+        });
+
+        document.getElementById(`${targetId}-popover`)?.classList.add('hidden');
+        document.getElementById(`${targetId}-trigger`)?.setAttribute('aria-expanded', 'false');
+
+        const [, department, side] = targetId.match(
+            /^strategy-emphasis-target-(practice|gameplan)-(offense|defense)$/
+        ) || [];
+
+        if (department && side) {
+            window.app_syncTeamStrategyEmphasis(department, side);
+        }
+    };
+
+    window.app_updateStrategyEmphasisButtons = (
+        controlId,
+        value,
+        disabled = false
+    ) => {
+        document.querySelectorAll(
+            `[data-strategy-emphasis-control="${controlId}"]`
+        ).forEach(button => {
+            const selected =
+                button.dataset.strategyEmphasisValue === value;
+
+            button.disabled = disabled;
+            button.setAttribute('aria-pressed', String(selected));
+            button.className = `rounded-sm border px-1.5 py-1 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${selected ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}`;
+        });
+    };
+
+    window.app_setStrategyEmphasisPriority = (
+        department,
+        side,
+        value
+    ) => {
+        const priority = document.getElementById(
+            `strategy-emphasis-priority-${department}-${side}`
+        );
+        if (!priority || priority.disabled) return;
+
+        priority.value = value;
+        window.app_setTeamStrategyEmphasis(department, side, value);
+        window.app_updateStrategyEmphasisButtons(
+            priority.id,
+            value
+        );
     };
 
     window.app_setTeamStrategyEmphasis = (
@@ -7821,6 +8406,19 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
         saveGameState();
 
+        const priorityControlId = isDevelopment
+            ? 'strategy-player-priority'
+            : `strategy-prospect-priority-${department}`;
+        const priorityControl = document.getElementById(priorityControlId);
+
+        if (priorityControl) {
+            priorityControl.value = value;
+            window.app_updateStrategyPriorityButtons(
+                priorityControlId,
+                value
+            );
+        }
+
         const statusId = isDevelopment
             ? 'strategy-player-priority-status'
             : 'strategy-prospect-priority-status';
@@ -7932,6 +8530,26 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         );
     };
 
+    window.app_toggleStrategyPriorityMenu = menuId => {
+        const menu = document.getElementById(menuId);
+        const trigger = document.getElementById(`${menuId}-trigger`);
+        if (!menu || !trigger) return;
+
+        const isOpening = menu.classList.contains('hidden');
+
+        document.querySelectorAll('[data-strategy-priority-popover]').forEach(
+            panel => panel.classList.add('hidden')
+        );
+        document.querySelectorAll('[id^="strategy-priority-menu-"][id$="-trigger"]').forEach(
+            button => button.setAttribute('aria-expanded', 'false')
+        );
+
+        if (isOpening) {
+            menu.classList.remove('hidden');
+            trigger.setAttribute('aria-expanded', 'true');
+        }
+    };
+
     let activeStaffHubTab =
         container.querySelector(
             '.staff-hub-tab-btn.bg-slate-900'
@@ -8034,22 +8652,22 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     </p>
                 </div>
 
-                <label class="block max-w-sm">
+                <div class="block max-w-sm">
                     <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                         Staff operating mode
                     </span>
-                    <select
-                        class="w-full rounded border border-slate-300 bg-white p-2 text-xs font-semibold text-slate-800"
-                        onchange="app_setTeamStaffAutonomy(this.value)">
+                    <div class="flex rounded border border-slate-300 bg-white p-0.5" role="group" aria-label="Overall staff operating mode">
                         ${strategyAutonomyOptions.map(([value, label]) => `
-                            <option
-                                value="${value}"
-                                ${getStrategyAutonomy('staff') === value ? 'selected' : ''}>
+                            <button
+                                type="button"
+                                aria-pressed="${getStrategyAutonomy('staff') === value}"
+                                onclick="app_setTeamStaffAutonomy('${value}')"
+                                class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold ${getStrategyAutonomy('staff') === value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">
                                 ${label}
-                            </option>
+                            </button>
                         `).join('')}
-                    </select>
-                </label>
+                    </div>
+                </div>
 
                 <div class="mt-2 grid grid-cols-1 gap-1 text-[10px] text-slate-600 sm:grid-cols-3">
                     <p><b>Delegate:</b> Staff has more discretion.</p>
@@ -8126,18 +8744,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                                 Select prospect
                             </span>
-                            <select
-                                id="strategy-prospect-target"
-                                class="w-full rounded border border-slate-300 bg-white p-2 text-xs font-semibold text-slate-800"
-                                onchange="app_syncTeamStrategyIndividualPriority('prospect')">
-                                ${strategyProspects.map(player => `
-                                    <option
-                                        value="${strategyEscape(player.id)}"
-                                        ${String(player.id) === strategyInitialProspectId ? 'selected' : ''}>
-                                        ${getStrategyProspectLabel(player)}
-                                    </option>
-                                `).join('')}
-                            </select>
+                            ${renderStrategyTargetPicker(
+                                'strategy-prospect-target',
+                                strategyProspects,
+                                strategyInitialProspectId,
+                                'prospect',
+                                'Select prospect'
+                            )}
                         </label>
 
                         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -8194,18 +8807,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                                 Select player
                             </span>
-                            <select
-                                id="strategy-player-target"
-                                class="w-full rounded border border-slate-300 bg-white p-2 text-xs font-semibold text-slate-800"
-                                onchange="app_syncTeamStrategyIndividualPriority('player')">
-                                ${strategyRosterPlayers.map(player => `
-                                    <option
-                                        value="${strategyEscape(player.id)}"
-                                        ${String(player.id) === strategyInitialPlayerId ? 'selected' : ''}>
-                                        ${getStrategyProspectLabel(player)}
-                                    </option>
-                                `).join('')}
-                            </select>
+                            ${renderStrategyTargetPicker(
+                                'strategy-player-target',
+                                strategyRosterPlayers,
+                                strategyInitialPlayerId,
+                                'player',
+                                'Select player'
+                            )}
                         </label>
 
                         <label class="block">
@@ -9559,6 +10167,97 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             renderStaffTab(gs);
         };
 
+        const renderStaffWorkPicker = (
+            index,
+            field,
+            label,
+            options,
+            selectedValue,
+            detailHeader = 'Details'
+        ) => {
+            const pickerId = `staff-work-picker-${index}-${field}`;
+            const selectedOption = options.find(option =>
+                String(option[0]) === String(selectedValue)
+            );
+
+            return `
+                <div class="relative min-w-0">
+                    <span class="mb-1 block text-[9px] font-bold uppercase text-slate-500">${label}</span>
+                    <button
+                        type="button"
+                        id="${pickerId}-trigger"
+                        aria-expanded="false"
+                        aria-controls="${pickerId}"
+                        onclick="window.app_toggleStaffWorkPicker('${pickerId}')"
+                        class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-2 text-left text-xs hover:border-slate-500">
+                        <span class="truncate font-semibold text-slate-700">${overviewEscape(selectedOption?.[1] || 'Choose...')}</span>
+                        <span aria-hidden="true" class="text-slate-400">▾</span>
+                    </button>
+                    <div id="${pickerId}" class="staff-work-picker absolute left-0 top-full z-30 mt-1 hidden max-h-72 w-80 max-w-[90vw] overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
+                        <input type="search" data-staff-work-search="${pickerId}" placeholder="Search ${overviewEscape(label.toLowerCase())}..." oninput="window.app_filterStaffWorkPicker('${pickerId}')" class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
+                        <div class="overflow-hidden rounded-sm border border-slate-200">
+                            <div class="grid grid-cols-[minmax(0,1fr)_8rem] gap-2 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                <span>${label}</span>
+                                <span>${detailHeader}</span>
+                            </div>
+                            ${options.map(([value, name, detail = '']) => `
+                                <button
+                                    type="button"
+                                    data-staff-work-option="${pickerId}"
+                                    data-staff-work-value="${overviewEscape(value)}"
+                                    data-staff-work-search-text="${overviewEscape(`${name} ${detail}`)}"
+                                    onclick="window.app_selectStaffWorkPicker(${index}, '${field}', this.dataset.staffWorkValue)"
+                                    class="grid w-full grid-cols-[minmax(0,1fr)_8rem] gap-2 border-t border-slate-100 px-2 py-1.5 text-left text-[10px] ${String(value) === String(selectedValue) ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}">
+                                    <span class="truncate font-semibold">${overviewEscape(name)}</span>
+                                    <span class="truncate text-right ${String(value) === String(selectedValue) ? 'text-slate-200' : 'text-slate-500'}">${overviewEscape(detail)}</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        window.app_toggleStaffWorkPicker = pickerId => {
+            const picker = document.getElementById(pickerId);
+            const trigger = document.getElementById(`${pickerId}-trigger`);
+            if (!picker || !trigger) return;
+
+            const isOpening = picker.classList.contains('hidden');
+            document.querySelectorAll('.staff-work-picker').forEach(panel =>
+                panel.classList.add('hidden')
+            );
+            document.querySelectorAll('[aria-controls^="staff-work-picker-"]').forEach(button =>
+                button.setAttribute('aria-expanded', 'false')
+            );
+
+            if (isOpening) {
+                picker.classList.remove('hidden');
+                trigger.setAttribute('aria-expanded', 'true');
+                picker.querySelector('input[type="search"]')?.focus();
+            }
+        };
+
+        window.app_filterStaffWorkPicker = pickerId => {
+            const query = String(
+                document.querySelector(
+                    `[data-staff-work-search="${pickerId}"]`
+                )?.value || ''
+            ).trim().toLowerCase();
+
+            document.querySelectorAll(
+                `[data-staff-work-option="${pickerId}"]`
+            ).forEach(button => {
+                button.hidden = !String(
+                    button.dataset.staffWorkSearchText || ''
+                ).toLowerCase().includes(query);
+            });
+        };
+
+        window.app_selectStaffWorkPicker = (index, field, value) => {
+            window.app_updateStaffWorkAssignment(index, field, value);
+        };
+
         window.app_updateStaffWorkAssignment = (index, field, value) => {
             const gs = getGameState();
             const currentTeam = gs?.playerTeam;
@@ -9906,19 +10605,35 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             String(coach.id),
                             coach.isUserCoach
                                 ? `${coach.name} (You)`
-                                : coach.name
+                                : coach.name,
+                            `${getCoachHours(coach.id)}/${getCoachWeeklyCapacity(coach)} hrs`
                         ]);
 
                         const opponentOptions = [
-                            ['', 'Any opponent'],
+                            ['', 'Any opponent', 'No team restriction'],
                             ...(gameState.teams || [])
                                 .filter(other => other &&
                                     other.id !== team.id &&
                                     other.leagueType === team.leagueType)
-                                .map(other => [
-                                    String(other.id),
-                                    other.name
-                                ])
+                                .sort((a, b) =>
+                                    String(a.name || '').localeCompare(String(b.name || ''))
+                                )
+                                .map(other => {
+                                    const league = other.leagueType === 'youth'
+                                        ? 'Pee-Wee'
+                                        : Number(other.tier) === 1
+                                            ? 'Premier'
+                                            : Number(other.tier) === 2
+                                                ? 'Sandlot'
+                                                : 'League';
+                                    const record = `${Number(other.wins) || 0}-${Number(other.losses) || 0}-${Number(other.ties) || 0}`;
+
+                                    return [
+                                        String(other.id),
+                                        other.name,
+                                        `${league} · ${record}`
+                                    ];
+                                })
                         ];
 
                         return `
@@ -9937,14 +10652,14 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 ` : `
                                     <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Coach</span>
-                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
-                                            aria-label="Assigned coach"
-                                            onchange="app_updateStaffWorkAssignment(${index}, 'coachId', this.value)">
-                                            ${renderOptions(
-                                                coachOptions,
-                                                assignment.coachId
-                                            )}
-                                        </select>
+                                        ${renderStaffWorkPicker(
+                                            index,
+                                            'coachId',
+                                            'Coach',
+                                            coachOptions,
+                                            assignment.coachId,
+                                            'Week hours'
+                                        )}
                                     </label>
                                 `}
 
@@ -9960,14 +10675,17 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 ` : `
                                     <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Task</span>
-                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
-                                            aria-label="Staff task"
-                                            onchange="app_updateStaffWorkAssignment(${index}, 'task', this.value)">
-                                            ${renderOptions(
-                                                Object.entries(editableTaskLabels),
-                                                task
-                                            )}
-                                        </select>
+                                        <div class="grid grid-cols-2 gap-1" role="group" aria-label="Staff task">
+                                            ${Object.entries(editableTaskLabels).map(([value, label]) => `
+                                                <button
+                                                    type="button"
+                                                    aria-pressed="${task === value}"
+                                                    onclick="app_updateStaffWorkAssignment(${index}, 'task', '${value}')"
+                                                    class="rounded-sm border px-2 py-1.5 text-left text-[10px] font-semibold ${task === value ? 'border-blue-700 bg-blue-50 text-blue-900' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}">
+                                                    ${label}
+                                                </button>
+                                            `).join('')}
+                                        </div>
                                     </label>
                                 `}
 
@@ -9989,26 +10707,30 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 ` : focusList.length > 0 ? `
                                     <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Focus</span>
-                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
-                                            aria-label="Task focus"
-                                            onchange="app_updateStaffWorkAssignment(${index}, 'focus', this.value)">
-                                            ${renderOptions(
-                                                focusList,
-                                                assignment.focus || 'all'
-                                            )}
-                                        </select>
+                                        <div class="grid grid-cols-2 gap-1" role="group" aria-label="Task focus">
+                                            ${focusList.map(([value, label]) => `
+                                                <button
+                                                    type="button"
+                                                    aria-pressed="${(assignment.focus || 'all') === String(value)}"
+                                                    onclick="app_updateStaffWorkAssignment(${index}, 'focus', '${value}')"
+                                                    title="${label}"
+                                                    class="rounded-sm border px-1.5 py-1 text-left text-[9px] font-semibold ${((assignment.focus || 'all') === String(value)) ? 'border-blue-700 bg-blue-50 text-blue-900' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}">
+                                                    ${label}
+                                                </button>
+                                            `).join('')}
+                                        </div>
                                     </label>
                                 ` : task === 'defensePrep' ? `
                                     <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Opponent</span>
-                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
-                                            aria-label="Preparation opponent"
-                                            onchange="app_updateStaffWorkAssignment(${index}, 'opponentTeamId', this.value)">
-                                            ${renderOptions(
-                                                opponentOptions,
-                                                assignment.opponentTeamId || ''
-                                            )}
-                                        </select>
+                                        ${renderStaffWorkPicker(
+                                            index,
+                                            'opponentTeamId',
+                                            'Opponent',
+                                            opponentOptions,
+                                            assignment.opponentTeamId || '',
+                                            'League · Record'
+                                        )}
                                     </label>
                                 ` : `
                                     <div class="text-[10px] text-slate-500">
@@ -10019,28 +10741,27 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 ${task === 'training' ? `
                                     <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Skill</span>
-                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
-                                            aria-label="Training skill"
-                                            onchange="app_updateStaffWorkAssignment(${index}, 'skill', this.value)">
-                                            ${renderOptions(
-                                                skillOptions,
-                                                assignment.skill || ''
-                                            )}
-                                        </select>
+                                        ${renderStaffWorkPicker(
+                                            index,
+                                            'skill',
+                                            'Training skill',
+                                            skillOptions.map(([value, name]) => [
+                                                value,
+                                                name,
+                                                value ? 'Skill focus' : 'Coach chooses'
+                                            ]),
+                                            assignment.skill || '',
+                                            'Focus'
+                                        )}
                                     </label>
                                 ` : '<div></div>'}
 
                                 ${showTargets ? `
                                     <label class="block min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Max targets</span>
-                                        <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                        <input type="number" min="1" max="12" step="1" value="${assignment.maxTargets || (task === 'training' ? 4 : 1)}" class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
                                             aria-label="Maximum targets"
                                             onchange="app_updateStaffWorkAssignment(${index}, 'maxTargets', this.value)">
-                                            ${renderOptions(
-                                                [[1, '1 player'], [2, '2 players'], [3, '3 players'], [4, '4 players'], [6, '6 players'], [8, '8 players'], [12, '12 players']],
-                                                assignment.maxTargets || (task === 'training' ? 4 : 1)
-                                            )}
-                                        </select>
                                     </label>
                                 ` : '<div></div>'}
 
@@ -10057,17 +10778,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     <div class="flex items-end gap-2">
                                         <label class="block flex-1 min-w-0">
                                             <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Hours</span>
-                                            <select class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
+                                            <input type="number" min="0" max="${Math.max(capacity, currentHours)}" step="1" value="${currentHours}" class="w-full text-xs border border-slate-300 rounded p-2 bg-white"
                                                 aria-label="Assigned hours"
                                                 onchange="app_updateStaffWorkAssignment(${index}, 'hours', this.value)">
-                                                ${renderOptions(
-                                                    hoursOptions.map(hours => [
-                                                        hours,
-                                                        `${hours} hrs`
-                                                    ]),
-                                                    workHours(assignment)
-                                                )}
-                                            </select>
                                         </label>
                                         <button class="px-2 py-2 text-xs font-bold text-rose-600 border border-rose-200 rounded hover:bg-rose-50"
                                             title="Remove assignment"
@@ -10527,6 +11240,16 @@ export function renderStaffCarouselTab(
         staffCarouselFitRole = role;
 
         renderStaffCarouselTab(Game.getGameState() || gameState);
+    };
+
+    window.app_toggleStaffCarouselSortMenu = () => {
+        const menu = document.getElementById('staff-carousel-sort-menu');
+        const trigger = document.getElementById('staff-carousel-sort-trigger');
+        if (!menu || !trigger) return;
+
+        const isOpening = menu.classList.contains('hidden');
+        menu.classList.toggle('hidden', !isOpening);
+        trigger.setAttribute('aria-expanded', String(isOpening));
     };
 
     window.app_toggleStaffCarouselSortDirection = () => {
@@ -11033,37 +11756,45 @@ export function renderStaffCarouselTab(
                     </button>
                 </form>
 
-                <label class="block">
+                <div class="relative">
                     <span class="block text-[10px] font-bold uppercase tracking-wide text-slate-600 mb-1">
                         Sort candidates
                     </span>
-                    <select
-                        class="w-full sm:w-44 rounded border border-slate-300 bg-white px-2 py-2 text-xs"
-                        onchange="app_setStaffCarouselSort(this.value)">
-                        <option value="overall" ${staffCarouselSort === 'overall' ? 'selected' : ''}>Skill average</option>
-                        <option value="name" ${staffCarouselSort === 'name' ? 'selected' : ''}>Name</option>
-                        <option value="offense" ${staffCarouselSort === 'offense' ? 'selected' : ''}>Offense scheme</option>
-                        <option value="defense" ${staffCarouselSort === 'defense' ? 'selected' : ''}>Defense scheme</option>
-                        <option value="scouting" ${staffCarouselSort === 'scouting' ? 'selected' : ''}>Scouting</option>
-                        <option value="teaching" ${staffCarouselSort === 'teaching' ? 'selected' : ''}>Teaching</option>
-                        <option value="gameplan" ${staffCarouselSort === 'gameplan' ? 'selected' : ''}>Game planning</option>
-                        <option value="stipend" ${staffCarouselSort === 'stipend' ? 'selected' : ''}>Stipend demand</option>
-                        <option value="roleFit" ${staffCarouselSort === 'roleFit' ? 'selected' : ''}>Selected role fit</option>
-                    </select>
-                </label>
+                    <button type="button" id="staff-carousel-sort-trigger" aria-expanded="false" aria-controls="staff-carousel-sort-menu" onclick="window.app_toggleStaffCarouselSortMenu()" class="flex w-full sm:w-44 items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-2 text-left text-xs font-semibold text-slate-700 hover:border-slate-500">
+                        <span class="truncate">${({ overall: 'Skill average', name: 'Name', offense: 'Offense scheme', defense: 'Defense scheme', scouting: 'Scouting', teaching: 'Teaching', gameplan: 'Game planning', stipend: 'Stipend demand', roleFit: 'Selected role fit' })[staffCarouselSort] || 'Skill average'}</span>
+                        <span aria-hidden="true" class="text-slate-400">▾</span>
+                    </button>
+                    <div id="staff-carousel-sort-menu" class="absolute left-0 top-full z-30 mt-1 hidden w-56 rounded border border-slate-300 bg-white p-1 shadow-xl">
+                        ${[
+                            ['overall', 'Skill average'],
+                            ['name', 'Name'],
+                            ['offense', 'Offense scheme'],
+                            ['defense', 'Defense scheme'],
+                            ['scouting', 'Scouting'],
+                            ['teaching', 'Teaching'],
+                            ['gameplan', 'Game planning'],
+                            ['stipend', 'Stipend demand'],
+                            ['roleFit', 'Selected role fit']
+                        ].map(([value, label]) => `
+                            <button type="button" aria-pressed="${staffCarouselSort === value}" onclick="app_setStaffCarouselSort('${value}')" class="block w-full rounded-sm px-2 py-1.5 text-left text-xs ${staffCarouselSort === value ? 'bg-slate-900 font-bold text-white' : 'text-slate-700 hover:bg-slate-100'}">${label}</button>
+                        `).join('')}
+                    </div>
+                </div>
 
-                <label class="block">
+                <div>
                     <span class="block text-[10px] font-bold uppercase tracking-wide text-slate-600 mb-1">
                         Fit focus
                     </span>
-                    <select
-                        class="w-full sm:w-36 rounded border border-slate-300 bg-white px-2 py-2 text-xs"
-                        onchange="app_setStaffCarouselFitRole(this.value)">
-                        <option value="general" ${staffCarouselFitRole === 'general' ? 'selected' : ''}>General</option>
-                        <option value="scouting" ${staffCarouselFitRole === 'scouting' ? 'selected' : ''}>Scouting</option>
-                        <option value="training" ${staffCarouselFitRole === 'training' ? 'selected' : ''}>Training</option>
-                    </select>
-                </label>
+                    <div class="flex rounded border border-slate-300 bg-white p-0.5" role="group" aria-label="Candidate role fit">
+                        ${[
+                            ['general', 'General'],
+                            ['scouting', 'Scouting'],
+                            ['training', 'Training']
+                        ].map(([value, label]) => `
+                            <button type="button" aria-pressed="${staffCarouselFitRole === value}" onclick="app_setStaffCarouselFitRole('${value}')" class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold ${staffCarouselFitRole === value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">${label}</button>
+                        `).join('')}
+                    </div>
+                </div>
 
                 <button
                     type="button"
@@ -11682,12 +12413,29 @@ function renderPositionalOveralls() {
     const defChart = team.depthChart?.defense || {};
     const stChart = team.depthChart?.specialTeams || {};
 
-    // Calculate room quality for the top summary cards
+    // Summarize the two strongest players who can actually fill each position.
     const roomSummaries = positions.map(pos => {
-        const ratings = roster.map(p => calculateOverall(p, pos)).sort((a, b) => b - a);
-        const top1 = ratings[0] || 0;
-        const top2 = ratings[1] || 0;
-        return { pos, top1, top2, avg: Math.round((top1 + top2) / 2) };
+        const eligiblePlayers = roster
+            .filter(player =>
+                Game.isPlayerViableForPosition(
+                    getPlayerForPositionRatings(player),
+                    pos
+                )
+            )
+            .map(player => ({
+                player,
+                overall: calculateOverall(
+                    getPlayerForPositionRatings(player),
+                    pos
+                )
+            }))
+            .sort((a, b) => b.overall - a.overall);
+
+        return {
+            pos,
+            bestFit: eligiblePlayers[0] || null,
+            nextFit: eligiblePlayers[1] || null
+        };
     });
 
     pane.innerHTML = `
@@ -11695,15 +12443,21 @@ function renderPositionalOveralls() {
             <!-- Top Strategic Radar: Position Room Strength -->
             <div class="min-w-0 bg-slate-900 text-white rounded p-3 border border-slate-700 shadow-sm shrink-0">
             <div class="flex justify-between items-center mb-2 pb-1 border-b border-slate-800">
-                <span class="text-[10px] font-black uppercase tracking-wider text-amber-400">Franchise Position Room Strength</span>
-                <span class="text-[10px] text-slate-400 font-mono">Starter / Backup OVR</span>
+                <span class="text-[10px] font-black uppercase tracking-wider text-amber-400">Top Positional Fits</span>
+                <span class="text-[10px] text-slate-400 font-mono">Ability, not lineup assignment</span>
             </div>
                 <div class="grid grid-cols-2 sm:grid-cols-4 2xl:grid-cols-2 gap-2">
                 ${roomSummaries.map(r => `
-                    <div class="bg-slate-800/80 p-2 rounded border border-slate-700 text-center">
+                    <div class="bg-slate-800/80 p-2 rounded border border-slate-700">
                         <span class="text-[10px] font-black uppercase text-slate-300 block">${r.pos}</span>
-                        <span class="text-sm font-black ${r.top1 >= 65 ? 'text-emerald-400' : (r.top1 >= 50 ? 'text-amber-400' : 'text-slate-400')}">${r.top1}</span>
-                        <span class="text-[9px] text-slate-400 block font-mono">bup: ${r.top2}</span>
+                        <div class="mt-1 flex items-center justify-between gap-2 text-[9px]">
+                            <span class="min-w-0 truncate text-slate-300" title="${r.bestFit?.player.name || 'No eligible fit'}">Best · ${r.bestFit?.player.name || 'No eligible fit'}</span>
+                            <b class="shrink-0 text-sm font-black ${r.bestFit?.overall >= 65 ? 'text-emerald-400' : (r.bestFit?.overall >= 50 ? 'text-amber-400' : 'text-slate-400')}">${r.bestFit?.overall ?? '—'}</b>
+                        </div>
+                        <div class="mt-0.5 flex items-center justify-between gap-2 text-[9px]">
+                            <span class="min-w-0 truncate text-slate-500" title="${r.nextFit?.player.name || 'No second eligible fit'}">Next · ${r.nextFit?.player.name || '—'}</span>
+                            <span class="shrink-0 font-mono text-slate-400">${r.nextFit?.overall ?? '—'}</span>
+                        </div>
                     </div>
                 `).join('')}
             </div>
@@ -11711,17 +12465,22 @@ function renderPositionalOveralls() {
 
         <!-- Master 8-Way Versatility Matrix Table -->
             <div class="min-w-0 bg-white rounded border border-slate-200 shadow-sm overflow-x-auto">
-        <table class="w-full min-w-[820px] table-fixed text-xs font-mono">
+        <table class="w-full min-w-[1100px] table-fixed text-xs font-mono">
             <colgroup>
-                <col style="width: 4%">
-                <col style="width: 12%">
-                <col style="width: 5%">
-                <col style="width: 15%">
-                <col style="width: 6%">
-                <col style="width: 6%">
-                <col style="width: 16%">
-                <col style="width: 17%">
-                <col style="width: 19%">
+            <col style="width: 20%">
+            <col style="width: 5%">
+            <col style="width: 4%">
+            <col style="width: 4%">
+            <col style="width: 4%">
+            <col style="width: 5.5%">
+            <col style="width: 5.5%">
+            <col style="width: 5.5%">
+            <col style="width: 5.5%">
+            <col style="width: 5.5%">
+            <col style="width: 5.5%">
+            <col style="width: 5.5%">
+            <col style="width: 5.5%">
+            <col style="width: 19%">
             </colgroup>
                 <thead class="bg-slate-900 text-white uppercase text-[10px] tracking-wider select-none">
                     <tr>
@@ -11748,17 +12507,28 @@ function renderPositionalOveralls() {
                         const stamina = p.attributes?.physical?.stamina || 50;
 
                         // Check active roles
-                        const offSlot = Object.entries(offChart).find(([_, id]) => id === p.id)?.[0];
-                        const defSlot = Object.entries(defChart).find(([_, id]) => id === p.id)?.[0];
-                        const isPR = stChart['PR'] === p.id;
+                        const offSlots = Object.entries(offChart)
+                            .filter(([, id]) => String(id) === String(p.id))
+                            .map(([slot]) => slot);
+                        const defSlots = Object.entries(defChart)
+                            .filter(([, id]) => String(id) === String(p.id))
+                            .map(([slot]) => slot);
+                        const isPR = String(stChart.PR) === String(p.id);
 
-                        let rolesBadge = '';
-                        if (offSlot && defSlot) rolesBadge = `<span class="bg-amber-100 text-amber-900 border border-amber-300 px-1 rounded text-[9px] font-black font-sans">⚡ ${offSlot} & ${defSlot}</span>`;
-                        else if (offSlot) rolesBadge = `<span class="bg-blue-50 text-blue-800 border border-blue-200 px-1 rounded text-[9px] font-bold font-sans">${offSlot}</span>`;
-                        else if (defSlot) rolesBadge = `<span class="bg-red-50 text-red-800 border border-red-200 px-1 rounded text-[9px] font-bold font-sans">${defSlot}</span>`;
-                        else rolesBadge = `<span class="text-slate-400 font-sans text-[10px]">Reserve</span>`;
-
-                        if (isPR) rolesBadge += ` <span class="bg-purple-100 text-purple-900 border border-purple-200 px-1 rounded text-[9px] font-black font-sans">PR</span>`;
+                        const rolesBadge = [
+                            ...offSlots.map(slot =>
+                                `<span class="bg-blue-50 text-blue-800 border border-blue-200 px-1 rounded text-[9px] font-bold font-sans">${slot}</span>`
+                            ),
+                            ...defSlots.map(slot =>
+                                `<span class="bg-red-50 text-red-800 border border-red-200 px-1 rounded text-[9px] font-bold font-sans">${slot}</span>`
+                            ),
+                            ...(!offSlots.length && !defSlots.length
+                                ? ['<span class="text-slate-400 font-sans text-[10px]">Reserve</span>']
+                                : []),
+                            ...(isPR
+                                ? ['<span class="bg-purple-100 text-purple-900 border border-purple-200 px-1 rounded text-[9px] font-black font-sans">PR</span>']
+                                : [])
+                        ].join(' ');
 
                         return `
                         <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
@@ -12323,6 +13093,89 @@ export function renderStandingsTab(gameState) {
     `;
 }
 
+window.app_toggleStatsPopover = function(popoverId, triggerId) {
+    const popover = document.getElementById(popoverId);
+    const trigger = document.getElementById(triggerId);
+    if (!popover || !trigger) return;
+
+    const isOpening = popover.classList.contains('hidden');
+
+    document.querySelectorAll('.stats-popover').forEach(panel =>
+        panel.classList.add('hidden')
+    );
+    document.querySelectorAll('[data-stats-popover-trigger]').forEach(button =>
+        button.setAttribute('aria-expanded', 'false')
+    );
+
+    if (isOpening) {
+        popover.classList.remove('hidden');
+        trigger.setAttribute('aria-expanded', 'true');
+        popover.querySelector('input')?.focus();
+    }
+};
+
+window.app_setStatsLeagueFilter = function(league) {
+    const input = document.getElementById('stats-filter-league');
+    if (!input) return;
+
+    input.value = league;
+    document.querySelectorAll('.stats-league-button').forEach(button => {
+        const selected = button.dataset.league === league;
+        button.setAttribute('aria-pressed', String(selected));
+        button.classList.toggle('is-active', selected);
+    });
+
+    renderPlayerStatsTab(getGameState());
+};
+
+window.app_filterStatsTeams = function() {
+    const query = String(
+        document.getElementById('stats-team-search')?.value || ''
+    ).trim().toLowerCase();
+
+    document.querySelectorAll('[data-stats-team-name]').forEach(button => {
+        button.hidden = !String(button.dataset.statsTeamName || '')
+            .toLowerCase()
+            .includes(query);
+    });
+};
+
+window.app_selectStatsTeam = function(teamId, teamName) {
+    const input = document.getElementById('stats-filter-team');
+    const label = document.getElementById('stats-team-label');
+    if (!input || !label) return;
+
+    input.value = String(teamId || '');
+    label.textContent = teamName || 'All Teams';
+    document.getElementById('stats-team-popover')?.classList.add('hidden');
+    document.getElementById('stats-team-trigger')?.setAttribute('aria-expanded', 'false');
+    renderPlayerStatsTab(getGameState());
+};
+
+window.app_filterStatsSort = function() {
+    const query = String(
+        document.getElementById('stats-sort-search')?.value || ''
+    ).trim().toLowerCase();
+
+    document.querySelectorAll('[data-stats-sort-label]').forEach(button => {
+        button.hidden = !String(button.dataset.statsSortLabel || '')
+            .toLowerCase()
+            .includes(query);
+    });
+};
+
+window.app_selectStatsSort = function(key, label) {
+    const input = document.getElementById('stats-sort');
+    const selectedLabel = document.getElementById('stats-sort-label');
+    if (!input || !selectedLabel) return;
+
+    input.value = key;
+    selectedLabel.textContent = label;
+    document.getElementById('stats-sort-popover')?.classList.add('hidden');
+    document.getElementById('stats-sort-trigger')?.setAttribute('aria-expanded', 'false');
+    renderPlayerStatsTab(getGameState());
+};
+
 window.app_setLeagueStatsView = function (view) {
     if (!['all', 'offense', 'defense'].includes(view)) return;
 
@@ -12336,24 +13189,54 @@ export function renderPlayerStatsTab(gameState) {
     const teams = Array.isArray(gameState.teams) ? gameState.teams : [];
     const teamById = new Map(teams.map(team => [String(team.id), team]));
 
-    // Populate the Team dropdown before any early returns.
-    // The HTML contains this select, but no initial team options.
+    // Populate the searchable team pop-out before any early returns.
     if (elements.statsFilterTeam) {
         const previousTeamId = elements.statsFilterTeam.value || '';
 
-        const teamOptions = [...teams]
+        const sortedTeams = [...teams]
             .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-            .map(team =>
-                `<option value="${team.id}">${team.name || 'Unnamed Team'}</option>`
-            )
-            .join('');
-
-        elements.statsFilterTeam.innerHTML =
-            `<option value="">All Teams</option>${teamOptions}`;
 
         elements.statsFilterTeam.value = teams.some(
             team => String(team.id) === previousTeamId
         ) ? previousTeamId : '';
+
+        const escapeStatsText = value => String(value ?? '').replace(
+            /[&<>"']/g,
+            character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[character]
+        );
+
+        const teamOptions = [
+            `<button type="button" data-stats-team-name="all teams" data-team-id="" data-team-label="All Teams" onclick="window.app_selectStatsTeam(this.dataset.teamId, this.dataset.teamLabel)" class="stats-popover-option grid grid-cols-[minmax(0,1fr)_5rem] gap-2 font-bold" role="option"><span>All Teams</span><span class="text-right text-[10px] text-slate-400">League</span></button>`,
+            ...sortedTeams.map(team => {
+                const name = team.name || 'Unnamed Team';
+                const league = team.leagueType === 'youth'
+                    ? 'Pee-Wee'
+                    : Number(team.tier) === 1
+                        ? 'Premier'
+                        : Number(team.tier) === 2
+                            ? 'Sandlot'
+                            : 'League';
+
+                return `<button type="button" data-stats-team-name="${escapeStatsText(name)}" data-team-id="${escapeStatsText(team.id)}" data-team-label="${escapeStatsText(name)}" onclick="window.app_selectStatsTeam(this.dataset.teamId, this.dataset.teamLabel)" class="stats-popover-option grid grid-cols-[minmax(0,1fr)_5rem] gap-2 border-t border-slate-100" role="option"><span class="truncate">${escapeStatsText(name)}</span><span class="text-right text-[10px] text-slate-500">${league}</span></button>`;
+            })
+        ].join('');
+
+        const teamOptionsElement = document.getElementById('stats-team-options');
+        if (teamOptionsElement) teamOptionsElement.innerHTML = teamOptions;
+
+        const selectedTeam = teams.find(
+            team => String(team.id) === elements.statsFilterTeam.value
+        );
+        const teamLabel = document.getElementById('stats-team-label');
+        if (teamLabel) {
+            teamLabel.textContent = selectedTeam?.name || 'All Teams';
+        }
     }
 
     const leagueSelect = document.getElementById('stats-filter-league');
@@ -12408,7 +13291,7 @@ export function renderPlayerStatsTab(gameState) {
             ? PLAYER_STAT_COLUMNS.filter(stat => defensiveStatKeys.includes(stat.key))
             : PLAYER_STAT_COLUMNS;
 
-    // Keep the sort dropdown synchronized with the active stat view.
+    // Keep the sort choices synchronized with the active stat view.
     const previousSort = elements.statsSort?.value || 'touchdowns';
 
     const sortStat = activeStatColumns.some(stat => stat.key === previousSort)
@@ -12418,11 +13301,29 @@ export function renderPlayerStatsTab(gameState) {
             || 'touchdowns';
 
     if (elements.statsSort) {
-        elements.statsSort.innerHTML = activeStatColumns.map(stat =>
-            `<option value="${stat.key}">Sort by: ${stat.label}</option>`
-        ).join('');
-
         elements.statsSort.value = sortStat;
+
+        const sortOptions = document.getElementById('stats-sort-options');
+        if (sortOptions) {
+            sortOptions.innerHTML = activeStatColumns.map(stat => `
+                <button
+                    type="button"
+                    data-stats-sort-label="${stat.label}"
+                    data-sort-key="${stat.key}"
+                    onclick="window.app_selectStatsSort('${stat.key}', '${stat.label.replace(/'/g, '&#39;')}')"
+                    class="stats-popover-option"
+                    role="option">
+                    ${stat.label}
+                </button>
+            `).join('');
+        }
+
+        const sortLabel = document.getElementById('stats-sort-label');
+        if (sortLabel) {
+            sortLabel.textContent = activeStatColumns.find(
+                stat => stat.key === sortStat
+            )?.label || 'Sort statistics';
+        }
     }
 
     // Before Week 1, clear stale stats and show the kickoff message.
@@ -13991,10 +14892,10 @@ export function renderPlaybookManager(gameState) {
                         <h4 class="font-black text-sm uppercase tracking-wider text-slate-900">Sideline Clipboard (Tendencies)</h4>
                         <p id="clipboard-clash-warning" class="text-[11px] mt-0.5">${clashHtml}</p>
                     </div>
-                    <select class="p-1.5 border border-slate-300 rounded font-bold text-slate-800 bg-slate-50 outline-none" onchange="app_updateClipboard('playcaller', this.value)">
-                        <option value="COACH" ${!isGM ? 'selected' : ''}>Delegate to Coach (Auto)</option>
-                        <option value="GM" ${isGM ? 'selected' : ''}>GM Manual Control</option>
-                    </select>
+                    <div class="flex rounded border border-slate-300 bg-white p-0.5" role="group" aria-label="Playcaller control">
+                        <button type="button" aria-pressed="${!isGM}" onclick="app_updateClipboard('playcaller', 'COACH')" class="rounded-sm px-2 py-1.5 text-[10px] font-bold ${!isGM ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">Coach</button>
+                        <button type="button" aria-pressed="${isGM}" onclick="app_updateClipboard('playcaller', 'GM')" class="rounded-sm px-2 py-1.5 text-[10px] font-bold ${isGM ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">GM</button>
+                    </div>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 ${sliderOpac}">
@@ -14691,56 +15592,59 @@ export function renderPracticeManager(gameState) {
                         <label class="block text-[10px] font-black uppercase tracking-wide text-slate-600 mb-1">
                             Field arrangement
                         </label>
-                        <select
-                            class="w-full p-2 border border-slate-300 rounded text-xs font-bold text-slate-800 bg-white"
-                            value="${practiceFieldAccess}"
-                            onchange="app_setPracticeFieldAccess(this.value)"
-                        >
-                            <option value="community" ${practiceFieldAccess === 'community' ? 'selected' : ''}>
-                                Community field — Free, up to 2 sessions
-                            </option>
-                            <option value="school" ${practiceFieldAccess === 'school' ? 'selected' : ''}>
-                                School partnership — $3/week, up to 3
-                            </option>
-                            <option value="dedicated" ${practiceFieldAccess === 'dedicated' ? 'selected' : ''}>
-                                Dedicated field — $8/week, up to 3
-                            </option>
-                        </select>
+                        <div class="grid grid-cols-1 gap-1" role="group" aria-label="Practice field arrangement">
+                            ${[
+                                ['community', 'Community field', 'Free · up to 2 sessions'],
+                                ['school', 'School partnership', '$3/week · up to 3'],
+                                ['dedicated', 'Dedicated field', '$8/week · up to 3']
+                            ].map(([value, title, detail]) => `
+                                <button
+                                    type="button"
+                                    aria-pressed="${practiceFieldAccess === value}"
+                                    onclick="app_setPracticeFieldAccess('${value}')"
+                                    class="flex items-center justify-between gap-2 rounded-sm border px-2 py-1.5 text-left ${practiceFieldAccess === value ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                                    <span class="text-[10px] font-bold">${title}</span>
+                                    <span class="text-[9px] text-slate-500">${detail}</span>
+                                </button>
+                            `).join('')}
+                        </div>
                     </div>
 
                     <div>
                         <label class="block text-[10px] font-black uppercase tracking-wide text-slate-600 mb-1">
                             Sessions per week
                         </label>
-                        <select
-                            class="w-full p-2 border border-slate-300 rounded text-xs font-bold text-slate-800 bg-white"
-                            onchange="app_setPracticeSchedule(this.value, ${minutesPerSession})"
-                        >
+                        <div class="flex rounded border border-slate-300 bg-white p-0.5" role="group" aria-label="Sessions per week">
                             ${Array.from(
                                 { length: selectedField.maxSessions },
                                 (_, index) => index + 1
                             ).map(count => `
-                                <option value="${count}" ${sessionsPerWeek === count ? 'selected' : ''}>
-                                    ${count} session${count === 1 ? '' : 's'} per week
-                                </option>
+                                <button
+                                    type="button"
+                                    aria-pressed="${sessionsPerWeek === count}"
+                                    onclick="app_setPracticeSchedule(${count}, ${minutesPerSession})"
+                                    class="flex-1 rounded-sm px-2 py-1.5 text-xs font-bold ${sessionsPerWeek === count ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">
+                                    ${count}
+                                </button>
                             `).join('')}
-                        </select>
+                        </div>
                     </div>
 
                     <div>
                         <label class="block text-[10px] font-black uppercase tracking-wide text-slate-600 mb-1">
                             Session length
                         </label>
-                        <select
-                            class="w-full p-2 border border-slate-300 rounded text-xs font-bold text-slate-800 bg-white"
-                            onchange="app_setPracticeSchedule(${sessionsPerWeek}, this.value)"
-                        >
-                            ${[60, 90, 120].map(minutes => `
-                                <option value="${minutes}" ${minutesPerSession === minutes ? 'selected' : ''}>
-                                    ${minutes} minutes
-                                </option>
-                            `).join('')}
-                        </select>
+                        <div class="flex items-center gap-2">
+                            <input
+                                type="number"
+                                min="60"
+                                max="120"
+                                step="30"
+                                value="${minutesPerSession}"
+                                onchange="app_setPracticeSchedule(${sessionsPerWeek}, this.value)"
+                                class="w-20 rounded-sm border border-slate-300 bg-white p-1.5 text-xs font-bold text-slate-800">
+                            <span class="text-[10px] font-bold text-slate-500">minutes</span>
+                        </div>
                     </div>
 
                     <div class="rounded border border-slate-100 bg-slate-50 p-2">
@@ -14794,12 +15698,23 @@ export function renderPracticeManager(gameState) {
                     <span class="font-black uppercase text-[10px] tracking-wider text-slate-500 block">General Manager Directive to Staff</span>
                     <p class="text-[11px] text-slate-700">How Coach ${coach?.name || 'Coach'} prioritizes drills when managing autonomously.</p>
                 </div>
-                <select class="p-1.5 border border-slate-300 rounded font-bold text-slate-800 text-xs bg-slate-50 outline-none" onchange="app_setGmDirective(this.value)">
-                    <option value="COACH_AUTONOMY" ${directive === 'COACH_AUTONOMY' ? 'selected' : ''}>Full Coach Autonomy (Follows Coach's Biases)</option>
-                    <option value="WIN_NOW" ${directive === 'WIN_NOW' ? 'selected' : ''}>Win-Now (Prioritizes Recess Opponent Prep)</option>
-                    <option value="DEVELOP_YOUTH" ${directive === 'DEVELOP_YOUTH' ? 'selected' : ''}>Youth Development (Chalk Talks & Playbook IQ)</option>
-                    <option value="HARD_CONDITIONING" ${directive === 'HARD_CONDITIONING' ? 'selected' : ''}>Physical Grit (Tire Runs & Fourth-Quarter Stamina)</option>
-                </select>
+                <div class="grid w-full grid-cols-2 gap-1 sm:w-auto" role="group" aria-label="General manager directive">
+                    ${[
+                        ['COACH_AUTONOMY', 'Coach autonomy', 'Let the coach’s profile guide practice.'],
+                        ['WIN_NOW', 'Win now', 'Favor preparation for the next opponent.'],
+                        ['DEVELOP_YOUTH', 'Develop youth', 'Favor development and playbook learning.'],
+                        ['HARD_CONDITIONING', 'Conditioning', 'Favor stamina and physical development.']
+                    ].map(([value, label, detail]) => `
+                        <button
+                            type="button"
+                            aria-pressed="${directive === value}"
+                            onclick="app_setGmDirective('${value}')"
+                            class="rounded-sm border px-2 py-1.5 text-left ${directive === value ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                            <span class="block text-[10px] font-black">${label}</span>
+                            <span class="block text-[9px] text-slate-500">${detail}</span>
+                        </button>
+                    `).join('')}
+                </div>
             </div>
 
             ${isDelegated ? `
@@ -14995,15 +15910,52 @@ export function renderDraftTeamView(gameState) {
     const rosterDiv = document.getElementById('draft-team-roster');
     if (!selector || !rosterDiv) return;
 
-    if (selector.options.length === 0) {
-        gameState.teams.forEach(t => {
-            const opt = document.createElement('option');
-            opt.value = t.id; opt.textContent = t.name;
-            selector.appendChild(opt);
-        });
-        selector.onchange = () => renderDraftTeamView(gameState);
+    const teams = Array.isArray(gameState?.teams) ? gameState.teams : [];
+    const currentTeamId = String(selector.value || '');
+    const selectedTeam = teams.find(team =>
+        String(team.id) === currentTeamId
+    ) || teams[0] || null;
+
+    selector.value = selectedTeam?.id == null
+        ? ''
+        : String(selectedTeam.id);
+
+    const escapeTeamText = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    const teamLabel = document.getElementById('draft-team-label');
+    if (teamLabel) {
+        teamLabel.textContent = selectedTeam?.name || 'No teams available';
     }
-    const team = gameState.teams.find(t => t.id === selector.value);
+
+    const teamOptions = document.getElementById('draft-team-options');
+    if (teamOptions) {
+        teamOptions.innerHTML = teams
+            .slice()
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+            .map(team => `
+                <button
+                    type="button"
+                    data-draft-team-id="${escapeTeamText(team.id)}"
+                    data-draft-team-name="${escapeTeamText(team.name || 'Unnamed Team')}"
+                    aria-pressed="${String(team.id) === selector.value}"
+                    onclick="window.app_selectDraftTeam(this.dataset.draftTeamId)"
+                    class="stats-popover-option ${String(team.id) === selector.value ? 'bg-slate-100 font-bold' : ''}"
+                    role="option">
+                    ${escapeTeamText(team.name || 'Unnamed Team')}
+                </button>
+            `).join('');
+    }
+
+    const team = selectedTeam;
     const roster = getUIRosterObjects(team);
     rosterDiv.innerHTML = roster.map(p => `
         <div class="flex justify-between py-1 border-b text-xs">
@@ -15011,6 +15963,42 @@ export function renderDraftTeamView(gameState) {
         </div>
     `).join('');
 }
+
+window.app_toggleDraftTeamPicker = function() {
+    const popover = document.getElementById('draft-team-popover');
+    const trigger = document.getElementById('draft-team-trigger');
+    if (!popover || !trigger) return;
+
+    const isOpening = popover.classList.contains('hidden');
+    popover.classList.toggle('hidden', !isOpening);
+    trigger.setAttribute('aria-expanded', String(isOpening));
+
+    if (isOpening) {
+        document.getElementById('draft-team-search')?.focus();
+    }
+};
+
+window.app_filterDraftTeams = function() {
+    const query = String(
+        document.getElementById('draft-team-search')?.value || ''
+    ).trim().toLowerCase();
+
+    document.querySelectorAll('[data-draft-team-name]').forEach(button => {
+        button.hidden = !button.dataset.draftTeamName
+            .toLowerCase()
+            .includes(query);
+    });
+};
+
+window.app_selectDraftTeam = function(teamId) {
+    const selector = document.getElementById('draft-team-selector');
+    if (!selector) return;
+
+    selector.value = String(teamId);
+    document.getElementById('draft-team-popover')?.classList.add('hidden');
+    document.getElementById('draft-team-trigger')?.setAttribute('aria-expanded', 'false');
+    renderDraftTeamView(getGameState());
+};
 
 export function startLiveGameLoop(initialGameState, onComplete) {
     activeLiveGame = initialGameState;
@@ -15020,10 +16008,128 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     isPaused = false;
     liveGameCurrentIndex = 0;
 
+    renderLiveStrategyControls();
+
     if (elements.simPlayLog) elements.simPlayLog.innerHTML = '';
     updateLiveScoreboard();
     runLiveGameStep();
 }
+
+function renderLiveStrategyControls() {
+    const team = getGameState()?.playerTeam;
+    if (!activeLiveGame || !team) return;
+
+    const formationGroups = {
+        offense: Object.entries(offenseFormations)
+            .filter(([key]) => key !== 'Punt' && key !== 'Punt_Return'),
+        defense: Object.entries(defenseFormations)
+            .filter(([key]) => key !== 'Punt' && key !== 'Punt_Return')
+    };
+
+    for (const side of ['offense', 'defense']) {
+        const formationMap = side === 'offense'
+            ? offenseFormations
+            : defenseFormations;
+        const formationKey = team.formations?.[side];
+        const formation = formationMap[formationKey];
+        const choices = formationGroups[side];
+        const input = document.getElementById(`sim-${side}-formation`);
+        const label = document.getElementById(`sim-${side}-formation-label`);
+        const menu = document.getElementById(`sim-${side}-formation-menu`);
+        const personnel = document.getElementById(`sim-${side}-personnel`);
+
+        if (input) input.value = formationKey || '';
+        if (label) label.textContent = formation?.name || 'Choose formation';
+        if (personnel) {
+            const personnelText = Object.entries(formation?.personnel || {})
+                .filter(([, count]) => Number(count) > 0)
+                .map(([position, count]) => `${count} ${position}`)
+                .join(' · ');
+            personnel.textContent = personnelText
+                ? `Personnel: ${personnelText}`
+                : 'Personnel: Standard';
+        }
+
+        if (!menu) continue;
+
+        menu.innerHTML = choices.map(([key, option]) => {
+            const personnelText = Object.entries(option.personnel || {})
+                .filter(([, count]) => Number(count) > 0)
+                .map(([position, count]) => `${count} ${position}`)
+                .join(' · ') || 'Standard personnel';
+            const selected = key === formationKey;
+
+            return `
+                <button
+                    type="button"
+                    aria-pressed="${selected}"
+                    onclick="window.app_setLiveFormation('${side}', '${key}')"
+                    class="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-sm px-2 py-2 text-left ${selected ? 'bg-amber-500/15 text-amber-200' : 'text-gray-200 hover:bg-gray-800'}">
+                    <span class="truncate text-xs font-bold">${option.name || key}</span>
+                    <span class="text-right text-[9px] text-gray-400">${personnelText}</span>
+                </button>
+            `;
+        }).join('');
+    }
+}
+
+window.app_toggleLiveFormationPicker = function(side) {
+    if (!['offense', 'defense'].includes(side)) return;
+
+    const menu = document.getElementById(`sim-${side}-formation-menu`);
+    const trigger = document.getElementById(`sim-${side}-formation-trigger`);
+    if (!menu || !trigger) return;
+
+    const isOpening = menu.classList.contains('hidden');
+    document.querySelectorAll('.live-formation-menu').forEach(panel =>
+        panel.classList.add('hidden')
+    );
+    document.querySelectorAll('[aria-controls^="sim-"][aria-controls$="-formation-menu"]').forEach(button =>
+        button.setAttribute('aria-expanded', 'false')
+    );
+
+    if (isOpening) {
+        menu.classList.remove('hidden');
+        trigger.setAttribute('aria-expanded', 'true');
+    }
+};
+
+window.app_setLiveFormation = function(side, formationKey) {
+    if (
+        !activeLiveGame ||
+        !['offense', 'defense'].includes(side) ||
+        typeof formationKey !== 'string'
+    ) {
+        return;
+    }
+
+    const gameState = getGameState();
+    const team = gameState?.playerTeam;
+    const formations = side === 'offense'
+        ? offenseFormations
+        : defenseFormations;
+
+    if (!team || !formations[formationKey]) return;
+
+    Game.changeFormation(side, formationKey);
+
+    const liveTeam = [
+        activeLiveGame.homeTeam,
+        activeLiveGame.awayTeam
+    ].find(candidate =>
+        String(candidate?.id) === String(team.id)
+    );
+
+    if (liveTeam && liveTeam !== team) {
+        liveTeam.formations = { ...team.formations };
+        liveTeam.depthChart = team.depthChart;
+    }
+
+    Game.saveGameState();
+    renderLiveStrategyControls();
+    document.getElementById(`sim-${side}-formation-menu`)?.classList.add('hidden');
+    document.getElementById(`sim-${side}-formation-trigger`)?.setAttribute('aria-expanded', 'false');
+};
 
 function updateLiveScoreboard() {
     if (!activeLiveGame) return;

@@ -338,18 +338,18 @@
                             <div class="flex items-center gap-2">
                                 <input type="text" id="draft-search" placeholder="Search prospects..."
                                     class="p-1.5 border border-slate-300 rounded text-xs w-36 outline-none focus:border-amber-500">
-                                <select id="draft-filter-pos"
-                                    class="p-1.5 border border-slate-300 rounded text-xs bg-white outline-none">
-                                    <option value="">All Positions</option>
-                                    <option value="QB">QB</option>
-                                    <option value="RB">RB</option>
-                                    <option value="WR">WR</option>
-                                    <option value="TE">TE</option>
-                                    <option value="OL">OL</option>
-                                    <option value="DL">DL</option>
-                                    <option value="LB">LB</option>
-                                    <option value="DB">DB</option>
-                                </select>
+                                <input type="hidden" id="draft-filter-pos" value="">
+                                <div class="flex max-w-full flex-nowrap gap-0.5 overflow-x-auto rounded border border-slate-300 bg-white p-0.5 hide-scrollbar" role="group" aria-label="Filter draft prospects by position">
+                                    <button type="button" class="position-filter-button" data-position-filter="draft-filter-pos" data-position="" aria-pressed="true" onclick="window.app_setPositionFilter('draft-filter-pos', '')">ALL</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="draft-filter-pos" data-position="QB" aria-pressed="false" onclick="window.app_setPositionFilter('draft-filter-pos', 'QB')">QB</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="draft-filter-pos" data-position="RB" aria-pressed="false" onclick="window.app_setPositionFilter('draft-filter-pos', 'RB')">RB</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="draft-filter-pos" data-position="WR" aria-pressed="false" onclick="window.app_setPositionFilter('draft-filter-pos', 'WR')">WR</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="draft-filter-pos" data-position="TE" aria-pressed="false" onclick="window.app_setPositionFilter('draft-filter-pos', 'TE')">TE</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="draft-filter-pos" data-position="OL" aria-pressed="false" onclick="window.app_setPositionFilter('draft-filter-pos', 'OL')">OL</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="draft-filter-pos" data-position="DL" aria-pressed="false" onclick="window.app_setPositionFilter('draft-filter-pos', 'DL')">DL</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="draft-filter-pos" data-position="LB" aria-pressed="false" onclick="window.app_setPositionFilter('draft-filter-pos', 'LB')">LB</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="draft-filter-pos" data-position="DB" aria-pressed="false" onclick="window.app_setPositionFilter('draft-filter-pos', 'DB')">DB</button>
+                                </div>
                             </div>
 
                             <!-- Right: Stat View Tabs -->
@@ -392,11 +392,19 @@
                     <!-- Tab 3: League Rosters -->
                     <div id="draft-tab-teams"
                         class="draft-tab-content hidden flex-grow flex flex-col overflow-hidden bg-slate-50 min-h-0">
-                        <div class="p-3 bg-white border-b border-slate-200 shrink-0">
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Select
-                                Team</label>
-                            <select id="draft-team-selector"
-                                class="w-full p-2 border border-slate-300 rounded font-bold text-slate-800 outline-none"></select>
+                        <div class="relative z-20 flex flex-wrap items-end gap-3 p-3 bg-white border-b border-slate-200 shrink-0">
+                            <div class="relative w-full max-w-sm">
+                                <span class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500">League Team</span>
+                                <input type="hidden" id="draft-team-selector" value="">
+                                <button type="button" id="draft-team-trigger" aria-expanded="false" aria-controls="draft-team-popover" onclick="window.app_toggleDraftTeamPicker()" class="flex w-full items-center justify-between gap-3 rounded border border-slate-300 bg-white px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:border-slate-500">
+                                    <span id="draft-team-label" class="truncate">Select a team</span>
+                                    <span aria-hidden="true" class="text-slate-400">▾</span>
+                                </button>
+                                <div id="draft-team-popover" class="absolute left-0 top-full mt-1 hidden w-full min-w-64 rounded border border-slate-300 bg-white p-2 shadow-xl">
+                                    <input id="draft-team-search" type="search" placeholder="Search teams..." oninput="window.app_filterDraftTeams()" class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
+                                    <div id="draft-team-options" class="max-h-64 overflow-y-auto" role="listbox" aria-label="Choose a league team"></div>
+                                </div>
+                            </div>
                         </div>
                         <div id="draft-team-roster" class="p-4 overflow-y-auto flex-grow min-h-0"></div>
                     </div>
@@ -555,7 +563,7 @@
                     </div>
 
                     <div class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
-                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Staff Hours Left</span>
+                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Recruiting Hours Left</span>
                         <span class="font-bold text-white" id="fa-user-staff-hours">—</span>
                     </div>
 
@@ -596,25 +604,26 @@
                                 class="px-2 py-1.5 border border-slate-300 rounded text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-100"
                                 onclick="
                                     document.getElementById('fa-minigame-search').value = '';
-                                    document.getElementById('fa-minigame-filter-pos').value = '';
-                                    app.renderFAPool();
+                                    window.app_setRecruitingPositionFilter('');
                                 ">
                                 Clear
                             </button>
 
-                            <select id="fa-minigame-filter-pos"
-                                class="p-1.5 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none"
-                                onchange="app.renderFAPool()">
-                                <option value="">All Positions</option>
-                                <option value="QB">QB</option>
-                                <option value="RB">RB</option>
-                                <option value="WR">WR</option>
-                                <option value="TE">TE</option>
-                                <option value="OL">OL</option>
-                                <option value="DL">DL</option>
-                                <option value="LB">LB</option>
-                                <option value="DB">DB</option>
-                            </select>
+                            <input type="hidden" id="fa-minigame-filter-pos" value="">
+                            <div
+                                class="flex max-w-full flex-nowrap gap-0.5 overflow-x-auto rounded border border-slate-300 bg-white p-0.5 hide-scrollbar"
+                                role="group"
+                                aria-label="Filter prospects by position">
+                                <button type="button" data-fa-position="" aria-pressed="true" onclick="window.app_setRecruitingPositionFilter('')" class="shrink-0 rounded-sm bg-slate-900 px-1.5 py-1 text-[9px] font-black text-white">ALL</button>
+                                <button type="button" data-fa-position="QB" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('QB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">QB</button>
+                                <button type="button" data-fa-position="RB" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('RB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">RB</button>
+                                <button type="button" data-fa-position="WR" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('WR')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">WR</button>
+                                <button type="button" data-fa-position="TE" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('TE')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">TE</button>
+                                <button type="button" data-fa-position="OL" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('OL')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">OL</button>
+                                <button type="button" data-fa-position="DL" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('DL')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">DL</button>
+                                <button type="button" data-fa-position="LB" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('LB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">LB</button>
+                                <button type="button" data-fa-position="DB" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('DB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">DB</button>
+                            </div>
                         </div>
                     </div>
                     <div id="fa-minigame-pool-tbody" class="flex-grow overflow-auto min-h-0"></div>
@@ -802,17 +811,18 @@
                                 <h3 class="text-sm font-black uppercase tracking-wider text-slate-800 hidden sm:block">Park Free Agents</h3>
                             </div>
                             <div class="flex items-center gap-2">
-                                <select id="fa-filter-pos" class="p-1.5 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none">
-                                    <option value="">All Positions</option>
-                                    <option value="QB">QB</option>
-                                    <option value="RB">RB</option>
-                                    <option value="WR">WR</option>
-                                    <option value="TE">TE</option>
-                                    <option value="OL">OL</option>
-                                    <option value="DL">DL</option>
-                                    <option value="LB">LB</option>
-                                    <option value="DB">DB</option>
-                                </select>
+                                <input type="hidden" id="fa-filter-pos" value="">
+                                <div class="flex max-w-full flex-nowrap gap-0.5 overflow-x-auto rounded border border-slate-300 bg-white p-0.5 hide-scrollbar" role="group" aria-label="Filter free agents by position">
+                                    <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="" aria-pressed="true" onclick="window.app_setPositionFilter('fa-filter-pos', '')">ALL</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="QB" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'QB')">QB</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="RB" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'RB')">RB</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="WR" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'WR')">WR</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="TE" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'TE')">TE</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="OL" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'OL')">OL</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="DL" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'DL')">DL</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="LB" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'LB')">LB</button>
+                                    <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="DB" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'DB')">DB</button>
+                                </div>
                                 <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded text-xs uppercase tracking-wider shadow-sm transition" onclick="app.autoFillRoster()">
                                     ⚡ Auto-Fill Walk-Ons (14)
                                 </button>
@@ -841,22 +851,43 @@
                                 <div id="schedule-list"></div>
                             </div>
                             <div id="league-pane-player-stats" class="league-sub-pane hidden absolute inset-0 flex flex-col bg-white">
-                                <div class="p-4 border-b bg-gray-50 flex flex-wrap gap-4 items-center shrink-0">
-                                    <select id="stats-filter-league" class="p-2 border rounded text-sm bg-white">
-                                        <option value="">All Leagues</option>
-                                        <option value="tier1">Premier Parks (Tier 1)</option>
-                                        <option value="tier2">Sandlot Circuit (Tier 2)</option>
-                                        <option value="youth">Pee-Wee (Youth)</option>
-                                    </select>
-                                    <select id="stats-filter-team" class="p-2 border rounded text-sm"></select>
-                                    <select id="stats-sort" class="p-2 border rounded text-sm">
-                                        <option value="touchdowns">Sort by: TDs</option>
-                                        <option value="passYards">Sort by: Pass Yds</option>
-                                        <option value="rushYards">Sort by: Rush Yds</option>
-                                        <option value="recYards">Sort by: Rec Yds</option>
-                                        <option value="tackles">Sort by: Tackles</option>
-                                        <option value="sacks">Sort by: Sacks</option>
-                                        <option value="interceptions">Sort by: INTs</option>
+                                <div class="relative z-20 flex flex-wrap items-end gap-3 border-b bg-gray-50 p-3 shrink-0">
+                                    <div>
+                                        <span class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500">League</span>
+                                        <input type="hidden" id="stats-filter-league" value="">
+                                        <div class="flex flex-wrap gap-0.5 rounded border border-slate-300 bg-white p-0.5" role="group" aria-label="Filter stats by league">
+                                            <button type="button" class="stats-league-button is-active" data-league="" aria-pressed="true" onclick="window.app_setStatsLeagueFilter('')">All</button>
+                                            <button type="button" class="stats-league-button" data-league="tier1" aria-pressed="false" onclick="window.app_setStatsLeagueFilter('tier1')">Premier</button>
+                                            <button type="button" class="stats-league-button" data-league="tier2" aria-pressed="false" onclick="window.app_setStatsLeagueFilter('tier2')">Sandlot</button>
+                                            <button type="button" class="stats-league-button" data-league="youth" aria-pressed="false" onclick="window.app_setStatsLeagueFilter('youth')">Pee-Wee</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="relative">
+                                        <span class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500">Team</span>
+                                        <input type="hidden" id="stats-filter-team" value="">
+                                        <button type="button" id="stats-team-trigger" data-stats-popover-trigger aria-expanded="false" aria-controls="stats-team-popover" onclick="window.app_toggleStatsPopover('stats-team-popover', 'stats-team-trigger')" class="flex min-w-40 items-center justify-between gap-3 rounded border border-slate-300 bg-white px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:border-slate-500">
+                                            <span id="stats-team-label" class="truncate">All Teams</span>
+                                            <span aria-hidden="true" class="text-slate-400">▾</span>
+                                        </button>
+                                        <div id="stats-team-popover" class="stats-popover absolute left-0 top-full mt-1 hidden w-72 max-w-[90vw] rounded border border-slate-300 bg-white p-2 shadow-xl">
+                                            <input id="stats-team-search" type="search" placeholder="Search teams..." oninput="window.app_filterStatsTeams()" class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
+                                            <div id="stats-team-options" class="max-h-56 overflow-y-auto" role="listbox" aria-label="Choose a team"></div>
+                                        </div>
+                                    </div>
+
+                                    <div class="relative">
+                                        <span class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500">Sort</span>
+                                        <input type="hidden" id="stats-sort" value="touchdowns">
+                                        <button type="button" id="stats-sort-trigger" data-stats-popover-trigger aria-expanded="false" aria-controls="stats-sort-popover" onclick="window.app_toggleStatsPopover('stats-sort-popover', 'stats-sort-trigger')" class="flex min-w-40 items-center justify-between gap-3 rounded border border-slate-300 bg-white px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:border-slate-500">
+                                            <span id="stats-sort-label" class="truncate">Touchdowns</span>
+                                            <span aria-hidden="true" class="text-slate-400">▾</span>
+                                        </button>
+                                        <div id="stats-sort-popover" class="stats-popover absolute right-0 top-full mt-1 hidden w-80 max-w-[90vw] rounded border border-slate-300 bg-white p-2 shadow-xl">
+                                            <input id="stats-sort-search" type="search" placeholder="Search statistics..." oninput="window.app_filterStatsSort()" class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
+                                            <div id="stats-sort-options" class="grid max-h-64 grid-cols-2 gap-1 overflow-y-auto" role="listbox" aria-label="Sort statistics"></div>
+                                        </div>
+                                    </div>
                                     </select>
                                 </div>
                                 <div id="player-stats-container" class="flex-grow overflow-y-auto p-0 min-h-0"></div>
@@ -997,8 +1028,9 @@
                             <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
                                 <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Offensive
                                     Gameplan</label>
-                                <select id="sim-offense-formation"
-                                    class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none mb-1"></select>
+                                <input type="hidden" id="sim-offense-formation" value="">
+                                <button type="button" id="sim-offense-formation-trigger" aria-expanded="false" aria-controls="sim-offense-formation-menu" onclick="window.app_toggleLiveFormationPicker('offense')" class="flex w-full items-center justify-between gap-2 rounded border border-gray-600 bg-gray-900 px-2 py-1.5 text-left text-xs font-bold text-white hover:border-amber-500"><span id="sim-offense-formation-label">Current offense</span><span aria-hidden="true" class="text-gray-400">▾</span></button>
+                                <div id="sim-offense-formation-menu" class="live-formation-menu mt-1 hidden max-h-56 overflow-y-auto rounded border border-gray-700 bg-gray-950 p-1"></div>
                                 <div id="sim-offense-personnel"
                                     class="text-[10px] text-amber-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block">
                                 </div>
@@ -1006,8 +1038,9 @@
                             <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
                                 <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Defensive
                                     Gameplan</label>
-                                <select id="sim-defense-formation"
-                                    class="w-full bg-gray-900 text-white text-xs border border-gray-600 rounded p-1.5 focus:border-amber-500 outline-none mb-1"></select>
+                                <input type="hidden" id="sim-defense-formation" value="">
+                                <button type="button" id="sim-defense-formation-trigger" aria-expanded="false" aria-controls="sim-defense-formation-menu" onclick="window.app_toggleLiveFormationPicker('defense')" class="flex w-full items-center justify-between gap-2 rounded border border-gray-600 bg-gray-900 px-2 py-1.5 text-left text-xs font-bold text-white hover:border-amber-500"><span id="sim-defense-formation-label">Current defense</span><span aria-hidden="true" class="text-gray-400">▾</span></button>
+                                <div id="sim-defense-formation-menu" class="live-formation-menu mt-1 hidden max-h-56 overflow-y-auto rounded border border-gray-700 bg-gray-950 p-1"></div>
                                 <div id="sim-defense-personnel"
                                     class="text-[10px] text-blue-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block">
                                 </div>
