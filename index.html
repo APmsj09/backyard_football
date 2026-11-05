@@ -66,6 +66,32 @@
             animation: fadeIn 0.3s ease-out;
         }
 
+            .gm-builder-picker-container {
+            container-name: gm-builder-picker;
+            container-type: inline-size;
+        }
+
+        .gm-builder-option-header,
+        .gm-builder-option {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .gm-builder-option-header > span,
+        .gm-builder-option > span {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        @container gm-builder-picker (min-width: 560px) {
+            .gm-builder-option-header,
+            .gm-builder-option {
+                grid-template-columns:
+                    minmax(0, 0.8fr)
+                    minmax(0, 1.3fr)
+                    minmax(0, 1fr);
+            }
+        }
+
         @keyframes fadeIn {
             from {
                 opacity: 0;

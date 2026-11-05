@@ -390,6 +390,19 @@ const STAFF_SCHEDULES = [
 ];
 
 function createStaffAvailability(role = 'coach') {
+    // The player's personal coaching profile should have a predictable
+    // weekly commitment rather than randomly generated staff availability.
+    if (role === 'user-coach') {
+        return {
+            weeklyHours: 8,
+            scheduleType: 'flexible',
+            scheduleLabel: 'Flexible schedule',
+            availableDays: ['Flexible'],
+            timeWindow: 'flexible',
+            reliability: 100
+        };
+    }
+
     const weeklyHourRanges = {
         coach: [3, 12],
         scout: [2, 8],

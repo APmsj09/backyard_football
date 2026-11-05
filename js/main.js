@@ -28,7 +28,8 @@ import {
 
 import {
     getEffectiveStaffWorkHours,
-    applyRecruitingSweetener
+    applyRecruitingSweetener,
+    buildAutomatedStaffAssignmentsForTeam
 } from './game/staff.js';
 import {
     acceptCommunityFavor as acceptCommunityFavorAction
@@ -47,6 +48,10 @@ let renderActiveExitInterview = null;
 const getDraftRosterLimit = () => getCurrentRosterLimit(gameState);
 const MIN_HEALTHY_PLAYERS = 8;
 const WEEKS_IN_SEASON = 9;
+
+const MIN_STARTING_COACH_SKILL = 20;
+const MAX_STARTING_COACH_SKILL = 70;
+const STARTING_COACH_SKILL_BUDGET = 330;
 
 const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const DEFENSIVE_POSITION_FITS = ['DL', 'LB', 'DB'];
@@ -489,19 +494,19 @@ function promptCoachCreation(teamId) {
 
         return `
             <input type="hidden" id="${controlId}" value="${escapeBuilderText(selectedValue)}">
-            <div class="relative">
-                <button type="button" id="${controlId}-trigger" aria-expanded="false" aria-controls="${popoverId}" onclick="window.app_toggleGMBuilderPicker('${controlId}')" class="flex w-full items-center justify-between gap-3 rounded border border-slate-300 bg-white px-2.5 py-2 text-left text-xs font-bold text-slate-800 hover:border-amber-500">
+            <div class="relative w-full min-w-0 gm-builder-picker-container">
+                <button type="button" id="${controlId}-trigger" aria-expanded="false" aria-controls="${popoverId}" onclick="window.app_toggleGMBuilderPicker('${controlId}')" class="flex w-full min-w-0 items-center justify-between gap-3 rounded border border-slate-300 bg-white px-2.5 py-2 text-left text-xs font-bold text-slate-800 hover:border-amber-500">
                     <span id="${controlId}-label" class="truncate">${escapeBuilderText(selected?.label || placeholder)}</span>
                     <span aria-hidden="true" class="text-slate-400">▾</span>
                 </button>
-                <div id="${popoverId}" class="gm-builder-popover absolute left-0 top-full z-40 mt-1 hidden max-h-80 w-full max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
-                    <input type="search" data-gm-builder-search="${controlId}" placeholder="Search ${escapeBuilderText(placeholder.toLowerCase())}..." oninput="window.app_filterGMBuilderPicker('${controlId}')" class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-amber-500">
+                <div id="${popoverId}" class="gm-builder-popover absolute left-0 top-full z-40 mt-1 hidden max-h-80 w-full min-w-0 max-w-full overflow-x-hidden overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
+                    <input type="search" data-gm-builder-search="${controlId}" placeholder="Search ${escapeBuilderText(placeholder.toLowerCase())}..." oninput="window.app_filterGMBuilderPicker('${controlId}')" class="mb-2 w-full min-w-0 rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-amber-500">
                     <div class="overflow-hidden rounded-sm border border-slate-200">
-                        <div class="grid grid-cols-1 gap-1 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1fr)] sm:gap-2">
+                        <div class="grid gm-builder-option-header gap-1 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
                             <span>Choice</span><span>Effect / Personnel</span><span>Trade-off / Style</span>
                         </div>
                         ${options.map(option => `
-                            <button type="button" data-gm-builder-option="${controlId}" data-gm-builder-value="${escapeBuilderText(option.value)}" data-gm-builder-label="${escapeBuilderText(option.label)}" data-gm-builder-search-text="${escapeBuilderText(`${option.label} ${option.detail || ''} ${option.extra || ''}`)}" aria-pressed="${String(option.value) === String(selectedValue)}" onclick="window.app_selectGMBuilderOption(this)" class="grid w-full grid-cols-1 gap-1 border-t border-slate-100 px-2 py-2 text-left text-[10px] sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1fr)] sm:gap-2 ${String(option.value) === String(selectedValue) ? 'bg-amber-50' : 'hover:bg-slate-50'}">
+                            <button type="button" data-gm-builder-option="${controlId}" data-gm-builder-value="${escapeBuilderText(option.value)}" data-gm-builder-label="${escapeBuilderText(option.label)}" data-gm-builder-search-text="${escapeBuilderText(`${option.label} ${option.detail || ''} ${option.extra || ''}`)}" aria-pressed="${String(option.value) === String(selectedValue)}" onclick="window.app_selectGMBuilderOption(this)" class="grid gm-builder-option w-full min-w-0 gap-1 border-t border-slate-100 px-2 py-2 text-left text-[10px] ${String(option.value) === String(selectedValue) ? 'bg-amber-50' : 'hover:bg-slate-50'}">
                                 <span class="font-bold text-slate-800">${escapeBuilderText(option.label)}</span>
                                 <span class="text-slate-600">${escapeBuilderText(option.detail || '—')}</span>
                                 <span class="text-amber-800">${escapeBuilderText(option.extra || '—')}</span>
@@ -572,7 +577,31 @@ function promptCoachCreation(teamId) {
 
         input.value = value;
         label.textContent = button.dataset.gmBuilderLabel || value;
+
+        document.querySelectorAll(
+            `[data-gm-builder-option="${controlId}"]`
+        ).forEach(optionButton => {
+            const isSelected =
+                String(optionButton.dataset.gmBuilderValue) === String(value);
+
+            optionButton.setAttribute(
+                'aria-pressed',
+                String(isSelected)
+            );
+
+            optionButton.classList.toggle(
+                'bg-amber-50',
+                isSelected
+            );
+
+            optionButton.classList.toggle(
+                'hover:bg-slate-50',
+                !isSelected
+            );
+        });
+
         input.dispatchEvent(new Event('change', { bubbles: true }));
+
         document.getElementById(`${controlId}-popover`)?.classList.add('hidden');
         document.getElementById(`${controlId}-trigger`)?.setAttribute('aria-expanded', 'false');
     };
@@ -607,7 +636,7 @@ function promptCoachCreation(teamId) {
         ? currentDefense
         : defenseChoices[0]?.value || '';
 
-    const coachSkillBudget = 330;
+    const coachSkillBudget = STARTING_COACH_SKILL_BUDGET;
 
     const coachSkillDefinitions = [
         { id: 'offense', label: 'Offense Scheme', keys: ['offSchemeMastery'] },
@@ -621,8 +650,8 @@ function promptCoachCreation(teamId) {
     const coachSkillPresets = {
         balanced: {
             label: 'Balanced',
-            detail: '50 across the board · 30 free',
-            values: { offense: 50, defense: 50, evaluation: 50, teaching: 50, planning: 50, practice: 50 }
+            detail: '55 across the board · Full budget',
+            values: { offense: 55, defense: 55, evaluation: 55, teaching: 55, planning: 55, practice: 55 }
         },
         evaluator: {
             label: 'Evaluator',
@@ -655,7 +684,7 @@ function promptCoachCreation(teamId) {
         '</p>' +
         '<div class="flex items-center justify-between bg-slate-900 text-white rounded px-3 py-2 mb-2">' +
         '<span class="text-xs font-bold uppercase">Skill Budget</span>' +
-        '<span class="text-right"><span id="new-coach-skill-total" class="block text-sm font-black">300 / 330</span><span id="new-coach-skill-remaining" class="block text-[9px] text-slate-300">30 points available</span></span>' +
+        '<span class="text-right"><span id="new-coach-skill-total" class="block text-sm font-black">330 / 330</span><span id="new-coach-skill-remaining" class="block text-[9px] text-slate-300">0 points available</span></span>' +
         '</div>' +
         '<div class="grid grid-cols-2 sm:grid-cols-3 gap-1 mb-3">' +
         Object.entries(coachSkillPresets).map(([key, preset]) =>
@@ -675,20 +704,22 @@ function promptCoachCreation(teamId) {
                 '<span class="flex items-center justify-between gap-2 text-xs font-bold text-slate-800 mb-3">' +
                 '<span>' + skill.label + '</span>' +
                 '<output id="new-coach-skill-value-' + skill.id + '"' +
-                ' class="text-base font-black text-slate-900 tabular-nums">50</output>' +
+                ' class="text-base font-black text-slate-900 tabular-nums">55</output>' +
                 '</span>' +
                 '<input type="range"' +
                 ' id="new-coach-skill-' + skill.id + '"' +
-                ' min="20" max="80" step="1" value="50"' +
+                ' min="' + MIN_STARTING_COACH_SKILL + '"' +
+                ' max="' + MAX_STARTING_COACH_SKILL + '"' +
+                ' step="1" value="55"' +
                 ' class="w-full accent-amber-500 cursor-pointer">' +
                 '<span class="flex justify-between text-[10px] text-slate-500 mt-1">' +
-                '<span>20 · Developing</span>' +
-                '<span>80 · Elite</span>' +
+                '<span>' + MIN_STARTING_COACH_SKILL + ' · Developing</span>' +
+                '<span>' + MAX_STARTING_COACH_SKILL + ' · Elite</span>' +
                 '</span></label>';
         }).join('') +
         '</div>' +
         '<p class="text-xs text-slate-500 mt-2">' +
-        'Skills range from 20 to 80. Presets leave points available for personal tuning.' +
+        'Starting skills range from 20 to 70. Presets leave points available for personal tuning.' +
         '</p></div>';
 
     const modalHtml = `
@@ -897,8 +928,11 @@ function promptCoachCreation(teamId) {
             // Prevent this slider from exceeding the remaining budget.
             control.max = String(
                 Math.max(
-                    20,
-                    Math.min(80, coachSkillBudget - otherSkillsTotal)
+                    MIN_STARTING_COACH_SKILL,
+                    Math.min(
+                        MAX_STARTING_COACH_SKILL,
+                        coachSkillBudget - otherSkillsTotal
+                    )
                 )
             );
 
@@ -1408,8 +1442,8 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
     const team = gameState.teams.find(t => t.id === teamId);
     if (!team) return;
 
-    const MIN_COACH_SKILL = 20;
-    const MAX_COACH_SKILL = 80;
+    const MIN_COACH_SKILL = MIN_STARTING_COACH_SKILL;
+    const MAX_COACH_SKILL = MAX_STARTING_COACH_SKILL;
 
     const coachSkillGroups = [
         { source: 'offSchemeMastery', keys: ['offSchemeMastery'] },
@@ -1443,7 +1477,7 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         ) {
             UI.showModal(
                 'Invalid Coach Build',
-                'Every coaching skill must be between 20 and 80.'
+                `Every starting coaching skill must be between ${MIN_COACH_SKILL} and ${MAX_COACH_SKILL}.`
             );
             return;
         }
@@ -1455,10 +1489,10 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         });
     }
 
-    if (skillBudgetTotal > 330) {
+    if (skillBudgetTotal > STARTING_COACH_SKILL_BUDGET) {
         UI.showModal(
             'Skill Budget Exceeded',
-            `Your coach uses ${skillBudgetTotal} points. The maximum is 330. Lower one or more skills and try again.`
+            `Your coach uses ${skillBudgetTotal} points. The maximum is ${STARTING_COACH_SKILL_BUDGET}. Lower one or more skills and try again.`
         );
         return;
     }
@@ -1535,22 +1569,46 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
 
         if (!team.staff) Game.initializeTeamStaff(team);
 
-        if (team.staff.gm) {
-            team.staff.gm.name = coachDetails.name;
+        const gmAgent = team.aiGmProfile || team.staff.gm;
 
-            if (!team.staff.gm.biases) {
-                team.staff.gm.biases = {};
+        if (gmAgent) {
+            const gmStrategyByArchetype = {
+                film_room_rat: 'DEVELOP_YOUTH',
+                neighborhood_builder: 'DEVELOP_YOUTH',
+                deal_maker: 'WIN_NOW',
+                culture_keeper: 'DEVELOP_YOUTH',
+                tactical_innovator: 'COACH_AUTONOMY',
+                win_now_gambler: 'WIN_NOW'
+            };
+
+            gmAgent.name = coachDetails.name;
+
+            // Keep the live GM agent aligned with the identity selected
+            // during franchise takeover, rather than its generated AI profile.
+            gmAgent.managementArchetypeId = archetype.id;
+            gmAgent.managementArchetypeName = archetype.name;
+            gmAgent.strategicDirective =
+                gmStrategyByArchetype[archetype.id] ||
+                gmAgent.strategicDirective ||
+                'COACH_AUTONOMY';
+
+            if (!gmAgent.biases) {
+                gmAgent.biases = {};
             }
 
-            team.staff.gm.biases.personality = {
+            gmAgent.biases.personality = {
                 name: archetype.name,
                 desc: archetype.lore
             };
 
-            team.staff.gm.biases.tactical = {
+            gmAgent.biases.tactical = {
                 name: coachDetails.off,
                 desc: `The franchise's chosen offensive identity is ${coachDetails.off}.`
             };
+
+            // Keep both references synchronized for existing systems.
+            team.aiGmProfile = gmAgent;
+            team.staff.gm = gmAgent;
         }
 
         // Keep the same head coach, but make the selected schemes their working preferences.
@@ -1617,6 +1675,14 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
             ...validatedSkillRatings
         };
 
+        // The initial development profile was created before the selected
+        // ratings were applied. Rebuild potential ceilings from the actual
+        // starting ratings rather than the temporary default ratings.
+        userCoach.development = {
+            ...(userCoach.development || {}),
+            skillCeilings: {}
+        };
+
         // Preserve the complete profile for future management systems.
         team.userCoachProfile = userCoach;
     } else {
@@ -1626,7 +1692,37 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         );
     }
 
-    Game.ensureTeamStaffWorkPlan(team);
+    const staffWorkPlan = Game.ensureTeamStaffWorkPlan(team);
+
+    // Rebuild the initial takeover workload after applying the user's
+    // coaching ratings. This ensures the new user-coach participates
+    // in the same skill-weighted allocation as the other coaches.
+    if (
+        userCoach &&
+        staffWorkPlan &&
+        Array.isArray(staffWorkPlan.assignments)
+    ) {
+        // Accepted community-service work remains a committed obligation.
+        const committedCommunityAssignments =
+            staffWorkPlan.assignments.filter(assignment =>
+                assignment?.task === 'communityService'
+            );
+
+        const takeoverAssignments =
+            buildAutomatedStaffAssignmentsForTeam(team, gameState);
+
+        staffWorkPlan.assignments = [
+            ...takeoverAssignments.filter(
+                assignment => assignment?.task !== 'communityService'
+            ),
+            ...committedCommunityAssignments
+        ];
+
+        staffWorkPlan.autoAssignedFor = {
+            year: gameState.year ?? null,
+            week: gameState.currentWeek ?? null
+        };
+    }
 
     // Initialize Year 5 Draft and reset all tracked stats for the new season.
     gameState.players.forEach(p => {
