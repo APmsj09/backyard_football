@@ -494,14 +494,14 @@ function promptCoachCreation(teamId) {
                     <span id="${controlId}-label" class="truncate">${escapeBuilderText(selected?.label || placeholder)}</span>
                     <span aria-hidden="true" class="text-slate-400">▾</span>
                 </button>
-                <div id="${popoverId}" class="gm-builder-popover absolute left-0 top-full z-40 mt-1 hidden max-h-80 w-[min(48rem,90vw)] overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
+                <div id="${popoverId}" class="gm-builder-popover absolute left-0 top-full z-40 mt-1 hidden max-h-80 w-full max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
                     <input type="search" data-gm-builder-search="${controlId}" placeholder="Search ${escapeBuilderText(placeholder.toLowerCase())}..." oninput="window.app_filterGMBuilderPicker('${controlId}')" class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-amber-500">
                     <div class="overflow-hidden rounded-sm border border-slate-200">
-                        <div class="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-2 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                        <div class="grid grid-cols-1 gap-1 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1fr)] sm:gap-2">
                             <span>Choice</span><span>Effect / Personnel</span><span>Trade-off / Style</span>
                         </div>
                         ${options.map(option => `
-                            <button type="button" data-gm-builder-option="${controlId}" data-gm-builder-value="${escapeBuilderText(option.value)}" data-gm-builder-label="${escapeBuilderText(option.label)}" data-gm-builder-search-text="${escapeBuilderText(`${option.label} ${option.detail || ''} ${option.extra || ''}`)}" aria-pressed="${String(option.value) === String(selectedValue)}" onclick="window.app_selectGMBuilderOption(this)" class="grid w-full grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-2 border-t border-slate-100 px-2 py-2 text-left text-[10px] ${String(option.value) === String(selectedValue) ? 'bg-amber-50' : 'hover:bg-slate-50'}">
+                            <button type="button" data-gm-builder-option="${controlId}" data-gm-builder-value="${escapeBuilderText(option.value)}" data-gm-builder-label="${escapeBuilderText(option.label)}" data-gm-builder-search-text="${escapeBuilderText(`${option.label} ${option.detail || ''} ${option.extra || ''}`)}" aria-pressed="${String(option.value) === String(selectedValue)}" onclick="window.app_selectGMBuilderOption(this)" class="grid w-full grid-cols-1 gap-1 border-t border-slate-100 px-2 py-2 text-left text-[10px] sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.3fr)_minmax(0,1fr)] sm:gap-2 ${String(option.value) === String(selectedValue) ? 'bg-amber-50' : 'hover:bg-slate-50'}">
                                 <span class="font-bold text-slate-800">${escapeBuilderText(option.label)}</span>
                                 <span class="text-slate-600">${escapeBuilderText(option.detail || '—')}</span>
                                 <span class="text-amber-800">${escapeBuilderText(option.extra || '—')}</span>
@@ -608,7 +608,6 @@ function promptCoachCreation(teamId) {
         : defenseChoices[0]?.value || '';
 
     const coachSkillBudget = 330;
-    const coachSkillValues = [35, 40, 45, 50, 55, 60, 65, 70, 75, 80];
 
     const coachSkillDefinitions = [
         { id: 'offense', label: 'Offense Scheme', keys: ['offSchemeMastery'] },
@@ -619,16 +618,56 @@ function promptCoachCreation(teamId) {
         { id: 'practice', label: 'Practice & Conditioning', keys: ['practiceDiscipline', 'conditioning'] }
     ];
 
+    const coachSkillPresets = {
+        balanced: {
+            label: 'Balanced',
+            detail: '50 across the board · 30 free',
+            values: { offense: 50, defense: 50, evaluation: 50, teaching: 50, planning: 50, practice: 50 }
+        },
+        evaluator: {
+            label: 'Evaluator',
+            detail: '70 player evaluation · 30 free',
+            values: { offense: 45, defense: 45, evaluation: 70, teaching: 50, planning: 45, practice: 45 }
+        },
+        developer: {
+            label: 'Developer',
+            detail: 'Teaching and practice · 30 free',
+            values: { offense: 40, defense: 40, evaluation: 45, teaching: 65, planning: 45, practice: 65 }
+        },
+        tactician: {
+            label: 'Tactician',
+            detail: 'Offense and defense · 30 free',
+            values: { offense: 65, defense: 65, evaluation: 45, teaching: 40, planning: 55, practice: 30 }
+        },
+        custom: {
+            label: 'Blank canvas',
+            detail: '20 across the board · 210 free',
+            values: { offense: 20, defense: 20, evaluation: 20, teaching: 20, planning: 20, practice: 20 }
+        }
+    };
+
     const coachSkillControlsHtml =
         '<div class="border-t border-slate-200 pt-4">' +
         '<label class="block text-xs font-bold text-slate-800 uppercase mb-1">' +
         '4. Coaching Skill Allocation</label>' +
         '<p class="text-xs text-slate-600 mb-3">' +
-        'Build your strengths and weaknesses using a shared budget.' +
+        'Choose a starting profile or begin at the minimum and build it yourself.' +
         '</p>' +
-        '<div class="flex justify-between bg-slate-900 text-white rounded px-3 py-2 mb-3">' +
+        '<div class="flex items-center justify-between bg-slate-900 text-white rounded px-3 py-2 mb-2">' +
         '<span class="text-xs font-bold uppercase">Skill Budget</span>' +
-        '<span id="new-coach-skill-total" class="text-sm font-black">330 / 330</span>' +
+        '<span class="text-right"><span id="new-coach-skill-total" class="block text-sm font-black">300 / 330</span><span id="new-coach-skill-remaining" class="block text-[9px] text-slate-300">30 points available</span></span>' +
+        '</div>' +
+        '<div class="grid grid-cols-2 sm:grid-cols-3 gap-1 mb-3">' +
+        Object.entries(coachSkillPresets).map(([key, preset]) =>
+            '<button type="button" data-coach-skill-preset="' + key + '" ' +
+            'aria-pressed="' + (key === 'balanced') + '" ' +
+            'onclick="window.app_setCoachSkillPreset(\'' + key + '\')" ' +
+            'class="rounded-sm border px-2 py-1.5 text-left ' +
+            (key === 'balanced' ? 'border-amber-600 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50') + '">' +
+            '<span class="block text-[10px] font-black">' + preset.label + '</span>' +
+            '<span class="block text-[9px] text-slate-500">' + preset.detail + '</span>' +
+            '</button>'
+        ).join('') +
         '</div>' +
         '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
         coachSkillDefinitions.map(function (skill) {
@@ -636,11 +675,11 @@ function promptCoachCreation(teamId) {
                 '<span class="flex items-center justify-between gap-2 text-xs font-bold text-slate-800 mb-3">' +
                 '<span>' + skill.label + '</span>' +
                 '<output id="new-coach-skill-value-' + skill.id + '"' +
-                ' class="text-base font-black text-slate-900 tabular-nums">55</output>' +
+                ' class="text-base font-black text-slate-900 tabular-nums">50</output>' +
                 '</span>' +
                 '<input type="range"' +
                 ' id="new-coach-skill-' + skill.id + '"' +
-                ' min="20" max="80" step="1" value="55"' +
+                ' min="20" max="80" step="1" value="50"' +
                 ' class="w-full accent-amber-500 cursor-pointer">' +
                 '<span class="flex justify-between text-[10px] text-slate-500 mt-1">' +
                 '<span>20 · Developing</span>' +
@@ -649,7 +688,7 @@ function promptCoachCreation(teamId) {
         }).join('') +
         '</div>' +
         '<p class="text-xs text-slate-500 mt-2">' +
-        'Skills range from 20 to 80. Lower one to free points for another.' +
+        'Skills range from 20 to 80. Presets leave points available for personal tuning.' +
         '</p></div>';
 
     const modalHtml = `
@@ -804,6 +843,8 @@ function promptCoachCreation(teamId) {
         )
         .filter(Boolean);
 
+    let activeCoachSkillPreset = 'balanced';
+
     const updateCoachSkillBudget = () => {
         const total = coachSkillControls.reduce(
             (sum, control) => sum + Number(control.value || 0),
@@ -823,6 +864,24 @@ function promptCoachCreation(teamId) {
                 total > coachSkillBudget
             );
         }
+
+        const remainingElement = document.getElementById(
+            'new-coach-skill-remaining'
+        );
+        if (remainingElement) {
+            const remaining = coachSkillBudget - total;
+            remainingElement.textContent = remaining >= 0
+                ? `${remaining} points available`
+                : `${Math.abs(remaining)} points over budget`;
+            remainingElement.classList.toggle('text-rose-300', remaining < 0);
+        }
+
+        document.querySelectorAll('[data-coach-skill-preset]').forEach(button => {
+            const selected =
+                button.dataset.coachSkillPreset === activeCoachSkillPreset;
+            button.setAttribute('aria-pressed', String(selected));
+            button.className = `rounded-sm border px-2 py-1.5 text-left ${selected ? 'border-amber-600 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`;
+        });
 
         coachSkillControls.forEach(control => {
             const currentValue = Number(control.value || 20);
@@ -858,8 +917,28 @@ function promptCoachCreation(teamId) {
         });
     };
 
+    window.app_setCoachSkillPreset = presetKey => {
+        const preset = coachSkillPresets[presetKey];
+        if (!preset) return;
+
+        activeCoachSkillPreset = presetKey;
+        coachSkillDefinitions.forEach(skill => {
+            const control = document.getElementById(
+                'new-coach-skill-' + skill.id
+            );
+            if (control) {
+                control.value = String(preset.values[skill.id]);
+            }
+        });
+
+        updateCoachSkillBudget();
+    };
+
     coachSkillControls.forEach(control => {
-        control.addEventListener('input', updateCoachSkillBudget);
+        control.addEventListener('input', () => {
+            activeCoachSkillPreset = 'custom';
+            updateCoachSkillBudget();
+        });
     });
 
     updateChoiceSummaries();
