@@ -784,7 +784,8 @@ export function getEffectiveStaffWorkHours(team, assignment) {
         weeklyCapacity / totalRequestedHours
     );
 
-    const rawReliability = Number(availability.reliability);
+    const availability = ensureStaffAvailability(coach);
+    const rawReliability = Number(availability?.reliability);
 
     const reliability = Math.max(
         0,
@@ -3526,7 +3527,7 @@ export function getRecruitingStaffHourBudget(team, gameState = null) {
             const availability = ensureStaffAvailability(coach);
             const rawHours = Number(availability?.weeklyHours);
 
-            const weeklyHours = Math.max(
+            const availabilityHours = Math.max(
                 0,
                 Math.min(
                     WEEKLY_COACH_HOURS,
@@ -3534,6 +3535,12 @@ export function getRecruitingStaffHourBudget(team, gameState = null) {
                         Number.isFinite(rawHours) ? rawHours : 8
                     )
                 )
+            );
+
+            const weeklyHours = getStaffWeeklyWorkCapacity(
+                team,
+                coach,
+                team.staffWorkPlan
             );
 
             const coachId = String(coach.id);
@@ -3625,6 +3632,7 @@ export function getRecruitingStaffHourBudget(team, gameState = null) {
 
                 weeklyHours,
                 weeklyCapacity: weeklyHours,
+                availabilityHours,
 
                 assignedHours,
                 recruitingHours,
@@ -3930,10 +3938,29 @@ export function recordRecruitingStaffAssignment(
         );
 
     // The daily history and weekly plan normally agree. Use the
-    // larger total to avoid accidentally granting duplicate hours.
+    // larger recruiting total to avoid granting duplicate hours.
+    const dailyWorkHistory =
+        progress.teamDailyWork?.[teamKey] || {};
+
+    const recordedRecruitingHours = Object.values(
+        dailyWorkHistory
+    )
+        .flatMap(assignments =>
+            Array.isArray(assignments) ? assignments : []
+        )
+        .filter(assignment =>
+            String(assignment?.coachId) === coachKey &&
+            isRecruitingAssignment(assignment)
+        )
+        .reduce(
+            (total, assignment) =>
+                total + Math.max(0, Number(assignment.hours) || 0),
+            0
+        );
+
     const recruitingHoursUsed = Math.max(
-        hoursAlreadyUsed,
-        plannedRecruitingHours
+        plannedRecruitingHours,
+        recordedRecruitingHours
     );
 
     const weeklyCapacity = getStaffWeeklyWorkCapacity(
@@ -3944,7 +3971,7 @@ export function recordRecruitingStaffAssignment(
 
     const remainingHours = Math.max(
         0,
-        recruitingCapacity - hoursAlreadyUsed
+        recruitingCapacity - recruitingHoursUsed
     );
 
     if (requestedHours > remainingHours) {
@@ -4012,39 +4039,6 @@ export function recordRecruitingStaffAssignment(
     }
 
     const teamWork = progress.teamDailyWork[teamKey];
-
-    const planHoursValue = Number(
-        staffWorkPlan.weeklyHoursPerCoach
-    );
-
-    const planCapacity = Number.isFinite(planHoursValue) &&
-        planHoursValue >= 0
-        ? Math.min(
-            WEEKLY_COACH_HOURS,
-            Math.floor(planHoursValue)
-        )
-        : WEEKLY_COACH_HOURS;
-
-    const weeklyCapacity = Math.min(
-        coachBudget.weeklyHours,
-        planCapacity
-    );
-
-    // All existing weekly assignments count against the same
-    // coaching-hour limit, including scouting, training,
-    // preparation, community service, and recruiting.
-    const hoursAlreadyUsed = staffWorkPlan.assignments
-        .filter(assignment =>
-            assignment &&
-            String(assignment.coachId) === coachKey &&
-            Number.isFinite(Number(assignment.hours)) &&
-            Number(assignment.hours) > 0
-        )
-        .reduce(
-            (total, assignment) =>
-                total + Number(assignment.hours),
-            0
-        );
 
     const assignment = {
         year: workYear,
@@ -6167,11 +6161,38 @@ export function processAiRecruitingDay(gameState) {
                     ].includes(activity.type)
                 );
 
-                const observedRivalTeams = new Set(
-                    observedRivalActivity.map(activity =>
+                // Active roster offers are observable competition too.
+                // Only count offers made before today so teams are evaluated
+                // using the same previous-day information window.
+                const activeRivalOfferTeamIds = Object.entries(
+                    record.offersByTeam || {}
+                )
+                    .filter(([rivalTeamId, offer]) => {
+                        if (
+                            String(rivalTeamId) === teamKey ||
+                            offer?.status !== 'active' ||
+                            !Number.isFinite(Number(offer.offeredDay)) ||
+                            Number(offer.offeredDay) >= day
+                        ) {
+                            return false;
+                        }
+
+                        const rivalTeam = gameState.teams.find(
+                            candidate =>
+                                String(candidate?.id) ===
+                                String(rivalTeamId)
+                        );
+
+                        return rivalTeam?.leagueType === 'main';
+                    })
+                    .map(([rivalTeamId]) => String(rivalTeamId));
+
+                const observedRivalTeams = new Set([
+                    ...observedRivalActivity.map(activity =>
                         String(activity.teamId)
-                    )
-                );
+                    ),
+                    ...activeRivalOfferTeamIds
+                ]);
 
                 const rivalTeamCount = observedRivalTeams.size;
 
@@ -7341,20 +7362,11 @@ export function ensureAiStaffWorkPlan(
         const isRecruitingWeek =
             isOffseason && offseasonPhase === 'recruiting';
 
-        const availability = ensureStaffAvailability(coach);
-        const rawWeeklyHours = Number(availability?.weeklyHours);
-
         const coachWeeklyCapacity = isRecruitingWeek
-            ? Math.max(
-                0,
-                Math.min(
-                    WEEKLY_COACH_HOURS,
-                    Math.floor(
-                        Number.isFinite(rawWeeklyHours)
-                            ? rawWeeklyHours
-                            : 8
-                    )
-                )
+            ? getStaffWeeklyWorkCapacity(
+                team,
+                coach,
+                null
             )
             : WEEKLY_COACH_HOURS;
 
@@ -7380,22 +7392,7 @@ export function ensureAiStaffWorkPlan(
         let specialtyHours = 16;
 
         if (isRecruitingWeek) {
-            const availability = ensureStaffAvailability(coach);
-            const rawWeeklyHours = Number(
-                availability?.weeklyHours
-            );
-
-            const weeklyAvailableHours = Math.max(
-                0,
-                Math.min(
-                    WEEKLY_COACH_HOURS,
-                    Math.floor(
-                        Number.isFinite(rawWeeklyHours)
-                            ? rawWeeklyHours
-                            : 8
-                    )
-                )
-            );
+            const weeklyAvailableHours = coachWeeklyCapacity;
 
             // Keep one modest free-agent scouting allocation.
             // The rest of the staff's time remains available for recruiting.
