@@ -645,6 +645,64 @@ export function ensureStaffAvailability(staff) {
     return availability;
 }
 
+function getStaffWeeklyWorkCapacity(
+    team,
+    coach,
+    plan = team?.staffWorkPlan
+) {
+    if (!team || !coach) return 0;
+
+    const availability = ensureStaffAvailability(coach);
+
+    if (!availability) return 0;
+
+    const rawAvailability = Number(availability.weeklyHours);
+
+    const availableHours = Math.max(
+        0,
+        Math.min(
+            WEEKLY_COACH_HOURS,
+            Number.isFinite(rawAvailability)
+                ? rawAvailability
+                : 8
+        )
+    );
+
+    const availableDays = Array.isArray(availability.availableDays)
+        ? availability.availableDays.filter(
+            day => typeof day === 'string' && day.trim()
+        )
+        : [];
+
+    const isFlexibleSchedule =
+        availability.scheduleType === 'flexible' ||
+        availableDays.includes('Flexible');
+
+    const hoursPerDay =
+        availability.timeWindow === 'mixed' ? 6 : 4;
+
+    const scheduleCapacity =
+        !isFlexibleSchedule && availableDays.length > 0
+            ? availableDays.length * hoursPerDay
+            : availableHours;
+
+    const configuredPlanCap = Number(plan?.weeklyHoursPerCoach);
+
+    const planCap =
+        Number.isFinite(configuredPlanCap) && configuredPlanCap >= 0
+            ? Math.min(WEEKLY_COACH_HOURS, configuredPlanCap)
+            : WEEKLY_COACH_HOURS;
+
+    return Math.max(
+        0,
+        Math.min(
+            availableHours,
+            scheduleCapacity,
+            planCap
+        )
+    );
+}
+
 /**
  * Calculates the effective hours contributed by one staff assignment.
  *
@@ -684,10 +742,6 @@ export function getEffectiveStaffWorkHours(team, assignment) {
 
     if (!coach) return 0;
 
-    const availability = ensureStaffAvailability(coach);
-
-    if (!availability) return 0;
-
     const requestedHours = Number(assignment.hours);
 
     if (
@@ -717,48 +771,10 @@ export function getEffectiveStaffWorkHours(team, assignment) {
 
     if (totalRequestedHours <= 0) return 0;
 
-    const rawAvailability = Number(availability.weeklyHours);
-
-    const availableHours = Math.max(
-        0,
-        Math.min(
-            40,
-            Number.isFinite(rawAvailability) ? rawAvailability : 8
-        )
-    );
-
-    // A flexible schedule does not impose a day-by-day restriction.
-    // For fixed schedules, cap hours per available day. The availability
-    // profile remains the primary weekly limit.
-    const availableDays = Array.isArray(availability.availableDays)
-        ? availability.availableDays.filter(
-            day => typeof day === 'string' && day.trim()
-        )
-        : [];
-
-    const isFlexibleSchedule =
-        availability.scheduleType === 'flexible' ||
-        availableDays.includes('Flexible');
-
-    const hoursPerDay =
-        availability.timeWindow === 'mixed' ? 6 : 4;
-
-    const scheduleCapacity =
-        !isFlexibleSchedule && availableDays.length > 0
-            ? availableDays.length * hoursPerDay
-            : availableHours;
-
-    const configuredPlanCap = Number(plan.weeklyHoursPerCoach);
-
-    const planCap =
-        Number.isFinite(configuredPlanCap) && configuredPlanCap >= 0
-            ? Math.min(40, configuredPlanCap)
-            : 40;
-
-    const weeklyCapacity = Math.min(
-        availableHours,
-        scheduleCapacity,
-        planCap
+    const weeklyCapacity = getStaffWeeklyWorkCapacity(
+        team,
+        coach,
+        plan
     );
 
     // Scale assignments proportionally if their combined hours exceed
@@ -3399,65 +3415,101 @@ export function assignCommunityServiceStaffHours(
 }
 
 /**
- * Returns each active coach's available hours for the offseason
- * recruiting week, using the established staff availability rules.
+ * Returns each active coach's recruiting budget and current workload.
  *
- * The returned budget is informational; hours are not consumed here.
+ * Recruiting hours are tracked separately from other staff assignments.
+ * Effective hours show how much recruiting work is actually delivered
+ * after the shared weekly workload, schedule, and reliability are applied.
  */
 export function getRecruitingStaffHourBudget(team, gameState = null) {
     if (!team) return [];
 
-    const offseason = gameState?.offseasonState;
-    const recruitingPhase = String(offseason?.phase || '')
+        const phase = String(
+        gameState?.offseasonState?.phase || ''
+    )
         .toLowerCase()
-        .replace(/[^a-z]/g, '') === 'recruiting';
-    const year = Number(gameState?.year);
-    const recruitingWeekKey = `${year}:0`;
+        .replace(/[^a-z]/g, '');
 
-    if (
-        recruitingPhase &&
-        Number.isInteger(year) &&
-        year > 0
-    ) {
-        const playerTeamId = gameState.playerTeam?.id == null
-            ? null
-            : String(gameState.playerTeam.id);
-        const isPlayerTeam =
-            team.isPlayerControlled === true ||
-            (
-                playerTeamId !== null &&
-                String(team.id) === playerTeamId
-            );
-        const recruitingAutonomy = String(
-            team.teamInstructions?.departments?.recruiting?.autonomy ||
-            'guided'
-        ).toLowerCase();
-        const needsRecruitingReserve =
-            isPlayerTeam &&
-            recruitingAutonomy !== 'direct' &&
-            team.staffWorkPlan?.recruitingReserveWeekKey !==
-                recruitingWeekKey;
-        const needsPlan =
-            !Array.isArray(team.staffWorkPlan?.assignments) ||
-            team.staffWorkPlan?.activeWeekKey !== recruitingWeekKey;
+    if (phase === 'recruiting') {
+        const workYear = Number(gameState?.year);
 
-        if (isPlayerTeam && (needsPlan || needsRecruitingReserve)) {
-            ensureTeamStaffWorkPlan(
-                team,
-                year,
-                0,
-                recruitingAutonomy === 'direct' ? null : true
-            );
-        } else if (!isPlayerTeam && (
-            team.aiStaffWorkPlanKey !== recruitingWeekKey ||
-            team.aiStaffWorkPlanPhaseKey !== 'offseason:recruiting' ||
-            !Array.isArray(team.staffWorkPlan?.assignments)
-        )) {
-            ensureAiStaffWorkPlan(team, gameState, year, 0);
+        if (Number.isInteger(workYear)) {
+            const workWeekKey = `${workYear}:0`;
+            const playerTeamId = gameState.playerTeam?.id == null
+                ? null
+                : String(gameState.playerTeam.id);
+
+            const isPlayerTeam =
+                team.isPlayerControlled === true ||
+                (
+                    playerTeamId !== null &&
+                    String(team.id) === playerTeamId
+                );
+
+            if (isPlayerTeam) {
+                const plan = ensureTeamStaffWorkPlan(
+                    team,
+                    workYear,
+                    0
+                );
+
+                if (
+                    plan &&
+                    Array.isArray(plan.assignments) &&
+                    plan.offseasonRecruitingPlanKey !== workWeekKey
+                ) {
+                    // Keep scouting and accepted community commitments.
+                    // Remove regular-season training and preparation.
+                    plan.assignments = plan.assignments.filter(
+                        assignment =>
+                            assignment &&
+                            (
+                                assignment.task === STAFF_WORK_TASKS.SCOUTING ||
+                                assignment.task === 'communityService' ||
+                                assignment.task === STAFF_WORK_TASKS.RECRUITING ||
+                                assignment.source === 'recruiting'
+                            )
+                    );
+
+                    plan.assignments.forEach(assignment => {
+                        if (
+                            assignment.task === STAFF_WORK_TASKS.SCOUTING
+                        ) {
+                            assignment.focus = 'freeAgents';
+                        }
+                    });
+
+                    plan.offseasonRecruitingPlanKey = workWeekKey;
+                }
+            } else {
+                ensureAiStaffWorkPlan(
+                    team,
+                    gameState,
+                    workYear,
+                    0
+                );
+            }
         }
     }
 
     const seenCoachIds = new Set();
+
+    const planAssignments = Array.isArray(
+        team.staffWorkPlan?.assignments
+    )
+        ? team.staffWorkPlan.assignments
+        : [];
+
+    const progress = gameState?.offseasonState?.recruitingProgress;
+
+    const teamDailyWork =
+        progress?.teamDailyWork?.[String(team.id)] || {};
+
+    const dailyRecruitingAssignments = Object.values(
+        teamDailyWork
+    ).flatMap(assignments =>
+        Array.isArray(assignments) ? assignments : []
+    );
 
     return ensureTeamCoachingStaff(team)
         .filter(coach => {
@@ -3474,7 +3526,7 @@ export function getRecruitingStaffHourBudget(team, gameState = null) {
             const availability = ensureStaffAvailability(coach);
             const rawHours = Number(availability?.weeklyHours);
 
-            const availableHours = Math.max(
+            const weeklyHours = Math.max(
                 0,
                 Math.min(
                     WEEKLY_COACH_HOURS,
@@ -3484,101 +3536,111 @@ export function getRecruitingStaffHourBudget(team, gameState = null) {
                 )
             );
 
-            const availableDays = Array.isArray(
-                availability?.availableDays
-            )
-                ? availability.availableDays.filter(
-                    day => typeof day === 'string' && day.trim()
-                )
-                : [];
+            const coachId = String(coach.id);
 
-            const isFlexibleSchedule =
-                availability?.scheduleType === 'flexible' ||
-                availableDays.includes('Flexible');
-
-            const hoursPerDay =
-                availability?.timeWindow === 'mixed' ? 6 : 4;
-
-            const scheduleCapacity =
-                !isFlexibleSchedule && availableDays.length > 0
-                    ? availableDays.length * hoursPerDay
-                    : availableHours;
-
-            const weeklyHours = Math.min(
-                availableHours,
-                scheduleCapacity
-            );
-
-            const plan = team.staffWorkPlan;
-            const configuredPlanHours = Number(
-                plan?.weeklyHoursPerCoach
-            );
-            const planCapacity =
-                Number.isFinite(configuredPlanHours) &&
-                configuredPlanHours >= 0
-                    ? Math.min(
-                        WEEKLY_COACH_HOURS,
-                        Math.floor(configuredPlanHours)
-                    )
-                    : WEEKLY_COACH_HOURS;
-            const weeklyCapacity = Math.min(
-                weeklyHours,
-                planCapacity
-            );
-            const activeWeekKey = plan?.activeWeekKey;
-            const activeAssignments = (
-                Array.isArray(plan?.assignments)
-                    ? plan.assignments
-                    : []
-            )
-                .filter(assignment =>
+            const coachAssignments = planAssignments.filter(
+                assignment =>
                     assignment &&
-                    String(assignment.coachId) === String(coach.id) &&
-                    (
-                        !assignment.weekKey ||
-                        assignment.weekKey === activeWeekKey
-                    ) &&
-                    Number.isFinite(Number(assignment.hours)) &&
-                    Number(assignment.hours) > 0
-                );
-            const requestedHours = activeAssignments
-                .reduce(
+                    String(assignment.coachId) === coachId
+            );
+
+            const isRecruitingAssignment = assignment => (
+                assignment?.task === STAFF_WORK_TASKS.RECRUITING ||
+                assignment?.source === 'recruiting'
+            );
+
+            const recruitingAssignments = coachAssignments.filter(
+                isRecruitingAssignment
+            );
+
+            const otherAssignments = coachAssignments.filter(
+                assignment => !isRecruitingAssignment(assignment)
+            );
+
+            const sumRequestedHours = assignments =>
+                assignments.reduce(
                     (total, assignment) =>
-                        total + Number(assignment.hours),
+                        total + Math.max(
+                            0,
+                            Number(assignment.hours) || 0
+                        ),
                     0
                 );
-            const assignedHours = Math.min(
-                weeklyCapacity,
-                requestedHours
-            );
-            const recruitingHours = Math.min(
-                assignedHours,
-                activeAssignments
-                    .filter(assignment =>
-                        assignment.task === STAFF_WORK_TASKS.RECRUITING
-                    )
-                    .reduce(
-                        (total, assignment) =>
-                            total + Number(assignment.hours),
-                        0
-                    )
+
+            const planRecruitingHours = sumRequestedHours(
+                recruitingAssignments
             );
 
+            const recordedRecruitingHours = sumRequestedHours(
+                dailyRecruitingAssignments.filter(assignment =>
+                    String(assignment?.coachId) === coachId
+                )
+            );
+
+            // Avoid counting the same assignment twice. The daily
+            // recruiting record also supports older saves where the
+            // shared work-plan entry may be missing.
+            const recruitingHours = Math.max(
+                planRecruitingHours,
+                recordedRecruitingHours
+            );
+
+            const otherAssignedHours = sumRequestedHours(
+                otherAssignments
+            );
+
+            const assignedHours =
+                recruitingHours + otherAssignedHours;
+
+            const effectiveRecruitingHours =
+                recruitingAssignments.reduce(
+                    (total, assignment) =>
+                        total + Math.max(
+                            0,
+                            getEffectiveStaffWorkHours(
+                                team,
+                                assignment
+                            ) || 0
+                        ),
+                    0
+                );
+
+            const effectiveOtherHours =
+                otherAssignments.reduce(
+                    (total, assignment) =>
+                        total + Math.max(
+                            0,
+                            getEffectiveStaffWorkHours(
+                                team,
+                                assignment
+                            ) || 0
+                        ),
+                    0
+                );
+
             return {
-                coachId: String(coach.id),
+                coachId,
                 coachName: coach.name || 'Coach',
+                role: coach.role || 'Staff',
+
                 weeklyHours,
-                weeklyCapacity,
+                weeklyCapacity: weeklyHours,
+
                 assignedHours,
                 recruitingHours,
-                otherAssignedHours: Math.max(
+                otherAssignedHours,
+
+                recruitingCapacity: Math.max(
                     0,
-                    assignedHours - recruitingHours
+                    weeklyHours - otherAssignedHours
                 ),
                 remainingHours: Math.max(
                     0,
-                    weeklyCapacity - requestedHours
-                )
+                    weeklyHours - otherAssignedHours - recruitingHours
+                ),
+
+                effectiveRecruitingHours,
+                effectiveOtherHours
             };
         });
 }
@@ -3764,7 +3826,10 @@ export function recordRecruitingStaffAssignment(
         coach => String(coach?.id) === coachKey
     );
 
-    const coachBudget = getRecruitingStaffHourBudget(team, gameState).find(
+    const coachBudget = getRecruitingStaffHourBudget(
+        team,
+        gameState
+    ).find(
         coach => String(coach.coachId) === coachKey
     );
 
@@ -3775,10 +3840,18 @@ export function recordRecruitingStaffAssignment(
         };
     }
 
-    if (coachBudget.weeklyHours <= 0) {
+    const recruitingCapacity = Math.max(
+        0,
+        Number(
+            coachBudget.recruitingCapacity ??
+            coachBudget.weeklyHours
+        ) || 0
+    );
+
+    if (recruitingCapacity <= 0) {
         return {
             success: false,
-            message: 'This coach has no available recruiting hours.'
+            message: 'This coach has no remaining recruiting hours.'
         };
     }
 
@@ -3834,6 +3907,94 @@ export function recordRecruitingStaffAssignment(
         };
     }
 
+        // Recruiting shares the coach's actual weekly capacity with
+    // their other assigned responsibilities.
+    const coachPlanAssignments = staffWorkPlan.assignments.filter(
+        item =>
+            item &&
+            String(item.coachId) === coachKey &&
+            Number(item.hours) > 0
+    );
+
+    const isRecruitingAssignment = assignment => (
+        assignment?.task === STAFF_WORK_TASKS.RECRUITING ||
+        assignment?.source === 'recruiting'
+    );
+
+    const plannedRecruitingHours = coachPlanAssignments
+        .filter(isRecruitingAssignment)
+        .reduce(
+            (total, assignment) =>
+                total + Math.max(0, Number(assignment.hours) || 0),
+            0
+        );
+
+    // The daily history and weekly plan normally agree. Use the
+    // larger total to avoid accidentally granting duplicate hours.
+    const recruitingHoursUsed = Math.max(
+        hoursAlreadyUsed,
+        plannedRecruitingHours
+    );
+
+    const weeklyCapacity = getStaffWeeklyWorkCapacity(
+        team,
+        assignedCoach,
+        staffWorkPlan
+    );
+
+    const remainingHours = Math.max(
+        0,
+        recruitingCapacity - hoursAlreadyUsed
+    );
+
+    if (requestedHours > remainingHours) {
+        return {
+            success: false,
+            message:
+                `${coachBudget.coachName} has ${remainingHours} recruiting ` +
+                `hour(s) remaining this week, but ${requestedHours} were requested.`,
+            remainingHours
+        };
+    }
+
+    // Reserve the new recruiting hours by reducing the coach's
+    // other scheduled work proportionally. Recruiting is not added
+    // on top of a fully booked schedule.
+    const otherAssignments = coachPlanAssignments.filter(
+        assignment => !isRecruitingAssignment(assignment)
+    );
+
+    const totalOtherHours = otherAssignments.reduce(
+        (total, assignment) =>
+            total + Math.max(0, Number(assignment.hours) || 0),
+        0
+    );
+
+    const remainingOtherCapacity = Math.max(
+        0,
+        weeklyCapacity - recruitingHoursUsed - requestedHours
+    );
+
+    const workloadReductionFactor = totalOtherHours > 0
+        ? Math.min(1, remainingOtherCapacity / totalOtherHours)
+        : 1;
+
+    const previousAssignmentHours = [];
+
+    if (workloadReductionFactor < 1) {
+        otherAssignments.forEach(assignment => {
+            const originalHours = Number(assignment.hours) || 0;
+
+            previousAssignmentHours.push({
+                assignment,
+                hours: originalHours
+            });
+
+            assignment.hours =
+                originalHours * workloadReductionFactor;
+        });
+    }
+
     if (
         !progress.teamDailyWork ||
         typeof progress.teamDailyWork !== 'object' ||
@@ -3885,21 +4046,6 @@ export function recordRecruitingStaffAssignment(
             0
         );
 
-    const remainingHours = Math.max(
-        0,
-        weeklyCapacity - hoursAlreadyUsed
-    );
-
-    if (requestedHours > remainingHours) {
-        return {
-            success: false,
-            message:
-                `${coachBudget.coachName} has ${remainingHours} recruiting ` +
-                `hour(s) remaining this week, but ${requestedHours} were requested.`,
-            remainingHours
-        };
-    }
-
     const assignment = {
         year: workYear,
         week: workWeek,
@@ -3930,6 +4076,12 @@ export function recordRecruitingStaffAssignment(
             staffWorkPlan.assignments.filter(
                 item => item !== assignment
             );
+
+        // Restore the original workload if recruiting could not
+        // be delivered.
+        previousAssignmentHours.forEach(entry => {
+            entry.assignment.hours = entry.hours;
+        });
 
         return {
             success: false,
@@ -4342,6 +4494,13 @@ export function executeRecruitingAction(
         (total, key) => total + rating(key),
         0
     ) / profile.skills.length;
+
+    // Preserve the original assignment separately from the hours
+    // the staff-work system actually delivered.
+    const requestedHours = Math.max(
+        0,
+        Number(assignmentResult.assignment?.hours ?? hours) || 0
+    );
 
     // Better-suited coaches get more interest from the same time investment.
     const skillMultiplier = 0.65 + (averageSkill / 100) * 0.7;
@@ -4770,6 +4929,7 @@ export function executeRecruitingAction(
                     roleDiscussionSnapshot.averageMastery
             }
             : null,
+        requestedHours,
         hours: assignedHours,
         effectiveHours,
         skillMultiplier,
@@ -5654,7 +5814,10 @@ export function processAiRecruitingDay(gameState) {
             };
         };
 
-        const staffBudgets = getRecruitingStaffHourBudget(team);
+        const staffBudgets = getRecruitingStaffHourBudget(
+            team,
+            gameState
+        );
         const targetedToday = new Set();
 
         for (const staffBudget of staffBudgets) {
@@ -5723,7 +5886,7 @@ export function processAiRecruitingDay(gameState) {
 
             if (remainingHours <= 0) continue;
 
-            // Spread the remaining recruiting capacity across the
+            // Spread the available recruiting capacity across the
             // seven-day calendar without exceeding weekly commitments.
             const plannedHoursThroughToday = Math.round(
                 availableRecruitingHours * day / totalDays
@@ -6991,10 +7154,11 @@ export function ensureAiStaffWorkPlan(
         offseasonPhase !== '' &&
         offseasonPhase !== 'regularseason';
 
+    const isRecruitingWeek =
+        offseasonPhase === 'recruiting';
+
     const planPhaseKey = isOffseason
-        ? offseasonPhase === 'recruiting'
-            ? 'offseason:recruiting'
-            : 'offseason'
+        ? `offseason:${offseasonPhase}`
         : 'regularseason';
 
     if (
@@ -7118,9 +7282,11 @@ export function ensureAiStaffWorkPlan(
     // During the regular season, AI scouts track Pee Wee prospects.
     // Offseason scouting continues to focus on the incoming draft class,
     // or free agents when there is no eligible draft class.
-    const scoutingFocus = isOffseason
-        ? (hasDraftClass ? 'draft' : 'freeAgents')
-        : 'youth';
+    const scoutingFocus = isRecruitingWeek
+        ? 'freeAgents'
+        : isOffseason
+            ? (hasDraftClass ? 'draft' : 'freeAgents')
+            : 'youth';
 
     const specialties = [
         {
@@ -7175,11 +7341,20 @@ export function ensureAiStaffWorkPlan(
         const isRecruitingWeek =
             isOffseason && offseasonPhase === 'recruiting';
 
+        const availability = ensureStaffAvailability(coach);
+        const rawWeeklyHours = Number(availability?.weeklyHours);
+
         const coachWeeklyCapacity = isRecruitingWeek
-            ? (
-                getRecruitingStaffHourBudget(team).find(budget =>
-                    String(budget.coachId) === String(coach.id)
-                )?.weeklyHours || 0
+            ? Math.max(
+                0,
+                Math.min(
+                    WEEKLY_COACH_HOURS,
+                    Math.floor(
+                        Number.isFinite(rawWeeklyHours)
+                            ? rawWeeklyHours
+                            : 8
+                    )
+                )
             )
             : WEEKLY_COACH_HOURS;
 
@@ -7204,12 +7379,42 @@ export function ensureAiStaffWorkPlan(
 
         let specialtyHours = 16;
 
-        if (isOffseason) {
-            // Use the offseason for prospect evaluation and development,
-            // rather than preparing for a game that may not be scheduled.
+        if (isRecruitingWeek) {
+            const availability = ensureStaffAvailability(coach);
+            const rawWeeklyHours = Number(
+                availability?.weeklyHours
+            );
+
+            const weeklyAvailableHours = Math.max(
+                0,
+                Math.min(
+                    WEEKLY_COACH_HOURS,
+                    Math.floor(
+                        Number.isFinite(rawWeeklyHours)
+                            ? rawWeeklyHours
+                            : 8
+                    )
+                )
+            );
+
+            // Keep one modest free-agent scouting allocation.
+            // The rest of the staff's time remains available for recruiting.
+            specialtyHours = specialty.task === 'scouting'
+                ? Math.min(
+                    weeklyAvailableHours,
+                    Math.max(
+                        1,
+                        Math.round(weeklyAvailableHours * 0.20)
+                    )
+                )
+                : 0;
+
+        } else if (isOffseason) {
+            // Other offseason stages can still prioritize evaluation.
             specialtyHours = specialty.task === 'scouting'
                 ? (gmDirective === 'DEVELOP_YOUTH' ? 28 : 24)
                 : 0;
+
         } else if (gmDirective === 'WIN_NOW') {
             // Prioritize immediate performance and weekly preparation.
             specialtyHours = specialty.task === 'scouting'
@@ -7227,7 +7432,7 @@ export function ensureAiStaffWorkPlan(
 
         // The GM sets the strategic emphasis for delegated work.
         // Do not revive game-preparation assignments in the offseason.
-        if (specialtyHours > 0) {
+        if (specialtyHours > 0 && !isRecruitingWeek) {
             specialtyHours += getAiGmDelegationAdjustment(
                 gm,
                 specialty.task
@@ -7337,9 +7542,11 @@ export function ensureAiStaffWorkPlan(
                 coachId: coach.id,
                 task: 'training',
                 hours: trainingHours,
-                focus: gmDirective === 'HARD_CONDITIONING'
+                focus: isRecruitingWeek
                     ? 'all'
-                    : specialty.trainingFocus,
+                    : gmDirective === 'HARD_CONDITIONING'
+                        ? 'all'
+                        : specialty.trainingFocus,
                 maxTargets: 6
             });
         }
