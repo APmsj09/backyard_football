@@ -4637,7 +4637,7 @@ export function simulateMatchFast(homeTeam, awayTeam) {
         Number.isInteger(game.currentWeek)
     ) {
         const year = game.year;
-        const week = game.currentWeek;
+        const week = game.currentWeek + 1;
 
         recordTeamGamePlanningOutcome(
             homeTeam,

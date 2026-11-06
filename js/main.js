@@ -970,7 +970,7 @@ function promptCoachCreation(teamId) {
 
     coachSkillControls.forEach(control => {
         control.addEventListener('input', () => {
-            activeCoachSkillPreset = 'custom';
+            activeCoachSkillPreset = null;
             updateCoachSkillBudget();
         });
     });
