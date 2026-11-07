@@ -3712,8 +3712,312 @@ export function renderOffseasonFAPool(gameState) {
         })[character]
     );
 
+    const playerTeamKey = String(gameState.playerTeam.id);
+
+    const userRecruitingList = Array.isArray(
+        progress.teamRecruitingLists?.[playerTeamKey]
+    )
+        ? progress.teamRecruitingLists[playerTeamKey]
+        : [];
+
+    const userRecruitingListIds = new Set(
+        userRecruitingList
+            .filter(entry => entry?.playerId != null)
+            .map(entry => String(entry.playerId))
+    );
+
+    const listCoachOptions = quickBudget
+        .filter(coach => coach?.coachId != null)
+        .map(coach => {
+            const profile = quickCoachRecords.find(candidate =>
+                String(candidate?.id) === String(coach.coachId)
+            );
+
+            const remainingHours = Math.max(
+                0,
+                Number(
+                    coach.remainingHours ??
+                    coach.weeklyCapacity ??
+                    coach.weeklyHours
+                ) || 0
+            );
+
+            return {
+                coachId: String(coach.coachId),
+                coachName:
+                    profile?.name ||
+                    profile?.coachName ||
+                    coach.coachName ||
+                    `Coach ${coach.coachId}`,
+                remainingHours
+            };
+        });
+
+    const userRecruitingListHtml = userRecruitingList.map(
+        (entry, index) => {
+            const playerId = String(entry?.playerId ?? '');
+
+            const player = gameState.players.find(candidate =>
+                String(candidate?.id) === playerId
+            );
+
+            const record = progress.recruits?.[playerId];
+
+            const interest = Math.max(
+                0,
+                Math.min(
+                    100,
+                    Number(
+                        record?.interestByTeam?.[playerTeamKey]
+                    ) || 0
+                )
+            );
+
+            const committedTeamId =
+                record?.committedTeamId ?? player?.teamId ?? null;
+
+            const statusLabel = committedTeamId != null
+                ? String(committedTeamId) === playerTeamKey
+                    ? 'Committed to your team'
+                    : 'Committed elsewhere'
+                : player && record?.status === 'available' &&
+                  player.teamId == null
+                    ? 'Available'
+                    : 'Unavailable';
+
+            const position = player
+                ? getFreeAgentDisplayPosition(
+                    gameState.playerTeam,
+                    player
+                )
+                : entry?.position || '—';
+
+            const assignedCoachId =
+                entry?.assignedCoachId == null
+                    ? ''
+                    : String(entry.assignedCoachId);
+
+            const assignedCoach = listCoachOptions.find(coach =>
+                coach.coachId === assignedCoachId
+            );
+
+            const missingCoachOption =
+                assignedCoachId && !assignedCoach
+                    ? `
+                        <option value="${quickEscapeHtml(assignedCoachId)}" selected disabled>
+                            Previously assigned coach
+                        </option>
+                    `
+                    : '';
+
+            const coachOptionsHtml = listCoachOptions.map(coach => `
+                <option
+                    value="${quickEscapeHtml(coach.coachId)}"
+                    ${coach.coachId === assignedCoachId ? 'selected' : ''}
+                    ${coach.remainingHours <= 0 ? 'disabled' : ''}>
+                    ${quickEscapeHtml(coach.coachName)}
+                    (${coach.remainingHours}h left)
+                </option>
+            `).join('');
+
+            const lastCoach = entry?.lastCoachId != null
+                ? listCoachOptions.find(coach =>
+                    coach.coachId === String(entry.lastCoachId)
+                )
+                : null;
+
+            const actionLabels = {
+                outreach: 'Outreach',
+                teammateConnection: 'Teammate connection',
+                roleDiscussion: 'Role discussion',
+                practiceInvitation: 'Practice invitation'
+            };
+
+            const lastWorkLabel = entry?.lastWorkedDay != null
+                ? `Last worked Day ${entry.lastWorkedDay}` +
+                    (
+                        entry.lastAction
+                            ? ` · ${actionLabels[entry.lastAction] || entry.lastAction}`
+                            : ''
+                    ) +
+                    (
+                        lastCoach
+                            ? ` · ${quickEscapeHtml(lastCoach.coachName)}`
+                            : ''
+                    )
+                : 'No staff work recorded yet';
+
+            return `
+                <div class="grid grid-cols-[auto_minmax(0,1fr)] gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0 sm:grid-cols-[auto_minmax(0,1fr)_minmax(190px,230px)_auto] sm:items-center">
+
+                    <div class="flex h-7 w-7 items-center justify-center rounded bg-slate-900 text-xs font-black text-white">
+                        ${index + 1}
+                    </div>
+
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="truncate text-xs font-black text-slate-900">
+                                ${quickEscapeHtml(
+                                    player?.name ||
+                                    entry?.playerName ||
+                                    'Unknown prospect'
+                                )}
+                            </span>
+
+                            <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">
+                                ${quickEscapeHtml(position)}
+                            </span>
+                        </div>
+
+                        <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px]">
+                            <span class="font-bold text-emerald-700">
+                                Interest: ${interest}/100
+                            </span>
+
+                            <span class="text-slate-500">
+                                ${quickEscapeHtml(statusLabel)}
+                            </span>
+                        </div>
+
+                        <div class="mt-1 text-[9px] text-slate-400">
+                            ${lastWorkLabel}
+                        </div>
+                    </div>
+
+                    <div class="min-w-0">
+                        <label
+                            class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500"
+                            for="fa-list-coach-${quickEscapeHtml(playerId)}">
+                            Recruiting Coach
+                        </label>
+
+                        <select
+                            id="fa-list-coach-${quickEscapeHtml(playerId)}"
+                            onchange="window.app_setRecruitingListCoach('${quickEscapeHtml(playerId)}', this.value)"
+                            class="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-700">
+                            <option value="" ${assignedCoachId === '' ? 'selected' : ''}>
+                                Any available coach
+                            </option>
+                            ${missingCoachOption}
+                            ${coachOptionsHtml}
+                        </select>
+                    </div>
+
+                    <div class="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
+                        <button
+                            type="button"
+                            title="Move prospect up"
+                            aria-label="Move ${quickEscapeHtml(player?.name || playerId)} up"
+                            ${index === 0 ? 'disabled' : ''}
+                            onclick="window.app_moveRecruitingListItem('${quickEscapeHtml(playerId)}', -1)"
+                            class="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-black text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30">
+                            ↑
+                        </button>
+
+                        <button
+                            type="button"
+                            title="Move prospect down"
+                            aria-label="Move ${quickEscapeHtml(player?.name || playerId)} down"
+                            ${index === userRecruitingList.length - 1 ? 'disabled' : ''}
+                            onclick="window.app_moveRecruitingListItem('${quickEscapeHtml(playerId)}', 1)"
+                            class="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-black text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30">
+                            ↓
+                        </button>
+
+                        <button
+                            type="button"
+                            title="Remove from recruiting list"
+                            aria-label="Remove ${quickEscapeHtml(player?.name || playerId)}"
+                            onclick="window.app_removeRecruitingListItem('${quickEscapeHtml(playerId)}')"
+                            class="rounded border border-red-200 bg-white px-2 py-1 text-[10px] font-bold text-red-700 hover:bg-red-50">
+                            Remove
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+    ).join('');
+
+    const userRecruitingListPanel = `
+        <section class="mb-3 overflow-hidden rounded-lg border border-slate-300 bg-white">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                <div>
+                    <div class="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                        Your Recruiting List
+                    </div>
+
+                    <p class="mt-0.5 text-[9px] text-slate-500">
+                        Staff work from the top down. Move prospects to change priority.
+                    </p>
+                </div>
+
+                <span class="rounded bg-slate-200 px-2 py-1 text-[10px] font-black text-slate-700">
+                    ${userRecruitingList.length} prospects
+                </span>
+            </div>
+
+            ${
+                userRecruitingList.length > 0
+                    ? `<div class="divide-y divide-slate-100">${userRecruitingListHtml}</div>`
+                    : `
+                        <div class="px-3 py-5 text-center">
+                            <div class="text-xs font-bold text-slate-600">
+                                Your recruiting list is empty
+                            </div>
+
+                            <p class="mt-1 text-[10px] text-slate-500">
+                                Select prospects below and add them to your list.
+                            </p>
+                        </div>
+                    `
+            }
+        </section>
+    `;
+
+    const userRecruitingListPanel = `
+        <section class="mb-3 overflow-hidden rounded-lg border border-slate-300 bg-white">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                <div>
+                    <div class="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                        Your Recruiting List
+                    </div>
+
+                    <p class="mt-0.5 text-[9px] text-slate-500">
+                        Staff work from the top down. Your order determines prospect priority.
+                    </p>
+                </div>
+
+                <span class="rounded bg-slate-200 px-2 py-1 text-[10px] font-black text-slate-700">
+                    ${userRecruitingList.length} prospects
+                </span>
+            </div>
+
+            ${
+                userRecruitingList.length > 0
+                    ? `<div class="divide-y divide-slate-100">${userRecruitingListHtml}</div>`
+                    : `
+                        <div class="px-3 py-5 text-center">
+                            <div class="text-xs font-bold text-slate-600">
+                                Your recruiting list is empty
+                            </div>
+
+                            <p class="mt-1 text-[10px] text-slate-500">
+                                Select prospects below and add them to your list. Your staff will handle the recruiting work as you advance each day.
+                            </p>
+                        </div>
+                    `
+            }
+        </section>
+    `;
+
     if (pool.length === 0) {
-        container.innerHTML = `<p class="p-8 text-center text-slate-400 italic text-xs">No free agents available matching this filter.</p>`;
+        container.innerHTML = `
+            ${userRecruitingListPanel}
+
+            <p class="p-8 text-center text-slate-400 italic text-xs">
+                No free agents available matching this filter.
+            </p>
+        `;
         return;
     }
 
@@ -4292,112 +4596,48 @@ export function renderOffseasonFAPool(gameState) {
                 </p>
             </div>
 
-            <!-- Compact horizontal recruiting toolbar -->
-            <div class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
-                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-12 gap-2 items-end">
+            ${userRecruitingListPanel}
 
-                    <div class="relative xl:col-span-3">
-                        <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
-                            Coach
-                        </label>
-                        <input type="hidden" id="fa-quick-coach" value="${quickEscapeHtml(recruitingQuickAssignDefaults.coachId)}">
-                        <button
-                            type="button"
-                            id="fa-quick-coach-trigger"
-                            aria-expanded="false"
-                            aria-controls="fa-quick-coach-options"
-                            onclick="window.app_toggleRecruitingCoachPicker()"
-                            class="flex w-full items-center justify-between gap-2 rounded-sm border border-slate-300 bg-white px-2 py-2 text-left text-xs hover:border-emerald-600 disabled:opacity-50"
-                            ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
-                            <span id="fa-quick-coach-label" class="truncate">
-                                ${quickEscapeHtml(quickSelectedCoach?.coachName || 'No available coach')}
-                                ${quickSelectedCoach ? ` · ${quickSelectedCoach.remainingHours}h` : ''}
-                            </span>
-                            <span aria-hidden="true" class="text-slate-400">▾</span>
-                        </button>
+            <!-- Prospect selection only adds players to the persistent list. -->
+            <div class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <div class="text-[10px] font-black uppercase tracking-wide text-slate-700">
+                            Add Prospects to Your List
+                        </div>
+
+                        <p class="mt-1 text-[10px] text-slate-500">
+                            Select prospects below. Adding them does not use staff hours or perform a recruiting action.
+                        </p>
+
                         <div
-                            id="fa-quick-coach-options"
-                            class="absolute left-0 top-full z-30 mt-1 hidden max-h-56 w-[min(22rem,90vw)] overflow-y-auto rounded-sm border border-slate-300 bg-white p-1 shadow-xl">
-                            ${quickAssignCoaches.map(coach => `
-                                <button
-                                    type="button"
-                                    data-quick-coach-id="${quickEscapeHtml(coach.coachId)}"
-                                    data-remaining-hours="${coach.remainingHours}"
-                                    aria-pressed="${String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId)}"
-                                    onclick="window.app_selectRecruitingQuickCoach('${quickEscapeHtml(coach.coachId)}')"
-                                    class="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-2 text-left hover:bg-emerald-50 ${String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId) ? 'bg-emerald-50' : ''}">
-                                    <span class="min-w-0">
-                                        <span class="block truncate text-xs font-bold text-slate-800">${quickEscapeHtml(coach.coachName)}</span>
-                                        <span class="block text-[10px] text-slate-500">${quickEscapeHtml(coach.role)} · Recruiting skill ${coach.skillEstimate}</span>
-                                    </span>
-                                    <span class="shrink-0 text-[10px] font-black text-emerald-800">${coach.remainingHours}h left</span>
-                                </button>
-                            `).join('') || '<div class="p-2 text-xs text-slate-500">No recruiting hours remain.</div>'}
+                            id="fa-quick-selected-count"
+                            class="mt-1 text-[10px] font-bold text-slate-600">
+                            ${recruitingQuickSelectedIds.size} selected
                         </div>
                     </div>
 
-                    <div class="xl:col-span-5">
-                        <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
-                            Recruiting Action
-                        </label>
-                        <input type="hidden" id="fa-quick-action" value="${quickEscapeHtml(recruitingQuickAssignDefaults.actionType)}">
-                        <div class="grid grid-cols-2 gap-1" role="group" aria-label="Recruiting action">
-                            ${[
-                                ['outreach', 'Outreach', 'Build familiarity'],
-                                ['teammateConnection', 'Teammate', 'Use known connections'],
-                                ['roleDiscussion', 'Role fit', 'Discuss playing opportunity'],
-                                ['practiceInvitation', 'Practice', 'Show development fit']
-                            ].map(([value, label, detail]) => `
-                                <button
-                                    type="button"
-                                    data-quick-action="${value}"
-                                    aria-pressed="${recruitingQuickAssignDefaults.actionType === value}"
-                                    title="${detail}"
-                                    onclick="window.app_selectRecruitingQuickAction('${value}')"
-                                    class="rounded-sm border px-2 py-1.5 text-left ${recruitingQuickAssignDefaults.actionType === value ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
-                                    <span class="block text-[10px] font-black">${label}</span>
-                                    <span class="block truncate text-[9px] opacity-70">${detail}</span>
-                                </button>
-                            `).join('')}
-                        </div>
-                    </div>
-
-                    <div class="xl:col-span-1">
-                        <label class="mb-1 block text-[9px] font-black uppercase text-slate-500">
-                            Hours
-                        </label>
-                        <input
-                            type="number"
-                            id="fa-quick-hours"
-                            min="1"
-                            max="${quickMaxHours}"
-                            step="1"
-                            value="${recruitingQuickAssignDefaults.hours}"
-                            onchange="window.app_updateRecruitingQuickDefaults()"
-                            class="w-full rounded border border-slate-300 bg-white p-2 text-xs"
-                            ${quickAssignCoaches.length === 0 ? 'disabled' : ''}>
-                    </div>
-
-                    <div class="grid grid-cols-3 gap-1 xl:col-span-3">
+                    <div class="flex flex-wrap items-center gap-2">
                         <button
                             type="button"
                             onclick="window.app_selectVisibleRecruitingTargets()"
-                            class="w-full rounded-sm border border-slate-300 bg-white px-2 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-100 whitespace-nowrap">
-                            Select
+                            class="rounded-sm border border-slate-300 bg-white px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-100">
+                            Select Visible
                         </button>
+
                         <button
                             type="button"
                             onclick="window.app_clearRecruitingTargetSelection()"
-                            class="w-full rounded-sm border border-slate-300 bg-white px-2 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-100">
+                            class="rounded-sm border border-slate-300 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-100">
                             Clear
                         </button>
+
                         <button
                             type="button"
-                            id="fa-quick-assign-button"
-                            onclick="window.app_quickAssignSelectedRecruitingTargets()"
-                            ${quickAssignCoaches.length === 0 ? 'disabled' : ''}
-                            class="w-full rounded-sm bg-emerald-700 px-2 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap">
-                            Assign (${recruitingQuickSelectedIds.size})
+                            id="fa-quick-add-button"
+                            onclick="window.app_addSelectedRecruitingTargetsToList()"
+                            class="rounded-sm bg-emerald-700 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800">
+                            Add to Recruiting List (${recruitingQuickSelectedIds.size})
                         </button>
                     </div>
                 </div>
@@ -4572,9 +4812,11 @@ export function renderOffseasonFAPool(gameState) {
                         <td class="py-2 px-2 text-center" onclick="event.stopPropagation()">
                             <input
                                 type="checkbox"
-                                class="fa-recruit-select h-4 w-4 accent-emerald-700"
+                                class="fa-recruit-select h-4 w-4 accent-emerald-700 disabled:cursor-not-allowed disabled:opacity-30"
                                 value="${p.id}"
                                 ${recruitingQuickSelectedIds.has(String(p.id)) ? 'checked' : ''}
+                                ${userRecruitingListIds.has(String(p.id)) ? 'disabled' : ''}
+                                title="${userRecruitingListIds.has(String(p.id)) ? 'Already on your recruiting list' : 'Select to add to your recruiting list'}"
                                 onchange="window.app_toggleRecruitingQuickSelection('${p.id}', this.checked)"
                             />
                         </td>
@@ -4638,7 +4880,7 @@ export function renderOffseasonFAPool(gameState) {
                                 <button
                                     class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold px-2 py-1.5 rounded text-[10px] uppercase tracking-wider transition shadow-sm"
                                     onclick="window.app_openRecruitingActionModal('${p.id}')">
-                                    Recruit
+                                    Recruit Now
                                 </button>
 
                                 <button
@@ -5114,19 +5356,20 @@ window.app_toggleRecruitingQuickSelection = function(playerId, checked) {
         recruitingQuickSelectedIds.delete(key);
     }
 
-    const button = document.getElementById('fa-quick-assign-button');
+    const button = document.getElementById('fa-quick-add-button');
 
     if (button) {
-button.textContent =
-    `Assign (${recruitingQuickSelectedIds.size})`;
+        button.textContent =
+            `Add to Recruiting List (${recruitingQuickSelectedIds.size})`;
     }
 
-    const count = document.querySelector(
-        '#fa-minigame-pool-tbody .fa-quick-selected-count'
+    const count = document.getElementById(
+        'fa-quick-selected-count'
     );
 
     if (count) {
-        count.textContent = `${recruitingQuickSelectedIds.size} selected`;
+        count.textContent =
+            `${recruitingQuickSelectedIds.size} selected`;
     }
 };
 
@@ -5134,22 +5377,26 @@ window.app_selectVisibleRecruitingTargets = function() {
     document.querySelectorAll(
         '#fa-minigame-pool-tbody .fa-recruit-select'
     ).forEach(checkbox => {
+        if (checkbox.disabled) return;
+
         checkbox.checked = true;
         recruitingQuickSelectedIds.add(String(checkbox.value));
     });
 
-    window.app_toggleRecruitingQuickSelection(
-        '__selection_refresh__',
-        false
-    );
-
-    recruitingQuickSelectedIds.delete('__selection_refresh__');
-
-    const button = document.getElementById('fa-quick-assign-button');
+    const button = document.getElementById('fa-quick-add-button');
 
     if (button) {
         button.textContent =
-            `Assign (${recruitingQuickSelectedIds.size})`;
+            `Add to Recruiting List (${recruitingQuickSelectedIds.size})`;
+    }
+
+    const count = document.getElementById(
+        'fa-quick-selected-count'
+    );
+
+    if (count) {
+        count.textContent =
+            `${recruitingQuickSelectedIds.size} selected`;
     }
 };
 
@@ -5162,17 +5409,342 @@ window.app_clearRecruitingTargetSelection = function() {
         checkbox.checked = false;
     });
 
-    const button = document.getElementById('fa-quick-assign-button');
+    const button = document.getElementById('fa-quick-add-button');
 
     if (button) {
-        button.textContent = 'Assign (0)';
+        button.textContent = 'Add to Recruiting List (0)';
     }
 
-    const count = document.querySelector(
-        '#fa-minigame-pool-tbody .fa-quick-selected-count'
+    const count = document.getElementById(
+        'fa-quick-selected-count'
     );
 
-    if (count) count.textContent = '0 selected';
+    if (count) {
+        count.textContent = '0 selected';
+    }
+};
+
+window.app_addSelectedRecruitingTargetsToList = function() {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    const state = gs?.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    const phase = String(state?.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    if (
+        !team ||
+        phase !== 'recruiting' ||
+        !progress?.initialized ||
+        progress.completed === true ||
+        Number(progress.seasonYear) !== Number(gs.year)
+    ) {
+        showModal(
+            'Recruiting Unavailable',
+            '<p>The recruiting period is not currently active.</p>'
+        );
+        return;
+    }
+
+    const selectedIds = [...recruitingQuickSelectedIds];
+
+    if (selectedIds.length === 0) {
+        showModal(
+            'No Prospects Selected',
+            '<p>Select at least one prospect before adding to your recruiting list.</p>'
+        );
+        return;
+    }
+
+    if (
+        !progress.teamRecruitingLists ||
+        typeof progress.teamRecruitingLists !== 'object' ||
+        Array.isArray(progress.teamRecruitingLists)
+    ) {
+        progress.teamRecruitingLists = {};
+    }
+
+    const teamKey = String(team.id);
+
+    const recruitingList = Array.isArray(
+        progress.teamRecruitingLists[teamKey]
+    )
+        ? progress.teamRecruitingLists[teamKey]
+        : [];
+
+    const existingIds = new Set(
+        recruitingList
+            .filter(entry => entry?.playerId != null)
+            .map(entry => String(entry.playerId))
+    );
+
+    let addedCount = 0;
+    const skipped = [];
+
+    const currentDay = Math.max(
+        1,
+        Math.floor(Number(state.recruitingDay) || 1)
+    );
+
+    for (const playerId of selectedIds) {
+        const player = gs.players?.find(candidate =>
+            String(candidate?.id) === playerId
+        );
+
+        const record =
+            progress.recruits?.[playerId];
+
+        if (
+            !player ||
+            player.teamId != null ||
+            !record ||
+            record.status !== 'available' ||
+            record.committedTeamId != null
+        ) {
+            skipped.push({
+                playerName: player?.name || playerId,
+                reason: 'No longer available'
+            });
+
+            continue;
+        }
+
+        if (existingIds.has(playerId)) {
+            skipped.push({
+                playerName: player.name,
+                reason: 'Already on your recruiting list'
+            });
+
+            continue;
+        }
+
+        recruitingList.push({
+            playerId,
+            assignedCoachId: null,
+            addedDay: currentDay,
+            lastWorkedDay: null,
+            lastCoachId: null,
+            lastAction: null
+        });
+
+        existingIds.add(playerId);
+        addedCount++;
+    }
+
+    progress.teamRecruitingLists[teamKey] = recruitingList;
+
+    recruitingQuickSelectedIds.clear();
+
+    Game.saveGameState?.('backyardFootballGameState');
+
+    const latestState = getGameState() || gs;
+
+    renderOffseasonFAScreen(latestState);
+
+    const escapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    const skippedHtml = skipped.length > 0
+        ? `
+            <div class="mt-3">
+                <div class="font-bold text-amber-800">
+                    Not added (${skipped.length})
+                </div>
+
+                <div class="mt-1 space-y-1 text-xs text-slate-600">
+                    ${skipped.map(item => `
+                        <div>
+                            <b>${escapeHtml(item.playerName)}</b>:
+                            ${escapeHtml(item.reason)}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `
+        : '';
+
+    showModal(
+        addedCount > 0
+            ? 'Recruiting List Updated'
+            : 'No Prospects Added',
+        `
+            <div class="space-y-2 text-sm">
+                <p>
+                    Added <b>${addedCount}</b> prospect(s) to your recruiting list.
+                </p>
+
+                <p class="text-xs text-slate-500">
+                    No staff hours were used. Your staff will begin working through the list as you advance recruiting days.
+                </p>
+
+                ${skippedHtml}
+            </div>
+        `,
+        null,
+        'Continue'
+    );
+};
+
+function getPlayerRecruitingListContext() {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    const state = gs?.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    const phase = String(state?.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    if (
+        !team ||
+        phase !== 'recruiting' ||
+        !progress?.initialized ||
+        progress.completed === true ||
+        Number(progress.seasonYear) !== Number(gs.year)
+    ) {
+        return null;
+    }
+
+    if (
+        !progress.teamRecruitingLists ||
+        typeof progress.teamRecruitingLists !== 'object' ||
+        Array.isArray(progress.teamRecruitingLists)
+    ) {
+        progress.teamRecruitingLists = {};
+    }
+
+    const teamKey = String(team.id);
+
+    if (!Array.isArray(progress.teamRecruitingLists[teamKey])) {
+        progress.teamRecruitingLists[teamKey] = [];
+    }
+
+    return {
+        gs,
+        team,
+        progress,
+        teamKey,
+        list: progress.teamRecruitingLists[teamKey]
+    };
+}
+
+function savePlayerRecruitingList(context) {
+    if (!context) return;
+
+    Game.saveGameState?.('backyardFootballGameState');
+
+    renderOffseasonFAScreen(
+        getGameState() || context.gs
+    );
+}
+
+window.app_setRecruitingListCoach = function(playerId, coachId) {
+    const context = getPlayerRecruitingListContext();
+
+    if (!context) {
+        showModal(
+            'Recruiting Unavailable',
+            '<p>The recruiting period is not currently active.</p>'
+        );
+        return;
+    }
+
+    const entry = context.list.find(candidate =>
+        String(candidate?.playerId) === String(playerId)
+    );
+
+    if (!entry) return;
+
+    const normalizedCoachId = String(coachId || '');
+
+    if (normalizedCoachId) {
+        const staffBudget =
+            Game.getRecruitingStaffHourBudget?.(
+                context.team,
+                context.gs
+            ) || [];
+
+        const validCoach = staffBudget.some(coach =>
+            String(coach?.coachId) === normalizedCoachId
+        );
+
+        if (!validCoach) {
+            showModal(
+                'Coach Unavailable',
+                '<p>That coach is no longer part of your available recruiting staff.</p>'
+            );
+
+            renderOffseasonFAScreen(context.gs);
+            return;
+        }
+
+        entry.assignedCoachId = normalizedCoachId;
+    } else {
+        entry.assignedCoachId = null;
+    }
+
+    savePlayerRecruitingList(context);
+};
+
+window.app_moveRecruitingListItem = function(playerId, direction) {
+    const context = getPlayerRecruitingListContext();
+
+    if (!context) return;
+
+    const index = context.list.findIndex(entry =>
+        String(entry?.playerId) === String(playerId)
+    );
+
+    if (index < 0) return;
+
+    const offset = Number(direction);
+
+    if (offset !== -1 && offset !== 1) return;
+
+    const nextIndex = index + offset;
+
+    if (
+        nextIndex < 0 ||
+        nextIndex >= context.list.length
+    ) {
+        return;
+    }
+
+    [
+        context.list[index],
+        context.list[nextIndex]
+    ] = [
+        context.list[nextIndex],
+        context.list[index]
+    ];
+
+    savePlayerRecruitingList(context);
+};
+
+window.app_removeRecruitingListItem = function(playerId) {
+    const context = getPlayerRecruitingListContext();
+
+    if (!context) return;
+
+    const index = context.list.findIndex(entry =>
+        String(entry?.playerId) === String(playerId)
+    );
+
+    if (index < 0) return;
+
+    context.list.splice(index, 1);
+
+    savePlayerRecruitingList(context);
 };
 
 window.app_quickAssignSelectedRecruitingTargets = function() {

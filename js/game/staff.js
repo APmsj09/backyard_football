@@ -6104,6 +6104,14 @@ export function processAiRecruitingDay(gameState) {
         ? null
         : String(gameState.playerTeam.id);
 
+    const getTeamRecruitingList = team => {
+        const list = progress.teamRecruitingLists?.[
+            String(team?.id)
+        ];
+
+        return Array.isArray(list) ? list : [];
+    };
+
     const teams = gameState.teams.filter(team => {
         if (!team || team.leagueType !== 'main') {
             return false;
@@ -6118,12 +6126,11 @@ export function processAiRecruitingDay(gameState) {
 
         if (!isPlayerTeam) return true;
 
-        const autonomy = String(
-            team.teamInstructions?.departments?.recruiting?.autonomy ||
-            'guided'
-        ).toLowerCase();
-
-        return autonomy !== 'direct';
+        // The user's staff only work prospects explicitly placed
+        // on the persistent recruiting list.
+        return getTeamRecruitingList(team).some(
+            entry => entry?.playerId != null
+        );
     });
 
     for (const team of teams) {
@@ -6150,6 +6157,28 @@ export function processAiRecruitingDay(gameState) {
                 playerTeamId !== null &&
                 String(team.id) === playerTeamId
             );
+
+        const userRecruitingTargets = new Map(
+            isPlayerControlledTeam
+                ? getTeamRecruitingList(team)
+                    .filter(entry => entry?.playerId != null)
+                    .map(entry => [
+                        String(entry.playerId),
+                        entry
+                    ])
+                : []
+        );
+
+        const userRecruitingPriorityIndices = new Map(
+            isPlayerControlledTeam
+                ? getTeamRecruitingList(team)
+                    .filter(entry => entry?.playerId != null)
+                    .map((entry, index) => [
+                        String(entry.playerId),
+                        index
+                    ])
+                : []
+        );
 
         const recruitingWorkPlan = Number.isInteger(workYear)
             ? (
@@ -6258,6 +6287,10 @@ export function processAiRecruitingDay(gameState) {
                     normalizedLevel === 'ignore'
             };
         };
+
+        const canAutomatePlayerTeamOffers =
+            !isPlayerControlledTeam ||
+            recruitingAutonomy !== 'direct';
 
         const staffBudgets = getRecruitingStaffHourBudget(
             team,
@@ -6453,10 +6486,25 @@ export function processAiRecruitingDay(gameState) {
                             String(refusedTeamId) === teamKey
                     );
 
+                const userRecruitingTarget = isPlayerControlledTeam
+                    ? userRecruitingTargets.get(String(player?.id))
+                    : null;
+
+                const assignedToAnotherCoach =
+                    isPlayerControlledTeam &&
+                    userRecruitingTarget?.assignedCoachId != null &&
+                    String(userRecruitingTarget.assignedCoachId) !==
+                        String(coach.id);
+
                 if (
                     !getRecruitEligibility(player, record) ||
                     hasRefusedThisTeam ||
-                    targetedToday.has(String(player.id))
+                    targetedToday.has(String(player.id)) ||
+                    (
+                        isPlayerControlledTeam &&
+                        !userRecruitingTarget
+                    ) ||
+                    assignedToAnotherCoach
                 ) {
                     return null;
                 }
@@ -7020,27 +7068,120 @@ export function processAiRecruitingDay(gameState) {
                 };
             })
                 .filter(Boolean)
-                .sort((a, b) => b.score - a.score);
+                .sort((a, b) => {
+                    if (isPlayerControlledTeam) {
+                        const aEntry = userRecruitingTargets.get(
+                            String(a.player?.id)
+                        );
+
+                        const bEntry = userRecruitingTargets.get(
+                            String(b.player?.id)
+                        );
+
+                        const aLastWorkedDay =
+                            Number(aEntry?.lastWorkedDay) || 0;
+
+                        const bLastWorkedDay =
+                            Number(bEntry?.lastWorkedDay) || 0;
+
+                        // Give prospects who have received less attention
+                        // priority over those worked more recently.
+                        if (aLastWorkedDay !== bLastWorkedDay) {
+                            return aLastWorkedDay - bLastWorkedDay;
+                        }
+
+                        const aRank =
+                            userRecruitingPriorityIndices.get(
+                                String(a.player?.id)
+                            ) ?? Number.MAX_SAFE_INTEGER;
+
+                        const bRank =
+                            userRecruitingPriorityIndices.get(
+                                String(b.player?.id)
+                            ) ?? Number.MAX_SAFE_INTEGER;
+
+                        if (aRank !== bRank) {
+                            return aRank - bRank;
+                        }
+                    }
+
+                    return b.score - a.score;
+                });
 
             if (evaluatedTargets.length === 0) continue;
 
-            const target = evaluatedTargets[0];
-            const selectedAction = target.selectedAction;
+            // User staff can work multiple prospects.
+            // AI opponents retain their original single-target behavior.
+            const targetsToWork = isPlayerControlledTeam
+                ? evaluatedTargets
+                : evaluatedTargets.slice(0, 1);
 
-            if (!selectedAction) continue;
+            let dailyHoursRemaining = Math.floor(hoursToday);
 
-            const result = executeRecruitingAction(
-                gameState,
-                team.id,
-                coach.id,
-                target.player.id,
-                selectedAction.type,
-                hoursToday
-            );
+            for (
+                let targetIndex = 0;
+                targetIndex < targetsToWork.length;
+                targetIndex++
+            ) {
+                if (dailyHoursRemaining <= 0) break;
 
-            if (!result.success) continue;
+                const target = targetsToWork[targetIndex];
+                const selectedAction = target.selectedAction;
 
-            targetedToday.add(String(target.player.id));
+                if (!selectedAction) continue;
+
+                // Divide the coach's remaining hours across the
+                // eligible prospects, favoring higher-ranked targets.
+                const remainingTargets =
+                    targetsToWork.length - targetIndex;
+
+                const targetHours = isPlayerControlledTeam
+                    ? Math.max(
+                        1,
+                        Math.ceil(
+                            dailyHoursRemaining / remainingTargets
+                        )
+                    )
+                    : dailyHoursRemaining;
+
+                const result = executeRecruitingAction(
+                    gameState,
+                    team.id,
+                    coach.id,
+                    target.player.id,
+                    selectedAction.type,
+                    targetHours
+                );
+
+                if (!result.success) continue;
+
+                dailyHoursRemaining -= targetHours;
+
+                targetedToday.add(String(target.player.id));
+
+                const userListEntry = isPlayerControlledTeam
+                    ? userRecruitingTargets.get(
+                        String(target.player.id)
+                    )
+                    : null;
+
+                if (userListEntry) {
+                    userListEntry.lastWorkedDay = day;
+                    userListEntry.lastCoachId = String(coach.id);
+                    userListEntry.lastAction = selectedAction.type;
+                }
+
+            if (isPlayerControlledTeam) {
+                const listEntry = userRecruitingTargets.get(
+                    String(target.player.id)
+                );
+
+                if (listEntry) {
+                    listEntry.lastWorkedDay = day;
+                    listEntry.lastCoachId = String(coach.id);
+                    listEntry.lastAction = selectedAction.type;
+                }
+            }
 
             let offerExtended = false;
 
@@ -7093,6 +7234,7 @@ export function processAiRecruitingDay(gameState) {
                     invitationPatienceAdjustment;
 
                 const shouldExtendOffer =
+                    canAutomatePlayerTeamOffers &&
                     Number(result.interestAfter) >= 18 &&
                     invitationScore >= 22;
 
@@ -7159,6 +7301,7 @@ export function processAiRecruitingDay(gameState) {
             );
 
             const shouldConsiderSweetener =
+                canAutomatePlayerTeamOffers &&
                 Number(result.interestAfter) >= 18 &&
                 (
                     observedCompetitionPressure >= 3 ||
@@ -7251,34 +7394,35 @@ export function processAiRecruitingDay(gameState) {
                 ? sweetenerResult
                 : null;
 
-            actions.push({
-                teamId: team.id,
-                teamName: team.name,
-                coachId: coach.id,
-                coachName: coach.name || 'Coach',
-                playerId: target.player.id,
-                playerName: target.player.name,
-                action: selectedAction.type,
-                hours: hoursToday,
-                offerExtended,
+                actions.push({
+                    teamId: team.id,
+                    teamName: team.name,
+                    coachId: coach.id,
+                    coachName: coach.name || 'Coach',
+                    playerId: target.player.id,
+                    playerName: target.player.name,
+                    action: selectedAction.type,
+                    hours: targetHours,
+                    offerExtended,
 
-                interestGain:
-                    result.interestGain +
-                    (appliedSweetener?.interestGain || 0),
+                    interestGain:
+                        result.interestGain +
+                        (appliedSweetener?.interestGain || 0),
 
-                interestAfter:
-                    appliedSweetener?.interestAfter ??
-                    result.interestAfter,
+                    interestAfter:
+                        appliedSweetener?.interestAfter ??
+                        result.interestAfter,
 
-                sweetenerType:
-                    appliedSweetener?.activity?.sweetenerType || null,
+                    sweetenerType:
+                        appliedSweetener?.activity?.sweetenerType || null,
 
-                sweetenerCashSpent:
-                    appliedSweetener?.cashSpent || 0,
+                    sweetenerCashSpent:
+                        appliedSweetener?.cashSpent || 0,
 
-                sweetenerTokensSpent:
-                    appliedSweetener?.tokensSpent || 0
-            });
+                    sweetenerTokensSpent:
+                        appliedSweetener?.tokensSpent || 0
+                });
+            }
         }
     }
 

@@ -431,6 +431,9 @@ export function transitionOffseasonPhase(
             initialized: true,
             recruits,
             teamDailyWork: {},
+            teamRecruitingLists: {},
+            aiProcessedDays: {},
+            resolvedDays: [],
             dailyActivity: [],
             commitments: [],
             completed: false
