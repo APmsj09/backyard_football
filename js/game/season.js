@@ -5492,7 +5492,7 @@ export function resolveRecruitingDay(gameState = game) {
     return rosterSize + otherActiveReservations < rosterLimit
         ? team
         : null;
-};
+    };
 
     const protectedDraftIds = new Set(
         (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
@@ -6409,8 +6409,17 @@ export function resolveRecruitingDay(gameState = game) {
         return commitment;
     };
 
-    const chooseWeightedCandidate = candidates => {
+    const chooseWeightedCandidate = (
+        candidates,
+        commitmentProfile = {}
+    ) => {
         if (candidates.length === 0) return null;
+
+        const interestThreshold = Number.isFinite(
+            Number(commitmentProfile.interestThreshold)
+        )
+            ? Number(commitmentProfile.interestThreshold)
+            : seriousInterestThreshold;
 
         // Interest above the serious-contender threshold determines the
         // odds. A leader is favored, but the result isn't guaranteed.
@@ -6467,14 +6476,7 @@ export function resolveRecruitingDay(gameState = game) {
                 weight: Math.pow(
                     Math.max(
                         1,
-                        decisionScore -
-                            (
-                                Number.isFinite(
-                                    Number(candidate.interestThreshold)
-                                )
-                                    ? Number(candidate.interestThreshold)
-                                    : seriousInterestThreshold
-                            )
+                        decisionScore - interestThreshold
                     ),
                     1.6
                 ) * decisionMultiplier
@@ -6491,7 +6493,7 @@ export function resolveRecruitingDay(gameState = game) {
         // Players who are eager to join are less inclined to wait.
         // Higher-ego players are more willing to hold out for a better fit.
         const configuredNoCommitWeight = Number(
-            candidates[0]?.noCommitWeight
+            commitmentProfile.noCommitWeight
         );
 
         const noCommitWeight = Number.isFinite(
@@ -6792,6 +6794,8 @@ export function resolveRecruitingDay(gameState = game) {
                 const team = getEligibleTeam(teamId, player);
                 const interest = getInterest(record, teamId);
 
+                
+
                 const playerFit = team
                     ? calculatePlayerRecruitingFit(
                         player,
@@ -6839,20 +6843,12 @@ export function resolveRecruitingDay(gameState = game) {
                     pushMultiplier,
                     preferenceFit,
                     decisionScore,
-
-                    interestThreshold:
-                        commitmentProfile.interestThreshold,
-
-                    earlyCommitInterest:
-                        commitmentProfile.earlyCommitInterest,
-
-                    noCommitWeight:
-                        commitmentProfile.noCommitWeight
                 };
             })
             .filter(candidate =>
                 candidate.team &&
-                candidate.interest >= candidate.interestThreshold
+                candidate.interest >=
+                    commitmentProfile.interestThreshold
             )
             .sort((a, b) =>
                 b.decisionScore - a.decisionScore
@@ -6878,14 +6874,18 @@ export function resolveRecruitingDay(gameState = game) {
             const leader = contenders[0];
             const runnerUp = contenders[1] || null;
 
-        const leadMargin = leader.decisionScore -
-            (runnerUp?.decisionScore || 0);
+            const leadMargin = runnerUp
+                ? Math.max(
+                    0,
+                    leader.decisionScore - runnerUp.decisionScore
+                )
+                : 0;
 
             const hasFewAlternatives = contenders.length === 1;
             const strongLead = leadMargin >= 18;
 
             const earlyCommitInterest =
-                leader.earlyCommitInterest ?? 82;
+                commitmentProfile.earlyCommitInterest;
 
             if (
                 leader.interest >= earlyCommitInterest &&
@@ -6893,26 +6893,38 @@ export function resolveRecruitingDay(gameState = game) {
             ) {
                 // Strong recruiting interest can trigger an early
                 // decision, but it does not dictate which team wins.
-                const earlyCommitChance = Math.min(
-                    0.85,
-                    0.35 +
-                        (leader.interest - 80) * 0.02 +
-                        leadMargin * 0.006
-                );
+                const earlyCommitChance = Math.max(
+                    0,
+                    Math.min(
+                        0.85,
+                        0.35 +
+                            (
+                                leader.interest -
+                                earlyCommitInterest
+                            ) * 0.02 +
+                            leadMargin * 0.006
+                    )
+                );  
 
                 if (Math.random() < earlyCommitChance) {
                     // Let the player evaluate all serious offers using
                     // the same fit, recruiting investment, and
                     // willingness-to-remain-unsigned calculations
                     // used for the final recruiting decision.
-                    winner = chooseWeightedCandidate(contenders);
+                    winner = chooseWeightedCandidate(
+                        contenders,
+                        commitmentProfile
+                    );
                 }
             }
         }
 
         // End-of-week decisions consider all eligible serious contenders.
         if (finalDay && contenders.length > 0) {
-            winner = chooseWeightedCandidate(contenders);
+            winner = chooseWeightedCandidate(
+                contenders,
+                commitmentProfile
+            );
         }
 
         if (!winner) {

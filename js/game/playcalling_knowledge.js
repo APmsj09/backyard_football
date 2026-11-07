@@ -35,7 +35,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['Less effective into a crowded interior', 'Limited explosive potential without a crease'],
         keyPositions: ['RB', 'OL'],
         supportingPositions: ['TE', 'FB'],
-        skillPriorities: { RB: ['vision', 'strength', 'acceleration'], OL: ['blocking', 'strength'] }
+        skillPriorities: { RB: ['strength', 'carrying'], OL: ['blocking', 'strength'] }
     },
     outsideRun: {
         label: 'Outside run',
@@ -46,7 +46,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['Needs space and sound blocking angles', 'Can lose yards against fast edge contain'],
         keyPositions: ['RB', 'OL'],
         supportingPositions: ['TE', 'FB', 'WR'],
-        skillPriorities: { RB: ['speed', 'agility', 'acceleration'], OL: ['blocking', 'agility'] }
+        skillPriorities: { RB: ['speed', 'agility'], OL: ['blocking', 'agility'] }
     },
     powerRun: {
         label: 'Power run',
@@ -57,7 +57,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['Can run into a loaded front', 'Less flexible when the defense wins the point of attack'],
         keyPositions: ['RB', 'OL'],
         supportingPositions: ['FB', 'TE'],
-        skillPriorities: { RB: ['strength', 'vision', 'truck'], OL: ['blocking', 'strength'], FB: ['blocking', 'strength'] }
+        skillPriorities: { RB: ['strength', 'carrying'], OL: ['blocking', 'strength'], FB: ['blocking', 'strength'] }
     },
     counterRun: {
         label: 'Counter / misdirection run',
@@ -68,7 +68,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['Timing and blocking coordination matter', 'Less useful when defenders stay disciplined'],
         keyPositions: ['RB', 'OL'],
         supportingPositions: ['FB', 'TE'],
-        skillPriorities: { RB: ['vision', 'agility'], OL: ['blocking', 'playbookIQ'] }
+        skillPriorities: { RB: ['agility'], OL: ['blocking', 'playbookIQ'] }
     },
     quickPass: {
         label: 'Quick pass',
@@ -79,7 +79,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['Limited time for receivers to separate', 'Tight underneath coverage can compress windows'],
         keyPositions: ['QB', 'WR'],
         supportingPositions: ['TE', 'RB', 'OL'],
-        skillPriorities: { QB: ['throwingAccuracy', 'decisionMaking'], WR: ['routeRunning', 'catchingHands'], TE: ['routeRunning', 'catchingHands'] }
+        skillPriorities: { QB: ['throwingAccuracy', 'decisionMaking'], WR: ['catchingHands'], TE: ['catchingHands'] }
     },
     verticalPass: {
         label: 'Vertical / deep pass',
@@ -101,7 +101,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['Timing and spacing are important', 'Pattern-match defenders and pressure can disrupt routes'],
         keyPositions: ['QB', 'WR', 'TE'],
         supportingPositions: ['RB', 'OL'],
-        skillPriorities: { QB: ['throwingAccuracy', 'decisionMaking'], WR: ['routeRunning', 'agility'], TE: ['routeRunning', 'catchingHands'] }
+        skillPriorities: { QB: ['throwingAccuracy', 'decisionMaking'], WR: ['agility'], TE: ['catchingHands'] }
     },
     screenPass: {
         label: 'Screen pass',
@@ -123,7 +123,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['The fake must be credible', 'Can expose the QB when pressure arrives early'],
         keyPositions: ['QB', 'RB', 'OL'],
         supportingPositions: ['WR', 'TE', 'FB'],
-        skillPriorities: { QB: ['playbookIQ', 'throwingAccuracy'], RB: ['ballHandling'], OL: ['blocking'] }
+        skillPriorities: { QB: ['playbookIQ', 'throwingAccuracy'], RB: ['carrying'], OL: ['blocking'] }
     },
     rolloutPass: {
         label: 'Rollout / bootleg pass',
@@ -134,7 +134,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['Contain defenders can limit the escape lane', 'Can shrink the available field and passing angles'],
         keyPositions: ['QB', 'RB'],
         supportingPositions: ['TE', 'WR', 'OL'],
-        skillPriorities: { QB: ['mobility', 'throwingAccuracy', 'decisionMaking'], OL: ['blocking'] }
+        skillPriorities: { QB: ['throwingAccuracy', 'decisionMaking'], OL: ['blocking'] }
     },
     floodPass: {
         label: 'Flood / layered pass',
@@ -145,7 +145,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['Pattern-match coverage can pass routes off', 'Requires time and route spacing'],
         keyPositions: ['QB', 'WR'],
         supportingPositions: ['TE', 'RB', 'OL'],
-        skillPriorities: { QB: ['decisionMaking', 'throwingAccuracy'], WR: ['routeRunning', 'speed'] }
+        skillPriorities: { QB: ['decisionMaking', 'throwingAccuracy'], WR: ['speed', 'agility'] }
     },
     runPassOption: {
         label: 'Run-pass option',
@@ -156,7 +156,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['Requires a correct, timely read', 'Disciplined defenders reduce the decision advantage'],
         keyPositions: ['QB', 'RB'],
         supportingPositions: ['WR', 'OL'],
-        skillPriorities: { QB: ['decisionMaking', 'playbookIQ'], RB: ['vision', 'ballHandling'] }
+        skillPriorities: { QB: ['decisionMaking', 'playbookIQ'], RB: ['carrying'] }
     },
     trickPass: {
         label: 'Trick / deception pass',
@@ -167,7 +167,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['High execution and turnover risk', 'Loses surprise value when overused'],
         keyPositions: ['QB', 'RB'],
         supportingPositions: ['WR', 'TE', 'OL'],
-        skillPriorities: { QB: ['decisionMaking', 'throwingAccuracy'], RB: ['ballHandling', 'playbookIQ'] }
+        skillPriorities: { QB: ['decisionMaking', 'throwingAccuracy'], RB: ['carrying', 'playbookIQ'] }
     },
     balancedPass: {
         label: 'Balanced pass',
@@ -178,7 +178,7 @@ const OFFENSE_PROFILES = {
         weaknesses: ['May lack a single decisive advantage', 'Still depends on the QB reading the defense'],
         keyPositions: ['QB', 'WR'],
         supportingPositions: ['TE', 'RB', 'OL'],
-        skillPriorities: { QB: ['decisionMaking', 'throwingAccuracy'], WR: ['routeRunning', 'catchingHands'] }
+        skillPriorities: { QB: ['decisionMaking', 'throwingAccuracy'], WR: ['catchingHands'] }
     }
 };
 
@@ -247,7 +247,7 @@ const DEFENSE_PROFILES = {
         weaknesses: ['Fewer defenders remain available for coverage', 'Quick throws, screens and vertical releases can punish poor spacing'],
         keyPositions: ['DL', 'LB', 'DB'],
         supportingPositions: ['DB'],
-        skillPriorities: { DL: ['speed', 'strength', 'passRush'], LB: ['speed', 'tackling'], DB: ['coverage', 'speed'] }
+        skillPriorities: { DL: ['speed', 'strength'], LB: ['speed', 'tackling'], DB: ['coverage', 'speed'] }
     },
     zoneBlitz: {
         label: 'Zone blitz',
@@ -258,7 +258,7 @@ const DEFENSE_PROFILES = {
         weaknesses: ['Dropping and rushing players must execute their assignments', 'Screens and quick decisions can exploit pressure movement'],
         keyPositions: ['DL', 'LB', 'DB'],
         supportingPositions: ['LB', 'DB'],
-        skillPriorities: { DL: ['passRush', 'playbookIQ'], LB: ['coverage', 'playbookIQ'], DB: ['coverage', 'playbookIQ'] }
+        skillPriorities: { DL: ['playbookIQ'], LB: ['coverage', 'playbookIQ'], DB: ['coverage', 'playbookIQ'] }
     },
     runFit: {
         label: 'Run-focused front',
@@ -393,6 +393,174 @@ const DEFENSE_OVERRIDES = {
     }
 };
 
+const MENTAL_IQ = Object.freeze([
+    'playbookIQ',
+    'decisionMaking'
+]);
+
+const PLAYBOOK_AWARENESS = Object.freeze([
+    'playbookIQ'
+]);
+
+const DECISION_AWARENESS = Object.freeze([
+    'decisionMaking'
+]);
+
+const TACTICAL_MENTAL_PRIORITIES = {
+    // OFFENSE
+    insideRun: {
+        RB: MENTAL_IQ,
+        OL: MENTAL_IQ,
+        FB: MENTAL_IQ,
+        TE: PLAYBOOK_AWARENESS
+    },
+    outsideRun: {
+        RB: MENTAL_IQ,
+        OL: MENTAL_IQ,
+        FB: MENTAL_IQ,
+        TE: MENTAL_IQ,
+        WR: PLAYBOOK_AWARENESS
+    },
+    powerRun: {
+        RB: MENTAL_IQ,
+        OL: MENTAL_IQ,
+        FB: MENTAL_IQ,
+        TE: PLAYBOOK_AWARENESS
+    },
+    counterRun: {
+        RB: MENTAL_IQ,
+        OL: MENTAL_IQ,
+        FB: MENTAL_IQ,
+        TE: PLAYBOOK_AWARENESS
+    },
+    quickPass: {
+        QB: MENTAL_IQ,
+        WR: MENTAL_IQ,
+        TE: MENTAL_IQ,
+        RB: DECISION_AWARENESS,
+        OL: PLAYBOOK_AWARENESS
+    },
+    verticalPass: {
+        QB: MENTAL_IQ,
+        WR: MENTAL_IQ,
+        TE: MENTAL_IQ,
+        OL: MENTAL_IQ,
+        RB: PLAYBOOK_AWARENESS
+    },
+    crossingPass: {
+        QB: MENTAL_IQ,
+        WR: MENTAL_IQ,
+        TE: MENTAL_IQ,
+        RB: DECISION_AWARENESS,
+        OL: PLAYBOOK_AWARENESS
+    },
+    screenPass: {
+        QB: MENTAL_IQ,
+        RB: MENTAL_IQ,
+        OL: MENTAL_IQ,
+        WR: MENTAL_IQ,
+        TE: PLAYBOOK_AWARENESS
+    },
+    playAction: {
+        QB: MENTAL_IQ,
+        RB: MENTAL_IQ,
+        OL: MENTAL_IQ,
+        FB: MENTAL_IQ,
+        TE: MENTAL_IQ,
+        WR: PLAYBOOK_AWARENESS
+    },
+    rolloutPass: {
+        QB: MENTAL_IQ,
+        RB: MENTAL_IQ,
+        OL: MENTAL_IQ,
+        TE: MENTAL_IQ,
+        WR: PLAYBOOK_AWARENESS
+    },
+    floodPass: {
+        QB: MENTAL_IQ,
+        WR: MENTAL_IQ,
+        TE: MENTAL_IQ,
+        RB: DECISION_AWARENESS,
+        OL: PLAYBOOK_AWARENESS
+    },
+    runPassOption: {
+        QB: MENTAL_IQ,
+        RB: MENTAL_IQ,
+        WR: DECISION_AWARENESS,
+        OL: PLAYBOOK_AWARENESS
+    },
+    trickPass: {
+        QB: MENTAL_IQ,
+        RB: MENTAL_IQ,
+        WR: MENTAL_IQ,
+        TE: DECISION_AWARENESS,
+        OL: MENTAL_IQ
+    },
+    balancedPass: {
+        QB: MENTAL_IQ,
+        WR: MENTAL_IQ,
+        TE: MENTAL_IQ,
+        RB: DECISION_AWARENESS,
+        OL: PLAYBOOK_AWARENESS
+    },
+
+    // DEFENSE
+    zoneCover2: {
+        DB: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DL: PLAYBOOK_AWARENESS
+    },
+    zoneCover3: {
+        DB: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DL: PLAYBOOK_AWARENESS
+    },
+    quartersCoverage: {
+        DB: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DL: PLAYBOOK_AWARENESS
+    },
+    splitFieldZone: {
+        DB: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DL: PLAYBOOK_AWARENESS
+    },
+    manCoverage: {
+        DB: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DL: PLAYBOOK_AWARENESS
+    },
+    manBlitz: {
+        DL: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DB: MENTAL_IQ
+    },
+    zoneBlitz: {
+        DL: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DB: MENTAL_IQ
+    },
+    runFit: {
+        DL: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DB: PLAYBOOK_AWARENESS
+    },
+    bracketCoverage: {
+        DB: MENTAL_IQ,
+        LB: MENTAL_IQ
+    },
+    prevent: {
+        DB: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DL: PLAYBOOK_AWARENESS
+    },
+    balancedZone: {
+        DB: MENTAL_IQ,
+        LB: MENTAL_IQ,
+        DL: PLAYBOOK_AWARENESS
+    }
+};
+
 function hasTag(tags, candidates) {
     return candidates.some(tag => tags.has(tag));
 }
@@ -435,7 +603,7 @@ function inferDefensiveArchetype(play = {}) {
     return 'balancedZone';
 }
 
-function mergeProfile(base, override) {
+function mergeProfile(base, override, archetype) {
     const result = { ...base, ...override };
     result.situations = { ...(base.situations || {}), ...(override?.situations || {}) };
     result.strengths = [...(override?.strengths || base.strengths || [])];
@@ -445,14 +613,57 @@ function mergeProfile(base, override) {
     result.vulnerableTo = [...(override?.vulnerableTo || base.vulnerableTo || [])];
     result.keyPositions = [...(override?.keyPositions || base.keyPositions || [])];
     result.supportingPositions = [...(override?.supportingPositions || base.supportingPositions || [])];
-    result.skillPriorities = { ...(base.skillPriorities || {}), ...(override?.skillPriorities || {}) };
+
+    const combinedPriorities = {
+        ...(base.skillPriorities || {}),
+        ...(override?.skillPriorities || {})
+    };
+
+    const mentalKeys = new Set([
+        'playbookIQ',
+        'decisionMaking'
+    ]);
+
+    result.executionPriorities = {};
+    result.mentalPriorities = {};
+
+    for (const [position, skills] of Object.entries(combinedPriorities)) {
+        if (!Array.isArray(skills)) continue;
+
+        result.executionPriorities[position] = skills.filter(
+            skill => !mentalKeys.has(skill)
+        );
+
+        result.mentalPriorities[position] = skills.filter(
+            skill => mentalKeys.has(skill)
+        );
+    }
+
+    const explicitMentalPriorities =
+        TACTICAL_MENTAL_PRIORITIES[archetype] || {};
+
+    for (const [position, skills] of Object.entries(explicitMentalPriorities)) {
+        const existing = result.mentalPriorities[position] || [];
+
+        result.mentalPriorities[position] = [
+            ...new Set([...existing, ...skills])
+        ];
+    }
+
+    // Preserve the original combined field for compatibility.
+    result.skillPriorities = combinedPriorities;
+
     return result;
 }
 
 export function getOffensivePlayKnowledge(playKey, playDefinition = {}) {
     const override = OFFENSE_OVERRIDES[playKey] || {};
     const archetype = override.archetype || inferOffensiveArchetype(playDefinition);
-    const profile = mergeProfile(OFFENSE_PROFILES[archetype] || OFFENSE_PROFILES.balancedPass, override);
+    const profile = mergeProfile(
+        OFFENSE_PROFILES[archetype] || OFFENSE_PROFILES.balancedPass,
+        override,
+        archetype
+    );
 
     return {
         key: playKey,
@@ -467,6 +678,8 @@ export function getOffensivePlayKnowledge(playKey, playDefinition = {}) {
         keyPositions: profile.keyPositions,
         supportingPositions: profile.supportingPositions,
         skillPriorities: profile.skillPriorities,
+        executionPriorities: profile.executionPriorities,
+        mentalPriorities: profile.mentalPriorities,
         readProgression: Array.isArray(playDefinition.readProgression)
             ? [...playDefinition.readProgression]
             : [],
@@ -477,7 +690,11 @@ export function getOffensivePlayKnowledge(playKey, playDefinition = {}) {
 export function getDefensivePlayKnowledge(playKey, playDefinition = {}) {
     const override = DEFENSE_OVERRIDES[playKey] || {};
     const archetype = override.archetype || inferDefensiveArchetype(playDefinition);
-    const profile = mergeProfile(DEFENSE_PROFILES[archetype] || DEFENSE_PROFILES.balancedZone, override);
+    const profile = mergeProfile(
+        DEFENSE_PROFILES[archetype] || DEFENSE_PROFILES.balancedZone,
+        override,
+        archetype
+    );
 
     return {
         key: playKey,
@@ -492,6 +709,8 @@ export function getDefensivePlayKnowledge(playKey, playDefinition = {}) {
         keyPositions: profile.keyPositions,
         supportingPositions: profile.supportingPositions,
         skillPriorities: profile.skillPriorities,
+        executionPriorities: profile.executionPriorities,
+        mentalPriorities: profile.mentalPriorities,
         isBlitz: Boolean(playDefinition.blitz || playDefinition.tags?.includes('blitz')),
         surprisePotential: playDefinition.tags?.includes('overload') ? 2 : 1
     };

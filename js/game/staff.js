@@ -187,6 +187,408 @@ function getRecruitingPlaybookRoleSnapshot(team, position) {
     };
 }
 
+const PLAYCALL_SCOUTING_ATTRIBUTE_CATEGORIES = Object.freeze({
+    speed: 'physical',
+    strength: 'physical',
+    agility: 'physical',
+    explosiveness: 'physical',
+    jumping: 'physical',
+    stamina: 'physical',
+
+    playbookIQ: 'mental',
+    clutch: 'mental',
+    consistency: 'mental',
+    toughness: 'mental',
+    decisionMaking: 'mental',
+
+    throwingAccuracy: 'technical',
+    throwPower: 'technical',
+    catchingHands: 'technical',
+    carrying: 'technical',
+    tackling: 'technical',
+    blocking: 'technical',
+    blockShedding: 'technical',
+    coverage: 'technical'
+});
+
+function getTeamScoutingAttributeEstimate(
+    team,
+    player,
+    skill
+) {
+    if (!team || player?.id == null) return null;
+
+    const category =
+        PLAYCALL_SCOUTING_ATTRIBUTE_CATEGORIES[skill];
+
+    if (!category) return null;
+
+    const report = getTeamScoutingReport(
+        team,
+        player.id
+    );
+
+    const range =
+        report?.attributeRanges?.[category]?.[skill];
+
+    if (
+        range?.low == null ||
+        range?.high == null
+    ) {
+        return null;
+    }
+
+    const low = Number(range.low);
+    const high = Number(range.high);
+
+    if (
+        !Number.isFinite(low) ||
+        !Number.isFinite(high) ||
+        low < 1 ||
+        high > 99 ||
+        high < low
+    ) {
+        return null;
+    }
+
+    const rawConfidence = Number(report.confidence);
+
+    const reportConfidence = Number.isFinite(rawConfidence)
+        ? Math.max(0, Math.min(1, rawConfidence))
+        : 0;
+
+    const midpoint = (low + high) / 2;
+
+    // Wider ranges provide less precise information.
+    const rangePrecision =
+        1 - Math.min(1, (high - low) / 98);
+
+    const effectiveConfidence =
+        reportConfidence * rangePrecision;
+
+    // Uncertain estimates move toward neutral rather than
+    // being treated as known player ability.
+    const estimatedValue =
+        50 + (midpoint - 50) * effectiveConfidence;
+
+    return {
+        value: estimatedValue,
+        low,
+        high,
+        midpoint,
+        confidence: reportConfidence,
+        effectiveConfidence
+    };
+}
+
+function getTeamScoutingPositionSnapshot(
+    team,
+    position,
+    skillKeys = []
+) {
+    const normalizedPosition = String(position || '')
+        .toUpperCase();
+
+    if (!normalizedPosition || !Array.isArray(skillKeys)) {
+        return null;
+    }
+
+    // Fullback is a tactical role filled by an RB in this game.
+    // It is not a separate roster position.
+    const rosterPosition = normalizedPosition === 'FB'
+        ? 'RB'
+        : normalizedPosition;
+
+    const players = getRosterObjects(team).filter(
+        player =>
+            String(player?.pos || '').toUpperCase() ===
+            rosterPosition
+    );
+
+    if (players.length === 0) {
+        return {
+            position: normalizedPosition,
+            rosterPosition,
+            rosterCount: 0,
+            playersEvaluated: 0,
+            skills: {}
+        };
+    }
+
+    const skills = {};
+
+    for (const skill of new Set(skillKeys)) {
+        const estimates = players
+            .map(player => ({
+                playerId: String(player.id),
+                estimate: getTeamScoutingAttributeEstimate(
+                    team,
+                    player,
+                    skill
+                )
+            }))
+            .filter(entry =>
+                entry.estimate &&
+                entry.estimate.effectiveConfidence > 0
+            );
+
+        if (estimates.length === 0) continue;
+
+        const averageValue = estimates.reduce(
+            (total, entry) =>
+                total + entry.estimate.value,
+            0
+        ) / estimates.length;
+
+        const averageConfidence = estimates.reduce(
+            (total, entry) =>
+                total + entry.estimate.effectiveConfidence,
+            0
+        ) / estimates.length;
+
+        const bestEstimate = Math.max(
+            ...estimates.map(entry => entry.estimate.value)
+        );
+
+        skills[skill] = {
+            average: averageValue,
+            best: bestEstimate,
+            playersKnown: estimates.length,
+            confidence: averageConfidence
+        };
+    }
+
+    const playersEvaluated = new Set(
+        skillKeys.flatMap(skill => {
+            const estimates = players.filter(player => {
+                const estimate = getTeamScoutingAttributeEstimate(
+                    team,
+                    player,
+                    skill
+                );
+
+                return estimate &&
+                    estimate.effectiveConfidence > 0;
+            });
+
+            return estimates.map(player => String(player.id));
+        })
+    ).size;
+
+    return {
+        position: normalizedPosition,
+        rosterPosition,
+        rosterCount: players.length,
+        playersEvaluated,
+        skills
+    };
+}
+
+function getPlayRosterFitSnapshot(team, knowledge) {
+    if (
+        !team ||
+        !knowledge ||
+        !['offense', 'defense'].includes(knowledge.side)
+    ) {
+        return null;
+    }
+
+    const keyPositions = Array.isArray(knowledge.keyPositions)
+        ? knowledge.keyPositions
+        : [];
+
+    const supportingPositions = Array.isArray(
+        knowledge.supportingPositions
+    )
+        ? knowledge.supportingPositions
+        : [];
+
+    const executionPriorities =
+        knowledge.executionPriorities || {};
+
+    const mentalPriorities =
+        knowledge.mentalPriorities || {};
+
+    // Key roles receive full weight. Supporting roles still matter,
+    // but should not outweigh the positions that drive the play.
+    const positionRoles = new Map();
+
+    for (const position of keyPositions) {
+        if (typeof position !== 'string') continue;
+
+        positionRoles.set(position.toUpperCase(), {
+            role: 'key',
+            weight: 1
+        });
+    }
+
+    for (const position of supportingPositions) {
+        if (typeof position !== 'string') continue;
+
+        const normalized = position.toUpperCase();
+
+        if (!positionRoles.has(normalized)) {
+            positionRoles.set(normalized, {
+                role: 'supporting',
+                weight: 0.5
+            });
+        }
+    }
+
+    const positionSnapshots = [];
+
+    let executionTotal = 0;
+    let executionWeight = 0;
+    let executionConfidenceTotal = 0;
+
+    let mentalTotal = 0;
+    let mentalWeight = 0;
+    let mentalConfidenceTotal = 0;
+
+    let executionSkillCount = 0;
+    let mentalSkillCount = 0;
+
+    for (const [position, roleInfo] of positionRoles) {
+        const executionSkills = Array.isArray(
+            executionPriorities[position]
+        )
+            ? executionPriorities[position]
+            : [];
+
+        const mentalSkills = Array.isArray(
+            mentalPriorities[position]
+        )
+            ? mentalPriorities[position]
+            : [];
+
+        const allSkills = [
+            ...new Set([
+                ...executionSkills,
+                ...mentalSkills
+            ])
+        ];
+
+        const rosterSnapshot = getTeamScoutingPositionSnapshot(
+            team,
+            position,
+            allSkills
+        );
+
+        const evaluateSkills = skills => {
+            let total = 0;
+            let weight = 0;
+            let confidenceTotal = 0;
+            let coveredCount = 0;
+
+            for (const skill of skills) {
+                const estimate =
+                    rosterSnapshot?.skills?.[skill];
+
+                if (!estimate) continue;
+
+                const rosterCount = rosterSnapshot.rosterCount;
+
+                const playerCoverage = rosterCount > 0
+                    ? Math.min(
+                        1,
+                        estimate.playersKnown / rosterCount
+                    )
+                    : 0;
+
+                // Confidence already pulls individual estimates
+                // toward neutral. Player coverage additionally
+                // accounts for how much of the position group
+                // has actually been evaluated.
+                const adjustedValue =
+                    50 +
+                    (estimate.average - 50) * playerCoverage;
+
+                total += adjustedValue;
+                confidenceTotal += estimate.confidence;
+                weight++;
+                coveredCount += playerCoverage;
+            }
+
+            return {
+                score: weight > 0 ? total / weight : 50,
+                confidence: weight > 0
+                    ? confidenceTotal / weight
+                    : 0,
+                skillCount: weight,
+                coverage: weight > 0
+                    ? coveredCount / weight
+                    : 0
+            };
+        };
+
+        const execution = evaluateSkills(executionSkills);
+        const mental = evaluateSkills(mentalSkills);
+
+        if (execution.skillCount > 0) {
+            executionTotal +=
+                execution.score * roleInfo.weight;
+
+            executionWeight += roleInfo.weight;
+            executionConfidenceTotal +=
+                execution.confidence * roleInfo.weight;
+
+            executionSkillCount += execution.skillCount;
+        }
+
+        if (mental.skillCount > 0) {
+            mentalTotal +=
+                mental.score * roleInfo.weight;
+
+            mentalWeight += roleInfo.weight;
+            mentalConfidenceTotal +=
+                mental.confidence * roleInfo.weight;
+
+            mentalSkillCount += mental.skillCount;
+        }
+
+        positionSnapshots.push({
+            position,
+            rosterPosition:
+                rosterSnapshot?.rosterPosition || position,
+            role: roleInfo.role,
+            rosterCount: rosterSnapshot?.rosterCount || 0,
+            playersEvaluated:
+                rosterSnapshot?.playersEvaluated || 0,
+            execution,
+            mental
+        });
+    }
+
+    return {
+        side: knowledge.side,
+
+        executionFit: executionWeight > 0
+            ? executionTotal / executionWeight
+            : 50,
+
+        executionConfidence: executionWeight > 0
+            ? executionConfidenceTotal / executionWeight
+            : 0,
+
+        executionSkillCount,
+
+        mentalFit: mentalWeight > 0
+            ? mentalTotal / mentalWeight
+            : 50,
+
+        mentalConfidence: mentalWeight > 0
+            ? mentalConfidenceTotal / mentalWeight
+            : 0,
+
+        mentalSkillCount,
+
+        keyPositionCount: keyPositions.length,
+        supportingPositionCount: supportingPositions.length,
+
+        positions: positionSnapshots
+    };
+}
+
 export const tacticalBiases = [
     {
         id: 'power_run_specialist',
@@ -5083,6 +5485,30 @@ export function applyRecruitingSweetener(
         String(entry.teamId) === teamKey
     );
 
+    // Preserve fractional gift impact across transactions. Older records
+    // can fall back to the interest already awarded by previous gifts.
+    const storedCashGiftInterestAccrued =
+        record.recruitingPushByTeam?.[teamKey]?.cashGiftInterestAccrued;
+
+    const previousCashGiftInterestAccrued =
+        storedCashGiftInterestAccrued !== undefined &&
+        storedCashGiftInterestAccrued !== null &&
+        Number.isFinite(Number(storedCashGiftInterestAccrued))
+            ? Math.max(0, Number(storedCashGiftInterestAccrued))
+            : teamSweeteners
+                .filter(entry =>
+                    entry.sweetenerType === 'gift' ||
+                    String(entry.sweetenerType || '').startsWith('gift_')
+                )
+                .reduce(
+                    (total, entry) =>
+                        total + Math.max(
+                            0,
+                            Number(entry.interestGain) || 0
+                        ),
+                    0
+                );
+
     let cost = 0;
     let baseGain = 0;
     let label = '';
@@ -5161,21 +5587,28 @@ export function applyRecruitingSweetener(
             };
         }
 
-        // Add all previous gift spending for this team and prospect.
-        // This also recognizes gifts recorded under the previous tier names.
-        const previousGiftSpend = teamSweeteners
-            .filter(entry =>
-                entry.sweetenerType === 'gift' ||
-                String(entry.sweetenerType || '').startsWith('gift_')
-            )
-            .reduce(
-                (total, entry) =>
-                    total + Math.max(
-                        0,
-                        Number(entry.cashSpent) || 0
-                    ),
-                0
-            );
+        // Count previous gifts for this team and prospect.
+        // Recognize both custom gifts and legacy gift tier names.
+        const previousGiftEntries = teamSweeteners.filter(entry =>
+            entry.sweetenerType === 'gift' ||
+            String(entry.sweetenerType || '').startsWith('gift_')
+        );
+
+        if (previousGiftEntries.length >= 3) {
+            return {
+                success: false,
+                message: 'Your team has already made three recruiting gifts for this recruit.'
+            };
+        }
+
+        const previousGiftSpend = previousGiftEntries.reduce(
+            (total, entry) =>
+                total + Math.max(
+                    0,
+                    Number(entry.cashSpent) || 0
+                ),
+            0
+        );
 
         // Each additional dollar has less impact than the previous dollar.
         // Calculating the difference from cumulative spending means that
@@ -5220,6 +5653,7 @@ export function applyRecruitingSweetener(
         };
     }
 
+    let cashGiftInterestAccrued = null;
     let interestGain = baseGain;
 
     if (currentInterest >= 90) {
@@ -5228,19 +5662,29 @@ export function applyRecruitingSweetener(
         interestGain *= 0.65;
     }
 
-    interestGain = Math.round(interestGain);
+    if (normalizedSweetenerType === 'gift') {
+        const previouslyCreditedCashGiftInterest =
+            Math.round(previousCashGiftInterestAccrued);
+
+        cashGiftInterestAccrued =
+            previousCashGiftInterestAccrued + interestGain;
+
+        // Only round the cumulative impact. This prevents repeated
+        // transactions from gaining extra points through rounding.
+        interestGain = Math.max(
+            0,
+            Math.round(cashGiftInterestAccrued) -
+                previouslyCreditedCashGiftInterest
+        );
+    } else {
+        // Favor Token behavior remains unchanged.
+        interestGain = Math.round(interestGain);
+    }
 
     // Favor Tokens retain their original minimum impact.
-    // A cash gift that produces no additional interest should not charge
-    // the team's balance.
+    // Cash gifts can carry fractional impact into a later gift.
     if (normalizedSweetenerType === 'favor') {
         interestGain = Math.max(1, interestGain);
-    } else if (interestGain <= 0) {
-        return {
-            success: false,
-            message:
-                'That gift amount is too small to make a meaningful impression at this level of investment.'
-        };
     }
 
     const newInterest = Math.min(
@@ -5304,6 +5748,11 @@ export function applyRecruitingSweetener(
             cost
         ) * 100
     ) / 100;
+
+    if (normalizedSweetenerType === 'gift') {
+        recruitingPush.cashGiftInterestAccrued =
+            cashGiftInterestAccrued;
+    }
 
     recruitingPush.favorTokensSpent =
         (Number(recruitingPush.favorTokensSpent) || 0) +
@@ -5398,9 +5847,11 @@ export function applyRecruitingSweetener(
 
     return {
         success: true,
-        message:
-            `${label} increased ${player.name}'s interest by ` +
-            `${newInterest - currentInterest} points.`,
+        message: newInterest > currentInterest
+            ? `${label} increased ${player.name}'s interest by ` +
+                `${newInterest - currentInterest} points.`
+            : `${label} was recorded. Its fractional impact has not ` +
+                `changed ${player.name}'s displayed interest yet.`,
         interestBefore: currentInterest,
         interestGain: newInterest - currentInterest,
         interestAfter: newInterest,
@@ -6756,8 +7207,8 @@ export function processAiRecruitingDay(gameState) {
                 }
 
                 // Otherwise, use the largest gift that preserves the
-                // team's cash reserve. The sweetener function enforces
-                // the existing three-gift limit per recruit.
+                // team's cash reserve. The sweetener function applies
+                // cumulative diminishing returns across all gifts.
                 if (!sweetenerResult?.success) {
                     const giftType = spendableCash >= 20
                         ? 'gift_large'
@@ -9265,14 +9716,79 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         getStaffProfileId(defenseCoach, 'tactical') ||
         'adaptive_strategist';
 
-    const offenseInstinct =
-        offenseCoach?.ratings?.gameplanInstinct || 50;
-    const defenseInstinct =
-        defenseCoach?.ratings?.gameplanInstinct || 50;
+    const getCoachRating = (coach, skill) => {
+        const value = Number(coach?.ratings?.[skill]);
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, value))
+            : 50;
+    };
+
+    const offenseInstinct = getCoachRating(
+        offenseCoach,
+        'gameplanInstinct'
+    );
+
+    const defenseInstinct = getCoachRating(
+        defenseCoach,
+        'gameplanInstinct'
+    );
+
     const currentOffForm = team.formations?.offense || 'Balanced';
+
+    // Individual coaching tendencies influence tactical preferences.
+    const offenseRiskTolerance = getStaffBehaviorTendency(
+        offenseCoach,
+        'riskTolerance'
+    );
+
+    const offenseDiscipline = getStaffBehaviorTendency(
+        offenseCoach,
+        'discipline'
+    );
+
+    const defenseRiskTolerance = getStaffBehaviorTendency(
+        defenseCoach,
+        'riskTolerance'
+    );
+
+    const defenseDiscipline = getStaffBehaviorTendency(
+        defenseCoach,
+        'discipline'
+    );
+
+    // Coaching ability reduces decision errors, but never eliminates them.
+    const getDecisionNoise = (coach, schemeSkill) => {
+        const decisionQuality =
+            getCoachRating(coach, schemeSkill) * 0.45 +
+            getCoachRating(coach, 'gameplanInstinct') * 0.35 +
+            getCoachRating(coach, 'inGameAdjustments') * 0.20;
+
+        const noiseRange =
+            2 + ((100 - decisionQuality) / 100) * 8;
+
+        return (Math.random() * 2 - 1) * noiseRange;
+    };
 
     const allOffKeys = Object.keys(offensivePlaybook).filter(k => k !== 'Punt_Punt' && !['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'].includes(k));
     const allDefKeys = Object.keys(defensivePlaybook).filter(k => k !== 'PuntReturn_Classic' && !['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'].includes(k));
+
+    const installedOffense = Array.isArray(
+        team.gameplan.installedOffense
+    )
+        ? team.gameplan.installedOffense
+        : [];
+
+    const installedDefense = Array.isArray(
+        team.gameplan.installedDefense
+    )
+        ? team.gameplan.installedDefense
+        : [];
+
+    const getInstalledPlayContinuityBonus = (
+        installedPlays,
+        playKey
+    ) => installedPlays.includes(playKey) ? 6 : 0;
 
     // Staff preparation improves the odds that targeted plays make the
     // gameplan. Actual hours are reduced by staff availability/reliability.
@@ -9478,14 +9994,22 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
             score += 25;
         }
         if (play.tags?.includes('pa') || play.tags?.includes('trick')) {
-            score += offenseInstinct > 65 ? 15 : 5;
+            score += Math.max(
+                -6,
+                Math.min(
+                    16,
+                    5 +
+                    (offenseInstinct - 50) * 0.10 +
+                    (offenseRiskTolerance - 50) * 0.08 -
+                    (offenseDiscipline - 50) * 0.04
+                )
+            );
         }
-        if (gmDirective === 'WIN_NOW' && opponent) {
-            // Exploit opponent defensive style if coach has high gameplan instinct
-            const oppDef = opponent.formations?.defense || '';
-            if (oppDef.includes('4-2-2') && play.type === 'pass') score += 20; // Pass against run-heavy fronts
-            if (oppDef.includes('3-0-5') && play.type === 'run') score += 20;  // Run against dime looks
-        }
+
+        score += getInstalledPlayContinuityBonus(
+            installedOffense,
+            key
+        );
 
         score += getInstructionEmphasisScore(
             offenseEmphasis,
@@ -9495,7 +10019,13 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
 
         score += getPreparationScoreBonus('offensePrep', key);
 
-        return { key, score: score + Math.random() * 10 };
+        return {
+            key,
+            score: score + getDecisionNoise(
+                offenseCoach,
+                'offSchemeMastery'
+            )
+        };
     }).sort((a, b) => b.score - a.score);
 
     // Score defensive schemes
@@ -9517,11 +10047,17 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
             score += 20;
         }
 
-        if (gmDirective === 'WIN_NOW' && opponent) {
-            const oppOff = opponent.formations?.offense || '';
-            if (oppOff.includes('Spread') && play.concept === 'Zone') score += 20;
-            if (oppOff.includes('Power') && play.concept === 'Run') score += 25;
+        // Individual tendencies influence willingness to blitz.
+        if (play.blitz) {
+            score +=
+                (defenseRiskTolerance - 50) * 0.12 -
+                (defenseDiscipline - 50) * 0.04;
         }
+
+        score += getInstalledPlayContinuityBonus(
+            installedDefense,
+            key
+        );
 
         score += getInstructionEmphasisScore(
             defenseEmphasis,
@@ -9531,11 +10067,17 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
 
         score += getPreparationScoreBonus('defensePrep', key);
 
-        return { key, score: score + Math.random() * 10 };
+        return {
+            key,
+            score: score + getDecisionNoise(
+                defenseCoach,
+                'defSchemeMastery'
+            )
+        };
     }).sort((a, b) => b.score - a.score);
 
-    team.gameplan.installedOffense = scoredOff.slice(0, 6).map(s => s.key);
-    team.gameplan.installedDefense = scoredDef.slice(0, 4).map(s => s.key);
+    team.gameplan.installedOffense = scoredOff.slice(0, 8).map(s => s.key);
+    team.gameplan.installedDefense = scoredDef.slice(0, 8).map(s => s.key);
 }
 
 export function processWeeklyStaffPreparation(
