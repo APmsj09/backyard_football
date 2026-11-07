@@ -100,6 +100,60 @@ function getPlaycallAttributeValue(player, skill) {
     return Number.isFinite(rating) ? rating : null;
 }
 
+function getScoutedPlaycallAttributeValue(team, player, skill) {
+    const path = PLAYCALL_ATTRIBUTE_PATHS[skill];
+
+    if (!team || player?.id == null || !path) return null;
+
+    const category = path[0];
+    const attribute = path[1];
+
+    if (!['physical', 'mental', 'technical'].includes(category)) {
+        return null;
+    }
+
+    const report = getTeamScoutingReport(team, player.id);
+    const range = report?.attributeRanges?.[category]?.[attribute];
+
+    if (!range) return null;
+
+    const low = Number(range.low);
+    const high = Number(range.high);
+    const confidence = Number(report.confidence);
+
+    if (
+        !Number.isFinite(low) ||
+        !Number.isFinite(high) ||
+        !Number.isFinite(confidence) ||
+        low < 1 ||
+        high > 99 ||
+        high < low ||
+        confidence <= 0
+    ) {
+        return null;
+    }
+
+    const reportConfidence = Math.max(
+        0,
+        Math.min(1, confidence)
+    );
+
+    const midpoint = (low + high) / 2;
+
+    // Wide scouting ranges provide less reliable estimates.
+    const rangePrecision =
+        1 - Math.min(1, (high - low) / 98);
+
+    const effectiveConfidence =
+        reportConfidence * rangePrecision;
+
+    if (effectiveConfidence <= 0) return null;
+
+    // Uncertain estimates move toward neutral rather than
+    // pretending the midpoint is the player's confirmed ability.
+    return 50 + (midpoint - 50) * effectiveConfidence;
+}
+
 function getPlaycallSituationKey(down, yardsToGo, ballOn, scoreDiff, drivesRemaining) {
     const situations = getPlaycallSituationKeys(
         down,
@@ -296,28 +350,6 @@ function getPlaycallKnowledgeAdjustment(
 
             if (!player) continue;
 
-            let overallValue = 0;
-
-            // Fullbacks occupy an RB position in the player-rating system.
-            const overallPosition = position === 'FB'
-                ? 'RB'
-                : position;
-
-            try {
-                overallValue = calculateOverall(
-                    player,
-                    overallPosition
-                );
-            } catch {
-                overallValue = 0;
-            }
-
-            if (
-                !Number.isFinite(overallValue) ||
-                overallValue <= 0
-            ) {
-                continue;
-            }
 
             const executionSkills = Array.isArray(
                 knowledge?.executionPriorities?.[position]
@@ -335,7 +367,8 @@ function getPlaycallKnowledgeAdjustment(
 
             const getPriorityAverage = skills => {
                 const values = skills.flatMap(skill => {
-                    const rating = getPlaycallAttributeValue(
+                    const rating = getScoutedPlaycallAttributeValue(
+                        team,
                         player,
                         skill
                     );
@@ -357,21 +390,26 @@ function getPlaycallKnowledgeAdjustment(
                 mentalSkills
             );
 
-            // Missing specialized attributes remain neutral rather than
-            // penalizing a player or increasing the weight of other attributes.
-            const executionFit = executionAverage ?? overallValue;
-            const mentalFit = mentalAverage ?? overallValue;
+            // Unknown scouting information does not become an assumed rating.
+            // When both categories are known, execution carries more weight.
+            if (
+                executionAverage === null &&
+                mentalAverage === null
+            ) {
+                continue;
+            }
 
-            // Overall ability remains primary; execution and intelligence
-            // independently refine how well the player fits this concept.
             const value =
-                overallValue * 0.70 +
-                executionFit * 0.20 +
-                mentalFit * 0.10;
+                executionAverage !== null &&
+                mentalAverage !== null
+                    ? executionAverage * 0.70 +
+                        mentalAverage * 0.30
+                    : executionAverage ?? mentalAverage;
 
             // Consistency represents execution reliability, not intelligence.
             // Keep its influence small and independent of the IQ calculation.
-            const consistency = getPlaycallAttributeValue(
+            const consistency = getScoutedPlaycallAttributeValue(
+                team,
                 player,
                 'consistency'
             );
@@ -384,7 +422,11 @@ function getPlaycallKnowledgeAdjustment(
                 : 0;
 
             const clutch = isHighPressureSituation
-                ? getPlaycallAttributeValue(player, 'clutch')
+                ? getScoutedPlaycallAttributeValue(
+                    team,
+                    player,
+                    'clutch'
+                )
                 : null;
 
             const clutchAdjustment = clutch !== null
