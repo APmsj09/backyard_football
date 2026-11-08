@@ -1156,6 +1156,16 @@ export function determinePuntDecision(down, yardsToGo, ballOn, offenseTeam = nul
     // Trailing late in 4th quarter: always go for it
     if (timeRemaining < 180 && scoreDiff < 0) return false;
 
+    // GM Situational In-Game Suggestion
+    const gmFourthDown = offenseTeam?.liveGmAdjustments?.fourthDown;
+    if (gmFourthDown === 'aggressive') {
+        if (yardsToGo <= 1) return false;
+        if (yardsToGo <= 3 && ballOn >= 25) return false;
+        if (yardsToGo <= 5 && ballOn >= 40) return false;
+    } else if (gmFourthDown === 'conservative') {
+        if (yardsToGo > 1 && ballOn < 60) return true;
+    }
+
     const sit = offenseTeam?.gameplan?.situational || { fourthDownBravery: 50 };
     const bravery = sit.fourthDownBravery; // 0 to 100
 
@@ -1481,6 +1491,14 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     // First Down Tendency: Teams should try to establish the run on 1st down
     if (down === 1 && !isDesperation && !isChewClock) runProbability += 0.15;
 
+    // GM Situational Offensive Bias
+    const gmFocus = offense.liveGmAdjustments?.offenseFocus || 'balanced';
+    if (gmFocus === 'pound_rock') {
+        runProbability += 0.25;
+    } else if (gmFocus === 'air_it_out') {
+        runProbability -= 0.25;
+    }
+
     // ==========================================================
     // OFFENSIVE DECISION MODEL
     // ==========================================================
@@ -1785,6 +1803,20 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
             );
             if (tags.includes('deep')) score += (aggro - 0.5) * 40; // Aggressive loves deep, conservative hates it
             if (tags.includes('screen') || tags.includes('short')) score -= (aggro - 0.5) * 30;
+        }
+
+        // --- LEVEL 2.5: GM SITUATIONAL SUGGESTION ---
+        if (gmFocus === 'pound_rock') {
+            if (play.type === 'run') score += 35;
+            else score -= 15;
+        } else if (gmFocus === 'air_it_out') {
+            if (tags.includes('deep') || tags.includes('pa') || tags.includes('vertical')) score += 40;
+            if (play.type === 'run') score -= 20;
+        } else if (gmFocus === 'quick_game') {
+            if (tags.includes('screen') || tags.includes('short') || tags.includes('quick') || /slant|screen|out|flat|curl/i.test(key)) {
+                score += 35;
+            }
+            if (tags.includes('deep')) score -= 25;
         }
 
         // --- LEVEL 3: ELITE COACH INSTINCTS (Adjusting to Game State & Opponent) ---
@@ -2833,6 +2865,27 @@ export function determineDefensivePlayCall(
         }
         if (tags.includes('prevent') || tags.includes('safeZone')) {
             score -= (aggro - 0.5) * 30;
+        }
+
+        // GM Situational Defensive Bias
+        const gmDefFocus = defense.liveGmAdjustments?.defenseFocus || 'base';
+        if (gmDefFocus === 'stack_box') {
+            if (/run.?stuff|front|goal.?line|under|bear/i.test(key) || tags.includes('runSupport') || tags.includes('heavyFront')) {
+                score += 35;
+            }
+            if (tags.includes('prevent') || tags.includes('safeZone')) {
+                score -= 20;
+            }
+        } else if (gmDefFocus === 'deep_shell') {
+            if (/cover.?2|cover.?3|safe|prevent/i.test(key) || tags.includes('safeZone') || tags.includes('deepHelp')) {
+                score += 35;
+            }
+            if (play.blitz) score -= 30;
+        } else if (gmDefFocus === 'bring_heat') {
+            if (play.blitz || /blitz|overload|engage|fire/i.test(key)) {
+                score += 45;
+            }
+            if (tags.includes('prevent')) score -= 35;
         }
 
         // Estimate how many defenders are committed to rushing.
@@ -4301,6 +4354,16 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         clockBurn = Math.max(12, Math.floor(clockBurn * iqHurryMultiplier));
     }
 
+    // GM Pace / Clock Tempo Directive
+    const gmTempo = offense?.liveGmAdjustments?.tempo;
+    if (gmTempo === 'chew_clock') {
+        if (!playState.incomplete && !playState.outOfBounds && !playResult.possessionChange && !playState.touchdown && !playState.safety) {
+            clockBurn = Math.min(48, clockBurn + 10);
+        }
+    } else if (gmTempo === 'hurry_up') {
+        clockBurn = Math.max(12, Math.min(18, Math.floor(clockBurn * 0.55)));
+    }
+
     playResult.clockBurn = clockBurn;
     playResult.touchback = Boolean(playState.touchback);
 
@@ -4372,6 +4435,11 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
 
     const offense = gameInstance.possession;
     const defense = (offense.id === gameInstance.homeTeam.id) ? gameInstance.awayTeam : gameInstance.homeTeam;
+
+    if (gameInstance.liveGmAdjustments) {
+        if (offense.isPlayerControlled) offense.liveGmAdjustments = gameInstance.liveGmAdjustments;
+        if (defense.isPlayerControlled) defense.liveGmAdjustments = gameInstance.liveGmAdjustments;
+    }
 
         if (!offense.formations) offense.formations = { offense: 'Balanced', defense: '3-2-3' };
     if (!defense.formations) defense.formations = { offense: 'Balanced', defense: '3-2-3' };

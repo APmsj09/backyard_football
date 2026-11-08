@@ -709,6 +709,40 @@ function setupSimTabs() {
             });
         });
     });
+
+    const sidebarToggleBtn = document.getElementById('sim-sidebar-toggle');
+    if (sidebarToggleBtn) {
+        sidebarToggleBtn.addEventListener('click', () => {
+            toggleSimSidebar();
+        });
+    }
+}
+
+function toggleSimSidebar() {
+    const simSidebar = document.getElementById('sim-sidebar');
+    const toggleIcon = document.getElementById('sim-sidebar-toggle-icon');
+    const toggleText = document.getElementById('sim-sidebar-toggle-text');
+    if (!simSidebar) return;
+
+    const isHidden = simSidebar.classList.contains('hidden');
+    if (isHidden) {
+        simSidebar.classList.remove('hidden');
+        if (toggleIcon) toggleIcon.textContent = '▶';
+        if (toggleText) toggleText.textContent = 'Hide Sideline';
+    } else {
+        simSidebar.classList.add('hidden');
+        if (toggleIcon) toggleIcon.textContent = '◀';
+        if (toggleText) toggleText.textContent = 'Show Sideline';
+    }
+
+    if (elements?.fieldCanvas) {
+        elements.fieldCanvas.width = elements.fieldCanvas.clientWidth;
+        elements.fieldCanvas.height = elements.fieldCanvas.clientHeight;
+        if (lastRenderedFrame) {
+            drawLiveGameFieldFrame(lastRenderedFrame);
+        }
+    }
+    window.dispatchEvent(new Event('resize'));
 }
 
 export function showScreen(screenId) {
@@ -2941,6 +2975,10 @@ export function renderOffseasonFAScreen(gameState) {
     const userRosterEl = document.getElementById('fa-user-roster-count');
     const userCashEl = document.getElementById('fa-user-cash');
     const userStaffHoursEl = document.getElementById('fa-user-staff-hours');
+    const userTargetCountEl = document.getElementById('fa-user-target-count');
+    const userStaffHoursUsedEl = document.getElementById('fa-user-staff-hours-used');
+    const userActiveOffersEl = document.getElementById('fa-user-active-offers');
+    const userCommitmentsEl = document.getElementById('fa-user-commitments');
     const advanceBtn = document.getElementById('fa-advance-day-btn');
 
     const state = gameState.offseasonState || {};
@@ -3009,6 +3047,74 @@ export function renderOffseasonFAScreen(gameState) {
 
     const formatStaffHours = value =>
         (Math.round(value * 10) / 10).toString();
+
+    // Recruiting list size.
+    const recruitingTeamKey = String(team.id);
+
+    const recruitingList = Array.isArray(
+        progress.teamRecruitingLists?.[recruitingTeamKey]
+    )
+        ? progress.teamRecruitingLists[recruitingTeamKey]
+        : [];
+
+    const recruitingTargetCount = recruitingList.length;
+
+    // Hours committed across the shared staff workload.
+    // This includes recruiting, scouting, and other assigned work.
+    const staffHoursUsed = Math.max(
+        0,
+        staffHours.total - staffHours.remaining
+    );
+
+    // Count every active roster invitation from our team,
+    // including invitations to prospects not currently on our list.
+    const activeOfferCount = Object.values(
+        progress.recruits || {}
+    ).reduce((total, record) => {
+        const offer =
+            record?.offersByTeam?.[recruitingTeamKey];
+
+        return total + (
+            offer?.status === 'active' ? 1 : 0
+        );
+    }, 0);
+
+    // Count commitments belonging specifically to our team.
+    const commitmentIds = new Set(
+        (
+            Array.isArray(progress.commitments)
+                ? progress.commitments
+                : []
+        )
+            .filter(commitment =>
+                commitment?.playerId != null &&
+                String(commitment.teamId) === recruitingTeamKey
+            )
+            .map(commitment => String(commitment.playerId))
+    );
+
+    const commitmentCount = commitmentIds.size;
+
+    if (userTargetCountEl) {
+        userTargetCountEl.textContent =
+            String(recruitingTargetCount);
+    }
+
+    if (userStaffHoursUsedEl) {
+        userStaffHoursUsedEl.textContent =
+            `${formatStaffHours(staffHoursUsed)}h / ` +
+            `${formatStaffHours(staffHours.total)}h`;
+    }
+
+    if (userActiveOffersEl) {
+        userActiveOffersEl.textContent =
+            String(activeOfferCount);
+    }
+
+    if (userCommitmentsEl) {
+        userCommitmentsEl.textContent =
+            String(commitmentCount);
+    }
 
     if (userCashEl) {
         userCashEl.textContent = recruitingCash.toFixed(2);
@@ -3785,6 +3891,68 @@ export function renderOffseasonFAPool(gameState) {
                     ? 'Available'
                     : 'Unavailable';
 
+            const userOffer =
+                record?.offersByTeam?.[playerTeamKey] || null;
+
+            const hasActiveOffer =
+                userOffer?.status === 'active';
+
+            const offerStatusLabel = hasActiveOffer
+                ? 'Offer active · Roster spot reserved'
+                : userOffer?.status === 'withdrawn'
+                    ? 'Previous offer withdrawn'
+                    : userOffer?.status === 'accepted'
+                        ? 'Offer accepted'
+                        : userOffer?.status === 'declined'
+                            ? 'Offer declined'
+                            : 'No roster offer';
+
+            const canManageOffer =
+                statusLabel === 'Available';
+
+            const offerActionHtml = canManageOffer
+                ? `
+                    <button
+                        type="button"
+                        onclick="window.app_setRecruitingOffer('${quickEscapeHtml(playerId)}', '${hasActiveOffer ? 'withdraw' : 'extend'}')"
+                        class="${hasActiveOffer
+                            ? 'border border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100'
+                            : 'bg-emerald-700 text-white hover:bg-emerald-800'
+                        } rounded px-3 py-1.5 text-[10px] font-black uppercase tracking-wide">
+                        ${hasActiveOffer ? 'Withdraw Offer' : 'Offer Spot'}
+                    </button>
+                `
+                : `
+                    <span class="rounded bg-slate-100 px-2 py-1.5 text-[9px] font-bold text-slate-400">
+                        Offer unavailable
+                    </span>
+                `;
+
+            const manualRecruitingActionsHtml =
+                statusLabel === 'Available'
+                    ? `
+                        <div class="flex min-w-[116px] flex-col gap-1.5">
+                            <button
+                                type="button"
+                                onclick="window.app_openRecruitingActionModal('${quickEscapeHtml(playerId)}')"
+                                class="w-full rounded bg-slate-900 px-2 py-1.5 text-[10px] font-black uppercase tracking-wide text-white hover:bg-slate-800">
+                                Recruit
+                            </button>
+
+                            <button
+                                type="button"
+                                onclick="window.app_openRecruitingSweetenerModal('${quickEscapeHtml(playerId)}')"
+                                class="w-full rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-[10px] font-black uppercase tracking-wide text-amber-900 hover:bg-amber-100">
+                                Gift / Favor
+                            </button>
+                        </div>
+                    `
+                    : `
+                        <span class="text-[9px] font-semibold text-slate-400">
+                            Actions unavailable
+                        </span>
+                    `;
+
             const position = player
                 ? getFreeAgentDisplayPosition(
                     gameState.playerTeam,
@@ -3801,139 +3969,376 @@ export function renderOffseasonFAPool(gameState) {
                 coach.coachId === assignedCoachId
             );
 
-            const missingCoachOption =
-                assignedCoachId && !assignedCoach
-                    ? `
-                        <option value="${quickEscapeHtml(assignedCoachId)}" selected disabled>
-                            Previously assigned coach
-                        </option>
-                    `
-                    : '';
+            const assignedCoachLabel = assignedCoach?.coachName ||
+                (
+                    assignedCoachId
+                        ? 'Previously assigned coach'
+                        : 'Any available coach'
+                );
 
-            const coachOptionsHtml = listCoachOptions.map(coach => `
-                <option
-                    value="${quickEscapeHtml(coach.coachId)}"
-                    ${coach.coachId === assignedCoachId ? 'selected' : ''}
-                    ${coach.remainingHours <= 0 ? 'disabled' : ''}>
-                    ${quickEscapeHtml(coach.coachName)}
-                    (${coach.remainingHours}h left)
-                </option>
-            `).join('');
+            const coachPickerOptionsHtml = `
+                <button
+                    type="button"
+                    onclick="window.app_setRecruitingListCoach('${quickEscapeHtml(playerId)}', '')"
+                    class="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-xs hover:bg-emerald-50">
+                    <span class="font-bold text-slate-800">
+                        Any available coach
+                    </span>
+                    <span class="text-[9px] text-slate-500">
+                        Delegate
+                    </span>
+                </button>
 
-            const lastCoach = entry?.lastCoachId != null
-                ? listCoachOptions.find(coach =>
-                    coach.coachId === String(entry.lastCoachId)
-                )
-                : null;
+                <div class="my-1 border-t border-slate-200"></div>
+
+                ${listCoachOptions.map(coach => {
+                    const isCurrent =
+                        coach.coachId === assignedCoachId;
+
+                    const isUnavailable =
+                        coach.remainingHours <= 0 && !isCurrent;
+
+                    return `
+                        <button
+                            type="button"
+                            onclick="window.app_setRecruitingListCoach('${quickEscapeHtml(playerId)}', '${quickEscapeHtml(coach.coachId)}')"
+                            ${isUnavailable ? 'disabled' : ''}
+                            class="flex w-full items-center justify-between gap-3 rounded-sm px-3 py-2 text-left hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40">
+                            <span class="truncate text-xs font-bold text-slate-800">
+                                ${quickEscapeHtml(coach.coachName)}
+                            </span>
+                            <span class="shrink-0 text-[9px] font-semibold text-slate-500">
+                                ${coach.remainingHours}h left
+                            </span>
+                        </button>
+                    `;
+                }).join('')}
+            `;
 
             const actionLabels = {
-                outreach: 'Outreach',
+                outreach: 'Personal outreach',
                 teammateConnection: 'Teammate connection',
                 roleDiscussion: 'Role discussion',
                 practiceInvitation: 'Practice invitation'
             };
 
-            const lastWorkLabel = entry?.lastWorkedDay != null
-                ? `Last worked Day ${entry.lastWorkedDay}` +
-                    (
-                        entry.lastAction
-                            ? ` · ${actionLabels[entry.lastAction] || entry.lastAction}`
-                            : ''
-                    ) +
-                    (
-                        lastCoach
-                            ? ` · ${quickEscapeHtml(lastCoach.coachName)}`
-                            : ''
+            // Use the actual activity log as the source of truth.
+            const allStaffActivities = (
+                Array.isArray(progress.dailyActivity)
+                    ? progress.dailyActivity
+                    : []
+            )
+                .filter(activity =>
+                    String(activity.playerId) === playerId &&
+                    String(activity.teamId) === playerTeamKey &&
+                    Number(activity.year) === Number(gameState.year) &&
+                    [
+                        'recruiting_action',
+                        'recruiting_sweetener'
+                    ].includes(activity.type)
+                )
+                .sort((a, b) =>
+                    (Number(b.day) || 0) -
+                    (Number(a.day) || 0)
+                );
+
+            const workedRecruitingDays = new Set(
+                allStaffActivities
+                    .filter(activity =>
+                        activity.type === 'recruiting_action'
                     )
-                : 'No staff work recorded yet';
+                    .map(activity => Number(activity.day))
+                    .filter(day =>
+                        Number.isInteger(day) &&
+                        day >= 1 &&
+                        day <= 7
+                    )
+            );
+
+            const recentStaffActivities =
+                allStaffActivities.slice(0, 3);
+
+            const recentWorkHtml =
+                recentStaffActivities.length > 0
+                    ? recentStaffActivities.map(activity => {
+                        const coach = activity.coachId != null
+                            ? listCoachOptions.find(candidate =>
+                                candidate.coachId === String(activity.coachId)
+                            )
+                            : null;
+
+                        const coachName =
+                            activity.coachName ||
+                            coach?.coachName ||
+                            'Staff contact';
+
+                        const actionLabel =
+                            activity.type === 'recruiting_sweetener'
+                                ? activity.label || 'Gift / favor'
+                                : actionLabels[activity.action] ||
+                                  activity.label ||
+                                  'Recruiting contact';
+
+                        const hours = Math.max(
+                            0,
+                            Number(activity.hours) || 0
+                        );
+
+                        return `
+                            <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[9px]">
+                                <span class="font-black text-slate-700">
+                                    Day ${Math.max(1, Number(activity.day) || 1)}
+                                </span>
+
+                                <span class="text-slate-500">
+                                    ${quickEscapeHtml(coachName)}
+                                </span>
+
+                                <span class="text-slate-400">·</span>
+
+                                <span class="text-slate-600">
+                                    ${quickEscapeHtml(actionLabel)}
+                                </span>
+
+                                ${
+                                    hours > 0
+                                        ? `
+                                            <span class="font-bold text-indigo-700">
+                                                ${hours}h
+                                            </span>
+                                        `
+                                        : ''
+                                }
+                            </div>
+                        `;
+                    }).join('')
+                    : entry?.lastWorkedDay != null
+                        ? `
+                            <div class="text-[10px] font-semibold text-slate-700">
+                                Last recorded: Day ${entry.lastWorkedDay}
+                            </div>
+                            <div class="mt-1 text-[9px] text-slate-500">
+                                Detailed activity history unavailable
+                            </div>
+                        `
+                        : `
+                            <div class="text-[10px] font-semibold text-amber-700">
+                                No staff work recorded yet
+                            </div>
+                        `;
+
+            const workedDayCount = workedRecruitingDays.size;
+
+            const workDayTrackerHtml = `
+                <div class="flex items-center gap-1.5">
+                    ${Array.from({ length: 7 }, (_, dayIndex) => {
+                        const day = dayIndex + 1;
+                        const worked = workedRecruitingDays.has(day);
+
+                        return `
+                            <div
+                                class="flex flex-col items-center gap-1"
+                                title="Day ${day}: ${
+                                    worked
+                                        ? 'Staff contact recorded'
+                                        : 'No staff contact recorded'
+                                }">
+
+                                <span class="h-3.5 w-3.5 rounded-full border ${
+                                    worked
+                                        ? 'border-emerald-700 bg-emerald-500'
+                                        : 'border-slate-300 bg-slate-100'
+                                }"></span>
+
+                                <span class="text-[8px] font-bold text-slate-400">
+                                    ${day}
+                                </span>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+
+                <div class="mt-1 text-[9px] font-bold ${
+                    workedDayCount >= 5
+                        ? 'text-emerald-700'
+                        : workedDayCount > 0
+                            ? 'text-slate-600'
+                            : 'text-amber-700'
+                }">
+                    ${workedDayCount}/7 days contacted
+                </div>
+            `;
 
             return `
-                <div class="grid grid-cols-[auto_minmax(0,1fr)] gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0 sm:grid-cols-[auto_minmax(0,1fr)_minmax(190px,230px)_auto] sm:items-center">
+                <tr class="border-b border-slate-200 hover:bg-slate-50 ${
+                    index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'
+                }">
 
-                    <div class="flex h-7 w-7 items-center justify-center rounded bg-slate-900 text-xs font-black text-white">
-                        ${index + 1}
-                    </div>
+                    <!-- Priority rank -->
+                    <td class="w-12 px-3 py-3 text-center">
+                        <span class="inline-flex h-7 w-7 items-center justify-center rounded bg-slate-900 text-xs font-black text-white">
+                            ${index + 1}
+                        </span>
+                    </td>
 
-                    <div class="min-w-0">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <span class="truncate text-xs font-black text-slate-900">
-                                ${quickEscapeHtml(
-                                    player?.name ||
-                                    entry?.playerName ||
-                                    'Unknown prospect'
-                                )}
-                            </span>
+                    <!-- Prospect -->
+                    <td class="min-w-[155px] px-3 py-3">
+                        <div class="text-xs font-black text-slate-900">
+                            ${quickEscapeHtml(
+                                player?.name ||
+                                entry?.playerName ||
+                                'Unknown prospect'
+                            )}
+                        </div>
 
-                            <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">
+                        <div class="mt-1 flex items-center gap-2">
+                            <span class="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-700">
                                 ${quickEscapeHtml(position)}
                             </span>
-                        </div>
 
-                        <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px]">
-                            <span class="font-bold text-emerald-700">
-                                Interest: ${interest}/100
-                            </span>
-
-                            <span class="text-slate-500">
-                                ${quickEscapeHtml(statusLabel)}
+                            <span class="text-[9px] text-slate-500">
+                                ${player?.age != null
+                                    ? `Age ${quickEscapeHtml(player.age)}`
+                                    : ''}
                             </span>
                         </div>
 
-                        <div class="mt-1 text-[9px] text-slate-400">
-                            ${lastWorkLabel}
+                        <div class="mt-1 text-[9px] text-slate-500">
+                            ${quickEscapeHtml(statusLabel)}
                         </div>
-                    </div>
+                    </td>
 
-                    <div class="min-w-0">
-                        <label
-                            class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500"
-                            for="fa-list-coach-${quickEscapeHtml(playerId)}">
-                            Recruiting Coach
-                        </label>
+                    <!-- Interest -->
+                    <td class="w-36 px-3 py-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-[9px] font-bold uppercase text-slate-500">
+                                Interest
+                            </span>
 
-                        <select
-                            id="fa-list-coach-${quickEscapeHtml(playerId)}"
-                            onchange="window.app_setRecruitingListCoach('${quickEscapeHtml(playerId)}', this.value)"
-                            class="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-700">
-                            <option value="" ${assignedCoachId === '' ? 'selected' : ''}>
-                                Any available coach
-                            </option>
-                            ${missingCoachOption}
-                            ${coachOptionsHtml}
-                        </select>
-                    </div>
+                            <span class="font-mono text-xs font-black ${
+                                interest >= 70
+                                    ? 'text-emerald-700'
+                                    : interest >= 35
+                                        ? 'text-amber-700'
+                                        : 'text-slate-700'
+                            }">
+                                ${interest}/100
+                            </span>
+                        </div>
 
-                    <div class="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
+                        <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-200">
+                            <div
+                                class="h-full rounded-full ${
+                                    interest >= 70
+                                        ? 'bg-emerald-600'
+                                        : interest >= 35
+                                            ? 'bg-amber-500'
+                                            : 'bg-slate-500'
+                                }"
+                                style="width: ${interest}%">
+                            </div>
+                        </div>
+                    </td>
+
+                    <!-- Seven-day staff contact tracker -->
+                    <td class="min-w-[155px] px-3 py-3">
+                        ${workDayTrackerHtml}
+                    </td>
+
+                    <!-- Recruiting coach -->
+                    <td class="relative min-w-[190px] px-3 py-3">
                         <button
                             type="button"
-                            title="Move prospect up"
-                            aria-label="Move ${quickEscapeHtml(player?.name || playerId)} up"
-                            ${index === 0 ? 'disabled' : ''}
-                            onclick="window.app_moveRecruitingListItem('${quickEscapeHtml(playerId)}', -1)"
-                            class="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-black text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30">
-                            ↑
+                            id="fa-list-coach-trigger-${quickEscapeHtml(playerId)}"
+                            aria-expanded="false"
+                            onclick="window.app_toggleRecruitingListCoachPicker('${quickEscapeHtml(playerId)}')"
+                            class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-2 text-left text-[10px] font-bold text-slate-700 hover:border-emerald-600">
+
+                            <span class="truncate">
+                                ${quickEscapeHtml(assignedCoachLabel)}
+                            </span>
+
+                            <span class="shrink-0 text-slate-400">
+                                Change
+                            </span>
                         </button>
 
-                        <button
-                            type="button"
-                            title="Move prospect down"
-                            aria-label="Move ${quickEscapeHtml(player?.name || playerId)} down"
-                            ${index === userRecruitingList.length - 1 ? 'disabled' : ''}
-                            onclick="window.app_moveRecruitingListItem('${quickEscapeHtml(playerId)}', 1)"
-                            class="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-black text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30">
-                            ↓
-                        </button>
+                        <div
+                            id="fa-list-coach-options-${quickEscapeHtml(playerId)}"
+                            class="absolute left-3 top-full z-30 hidden max-h-64 w-[220px] overflow-y-auto rounded border border-slate-300 bg-white p-1 shadow-xl">
 
-                        <button
-                            type="button"
-                            title="Remove from recruiting list"
-                            aria-label="Remove ${quickEscapeHtml(player?.name || playerId)}"
-                            onclick="window.app_removeRecruitingListItem('${quickEscapeHtml(playerId)}')"
-                            class="rounded border border-red-200 bg-white px-2 py-1 text-[10px] font-bold text-red-700 hover:bg-red-50">
-                            Remove
-                        </button>
-                    </div>
-                </div>
+                            ${coachPickerOptionsHtml}
+
+                        </div>
+                    </td>
+
+                    <!-- Actual recorded recruiting activity -->
+                    <td class="min-w-[200px] px-3 py-3">
+                        <div class="mb-1 text-[9px] font-black uppercase tracking-wide text-slate-400">
+                            Recent Staff Work
+                        </div>
+
+                        <div class="space-y-1">
+                            ${recentWorkHtml}
+                        </div>
+                    </td>
+
+                    <!-- Manual recruiting actions -->
+                    <td class="min-w-[130px] px-3 py-3">
+                        ${manualRecruitingActionsHtml}
+                    </td>
+
+                    <!-- Roster offer -->
+                    <td class="min-w-[145px] px-3 py-3">
+                        <div class="mb-2">
+                            <span class="text-[9px] font-bold ${
+                                hasActiveOffer
+                                    ? 'text-emerald-700'
+                                    : 'text-slate-500'
+                            }">
+                                ${quickEscapeHtml(offerStatusLabel)}
+                            </span>
+                        </div>
+
+                        ${offerActionHtml}
+                    </td>
+
+                    <!-- Priority and removal controls -->
+                    <td class="w-24 px-3 py-3">
+                        <div class="flex items-center justify-center gap-1">
+
+                            <button
+                                type="button"
+                                title="Move prospect up"
+                                aria-label="Move prospect up"
+                                ${index === 0 ? 'disabled' : ''}
+                                onclick="window.app_moveRecruitingListItem('${quickEscapeHtml(playerId)}', -1)"
+                                class="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-black text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30">
+                                ↑
+                            </button>
+
+                            <button
+                                type="button"
+                                title="Move prospect down"
+                                aria-label="Move prospect down"
+                                ${index === userRecruitingList.length - 1 ? 'disabled' : ''}
+                                onclick="window.app_moveRecruitingListItem('${quickEscapeHtml(playerId)}', 1)"
+                                class="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-black text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30">
+                                ↓
+                            </button>
+
+                            <button
+                                type="button"
+                                title="Remove prospect"
+                                aria-label="Remove prospect"
+                                onclick="window.app_removeRecruitingListItem('${quickEscapeHtml(playerId)}')"
+                                class="rounded border border-red-200 bg-white px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-50">
+                                ×
+                            </button>
+
+                        </div>
+                    </td>
+                </tr>
             `;
         }
     ).join('');
@@ -3958,32 +4363,43 @@ export function renderOffseasonFAPool(gameState) {
 
             ${
                 userRecruitingList.length > 0
-                    ? `<div class="divide-y divide-slate-100">${userRecruitingListHtml}</div>`
+                    ? `
+                        <div class="overflow-x-auto">
+                            <table class="w-full min-w-[1280px] text-left">
+                                <thead class="bg-slate-100">
+                                    <tr class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                        <th class="px-3 py-2 text-center">Rank</th>
+                                        <th class="px-3 py-2">Prospect</th>
+                                        <th class="px-3 py-2">Interest</th>
+                                        <th class="px-3 py-2">7-Day Staff Work</th>
+                                        <th class="px-3 py-2">Recruiting Coach</th>
+                                        <th class="px-3 py-2">Latest Activity</th>
+                                        <th class="px-3 py-2">Manual Actions</th>
+                                        <th class="px-3 py-2">Roster Offer</th>
+                                        <th class="px-3 py-2 text-center">Priority</th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    ${userRecruitingListHtml}
+                                </tbody>
+                            </table>
+                        </div>
+                    `
                     : `
-                        <div class="px-3 py-5 text-center">
+                        <div class="px-3 py-8 text-center">
                             <div class="text-xs font-bold text-slate-600">
                                 Your recruiting list is empty
                             </div>
 
                             <p class="mt-1 text-[10px] text-slate-500">
-                                Select prospects below and add them to your list. Your staff will handle the recruiting work as you advance each day.
+                                Find prospects in the Prospects tab and add them here. Your staff will work through your ranked list.
                             </p>
                         </div>
                     `
             }
         </section>
     `;
-
-    if (pool.length === 0) {
-        container.innerHTML = `
-            ${userRecruitingListPanel}
-
-            <p class="p-8 text-center text-slate-400 italic text-xs">
-                No free agents available matching this filter.
-            </p>
-        `;
-        return;
-    }
 
     // Build the Recruiting Battle Board from observable activity.
     // User-team interest is shown exactly; rival interest stays estimated.
@@ -4523,6 +4939,22 @@ export function renderOffseasonFAPool(gameState) {
 
             <button
                 type="button"
+                id="fa-recruiting-tab-list"
+                aria-pressed="${recruitingActiveTab === 'list'}"
+                onclick="window.app_setRecruitingTab('list')"
+                class="rounded-md px-3 py-2 text-xs font-bold ${
+                    recruitingActiveTab === 'list'
+                        ? 'bg-slate-900 text-white'
+                        : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                }">
+                My Recruiting List
+                <span class="ml-1 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-700">
+                    ${userRecruitingList.length}
+                </span>
+            </button>
+
+            <button
+                type="button"
                 id="fa-recruiting-tab-battles"
                 aria-pressed="${recruitingActiveTab === 'battles'}"
                 onclick="window.app_setRecruitingTab('battles')"
@@ -4560,8 +4992,6 @@ export function renderOffseasonFAPool(gameState) {
                 </p>
             </div>
 
-            ${userRecruitingListPanel}
-
             <!-- Prospect selection only adds players to the persistent list. -->
             <div class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div class="flex flex-wrap items-center justify-between gap-3">
@@ -4576,7 +5006,7 @@ export function renderOffseasonFAPool(gameState) {
 
                         <div
                             id="fa-quick-selected-count"
-                            class="mt-1 text-[10px] font-bold text-slate-600">
+                            class="fa-quick-selected-count mt-1 text-[10px] font-bold text-slate-600">
                             ${recruitingQuickSelectedIds.size} selected
                         </div>
                     </div>
@@ -4598,10 +5028,11 @@ export function renderOffseasonFAPool(gameState) {
 
                         <button
                             type="button"
-                            id="fa-quick-add-button"
+                            id="fa-add-to-recruiting-list-button"
                             onclick="window.app_addSelectedRecruitingTargetsToList()"
-                            class="rounded-sm bg-emerald-700 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800">
-                            Add to Recruiting List (${recruitingQuickSelectedIds.size})
+                            ${recruitingQuickSelectedIds.size === 0 ? 'disabled' : ''}
+                            class="rounded-sm bg-emerald-700 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
+                            Add to List (${recruitingQuickSelectedIds.size})
                         </button>
                     </div>
                 </div>
@@ -4612,7 +5043,7 @@ export function renderOffseasonFAPool(gameState) {
 
             <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
                 <tr>
-                    <th class="py-2 px-2 text-center">Select</th>
+                    <th class="py-2 px-2 text-center">Add to List</th>
                     <th class="py-2 px-3 text-left font-sans">Free Agent</th>
                     <th class="py-2 px-2 text-center">Pos</th>
                     <th class="py-2 px-2 text-center">Scout Status</th>
@@ -4620,11 +5051,10 @@ export function renderOffseasonFAPool(gameState) {
                     <th class="py-2 px-2 text-center">DEF Estimate</th>
                     <th class="py-2 px-3 text-left font-sans">Your Program</th>
                     <th class="py-2 px-3 text-left font-sans">Market Intel & Suitors</th>
-                    <th class="py-2 px-3 text-right font-sans">Action</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-                ${pool.map(p => {
+                ${pool.length > 0 ? pool.map(p => {
                     const pos = getFreeAgentDisplayPosition(
                         gameState.playerTeam,
                         p
@@ -4829,36 +5259,35 @@ export function renderOffseasonFAPool(gameState) {
                         <td class="py-2 px-3 font-sans min-w-0 whitespace-normal break-words">
                             ${marketIntelHtml}
                         </td>
-                        <td class="py-2 px-3 font-sans text-right" onclick="event.stopPropagation()">
-                            <div class="grid grid-cols-2 gap-1.5 min-w-[156px]">
-                                <button
-                                    class="${
-                                        hasActiveOffer
-                                            ? 'bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300'
-                                            : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                                    } col-span-2 w-full font-bold px-2 py-1.5 rounded text-[10px] uppercase tracking-wider transition"
-                                    onclick="window.app_setRecruitingOffer('${p.id}', '${hasActiveOffer ? 'withdraw' : 'extend'}')">
-                                    ${hasActiveOffer ? 'Withdraw Offer' : 'Offer Spot'}
-                                </button>
-
-                                <button
-                                    class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold px-2 py-1.5 rounded text-[10px] uppercase tracking-wider transition shadow-sm"
-                                    onclick="window.app_openRecruitingActionModal('${p.id}')">
-                                    Recruit Now
-                                </button>
-
-                                <button
-                                    class="w-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-2 py-1.5 rounded text-[10px] uppercase tracking-wider transition"
-                                    onclick="window.app_openRecruitingSweetenerModal('${p.id}')">
-                                    Gift / Favor
-                                </button>
-                            </div>
-                        </td>
                     </tr>`;
-                }).join('')}
+                }).join('') : `
+                    <tr>
+                        <td
+                            colspan="8"
+                            class="px-4 py-10 text-center">
+
+                            <div class="text-xs font-bold text-slate-600">
+                                No matching prospects
+                            </div>
+
+                            <p class="mt-1 text-[10px] text-slate-500">
+                                Try changing your position filter or search.
+                                Your Recruiting List and Battle Board remain available.
+                            </p>
+                        </td>
+                    </tr>
+                `}
             </tbody>
                 </table>
             </div>
+        </div>
+
+        <div
+            id="fa-recruiting-list-panel"
+            class="${recruitingActiveTab === 'list' ? '' : 'hidden'}">
+
+            ${userRecruitingListPanel}
+
         </div>
 
         <div
@@ -5042,57 +5471,69 @@ window.app_setRecruitingOffer = function(
         'Continue'
     );
 };
+
 window.app_setRecruitingTab = function(tab) {
-    if (!['prospects', 'battles'].includes(tab)) return;
+    const availableTabs = [
+        'prospects',
+        'list',
+        'battles'
+    ];
+
+    if (!availableTabs.includes(tab)) return;
 
     recruitingActiveTab = tab;
 
-    const prospectsPanel = document.getElementById(
-        'fa-recruiting-prospects-panel'
-    );
-
-    const battlesPanel = document.getElementById(
-        'fa-recruiting-battles-panel'
-    );
-
-    const prospectsButton = document.getElementById(
-        'fa-recruiting-tab-prospects'
-    );
-
-    const battlesButton = document.getElementById(
-        'fa-recruiting-tab-battles'
-    );
-
-    const showProspects = tab === 'prospects';
-
-    prospectsPanel?.classList.toggle('hidden', !showProspects);
-    battlesPanel?.classList.toggle('hidden', showProspects);
+    const tabs = [
+        {
+            key: 'prospects',
+            buttonId: 'fa-recruiting-tab-prospects',
+            panelId: 'fa-recruiting-prospects-panel'
+        },
+        {
+            key: 'list',
+            buttonId: 'fa-recruiting-tab-list',
+            panelId: 'fa-recruiting-list-panel'
+        },
+        {
+            key: 'battles',
+            buttonId: 'fa-recruiting-tab-battles',
+            panelId: 'fa-recruiting-battles-panel'
+        }
+    ];
 
     const activeClass =
-        'rounded-md px-3 py-2 text-xs font-bold bg-slate-900 text-white';
+        'rounded-md px-3 py-2 text-xs font-bold ' +
+        'bg-slate-900 text-white';
 
     const inactiveClass =
-        'rounded-md px-3 py-2 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
+        'rounded-md px-3 py-2 text-xs font-bold ' +
+        'border border-slate-300 bg-white ' +
+        'text-slate-700 hover:bg-slate-50';
 
-    if (prospectsButton) {
-        prospectsButton.className =
-            showProspects ? activeClass : inactiveClass;
+    tabs.forEach(entry => {
+        const isActive = entry.key === tab;
 
-        prospectsButton.setAttribute(
-            'aria-pressed',
-            String(showProspects)
+        const button = document.getElementById(
+            entry.buttonId
         );
-    }
 
-    if (battlesButton) {
-        battlesButton.className =
-            showProspects ? inactiveClass : activeClass;
-
-        battlesButton.setAttribute(
-            'aria-pressed',
-            String(!showProspects)
+        const panel = document.getElementById(
+            entry.panelId
         );
-    }
+
+        panel?.classList.toggle('hidden', !isActive);
+
+        if (button) {
+            button.className = isActive
+                ? activeClass
+                : inactiveClass;
+
+            button.setAttribute(
+                'aria-pressed',
+                String(isActive)
+            );
+        }
+    });
 };
 
 window.app_updateRecruitingQuickDefaults = function() {
@@ -5611,6 +6052,40 @@ function savePlayerRecruitingList(context) {
         getGameState() || context.gs
     );
 }
+
+window.app_toggleRecruitingListCoachPicker = function(playerId) {
+    const picker = document.getElementById(
+        `fa-list-coach-options-${playerId}`
+    );
+
+    const trigger = document.getElementById(
+        `fa-list-coach-trigger-${playerId}`
+    );
+
+    if (!picker || !trigger) return;
+
+    const shouldOpen = picker.classList.contains('hidden');
+
+    // Close any other prospect's coach picker first.
+    document.querySelectorAll(
+        '[id^="fa-list-coach-options-"]'
+    ).forEach(element => {
+        element.classList.add('hidden');
+    });
+
+    document.querySelectorAll(
+        '[id^="fa-list-coach-trigger-"]'
+    ).forEach(element => {
+        element.setAttribute('aria-expanded', 'false');
+    });
+
+    picker.classList.toggle('hidden', !shouldOpen);
+
+    trigger.setAttribute(
+        'aria-expanded',
+        String(shouldOpen)
+    );
+};
 
 window.app_setRecruitingListCoach = function(playerId, coachId) {
     const context = getPlayerRecruitingListContext();
@@ -16749,6 +17224,32 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     isPaused = false;
     liveGameCurrentIndex = 0;
 
+
+    const userTeam = getGameState()?.playerTeam;
+    if (!activeLiveGame.liveGmAdjustments) {
+        activeLiveGame.liveGmAdjustments = userTeam?.liveGmAdjustments || {
+            offenseFocus: 'balanced',
+            defenseFocus: 'base',
+            fourthDown: 'coach',
+            tempo: 'normal'
+        };
+    }
+
+    const livePlayerTeam = [activeLiveGame.homeTeam, activeLiveGame.awayTeam].find(
+        t => t && (t.isPlayerControlled || (userTeam && String(t.id) === String(userTeam.id)))
+    );
+    if (livePlayerTeam) {
+        livePlayerTeam.liveGmAdjustments = activeLiveGame.liveGmAdjustments;
+    }
+
+    // Reset sidebar visibility on game start
+    const simSidebar = document.getElementById('sim-sidebar');
+    if (simSidebar) simSidebar.classList.remove('hidden');
+    const toggleIcon = document.getElementById('sim-sidebar-toggle-icon');
+    const toggleText = document.getElementById('sim-sidebar-toggle-text');
+    if (toggleIcon) toggleIcon.textContent = '▶';
+    if (toggleText) toggleText.textContent = 'Hide Sideline';
+
     renderLiveStrategyControls();
 
     if (elements.simPlayLog) elements.simPlayLog.innerHTML = '';
@@ -16756,10 +17257,101 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     runLiveGameStep();
 }
 
+function getLiveGameCoachQuote(adjustments, coachName) {
+    const adj = adjustments || {};
+    if (adj.tempo === 'hurry_up') {
+        return `"No-huddle drill! We're speeding up the pace, catching their defense without time to substitute."`;
+    }
+    if (adj.tempo === 'chew_clock') {
+        return `"Milking every tick off that play clock, boss. Taking our time and bleeding the clock."`;
+    }
+    if (adj.fourthDown === 'aggressive') {
+        return `"I love the swagger, boss. We're keeping the offense on the field on short-yardage 4th downs."`;
+    }
+    if (adj.fourthDown === 'conservative') {
+        return `"Playing smart field position. We'll pin them deep inside their 20."`;
+    }
+    if (adj.offenseFocus === 'pound_rock') {
+        return `"Understood. We're leaning on the offensive line and feeding our runners to wear down their front."`;
+    }
+    if (adj.offenseFocus === 'air_it_out') {
+        return `"Got it, boss. Dialing up deep verticals downfield to stretch their secondary."`;
+    }
+    if (adj.offenseFocus === 'quick_game') {
+        return `"Smart call. Quick slants, flats, and screens to neutralize their pass rush and get the ball out."`;
+    }
+    if (adj.defenseFocus === 'stack_box') {
+        return `"Loading up the tackle box! Daring them to test our corners on an island."`;
+    }
+    if (adj.defenseFocus === 'deep_shell') {
+        return `"Two-high shell back there. Keeping everything in front of us—no cheap chunk plays."`;
+    }
+    if (adj.defenseFocus === 'bring_heat') {
+        return `"Sending the house! Overload blitzes to force errant throws and sacks."`;
+    }
+    return `"Sticking to our base script, boss. Waiting for their defense to show its hand."`;
+}
+
 function renderLiveStrategyControls() {
     const team = getGameState()?.playerTeam;
     if (!activeLiveGame || !team) return;
 
+
+        if (!activeLiveGame.liveGmAdjustments) {
+        activeLiveGame.liveGmAdjustments = team.liveGmAdjustments || {
+            offenseFocus: 'balanced',
+            defenseFocus: 'base',
+            fourthDown: 'coach',
+            tempo: 'normal'
+        };
+    }
+    const adjustments = activeLiveGame.liveGmAdjustments;
+
+    // 1. Coach's Ear Card
+    const coach = team.staff?.coach || team.coach || (Array.isArray(team.coaches) ? team.coaches[0] : null);
+    const coachName = coach?.name ? `Coach ${coach.name}` : (team.coachName || 'Coach');
+    const coachNameEl = document.getElementById('sim-coach-name');
+    if (coachNameEl) coachNameEl.textContent = coachName;
+
+    const coachQuoteEl = document.getElementById('sim-coach-quote');
+    if (coachQuoteEl) {
+        coachQuoteEl.textContent = getLiveGameCoachQuote(adjustments, coachName);
+    }
+
+    // 2. GM Tweak Buttons Visual State
+    document.querySelectorAll('.gm-tweak-btn').forEach(btn => {
+        const type = btn.getAttribute('data-gm-type');
+        const val = btn.getAttribute('data-gm-val');
+        const isSelected = adjustments[type] === val;
+
+        if (type === 'offenseFocus') {
+            if (isSelected) {
+                btn.className = 'gm-tweak-btn text-left p-2 rounded border text-xs transition-all border-amber-500 bg-amber-950/60 text-amber-200 ring-1 ring-amber-500/50 shadow-sm';
+            } else {
+                btn.className = 'gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700/80 text-gray-300 hover:border-gray-500 hover:text-white';
+            }
+        } else if (type === 'defenseFocus') {
+            if (isSelected) {
+                btn.className = 'gm-tweak-btn text-left p-2 rounded border text-xs transition-all border-blue-500 bg-blue-950/60 text-blue-200 ring-1 ring-blue-500/50 shadow-sm';
+            } else {
+                btn.className = 'gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700/80 text-gray-300 hover:border-gray-500 hover:text-white';
+            }
+        } else if (type === 'fourthDown') {
+            if (isSelected) {
+                btn.className = 'gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all border-emerald-500 bg-emerald-950/60 text-emerald-200 font-bold ring-1 ring-emerald-500/50 shadow-sm';
+            } else {
+                btn.className = 'gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white font-bold';
+            }
+        } else if (type === 'tempo') {
+            if (isSelected) {
+                btn.className = 'gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all border-cyan-500 bg-cyan-950/60 text-cyan-200 font-bold ring-1 ring-cyan-500/50 shadow-sm';
+            } else {
+                btn.className = 'gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white font-bold';
+            }
+        }
+    });
+
+    // 3. Tactical Formations Selection
     const formationGroups = {
         offense: Object.entries(offenseFormations)
             .filter(([key]) => key !== 'Punt' && key !== 'Punt_Return'),
@@ -16813,6 +17405,34 @@ function renderLiveStrategyControls() {
         }).join('');
     }
 }
+
+window.app_setGmLiveTweak = function(category, value) {
+    if (!activeLiveGame) return;
+    if (!activeLiveGame.liveGmAdjustments) {
+        activeLiveGame.liveGmAdjustments = {
+            offenseFocus: 'balanced',
+            defenseFocus: 'base',
+            fourthDown: 'coach',
+            tempo: 'normal'
+        };
+    }
+    activeLiveGame.liveGmAdjustments[category] = value;
+
+    const gameState = getGameState();
+    const team = gameState?.playerTeam;
+    if (team) {
+        team.liveGmAdjustments = { ...activeLiveGame.liveGmAdjustments };
+    }
+
+    const livePlayerTeam = [activeLiveGame.homeTeam, activeLiveGame.awayTeam].find(
+        t => t && (t.isPlayerControlled || (team && String(t.id) === String(team.id)))
+    );
+    if (livePlayerTeam) {
+        livePlayerTeam.liveGmAdjustments = { ...activeLiveGame.liveGmAdjustments };
+    }
+
+    renderLiveStrategyControls();
+};
 
 window.app_toggleLiveFormationPicker = function(side) {
     if (!['offense', 'defense'].includes(side)) return;
@@ -17023,6 +17643,8 @@ function drawLiveGameFieldFrame(frame) {
     if (!frame || !elements.fieldCanvas || !elements.fieldCanvasCtx) {
         return;
     }
+
+    lastRenderedFrame = frame;
 
     const homeTeam = activeLiveGame?.homeTeam;
     const awayTeam = activeLiveGame?.awayTeam;

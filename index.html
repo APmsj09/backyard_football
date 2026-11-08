@@ -562,7 +562,7 @@
         <section id="offseason-fa-screen" class="screen hidden h-full flex flex-col overflow-hidden bg-slate-100">
             <!-- Header -->
             <div
-                class="flex-shrink-0 p-3.5 bg-slate-900 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700 shadow-sm">
+                class="flex-shrink-0 p-3.5 bg-slate-900 text-white grid grid-cols-1 xl:grid-cols-[minmax(230px,0.85fr)_minmax(360px,1.15fr)_auto] items-center gap-3 border-b border-slate-700 shadow-sm">
                 <div>
                     <div class="flex items-center gap-2">
                         <span class="text-xl">🤝</span>
@@ -572,7 +572,76 @@
                     </div>
                     <p class="text-[11px] text-slate-400 mt-0.5">Use staff time, team funds, and Favor Tokens to build relationships with unsigned neighborhood players over seven recruiting days.</p>
                 </div>
-                <div class="flex items-center gap-2 flex-wrap">
+
+                <!-- Recruiting Operations Overview -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 min-w-0">
+
+                    <div class="rounded border border-slate-700 bg-slate-800 px-2.5 py-2">
+                        <div class="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                            Targets
+                        </div>
+
+                        <div
+                            id="fa-user-target-count"
+                            class="mt-1 text-xl font-black font-mono text-white">
+                            0
+                        </div>
+
+                        <div class="text-[9px] text-slate-500">
+                            On recruiting list
+                        </div>
+                    </div>
+
+                    <div class="rounded border border-slate-700 bg-slate-800 px-2.5 py-2">
+                        <div class="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                            Staff Hours Used
+                        </div>
+
+                        <div
+                            id="fa-user-staff-hours-used"
+                            class="mt-1 text-xl font-black font-mono text-amber-400">
+                            0h
+                        </div>
+
+                        <div class="text-[9px] text-slate-500">
+                            Shared workload
+                        </div>
+                    </div>
+
+                    <div class="rounded border border-slate-700 bg-slate-800 px-2.5 py-2">
+                        <div class="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                            Active Offers
+                        </div>
+
+                        <div
+                            id="fa-user-active-offers"
+                            class="mt-1 text-xl font-black font-mono text-emerald-400">
+                            0
+                        </div>
+
+                        <div class="text-[9px] text-slate-500">
+                            Roster spots reserved
+                        </div>
+                    </div>
+
+                    <div class="rounded border border-slate-700 bg-slate-800 px-2.5 py-2">
+                        <div class="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                            Commitments
+                        </div>
+
+                        <div
+                            id="fa-user-commitments"
+                            class="mt-1 text-xl font-black font-mono text-white">
+                            0
+                        </div>
+
+                        <div class="text-[9px] text-slate-500">
+                            Signed prospects
+                        </div>
+                    </div>
+
+                </div>
+                <div class="flex items-center gap-2 flex-wrap xl:justify-end">
                     <div class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
                         <span class="text-slate-400 text-[10px] uppercase font-bold block">Team Funds</span>
                         <span class="font-bold text-emerald-400">$<span id="fa-user-cash">—</span></span>
@@ -589,7 +658,7 @@
                     </div>
 
                     <div class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
-                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Recruiting Hours Left</span>
+                        <span class="text-slate-400 text-[10px] uppercase font-bold block">Staff Hours Available</span>
                         <span class="font-bold text-white" id="fa-user-staff-hours">—</span>
                     </div>
 
@@ -1008,10 +1077,17 @@
                         class="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md border border-white/10 text-white px-8 py-3 rounded-full font-sans font-bold text-lg tracking-wide shadow-2xl whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-300 z-40 transform scale-105">
                         Play Result
                     </div>
+                    <!-- Retractable Sideline Button -->
+                    <button id="sim-sidebar-toggle" type="button"
+                        class="absolute top-3 right-3 z-30 bg-gray-900/85 hover:bg-gray-800 border border-gray-700/80 hover:border-gray-500 text-gray-200 hover:text-white px-2.5 py-1.5 rounded text-xs font-bold shadow-lg backdrop-blur-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                        title="Toggle Sideline Sidebar">
+                        <span id="sim-sidebar-toggle-icon">▶</span>
+                        <span id="sim-sidebar-toggle-text" class="hidden sm:inline">Hide Sideline</span>
+                    </button>
                 </div>
 
                 <!-- 2. Unified Right Sidebar (4 Tabs) -->
-                <div
+                <div id="sim-sidebar"
                     class="w-80 md:w-96 bg-gray-900 border-l border-gray-800 flex flex-col shrink-0 z-20 shadow-[-4px_0_15px_rgba(0,0,0,0.5)]">
                     <div class="flex bg-gray-800 border-b border-gray-700 text-[10px] sm:text-xs">
                         <button id="tab-btn-log"
@@ -1021,7 +1097,7 @@
                         <button id="tab-btn-stats"
                             class="flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider">STATS</button>
                         <button id="tab-btn-strategy"
-                            class="flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider">PLAN</button>
+                            class="flex-1 py-3 font-bold text-gray-400 hover:text-white border-t-2 border-transparent bg-gray-800 transition-colors tracking-wider">TWEAKS</button>
                     </div>
 
                     <div class="flex-grow relative">
@@ -1048,29 +1124,148 @@
                             </div>
                         </div>
 
-                        <!-- Tab 4: Strategy -->
+                        <!-- Tab 4: GM In-Game Tweaks & Adjustments -->
                         <div id="pane-strategy"
-                            class="absolute inset-0 hidden overflow-y-auto p-4 flex flex-col gap-4 bg-gray-900">
-                            <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
-                                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Offensive
-                                    Gameplan</label>
-                                <input type="hidden" id="sim-offense-formation" value="">
-                                <button type="button" id="sim-offense-formation-trigger" aria-expanded="false" aria-controls="sim-offense-formation-menu" onclick="window.app_toggleLiveFormationPicker('offense')" class="flex w-full items-center justify-between gap-2 rounded border border-gray-600 bg-gray-900 px-2 py-1.5 text-left text-xs font-bold text-white hover:border-amber-500"><span id="sim-offense-formation-label">Current offense</span><span aria-hidden="true" class="text-gray-400">▾</span></button>
-                                <div id="sim-offense-formation-menu" class="live-formation-menu mt-1 hidden max-h-56 overflow-y-auto rounded border border-gray-700 bg-gray-950 p-1"></div>
-                                <div id="sim-offense-personnel"
-                                    class="text-[10px] text-amber-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block">
+                            class="absolute inset-0 hidden overflow-y-auto p-3.5 flex flex-col gap-3.5 bg-gray-900">
+
+                            <!-- Coach's Ear Card -->
+                            <div class="bg-gray-950/80 p-3 rounded-lg border border-purple-900/50 shadow-md">
+                                <div class="flex items-center justify-between mb-1.5">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-xs">🎙️</span>
+                                        <span class="text-[10px] uppercase font-bold tracking-wider text-purple-400">Head Coach Ear</span>
+                                    </div>
+                                    <span id="sim-coach-name" class="text-[11px] font-bold text-gray-200">Coach</span>
+                                </div>
+                                <div id="sim-coach-quote" class="text-xs italic text-gray-300 font-sans bg-gray-900/90 p-2.5 rounded border border-gray-800 leading-snug">
+                                    "Sticking to our base script, boss. Waiting for their defense to show its hand."
                                 </div>
                             </div>
-                            <div class="bg-gray-800 p-3 rounded border border-gray-700 shadow-sm">
-                                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1">Defensive
-                                    Gameplan</label>
-                                <input type="hidden" id="sim-defense-formation" value="">
-                                <button type="button" id="sim-defense-formation-trigger" aria-expanded="false" aria-controls="sim-defense-formation-menu" onclick="window.app_toggleLiveFormationPicker('defense')" class="flex w-full items-center justify-between gap-2 rounded border border-gray-600 bg-gray-900 px-2 py-1.5 text-left text-xs font-bold text-white hover:border-amber-500"><span id="sim-defense-formation-label">Current defense</span><span aria-hidden="true" class="text-gray-400">▾</span></button>
-                                <div id="sim-defense-formation-menu" class="live-formation-menu mt-1 hidden max-h-56 overflow-y-auto rounded border border-gray-700 bg-gray-950 p-1"></div>
-                                <div id="sim-defense-personnel"
-                                    class="text-[10px] text-blue-400 font-mono font-bold mt-1 bg-gray-900 px-2 py-1 rounded inline-block">
+
+                            <!-- Offensive Focus -->
+                            <div class="bg-gray-800/90 p-3 rounded-lg border border-gray-700/80 shadow-sm">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-[10px] uppercase font-extrabold text-amber-400 tracking-wider">Offensive Focus</span>
+                                    <span class="text-[9px] text-gray-400 font-mono">GM Suggestion</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-1.5">
+                                    <button type="button" data-gm-type="offenseFocus" data-gm-val="balanced" onclick="window.app_setGmLiveTweak('offenseFocus', 'balanced')"
+                                        class="gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700 hover:border-gray-500">
+                                        <div class="font-bold text-white text-[11px]">Balanced</div>
+                                        <div class="text-[9px] text-gray-400">Coach's normal call</div>
+                                    </button>
+                                    <button type="button" data-gm-type="offenseFocus" data-gm-val="pound_rock" onclick="window.app_setGmLiveTweak('offenseFocus', 'pound_rock')"
+                                        class="gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700 hover:border-gray-500">
+                                        <div class="font-bold text-white text-[11px]">Pound The Rock</div>
+                                        <div class="text-[9px] text-gray-400">Power run emphasis</div>
+                                    </button>
+                                    <button type="button" data-gm-type="offenseFocus" data-gm-val="air_it_out" onclick="window.app_setGmLiveTweak('offenseFocus', 'air_it_out')"
+                                        class="gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700 hover:border-gray-500">
+                                        <div class="font-bold text-white text-[11px]">Air It Out</div>
+                                        <div class="text-[9px] text-gray-400">Deep vertical shots</div>
+                                    </button>
+                                    <button type="button" data-gm-type="offenseFocus" data-gm-val="quick_game" onclick="window.app_setGmLiveTweak('offenseFocus', 'quick_game')"
+                                        class="gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700 hover:border-gray-500">
+                                        <div class="font-bold text-white text-[11px]">Quick Rhythm</div>
+                                        <div class="text-[9px] text-gray-400">Slants, flats & screens</div>
+                                    </button>
                                 </div>
                             </div>
+
+                            <!-- Defensive Focus -->
+                            <div class="bg-gray-800/90 p-3 rounded-lg border border-gray-700/80 shadow-sm">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-[10px] uppercase font-extrabold text-blue-400 tracking-wider">Defensive Emphasis</span>
+                                    <span class="text-[9px] text-gray-400 font-mono">GM Suggestion</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-1.5">
+                                    <button type="button" data-gm-type="defenseFocus" data-gm-val="base" onclick="window.app_setGmLiveTweak('defenseFocus', 'base')"
+                                        class="gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700 hover:border-gray-500">
+                                        <div class="font-bold text-white text-[11px]">Base Scheme</div>
+                                        <div class="text-[9px] text-gray-400">Standard DC calls</div>
+                                    </button>
+                                    <button type="button" data-gm-type="defenseFocus" data-gm-val="stack_box" onclick="window.app_setGmLiveTweak('defenseFocus', 'stack_box')"
+                                        class="gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700 hover:border-gray-500">
+                                        <div class="font-bold text-white text-[11px]">Stack The Box</div>
+                                        <div class="text-[9px] text-gray-400">Stop interior runs</div>
+                                    </button>
+                                    <button type="button" data-gm-type="defenseFocus" data-gm-val="deep_shell" onclick="window.app_setGmLiveTweak('defenseFocus', 'deep_shell')"
+                                        class="gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700 hover:border-gray-500">
+                                        <div class="font-bold text-white text-[11px]">Deep Shell</div>
+                                        <div class="text-[9px] text-gray-400">Prevent big passes</div>
+                                    </button>
+                                    <button type="button" data-gm-type="defenseFocus" data-gm-val="bring_heat" onclick="window.app_setGmLiveTweak('defenseFocus', 'bring_heat')"
+                                        class="gm-tweak-btn text-left p-2 rounded border text-xs transition-all bg-gray-900 border-gray-700 hover:border-gray-500">
+                                        <div class="font-bold text-white text-[11px]">Bring The Heat</div>
+                                        <div class="text-[9px] text-gray-400">Aggressive blitzing</div>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- 4th-Down Directive & Tempo -->
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <!-- 4th Down Directive -->
+                                <div class="bg-gray-800/90 p-2.5 rounded-lg border border-gray-700/80 shadow-sm">
+                                    <div class="text-[10px] uppercase font-extrabold text-emerald-400 mb-1.5 tracking-wider">4th Down</div>
+                                    <div class="flex flex-col gap-1">
+                                        <button type="button" data-gm-type="fourthDown" data-gm-val="coach" onclick="window.app_setGmLiveTweak('fourthDown', 'coach')"
+                                            class="gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 font-bold text-gray-200">
+                                            Coach Discretion
+                                        </button>
+                                        <button type="button" data-gm-type="fourthDown" data-gm-val="aggressive" onclick="window.app_setGmLiveTweak('fourthDown', 'aggressive')"
+                                            class="gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 font-bold text-gray-200">
+                                            Aggressive (Go for it)
+                                        </button>
+                                        <button type="button" data-gm-type="fourthDown" data-gm-val="conservative" onclick="window.app_setGmLiveTweak('fourthDown', 'conservative')"
+                                            class="gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 font-bold text-gray-200">
+                                            Conservative (Pin 'em)
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Tempo / Clock Directive -->
+                                <div class="bg-gray-800/90 p-2.5 rounded-lg border border-gray-700/80 shadow-sm">
+                                    <div class="text-[10px] uppercase font-extrabold text-cyan-400 mb-1.5 tracking-wider">Game Pace</div>
+                                    <div class="flex flex-col gap-1">
+                                        <button type="button" data-gm-type="tempo" data-gm-val="normal" onclick="window.app_setGmLiveTweak('tempo', 'normal')"
+                                            class="gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 font-bold text-gray-200">
+                                            Normal Pace
+                                        </button>
+                                        <button type="button" data-gm-type="tempo" data-gm-val="chew_clock" onclick="window.app_setGmLiveTweak('tempo', 'chew_clock')"
+                                            class="gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 font-bold text-gray-200">
+                                            Chew Clock (Bleed)
+                                        </button>
+                                        <button type="button" data-gm-type="tempo" data-gm-val="hurry_up" onclick="window.app_setGmLiveTweak('tempo', 'hurry_up')"
+                                            class="gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 font-bold text-gray-200">
+                                            Hurry-Up (Fast)
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tactical Formations (Secondary Personnel Control) -->
+                            <details class="bg-gray-800/60 rounded-lg border border-gray-700/60 p-2 text-xs group">
+                                <summary class="font-bold text-[10px] uppercase tracking-wider text-gray-400 cursor-pointer flex justify-between items-center select-none">
+                                    <span>Tactical Formations</span>
+                                    <span class="text-gray-500 group-open:rotate-180 transition-transform">▾</span>
+                                </summary>
+                                <div class="mt-2.5 space-y-2.5 pt-2 border-t border-gray-700/50">
+                                    <div class="bg-gray-900/80 p-2 rounded border border-gray-800">
+                                        <label class="block text-[9px] uppercase font-bold text-gray-400 mb-1">Offensive Formation</label>
+                                        <input type="hidden" id="sim-offense-formation" value="">
+                                        <button type="button" id="sim-offense-formation-trigger" aria-expanded="false" aria-controls="sim-offense-formation-menu" onclick="window.app_toggleLiveFormationPicker('offense')" class="flex w-full items-center justify-between gap-2 rounded border border-gray-700 bg-gray-950 px-2 py-1 text-left text-xs font-bold text-white hover:border-amber-500"><span id="sim-offense-formation-label">Current offense</span><span aria-hidden="true" class="text-gray-400">▾</span></button>
+                                        <div id="sim-offense-formation-menu" class="live-formation-menu mt-1 hidden max-h-48 overflow-y-auto rounded border border-gray-700 bg-gray-950 p-1"></div>
+                                        <div id="sim-offense-personnel" class="text-[9px] text-amber-400 font-mono font-bold mt-1 bg-gray-950 px-1.5 py-0.5 rounded inline-block"></div>
+                                    </div>
+                                    <div class="bg-gray-900/80 p-2 rounded border border-gray-800">
+                                        <label class="block text-[9px] uppercase font-bold text-gray-400 mb-1">Defensive Formation</label>
+                                        <input type="hidden" id="sim-defense-formation" value="">
+                                        <button type="button" id="sim-defense-formation-trigger" aria-expanded="false" aria-controls="sim-defense-formation-menu" onclick="window.app_toggleLiveFormationPicker('defense')" class="flex w-full items-center justify-between gap-2 rounded border border-gray-700 bg-gray-950 px-2 py-1 text-left text-xs font-bold text-white hover:border-blue-500"><span id="sim-defense-formation-label">Current defense</span><span aria-hidden="true" class="text-gray-400">▾</span></button>
+                                        <div id="sim-defense-formation-menu" class="live-formation-menu mt-1 hidden max-h-48 overflow-y-auto rounded border border-gray-700 bg-gray-950 p-1"></div>
+                                        <div id="sim-defense-personnel" class="text-[9px] text-blue-400 font-mono font-bold mt-1 bg-gray-950 px-1.5 py-0.5 rounded inline-block"></div>
+                                    </div>
+                                </div>
+                            </details>
                         </div>
                     </div>
                 </div>

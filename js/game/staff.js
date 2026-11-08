@@ -6288,9 +6288,33 @@ export function processAiRecruitingDay(gameState) {
             };
         };
 
+        const automaticOfferPolicy =
+            recruitingInstructions.automaticOfferPolicy || {};
+
         const canAutomatePlayerTeamOffers =
             !isPlayerControlledTeam ||
+            (
+                recruitingAutonomy !== 'direct' &&
+                automaticOfferPolicy.enabled === true
+            );
+
+        // Gift automation remains separate from roster-offer policy.
+        const canAutomatePlayerTeamSweeteners =
+            !isPlayerControlledTeam ||
             recruitingAutonomy !== 'direct';
+
+        const configuredOfferInterest =
+            automaticOfferPolicy.minimumInterest;
+
+        const automaticOfferMinimumInterest =
+            configuredOfferInterest != null &&
+            String(configuredOfferInterest).trim() !== '' &&
+            Number.isFinite(Number(configuredOfferInterest))
+                ? Math.max(
+                    0,
+                    Math.min(100, Number(configuredOfferInterest))
+                )
+                : 18;
 
         const staffBudgets = getRecruitingStaffHourBudget(
             team,
@@ -6332,9 +6356,14 @@ export function processAiRecruitingDay(gameState) {
                     Number(assignment.hours) > 0
                 );
 
+            const isRecruitingAssignment = assignment => (
+                assignment?.task === STAFF_WORK_TASKS.RECRUITING ||
+                assignment?.source === 'recruiting'
+            );
+
             const nonRecruitingHours = coachAssignments
                 .filter(assignment =>
-                    assignment.task !== STAFF_WORK_TASKS.RECRUITING
+                    !isRecruitingAssignment(assignment)
                 )
                 .reduce(
                     (total, assignment) =>
@@ -6343,9 +6372,7 @@ export function processAiRecruitingDay(gameState) {
                 );
 
             const recruitingHoursUsed = coachAssignments
-                .filter(assignment =>
-                    assignment.task === STAFF_WORK_TASKS.RECRUITING
-                )
+                .filter(isRecruitingAssignment)
                 .reduce(
                     (total, assignment) =>
                         total + Number(assignment.hours),
@@ -7070,26 +7097,6 @@ export function processAiRecruitingDay(gameState) {
                 .filter(Boolean)
                 .sort((a, b) => {
                     if (isPlayerControlledTeam) {
-                        const aEntry = userRecruitingTargets.get(
-                            String(a.player?.id)
-                        );
-
-                        const bEntry = userRecruitingTargets.get(
-                            String(b.player?.id)
-                        );
-
-                        const aLastWorkedDay =
-                            Number(aEntry?.lastWorkedDay) || 0;
-
-                        const bLastWorkedDay =
-                            Number(bEntry?.lastWorkedDay) || 0;
-
-                        // Give prospects who have received less attention
-                        // priority over those worked more recently.
-                        if (aLastWorkedDay !== bLastWorkedDay) {
-                            return aLastWorkedDay - bLastWorkedDay;
-                        }
-
                         const aRank =
                             userRecruitingPriorityIndices.get(
                                 String(a.player?.id)
@@ -7100,11 +7107,15 @@ export function processAiRecruitingDay(gameState) {
                                 String(b.player?.id)
                             ) ?? Number.MAX_SAFE_INTEGER;
 
+                        // The GM's ranked list is the primary source
+                        // of recruiting priority.
                         if (aRank !== bRank) {
                             return aRank - bRank;
                         }
                     }
 
+                    // AI teams continue to rank prospects by evaluation.
+                    // This also provides a fallback for equal user ranks.
                     return b.score - a.score;
                 });
 
@@ -7223,7 +7234,8 @@ export function processAiRecruitingDay(gameState) {
 
                     const shouldExtendOffer =
                         canAutomatePlayerTeamOffers &&
-                        Number(result.interestAfter) >= 18 &&
+                        Number(result.interestAfter) >=
+                            automaticOfferMinimumInterest &&
                         invitationScore >= 22;
 
                     const offerCanBeExtended =
@@ -7289,7 +7301,7 @@ export function processAiRecruitingDay(gameState) {
                 );
 
                 const shouldConsiderSweetener =
-                    canAutomatePlayerTeamOffers &&
+                    canAutomatePlayerTeamSweeteners &&
                     Number(result.interestAfter) >= 18 &&
                     (
                         observedCompetitionPressure >= 3 ||
