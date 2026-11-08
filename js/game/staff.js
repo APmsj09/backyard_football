@@ -7171,260 +7171,248 @@ export function processAiRecruitingDay(gameState) {
                     userListEntry.lastAction = selectedAction.type;
                 }
 
-            if (isPlayerControlledTeam) {
-                const listEntry = userRecruitingTargets.get(
-                    String(target.player.id)
+                let offerExtended = false;
+
+                const recruitKey = String(target.player.id);
+                const recruitRecord =
+                    progress.recruits?.[recruitKey];
+
+                if (recruitRecord) {
+                    recruitRecord.offersByTeam =
+                        recruitRecord.offersByTeam &&
+                        typeof recruitRecord.offersByTeam === 'object' &&
+                        !Array.isArray(recruitRecord.offersByTeam)
+                            ? recruitRecord.offersByTeam
+                            : {};
+
+                    const existingOffer =
+                        recruitRecord.offersByTeam[teamKey];
+
+                    const invitationQuality = (
+                        skillValue('evalCharacter') +
+                        skillValue('gameplanInstinct') +
+                        skillValue('authority')
+                    ) / 3;
+
+                    // Better decision-makers are more consistent, but
+                    // still retain some uncertainty when extending offers.
+                    const invitationNoiseRange =
+                        2 + ((100 - invitationQuality) / 100) * 6;
+
+                    const invitationNoise =
+                        (Math.random() * 2 - 1) *
+                        invitationNoiseRange;
+
+                    const invitationRiskAdjustment =
+                        (
+                            getStaffBehaviorTendency(coach, 'riskTolerance') -
+                            50
+                        ) / 50 * 3;
+
+                    const invitationPatienceAdjustment =
+                        (
+                            getStaffBehaviorTendency(coach, 'patience') -
+                            50
+                        ) / 50 * 2;
+
+                    const invitationScore =
+                        target.score +
+                        invitationNoise +
+                        invitationRiskAdjustment -
+                        invitationPatienceAdjustment;
+
+                    const shouldExtendOffer =
+                        canAutomatePlayerTeamOffers &&
+                        Number(result.interestAfter) >= 18 &&
+                        invitationScore >= 22;
+
+                    const offerCanBeExtended =
+                        !existingOffer ||
+                        existingOffer.status === 'withdrawn';
+
+                    if (
+                        shouldExtendOffer &&
+                        offerCanBeExtended &&
+                        hasAiOfferCapacity(team)
+                    ) {
+                        const offer = {
+                            status: 'active',
+                            offeredDay: day,
+                            offeredYear: Number(gameState.year),
+                            withdrawnDay: null,
+                            respondedDay: null
+                        };
+
+                        recruitRecord.offersByTeam[teamKey] = offer;
+
+                        const offerActivity = {
+                            type: 'recruiting_offer',
+                            year: Number(gameState.year),
+                            day,
+                            teamId: team.id,
+                            teamName: team.name,
+                            playerId: target.player.id,
+                            playerName: target.player.name,
+                            action: 'extend',
+                            status: 'active',
+                            label: 'Offered a roster spot'
+                        };
+
+                        recruitRecord.history = Array.isArray(
+                            recruitRecord.history
+                        )
+                            ? recruitRecord.history
+                            : [];
+
+                        recruitRecord.history.push(offerActivity);
+
+                        progress.dailyActivity = Array.isArray(
+                            progress.dailyActivity
+                        )
+                            ? progress.dailyActivity
+                            : [];
+
+                        progress.dailyActivity.push(offerActivity);
+
+                        offerExtended = true;
+                    }
+                }
+
+                const observedCompetitionPressure = Math.max(
+                    0,
+                    Number(target.observedCompetitionPressure) || 0
                 );
 
-                if (listEntry) {
-                    listEntry.lastWorkedDay = day;
-                    listEntry.lastCoachId = String(coach.id);
-                    listEntry.lastAction = selectedAction.type;
-                }
-            }
+                const remainingRecruitingDays = Math.max(
+                    0,
+                    totalDays - day
+                );
 
-            let offerExtended = false;
-
-            const recruitKey = String(target.player.id);
-            const recruitRecord =
-                progress.recruits?.[recruitKey];
-
-            if (recruitRecord) {
-                recruitRecord.offersByTeam =
-                    recruitRecord.offersByTeam &&
-                    typeof recruitRecord.offersByTeam === 'object' &&
-                    !Array.isArray(recruitRecord.offersByTeam)
-                        ? recruitRecord.offersByTeam
-                        : {};
-
-                const existingOffer =
-                    recruitRecord.offersByTeam[teamKey];
-
-                const invitationQuality = (
-                    skillValue('evalCharacter') +
-                    skillValue('gameplanInstinct') +
-                    skillValue('authority')
-                ) / 3;
-
-                // Better decision-makers are more consistent, but
-                // still retain some uncertainty when extending offers.
-                const invitationNoiseRange =
-                    2 + ((100 - invitationQuality) / 100) * 6;
-
-                const invitationNoise =
-                    (Math.random() * 2 - 1) *
-                    invitationNoiseRange;
-
-                const invitationRiskAdjustment =
-                    (
-                        getStaffBehaviorTendency(coach, 'riskTolerance') -
-                        50
-                    ) / 50 * 3;
-
-                const invitationPatienceAdjustment =
-                    (
-                        getStaffBehaviorTendency(coach, 'patience') -
-                        50
-                    ) / 50 * 2;
-
-                const invitationScore =
-                    target.score +
-                    invitationNoise +
-                    invitationRiskAdjustment -
-                    invitationPatienceAdjustment;
-
-                const shouldExtendOffer =
+                const shouldConsiderSweetener =
                     canAutomatePlayerTeamOffers &&
                     Number(result.interestAfter) >= 18 &&
-                    invitationScore >= 22;
-
-                const offerCanBeExtended =
-                    !existingOffer ||
-                    existingOffer.status === 'withdrawn';
-
-                if (
-                    shouldExtendOffer &&
-                    offerCanBeExtended &&
-                    hasAiOfferCapacity(team)
-                ) {
-                    const offer = {
-                        status: 'active',
-                        offeredDay: day,
-                        offeredYear: Number(gameState.year),
-                        withdrawnDay: null,
-                        respondedDay: null
-                    };
-
-                    recruitRecord.offersByTeam[teamKey] = offer;
-
-                    const offerActivity = {
-                        type: 'recruiting_offer',
-                        year: Number(gameState.year),
-                        day,
-                        teamId: team.id,
-                        teamName: team.name,
-                        playerId: target.player.id,
-                        playerName: target.player.name,
-                        action: 'extend',
-                        status: 'active',
-                        label: 'Offered a roster spot'
-                    };
-
-                    recruitRecord.history = Array.isArray(
-                        recruitRecord.history
-                    )
-                        ? recruitRecord.history
-                        : [];
-
-                    recruitRecord.history.push(offerActivity);
-
-                    progress.dailyActivity = Array.isArray(
-                        progress.dailyActivity
-                    )
-                        ? progress.dailyActivity
-                        : [];
-
-                    progress.dailyActivity.push(offerActivity);
-
-                    offerExtended = true;
-                }
-            }
-
-            const observedCompetitionPressure = Math.max(
-                0,
-                Number(target.observedCompetitionPressure) || 0
-            );
-
-            const remainingRecruitingDays = Math.max(
-                0,
-                totalDays - day
-            );
-
-            const shouldConsiderSweetener =
-                canAutomatePlayerTeamOffers &&
-                Number(result.interestAfter) >= 18 &&
-                (
-                    observedCompetitionPressure >= 3 ||
-                    remainingRecruitingDays <= 1
-                );
-
-            let sweetenerResult = null;
-
-            if (shouldConsiderSweetener) {
-                const balance = Number(team.finances?.balance);
-
-                // Preserve a modest cash reserve instead of allowing AI
-                // recruiting to consume the entire team balance.
-                const reserve = Number.isFinite(balance)
-                    ? Math.max(10, balance * 0.15)
-                    : Infinity;
-
-                const spendableCash = Number.isFinite(balance)
-                    ? Math.max(0, balance - reserve)
-                    : 0;
-
-                const availableFavorTokens = Math.max(
-                    0,
-                    Math.floor(
-                        Number(team.socialProfile?.favorTokens) || 0
-                    )
-                );
-
-                let favorAttempted = false;
-
-                // Favor Tokens are scarce. Save them for particularly
-                // competitive late-week recruiting situations.
-                if (
-                    availableFavorTokens > 0 &&
-                    day >= totalDays - 1 &&
-                    observedCompetitionPressure >= 4
-                ) {
-                    favorAttempted = true;
-
-                    sweetenerResult = applyRecruitingSweetener(
-                        gameState,
-                        team.id,
-                        target.player.id,
-                        'favor'
+                    (
+                        observedCompetitionPressure >= 3 ||
+                        remainingRecruitingDays <= 1
                     );
-                }
 
-                // Otherwise, use the largest gift that preserves the
-                // team's cash reserve. The sweetener function applies
-                // cumulative diminishing returns across all gifts.
-                if (!sweetenerResult?.success) {
-                    const giftType = spendableCash >= 20
-                        ? 'gift_large'
-                        : spendableCash >= 10
-                            ? 'gift_medium'
-                            : spendableCash >= 5
-                                ? 'gift_small'
-                                : null;
+                let sweetenerResult = null;
 
-                    if (giftType) {
+                if (shouldConsiderSweetener) {
+                    const balance = Number(team.finances?.balance);
+
+                    // Preserve a modest cash reserve instead of allowing AI
+                    // recruiting to consume the entire team balance.
+                    const reserve = Number.isFinite(balance)
+                        ? Math.max(10, balance * 0.15)
+                        : Infinity;
+
+                    const spendableCash = Number.isFinite(balance)
+                        ? Math.max(0, balance - reserve)
+                        : 0;
+
+                    const availableFavorTokens = Math.max(
+                        0,
+                        Math.floor(
+                            Number(team.socialProfile?.favorTokens) || 0
+                        )
+                    );
+
+                    let favorAttempted = false;
+
+                    // Favor Tokens are scarce. Save them for particularly
+                    // competitive late-week recruiting situations.
+                    if (
+                        availableFavorTokens > 0 &&
+                        day >= totalDays - 1 &&
+                        observedCompetitionPressure >= 4
+                    ) {
+                        favorAttempted = true;
+
                         sweetenerResult = applyRecruitingSweetener(
                             gameState,
                             team.id,
                             target.player.id,
-                            giftType
+                            'favor'
+                        );
+                    }
+
+                    // Otherwise, use the largest gift that preserves the
+                    // team's cash reserve. The sweetener function applies
+                    // cumulative diminishing returns across all gifts.
+                    if (!sweetenerResult?.success) {
+                        const giftType = spendableCash >= 20
+                            ? 'gift_large'
+                            : spendableCash >= 10
+                                ? 'gift_medium'
+                                : spendableCash >= 5
+                                    ? 'gift_small'
+                                    : null;
+
+                        if (giftType) {
+                            sweetenerResult = applyRecruitingSweetener(
+                                gameState,
+                                team.id,
+                                target.player.id,
+                                giftType
+                            );
+                        }
+                    }
+
+                    // If a gift isn't affordable or available, a Favor Token
+                    // can still be used late in the week when competition
+                    // is substantial.
+                    if (
+                        !sweetenerResult?.success &&
+                        !favorAttempted &&
+                        availableFavorTokens > 0 &&
+                        day >= Math.max(2, totalDays - 2) &&
+                        observedCompetitionPressure >= 3
+                    ) {
+                        sweetenerResult = applyRecruitingSweetener(
+                            gameState,
+                            team.id,
+                            target.player.id,
+                            'favor'
                         );
                     }
                 }
 
-                // If a gift isn't affordable or available, a Favor Token
-                // can still be used late in the week when competition
-                // is substantial.
-                if (
-                    !sweetenerResult?.success &&
-                    !favorAttempted &&
-                    availableFavorTokens > 0 &&
-                    day >= Math.max(2, totalDays - 2) &&
-                    observedCompetitionPressure >= 3
-                ) {
-                    sweetenerResult = applyRecruitingSweetener(
-                        gameState,
-                        team.id,
-                        target.player.id,
-                        'favor'
-                    );
+                const appliedSweetener = sweetenerResult?.success
+                    ? sweetenerResult
+                    : null;
+
+                    actions.push({
+                        teamId: team.id,
+                        teamName: team.name,
+                        coachId: coach.id,
+                        coachName: coach.name || 'Coach',
+                        playerId: target.player.id,
+                        playerName: target.player.name,
+                        action: selectedAction.type,
+                        hours: targetHours,
+                        offerExtended,
+
+                        interestGain:
+                            result.interestGain +
+                            (appliedSweetener?.interestGain || 0),
+
+                        interestAfter:
+                            appliedSweetener?.interestAfter ??
+                            result.interestAfter,
+
+                        sweetenerType:
+                            appliedSweetener?.activity?.sweetenerType || null,
+
+                        sweetenerCashSpent:
+                            appliedSweetener?.cashSpent || 0,
+
+                        sweetenerTokensSpent:
+                            appliedSweetener?.tokensSpent || 0
+                    });
                 }
             }
-
-            const appliedSweetener = sweetenerResult?.success
-                ? sweetenerResult
-                : null;
-
-                actions.push({
-                    teamId: team.id,
-                    teamName: team.name,
-                    coachId: coach.id,
-                    coachName: coach.name || 'Coach',
-                    playerId: target.player.id,
-                    playerName: target.player.name,
-                    action: selectedAction.type,
-                    hours: targetHours,
-                    offerExtended,
-
-                    interestGain:
-                        result.interestGain +
-                        (appliedSweetener?.interestGain || 0),
-
-                    interestAfter:
-                        appliedSweetener?.interestAfter ??
-                        result.interestAfter,
-
-                    sweetenerType:
-                        appliedSweetener?.activity?.sweetenerType || null,
-
-                    sweetenerCashSpent:
-                        appliedSweetener?.cashSpent || 0,
-
-                    sweetenerTokensSpent:
-                        appliedSweetener?.tokensSpent || 0
-                });
-            }
         }
-    }
 
     progress.aiProcessedDays[dayKey] = true;
 

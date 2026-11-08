@@ -5898,70 +5898,148 @@ window.app = {
                 Number(activity?.day) === currentDay
             );
 
-            const activityHtml = dailyActivity.length > 0
-                ? dailyActivity.map(activity => {
-                    const teamName = escapeHtml(
-                        activity.teamName || 'Team'
-                    );
+            const playerTeamId = String(
+                gameState.playerTeam?.id ?? ''
+            );
 
-                    const playerName = escapeHtml(
-                        activity.playerName || 'Recruit'
-                    );
+            const yourTeamActivity = dailyActivity.filter(activity =>
+                String(activity?.teamId) === playerTeamId
+            );
 
-                    const actionLabel = escapeHtml(
-                        activity.label ||
-                        activity.action ||
-                        activity.type ||
-                        'Recruiting activity'
-                    );
+            const leagueActivity = dailyActivity.filter(activity =>
+                String(activity?.teamId) !== playerTeamId
+            );
 
-                    const hours = Number(activity.hours) || 0;
-                    const interestGain =
-                        Number(activity.interestGain) || 0;
-
-                    const detailParts = [];
-
-                    if (hours > 0) {
-                        detailParts.push(`${hours} staff hour(s)`);
-                    }
-
-                    if (interestGain > 0) {
-                        detailParts.push(`+${interestGain} interest`);
-                    }
-
-                    if (Number(activity.cashSpent) > 0) {
-                        detailParts.push(
-                            `-$${Number(activity.cashSpent).toFixed(2)}`
+            const renderActivityHtml = activityRecords =>
+                activityRecords.length > 0
+                    ? activityRecords.map(activity => {
+                        const teamName = escapeHtml(
+                            activity.teamName || 'Team'
                         );
-                    }
 
-                    if (Number(activity.tokensSpent) > 0) {
-                        detailParts.push(
-                            `${Number(activity.tokensSpent)} Favor Token(s)`
+                        const playerName = escapeHtml(
+                            activity.playerName || 'Recruit'
                         );
-                    }
 
-                    return `
-                        <div class="rounded border border-slate-200 bg-white p-2 text-[11px]">
-                            <div class="font-bold text-slate-800">
-                                ${teamName} · ${playerName}
+                        const actionLabel = escapeHtml(
+                            activity.label ||
+                            activity.action ||
+                            activity.type ||
+                            'Recruiting activity'
+                        );
+
+                        const coachName =
+                            activity.type === 'recruiting_action'
+                                ? activity.coachName || 'Staff'
+                                : null;
+
+                        const requestedHours = Number(
+                            activity.requestedHours
+                        );
+
+                        const deliveredHours = Math.max(
+                            0,
+                            Number(
+                                activity.effectiveHours ??
+                                activity.hours
+                            ) || 0
+                        );
+
+                        const interestGain =
+                            Number(activity.interestGain) || 0;
+
+                        const interestBefore = Number(
+                            activity.interestBefore
+                        );
+
+                        const interestAfter = Number(
+                            activity.interestAfter
+                        );
+
+                        const detailParts = [];
+
+                        if (coachName) {
+                            detailParts.push(`Coach: ${coachName}`);
+                        }
+
+                        if (
+                            Number.isFinite(requestedHours) &&
+                            requestedHours > 0
+                        ) {
+                            detailParts.push(
+                                `${requestedHours}h assigned · ` +
+                                `${deliveredHours.toFixed(1)}h delivered`
+                            );
+                        } else if (deliveredHours > 0) {
+                            detailParts.push(
+                                `${deliveredHours.toFixed(1)}h delivered`
+                            );
+                        }
+
+                        if (
+                            Number.isFinite(interestBefore) &&
+                            Number.isFinite(interestAfter)
+                        ) {
+                            detailParts.push(
+                                `Interest ${Math.round(interestBefore)} → ` +
+                                `${Math.round(interestAfter)}` +
+                                (
+                                    interestGain !== 0
+                                        ? ` (${interestGain > 0 ? '+' : ''}${Math.round(interestGain)})`
+                                        : ''
+                                )
+                            );
+                        } else if (interestGain !== 0) {
+                            detailParts.push(
+                                `${interestGain > 0 ? '+' : ''}${Math.round(interestGain)} interest`
+                            );
+                        }
+
+                        if (Number(activity.cashSpent) > 0) {
+                            detailParts.push(
+                                `-$${Number(activity.cashSpent).toFixed(2)}`
+                            );
+                        }
+
+                        if (Number(activity.tokensSpent) > 0) {
+                            detailParts.push(
+                                `${Number(activity.tokensSpent)} Favor Token(s)`
+                            );
+                        }
+
+                        return `
+                            <div class="rounded border border-slate-200 bg-white p-2 text-[11px]">
+                                <div class="font-bold text-slate-800">
+                                    ${teamName} · ${playerName}
+                                </div>
+
+                                <div class="mt-0.5 text-slate-600">
+                                    ${actionLabel}
+                                </div>
+
+                                ${
+                                    detailParts.length > 0
+                                        ? `
+                                            <div class="mt-1 text-slate-500">
+                                                ${detailParts.map(escapeHtml).join(' · ')}
+                                            </div>
+                                        `
+                                        : ''
+                                }
                             </div>
-                            <div class="text-slate-600">
-                                ${actionLabel}
-                            </div>
-                            ${
-                                detailParts.length > 0
-                                    ? `<div class="mt-0.5 text-slate-500">${escapeHtml(detailParts.join(' · '))}</div>`
-                                    : ''
-                            }
-                        </div>
+                        `;
+                    }).join('')
+                    : `
+                        <p class="p-2 text-[11px] italic text-slate-500">
+                            No recruiting actions were recorded today.
+                        </p>
                     `;
-                }).join('')
-                : `
-                    <p class="text-[11px] italic text-slate-500">
-                        No recruiting actions were recorded today.
-                    </p>
-                `;
+
+            const yourTeamActivityHtml =
+                renderActivityHtml(yourTeamActivity);
+
+            const leagueActivityHtml =
+                renderActivityHtml(leagueActivity);
 
             const commitmentHtml = [
                 ...(result.earlyCommitments || []),
@@ -5975,21 +6053,67 @@ window.app = {
             `).join('');
 
             dailyWire.innerHTML = `
-                <div class="mb-2 border-b border-slate-200 pb-1">
+                <div class="mb-3 border-b border-slate-200 pb-2">
                     <div class="font-black text-[10px] uppercase tracking-wider text-slate-800">
                         Recruiting Day ${currentDay} Activity
                     </div>
+
                     <div class="mt-1 text-[10px] text-slate-500">
-                        ${dailyActivity.length} activity record(s) ·
+                        Your team: ${yourTeamActivity.length} action(s) ·
+                        League: ${leagueActivity.length} action(s) ·
                         ${(result.earlyCommitments || []).length +
                             (result.finalCommitments || []).length}
                         commitment(s)
                     </div>
                 </div>
-                <div class="space-y-1.5">
-                    ${activityHtml}
-                    ${commitmentHtml}
-                </div>
+
+                <section class="mb-3">
+                    <div class="mb-2 flex items-center justify-between border-b border-emerald-200 pb-1">
+                        <span class="text-[10px] font-black uppercase tracking-wide text-emerald-800">
+                            Your Team's Recruiting Activity
+                        </span>
+
+                        <span class="rounded bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800">
+                            ${yourTeamActivity.length} action(s)
+                        </span>
+                    </div>
+
+                    <div class="space-y-1.5">
+                        ${yourTeamActivityHtml}
+                    </div>
+                </section>
+
+                <section class="mb-3">
+                    <div class="mb-2 flex items-center justify-between border-b border-slate-200 pb-1">
+                        <span class="text-[10px] font-black uppercase tracking-wide text-slate-700">
+                            Around the League
+                        </span>
+
+                        <span class="rounded bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-600">
+                            ${leagueActivity.length} action(s)
+                        </span>
+                    </div>
+
+                    <div class="space-y-1.5">
+                        ${leagueActivityHtml}
+                    </div>
+                </section>
+
+                ${
+                    commitmentHtml
+                        ? `
+                            <section>
+                                <div class="mb-2 border-b border-emerald-200 pb-1 text-[10px] font-black uppercase tracking-wide text-emerald-800">
+                                    Recruiting Commitments
+                                </div>
+
+                                <div class="space-y-1.5">
+                                    ${commitmentHtml}
+                                </div>
+                            </section>
+                        `
+                        : ''
+                }
             `;
         }
 

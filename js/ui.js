@@ -3947,42 +3947,6 @@ export function renderOffseasonFAPool(gameState) {
                     </div>
 
                     <p class="mt-0.5 text-[9px] text-slate-500">
-                        Staff work from the top down. Move prospects to change priority.
-                    </p>
-                </div>
-
-                <span class="rounded bg-slate-200 px-2 py-1 text-[10px] font-black text-slate-700">
-                    ${userRecruitingList.length} prospects
-                </span>
-            </div>
-
-            ${
-                userRecruitingList.length > 0
-                    ? `<div class="divide-y divide-slate-100">${userRecruitingListHtml}</div>`
-                    : `
-                        <div class="px-3 py-5 text-center">
-                            <div class="text-xs font-bold text-slate-600">
-                                Your recruiting list is empty
-                            </div>
-
-                            <p class="mt-1 text-[10px] text-slate-500">
-                                Select prospects below and add them to your list.
-                            </p>
-                        </div>
-                    `
-            }
-        </section>
-    `;
-
-    const userRecruitingListPanel = `
-        <section class="mb-3 overflow-hidden rounded-lg border border-slate-300 bg-white">
-            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
-                <div>
-                    <div class="text-[11px] font-black uppercase tracking-wide text-slate-800">
-                        Your Recruiting List
-                    </div>
-
-                    <p class="mt-0.5 text-[9px] text-slate-500">
                         Staff work from the top down. Your order determines prospect priority.
                     </p>
                 </div>
