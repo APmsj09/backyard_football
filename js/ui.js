@@ -6475,7 +6475,33 @@ window.app_openRecruitingActionModal = function(playerId) {
                 : 50
         };
     });
-    const initialCoach = coachChoices[0];
+    const teamRecruitingList = Array.isArray(
+        progress.teamRecruitingLists?.[String(team.id)]
+    )
+        ? progress.teamRecruitingLists[String(team.id)]
+        : [];
+
+    const assignedListEntry = teamRecruitingList.find(entry =>
+        String(entry?.playerId) === String(player.id)
+    );
+
+    const assignedCoachId =
+        assignedListEntry?.assignedCoachId == null
+            ? ''
+            : String(assignedListEntry.assignedCoachId);
+
+    const assignedCoachIndex = coachChoices.findIndex(coach =>
+        String(coach.coachId) === assignedCoachId
+    );
+
+    // Prefer the assigned coach when they have hours available.
+    // Otherwise, default to the first available coach.
+    const initialCoachIndex = assignedCoachIndex >= 0
+        ? assignedCoachIndex
+        : 0;
+
+    const initialCoach = coachChoices[initialCoachIndex];
+
     const initialHours = Math.min(
         4,
         initialCoach.remainingHours
@@ -6539,9 +6565,9 @@ window.app_openRecruitingActionModal = function(playerId) {
                             data-recruiting-choice-control="recruiting-action-coach"
                             data-recruiting-choice-value="${escapeHtml(coach.coachId)}"
                             data-remaining-hours="${coach.remainingHours}"
-                            aria-pressed="${index === 0}"
+                            aria-pressed="${String(coach.coachId) === String(initialCoach.coachId)}"
                             onclick="window.app_selectRecruitingActionChoice('recruiting-action-coach', '${escapeHtml(coach.coachId)}')"
-                            class="rounded-sm border px-2 py-1.5 text-left ${index === 0 ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                            class="rounded-sm border px-2 py-1.5 text-left ${String(coach.coachId) === String(initialCoach.coachId) ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
                             <span class="block truncate text-[10px] font-black">${escapeHtml(coach.coachName)}</span>
                             <span class="block truncate text-[9px] opacity-70">${escapeHtml(coach.role)} · Skill ${coach.skillEstimate}</span>
                             <span class="mt-0.5 block text-[9px] font-bold">${coach.remainingHours}h available</span>
