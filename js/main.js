@@ -3105,7 +3105,7 @@ async function handleAdvanceWeek() {
         // historical pre-simulation or duplicate an existing report email.
         const completedYear = Number(gameState?.year) - 1;
 
-        if (completedYear >= 5 && Array.isArray(gameState?.history?.seasons)) {
+        if (completedYear >= 1 && Array.isArray(gameState?.history?.seasons)) {
             const seasonEntry = gameState.history.seasons.find(
                 season => Number(season?.year) === completedYear
             );
@@ -3393,7 +3393,12 @@ async function startLiveGame(playerGameMatch) {
     for (const match of allGames) {
         if (match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id) continue;
         const result = Game.simulateMatchFast(match.home, match.away);
-        if (result) otherResults.push(result);
+        if (result) {
+            match.homeScore = result.homeScore;
+            match.awayScore = result.awayScore;
+            match.played = true;
+            otherResults.push(result);
+        }
     }
 
     Game.resetGameStats(playerGameMatch.home, playerGameMatch.away);
@@ -3472,7 +3477,12 @@ async function startLiveGame(playerGameMatch) {
             );
         }
 
+        playerGameMatch.homeScore = homeScore;
+        playerGameMatch.awayScore = awayScore;
+        playerGameMatch.played = true;
+
         const combined = [...otherResults, finalResult];
+
 
         finishWeekSimulation(
             combined,
@@ -5627,7 +5637,12 @@ window.app = {
     renderFAPool: () => {
         if (gameState) UI.renderOffseasonFAPool(gameState);
     },
-        openBidModal: (playerId) => {
+    cancelOffseasonBid: (idx) => {
+        UI.removeOffseasonFABid(idx);
+        gameState = Game.getGameState() || gameState;
+        if (gameState) UI.renderOffseasonFAPool(gameState);
+    },
+    openBidModal: (playerId) => {
         gameState = Game.getGameState() || gameState;
 
         if (

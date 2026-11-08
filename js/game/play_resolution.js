@@ -5200,7 +5200,13 @@ export function simulateWeek(options = {}) {
     return weeklyGames.map(match => {
         try {
             if (!match?.home || !match?.away) return null;
-            return simulateMatchFast(match.home, match.away);
+            const res = simulateMatchFast(match.home, match.away);
+            if (res) {
+                match.homeScore = res.homeScore;
+                match.awayScore = res.awayScore;
+                match.played = true;
+            }
+            return res;
         } catch (error) {
             return null;
         }

@@ -13565,9 +13565,19 @@ export function renderScheduleTab(gameState) {
             if (!games.length) return '';
             return `<div class="mb-3"><h5 class="text-[10px] font-bold uppercase text-${color}-600 mb-1 border-b border-${color}-100 pb-0.5">${title}</h5>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                ${games.map(g => `<div class="bg-white p-2 rounded border border-gray-200 shadow-sm flex justify-between items-center">
-                    <span class="font-semibold text-gray-800">${g.away.name}</span><span class="text-gray-400 font-mono text-[10px]">@</span><span class="font-semibold text-gray-800">${g.home.name}</span>
-                </div>`).join('')}
+                ${games.map(g => {
+                    const isPlayed = Boolean(g.played || (g.homeScore != null && g.awayScore != null));
+                    const awayScoreBadge = isPlayed ? `<span class="ml-1 px-1 rounded bg-slate-100 font-black text-slate-800 text-[11px]">${g.awayScore}</span>` : '';
+                    const homeScoreBadge = isPlayed ? `<span class="ml-1 px-1 rounded bg-slate-100 font-black text-slate-800 text-[11px]">${g.homeScore}</span>` : '';
+                    const centerBadge = isPlayed
+                        ? `<span class="text-[9px] bg-slate-200 text-slate-700 font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">Final</span>`
+                        : `<span class="text-gray-400 font-mono text-[10px]">@</span>`;
+                    return `<div class="bg-white p-2 rounded border border-gray-200 shadow-sm flex justify-between items-center">
+                        <span class="font-semibold text-gray-800 flex items-center">${g.away.name}${awayScoreBadge}</span>
+                        ${centerBadge}
+                        <span class="font-semibold text-gray-800 flex items-center">${g.home.name}${homeScoreBadge}</span>
+                    </div>`;
+                }).join('')}
             </div></div>`;
         }
 
