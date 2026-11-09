@@ -22,6 +22,33 @@ const TECHNIQUE_SKILLS = new Set([
 
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
+function isPlayerOnTeamRoster(team, player) {
+    if (!team || !player?.id) return false;
+
+    if (
+        player.teamId != null &&
+        String(player.teamId) === String(team.id)
+    ) {
+        return true;
+    }
+
+    const roster = Array.isArray(team.roster)
+        ? team.roster
+        : [];
+
+    return roster.some(rosterEntry => {
+        const rosterPlayerId =
+            rosterEntry && typeof rosterEntry === 'object'
+                ? rosterEntry.id
+                : rosterEntry;
+
+        return (
+            rosterPlayerId != null &&
+            String(rosterPlayerId) === String(player.id)
+        );
+    });
+}
+
 function stableNoise(seed) {
     let hash = 2166136261;
 
@@ -35,9 +62,25 @@ function stableNoise(seed) {
 
 function getEvaluatorProfile(evaluator, team, player) {
     const r = evaluator?.ratings || {};
-    const physical = clamp(Number(r.evalPhysicals ?? 50), 1, 99);
-    const technique = clamp(Number(r.evalTechnique ?? 50), 1, 99);
-    const character = clamp(Number(r.evalCharacter ?? 50), 1, 99);
+
+    const readRating = value => {
+        if (
+            value == null ||
+            (typeof value === 'string' && value.trim() === '')
+        ) {
+            return 50;
+        }
+
+        const numeric = Number(value);
+
+        return Number.isFinite(numeric)
+            ? clamp(numeric, 1, 99)
+            : 50;
+    };
+
+    const physical = readRating(r.evalPhysicals);
+    const technique = readRating(r.evalTechnique);
+    const character = readRating(r.evalCharacter);
 
     // GM expertise applies only when the user-coach performs the evaluation.
     const gmProfile = evaluator?.isUserCoach
@@ -89,7 +132,7 @@ function buildAttributeRanges(team, player, evaluator, level, profile) {
         const bucket = {};
 
         for (const [attr, actual] of Object.entries(attrs)) {
-            if (PUBLIC_MEASUREMENTS.has(attr) || typeof actual !== 'number') continue;
+            if (PUBLIC_MEASUREMENTS.has(attr) || !Number.isFinite(actual)) continue;
 
             const skill = category === 'physical'
                 ? profile.physical
@@ -344,7 +387,16 @@ function estimateCharacterSummary(team, player, evaluator, level) {
         biasMultiplier;
 
     const estimate = key => {
-        const actual = Number(personality[key]);
+        const rawValue = personality[key];
+
+        if (
+            rawValue == null ||
+            (typeof rawValue === 'string' && rawValue.trim() === '')
+        ) {
+            return null;
+        }
+
+        const actual = Number(rawValue);
 
         if (!Number.isFinite(actual)) return null;
 
@@ -558,6 +610,11 @@ function buildYouthPerformanceSummary(player, level) {
             addMetric(destination, stats, 'Receiving yards', 'recYards', divisor);
             addMetric(destination, stats, 'Tackles', 'tackles', divisor);
         }
+
+        // Include scoring production for every position except OL.
+        if (position !== 'OL') {
+            addMetric(destination, stats, 'Touchdowns', 'touchdowns', divisor);
+        }
     };
 
     if (history.length > 0) {
@@ -711,7 +768,7 @@ export function advanceTeamScoutingReport(
     }
 
     // The team's own roster does not need scouting.
-    if (player.teamId === team.id || team.roster?.includes(player.id)) return false;
+    if (isPlayerOnTeamRoster(team, player)) return false;
 
     const previous = getTeamScoutingReport(team, player.id);
     const profile = getEvaluatorProfile(evaluator, team, player);
@@ -766,7 +823,7 @@ export function advanceTeamScoutingReport(
     );
 
     const level = Math.max(
-        Number(previous?.level) || 0,
+        previousLevel,
         getLevelForProgress(progressPoints)
     );
 
@@ -779,10 +836,11 @@ export function advanceTeamScoutingReport(
         : previous?.evaluatedWeek ?? null;
 
     // Within a level, update progress without recalculating or rerolling estimates.
-    if (previous && level === previous.level) {
+    if (previous && level === previousLevel) {
         const stored = team.scoutingReports?.[String(player.id)];
         if (!stored) return false;
 
+        stored.level = previousLevel;
         stored.progressPoints = progressPoints;
 
         if (Number.isInteger(year)) stored.evaluatedYear = evaluatedYear;
@@ -868,12 +926,7 @@ export function advanceRecruitingTryoutScoutingReport(
     }
 
     // Tryouts only evaluate players outside this team's roster.
-    if (
-        String(player.teamId) === String(team.id) ||
-        team.roster?.some(
-            playerId => String(playerId) === String(player.id)
-        )
-    ) {
+    if (isPlayerOnTeamRoster(team, player)) {
         return {
             success: false,
             message: 'This player is already on the team\'s roster.'
@@ -1076,15 +1129,34 @@ export function recordScoutingReportOutcome(
 
     const evaluatorId = report.evaluatorId;
 
+    const teamStaff = [
+        ...(Array.isArray(team.coaches) ? team.coaches : []),
+        ...Object.values(
+            team.staff && typeof team.staff === 'object'
+                ? team.staff
+                : {}
+        )
+    ];
+
     const evaluator =
-        team.coaches?.find(
+        teamStaff.find(
             coach => String(coach?.id) === String(evaluatorId)
         ) ||
         gameState?.availableStaff?.find(
             coach => String(coach?.id) === String(evaluatorId)
         ) ||
         gameState?.teams
-            ?.flatMap(otherTeam => otherTeam?.coaches || [])
+            ?.flatMap(otherTeam => [
+                ...(Array.isArray(otherTeam?.coaches)
+                    ? otherTeam.coaches
+                    : []),
+                ...Object.values(
+                    otherTeam?.staff &&
+                    typeof otherTeam.staff === 'object'
+                        ? otherTeam.staff
+                        : {}
+                )
+            ])
             .find(
                 coach => String(coach?.id) === String(evaluatorId)
             );
@@ -1188,11 +1260,21 @@ const STAFF_WORK_TASKS = new Set([
 ]);
 
 function getAvailableScoutingStaff(team) {
-    const coaches = Array.isArray(team.coaches) ? team.coaches : [];
+    const coaches = [
+        ...(Array.isArray(team.coaches) ? team.coaches : []),
+        ...Object.values(
+            team.staff && typeof team.staff === 'object'
+                ? team.staff
+                : {}
+        )
+    ];
+
     const unique = new Map();
 
     for (const coach of coaches) {
-        if (coach?.id) unique.set(String(coach.id), coach);
+        if (coach?.id) {
+            unique.set(String(coach.id), coach);
+        }
     }
 
     return unique;
@@ -1732,8 +1814,15 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
         };
     };
 
-    const minAge = Number.isFinite(team.ageMin) ? team.ageMin : 12;
-    const maxAge = Number.isFinite(team.ageMax) ? team.ageMax : 18;
+    const isYouthFocus = focus === 'youth';
+
+    const minAge = isYouthFocus
+        ? 8
+        : Number.isFinite(team.ageMin) ? team.ageMin : 12;
+
+    const maxAge = isYouthFocus
+        ? 11
+        : Number.isFinite(team.ageMax) ? team.ageMax : 18;
 
     const candidates = [];
 
@@ -1741,14 +1830,18 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
         if (
             !player?.id ||
             !player.attributes ||
-            player.teamId === team.id ||
+            (
+                player.teamId != null &&
+                String(player.teamId) === String(team.id)
+            ) ||
             ownRoster.has(String(player.id)) ||
             ['retired', 'departed', 'temporary'].includes(
                 player.status?.type
             ) ||
             !Number.isFinite(player.age) ||
             player.age < minAge ||
-            player.age > maxAge
+            player.age > maxAge ||
+            (isYouthFocus && player.lifecycle !== 'youth')
         ) {
             continue;
         }
@@ -1814,8 +1907,26 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
         }
 
         // Finish partially completed reports before starting new ones.
-        const aProgress = Number(a.previous?.progressPoints) || 0;
-        const bProgress = Number(b.previous?.progressPoints) || 0;
+        // Older reports may have a level but no progressPoints field.
+        const getProgress = report => {
+            const level = clamp(
+                Math.floor(Number(report?.level) || 0),
+                0,
+                4
+            );
+
+            const stored = Number(report?.progressPoints);
+
+            return Math.max(
+                LEVEL_AT[level],
+                Number.isFinite(stored)
+                    ? clamp(stored, 0, LEVEL_AT[4])
+                    : 0
+            );
+        };
+
+        const aProgress = getProgress(a.previous);
+        const bProgress = getProgress(b.previous);
 
         if ((aProgress > 0) !== (bProgress > 0)) {
             return aProgress > 0 ? -1 : 1;
@@ -2923,10 +3034,35 @@ export function initializeInheritedScoutingReports(
         // Level 0 means the prior staff has no stored report for this player.
         if (level === 0) continue;
 
-        // Convert the intended level into historical scouting work. The
-        // lower-bound productivity factor guarantees the target level.
+        // Match the actual scouting productivity formula so the
+        // initialized report reliably reaches its intended level.
+        const historicalProfile = getEvaluatorProfile(
+            evaluator,
+            team,
+            player
+        );
+
+        const historicalToolkitLevel = Math.max(
+            0,
+            Math.min(
+                3,
+                Math.floor(
+                    Number(team.storeUpgrades?.scoutingToolkitLevel) || 0
+                )
+            )
+        );
+
+        const historicalProductivity =
+            clamp(
+                0.55 + historicalProfile.overall / 100,
+                0.55,
+                1.55
+            ) *
+            (1 + historicalToolkitLevel * 0.10);
+
         const historicalHours =
-            INHERITED_SCOUTING_THRESHOLDS[level] / 0.75 + 0.01;
+            INHERITED_SCOUTING_THRESHOLDS[level] /
+            historicalProductivity + 0.01;
 
         const saved = advanceTeamScoutingReport(
             team,

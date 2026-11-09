@@ -30,7 +30,9 @@ import {
 import {
     getEffectiveStaffWorkHours,
     applyRecruitingSweetener,
-    buildAutomatedStaffAssignmentsForTeam
+    buildAutomatedStaffAssignmentsForTeam,
+    generateTeamWalkOnInvitations,
+    acceptTeamWalkOnInvitation
 } from './game/staff.js';
 import {
     acceptCommunityFavor as acceptCommunityFavorAction
@@ -2278,10 +2280,278 @@ async function handleDraftEnd() {
     UI.startOffseasonFAMinigame(gameState);
 }
 
+function showWalkOnInvitationModal(invitation) {
+    gameState = Game.getGameState() || gameState;
+
+    const escapeWalkOnHtml = value =>
+        String(value ?? '').replace(
+            /[&<>"']/g,
+            character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[character]
+        );
+
+    const team = gameState?.playerTeam;
+
+    if (!team || !invitation) return;
+
+    const rosterSize =
+        Game.getRosterObjects(team).length;
+
+    const maximumRosterSize = 18;
+    const remainingSpots = Math.max(
+        0,
+        maximumRosterSize - rosterSize
+    );
+
+    const offers = Array.isArray(invitation.offers)
+        ? invitation.offers
+        : [];
+
+    const offerCards = offers.map(offer => {
+        const status = String(
+            offer.status || 'offered'
+        ).toLowerCase();
+
+        const canAccept =
+            status === 'offered' &&
+            remainingSpots > 0;
+
+        const estimatedAbility =
+            offer.estimatedOverall == null
+                ? 'Scouting estimate unavailable'
+                : `Team estimate: ${Math.round(
+                    Number(offer.estimatedOverall)
+                )}`;
+
+        const confidence = Math.round(
+            Math.max(
+                0,
+                Math.min(
+                    1,
+                    Number(offer.scoutingConfidence) || 0
+                )
+            ) * 100
+        );
+
+        const statusLabel = {
+            accepted: 'SIGNED',
+            declined: 'PASSED',
+            unavailable: 'NO LONGER AVAILABLE',
+            expired: 'EXPIRED'
+        }[status] || '';
+
+        return `
+            <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="font-black text-slate-900">
+                            ${escapeWalkOnHtml(offer.playerName)}
+                        </div>
+
+                        <div class="mt-1 text-xs text-slate-600">
+                            Age ${escapeWalkOnHtml(offer.age)}
+                            · ${escapeWalkOnHtml(offer.position)}
+                        </div>
+                    </div>
+
+                    ${
+                        canAccept
+                            ? `
+                                <button
+                                    type="button"
+                                    data-walk-on-accept="${escapeWalkOnHtml(offer.playerId)}"
+                                    class="walk-on-accept-btn shrink-0 rounded bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800"
+                                >
+                                    Sign Walk-On
+                                </button>
+                            `
+                            : `
+                                <span class="shrink-0 rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">
+                                    ${escapeWalkOnHtml(statusLabel || 'ROSTER FULL')}
+                                </span>
+                            `
+                    }
+                </div>
+
+                <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-600">
+                    <span>${escapeWalkOnHtml(estimatedAbility)}</span>
+                    <span>Scout confidence: ${confidence}%</span>
+                    <span>Team interest: ${Math.round(
+                        Number(offer.recruitingInterest) || 0
+                    )}/100</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    const bodyHtml = `
+        <div class="space-y-4 text-left">
+            <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <p class="text-sm font-bold text-amber-950">
+                    Recruiting has ended. A few unsigned prospects
+                    who showed interest in your team are still available.
+                </p>
+
+                <p class="mt-1 text-xs text-amber-900">
+                    You can sign them without spending recruiting time
+                    or team funds. Your recommended roster target is
+                    16 players, but you can continue up to 18.
+                </p>
+            </div>
+
+            <div class="flex items-center justify-between text-xs font-bold text-slate-600">
+                <span>YOUR ROSTER</span>
+                <span>${rosterSize}/18 players</span>
+            </div>
+
+            <div class="h-2 overflow-hidden rounded-full bg-slate-200">
+                <div
+                    class="h-full rounded-full bg-emerald-600"
+                    style="width: ${Math.min(
+                        100,
+                        (rosterSize / maximumRosterSize) * 100
+                    )}%"
+                ></div>
+            </div>
+
+            <p class="text-xs text-slate-500">
+                ${remainingSpots} roster spot(s) available.
+                Signing is optional; you do not have to fill every spot.
+            </p>
+
+            <div class="space-y-2">
+                ${offerCards || `
+                    <p class="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                        No walk-on invitations are available.
+                    </p>
+                `}
+            </div>
+        </div>
+    `;
+
+    UI.showModal(
+        'Walk-On Opportunities',
+        bodyHtml,
+        () => {
+            gameState = Game.getGameState() || gameState;
+
+            const teamKey = String(gameState.playerTeam.id);
+
+            const currentInvitation =
+                gameState.offseasonState
+                    ?.recruitingProgress
+                    ?.walkOnInvitationsByTeam?.[teamKey];
+
+            if (currentInvitation) {
+                currentInvitation.status = 'completed';
+
+                currentInvitation.declinedPlayerIds =
+                    Array.isArray(currentInvitation.declinedPlayerIds)
+                        ? currentInvitation.declinedPlayerIds
+                        : [];
+
+                currentInvitation.offers?.forEach(offer => {
+                    if (offer.status === 'offered') {
+                        offer.status = 'declined';
+
+                        if (
+                            !currentInvitation.declinedPlayerIds.some(
+                                id => String(id) === String(offer.playerId)
+                            )
+                        ) {
+                            currentInvitation.declinedPlayerIds.push(
+                                offer.playerId
+                            );
+                        }
+                    }
+                });
+            }
+
+            Game.saveGameState(activeSaveKey);
+            finishOffseasonFAMinigame();
+        },
+        'Finish Walk-On Period',
+        () => {},
+        'Return Later'
+    );
+
+    const modalBody = document.getElementById('modal-body');
+
+    modalBody
+        ?.querySelectorAll('.walk-on-accept-btn')
+        .forEach(button => {
+            button.addEventListener('click', () => {
+                const playerId = button.dataset.walkOnAccept;
+
+                if (playerId == null) return;
+
+                button.disabled = true;
+                button.textContent = 'Signing...';
+
+                const result =
+                    acceptTeamWalkOnInvitation(
+                        Game.getGameState() || gameState,
+                        playerId
+                    );
+
+                gameState = Game.getGameState() || gameState;
+
+                Game.saveGameState(activeSaveKey);
+
+                if (!result?.success) {
+                    UI.showModal(
+                        'Walk-On Not Available',
+                        `<p>${escapeWalkOnHtml(
+                            result?.message ||
+                            'This prospect could not be signed.'
+                        )}</p>`,
+                        () => {
+                            gameState = Game.getGameState() || gameState;
+
+                            const teamKey = String(
+                                gameState.playerTeam.id
+                            );
+
+                            const currentInvitation =
+                                gameState.offseasonState
+                                    ?.recruitingProgress
+                                    ?.walkOnInvitationsByTeam?.[teamKey];
+
+                            if (currentInvitation) {
+                                showWalkOnInvitationModal(
+                                    currentInvitation
+                                );
+                            }
+                        },
+                        'Back to Offers'
+                    );
+
+                    return;
+                }
+
+                const teamKey = String(gameState.playerTeam.id);
+
+                const currentInvitation =
+                    gameState.offseasonState
+                        ?.recruitingProgress
+                        ?.walkOnInvitationsByTeam?.[teamKey];
+
+                if (currentInvitation) {
+                    showWalkOnInvitationModal(currentInvitation);
+                }
+            });
+        });
+}
+
 function finishOffseasonFAMinigame() {
     gameState = Game.getGameState() || gameState;
 
-    // Ignore repeated calls after roster finalization has already run.
+    // Ignore repeated calls after roster finalization has run.
     if (gameState?.offseasonFACompleted === true) return;
 
     const normalizedPhase = String(
@@ -2302,29 +2572,100 @@ function finishOffseasonFAMinigame() {
         return;
     }
 
-    // 1. Let the AI trim their 24-man summer rosters down to the 18-man season limit
-    Game.executeAICutDowns();
+    const offseasonState = gameState.offseasonState;
 
-    for (const team of gameState.teams) {
-        if (!team) continue;
-        if (!team.isPlayerControlled) {
-            Game.autoFillTeamWalkOns(team, 14);
-        }
-        try {
-            Game.aiSetDepthChart(team);
-        } catch (error) {
-            console.error(error);
-        }
+    // Persist the AI roster-processing checkpoint so a return to this
+    // screen never repeats cuts or automatically signs more players.
+    if (
+        !offseasonState.rosterFinalizationProgress ||
+        typeof offseasonState.rosterFinalizationProgress !== 'object'
+    ) {
+        offseasonState.rosterFinalizationProgress = {};
     }
 
-    // Mark summer free agency complete only after AI roster processing.
-    // This activates the hard 18-player limit for the user's remaining cuts.
+    const finalizationProgress =
+        offseasonState.rosterFinalizationProgress;
+
+    if (finalizationProgress.aiRostersProcessed !== true) {
+        // First let AI teams trim their summer rosters.
+        Game.executeAICutDowns();
+
+        gameState = Game.getGameState() || gameState;
+
+        for (const team of gameState.teams || []) {
+            if (!team) continue;
+
+            if (!team.isPlayerControlled) {
+                // AI walk-ons fill toward the same 16-player target.
+                Game.autoFillTeamWalkOns(team, 16);
+            }
+
+            try {
+                Game.aiSetDepthChart(team);
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        gameState = Game.getGameState() || gameState;
+
+        if (
+            !gameState.offseasonState.rosterFinalizationProgress ||
+            typeof gameState.offseasonState.rosterFinalizationProgress !== 'object'
+        ) {
+            gameState.offseasonState.rosterFinalizationProgress = {};
+        }
+
+        gameState.offseasonState
+            .rosterFinalizationProgress.aiRostersProcessed = true;
+
+        // Save the completed AI work before presenting user decisions.
+        Game.saveGameState(activeSaveKey);
+    }
+
+    gameState = Game.getGameState() || gameState;
+
+    // Generate or restore the player's one-time invitation list.
+    const walkOnResult =
+        generateTeamWalkOnInvitations(
+            gameState,
+            gameState.playerTeam.id
+        );
+
+    if (!walkOnResult?.success) {
+        UI.showModal(
+            'Walk-On Opportunities Unavailable',
+            `<p>${String(
+                walkOnResult?.message ||
+                'The walk-on invitation list could not be prepared.'
+            )}</p>`
+        );
+        return;
+    }
+
+    const invitation = walkOnResult.invitation;
+
+    if (
+        invitation?.status === 'pending' &&
+        Array.isArray(invitation.offers) &&
+        invitation.offers.length > 0
+    ) {
+        Game.saveGameState(activeSaveKey);
+        showWalkOnInvitationModal(invitation);
+        return;
+    }
+
+    // No invitations remain to be handled. Complete roster finalization.
+    gameState = Game.getGameState() || gameState;
+
     gameState.offseasonFACompleted = true;
 
     // REPORT 4: Finalize Offseason Report (Roster health verification)
-    if (typeof debugCollector !== 'undefined') debugCollector.finalizeOffseasonReport(gameState);
+    if (typeof debugCollector !== 'undefined') {
+        debugCollector.finalizeOffseasonReport(gameState);
+    }
 
-    // Persist the completed roster work before returning to the dashboard.
+    // Persist completed roster work before returning to the dashboard.
     gameState = Game.getGameState() || gameState;
     Game.saveGameState(activeSaveKey);
 
@@ -2332,15 +2673,22 @@ function finishOffseasonFAMinigame() {
     UI.switchTab('my-team', gameState);
     UI.showScreen('dashboard-screen');
 
-    checkUserRosterLimit(); // Trigger the cut-down check immediately
+    checkUserRosterLimit();
 }
 
 // Global helper to validate roster size before games
 window.checkUserRosterLimit = function() {
     if (!gameState || !gameState.playerTeam) return;
-    
-    const rosterSize = gameState.playerTeam.roster.length;
-    const limit = 18; // Hard limit for regular season
+
+    // Do not enforce the regular-season cutdown until the
+    // summer roster window has formally closed.
+    if (gameState.offseasonFACompleted !== true) return;
+
+    const rosterSize = Array.isArray(gameState.playerTeam.roster)
+        ? gameState.playerTeam.roster.length
+        : 0;
+
+    const limit = getCurrentRosterLimit(gameState);
     const advBtn = document.getElementById('advance-week-btn');
     
     if (!advBtn) return;
@@ -7735,11 +8083,53 @@ window.app = {
     },
     autoFillRoster: () => {
         gameState = Game.getGameState();
+
         if (!gameState?.playerTeam) return;
-        const count = Game.autoFillTeamWalkOns(gameState.playerTeam, 14);
-        Game.saveGameState(activeSaveKey);
-        renderDashboard(gameState);
-        alert(`Signed ${count} walk-on prospect(s) from the park! Roster now at ${gameState.playerTeam.roster.length} players.`);
+
+        const normalizedPhase = String(
+            gameState.offseasonState?.phase || ''
+        )
+            .toLowerCase()
+            .replace(/[^a-z]/g, '');
+
+        const teamKey = String(gameState.playerTeam.id);
+
+        const invitation =
+            gameState.offseasonState
+                ?.recruitingProgress
+                ?.walkOnInvitationsByTeam?.[teamKey];
+
+        // During roster finalization, use the official walk-on process.
+        if (normalizedPhase === 'rosterfinalization') {
+            finishOffseasonFAMinigame();
+            return;
+        }
+
+        // Restore an existing pending invitation rather than generating
+        // another group or signing players automatically.
+        if (
+            invitation?.status === 'pending' &&
+            Array.isArray(invitation.offers) &&
+            invitation.offers.length > 0
+        ) {
+            showWalkOnInvitationModal(invitation);
+            return;
+        }
+
+        UI.showModal(
+            'Walk-On Signings',
+            `
+                <p>
+                    Walk-on signings are handled through the post-recruiting
+                    invitation period.
+                </p>
+                <p class="mt-2">
+                    You will receive a list of eligible prospects after the
+                    seven-day recruiting cycle. You can then choose whom
+                    to sign, up to the 18-player roster limit.
+                </p>
+            `
+        );
     },
     cutPlayer: (id) => {
         if (confirm("Cut this player?")) {

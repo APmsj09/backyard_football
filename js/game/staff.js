@@ -4250,6 +4250,18 @@ export function recordRecruitingStaffAssignment(
         };
     }
 
+    // Group tryouts always cost exactly two staff hours,
+    // regardless of the number of prospects attending.
+    if (
+        actionType === 'tryout_batch' &&
+        requestedHours !== 2
+    ) {
+        return {
+            success: false,
+            message: 'A group tryout requires exactly two staff hours.'
+        };
+    }
+
     const currentStaff = ensureTeamCoachingStaff(team);
 
     const assignedCoach = currentStaff.find(
@@ -4761,11 +4773,6 @@ export function executeRecruitingAction(
             label: 'Pickup practice invitation',
             pointsPerHour: 2.3,
             skills: ['teaching', 'conditioning']
-        },
-        tryout: {
-            label: 'Prospect tryout',
-            pointsPerHour: 2.4,
-            skills: ['teaching', 'evalPhysicals', 'evalTechnique']
         }
     };
 
@@ -5531,6 +5538,21 @@ export function executeRecruitingTryoutBatch(
             .map(player => String(player.id))
     );
 
+    const teamRosterIds = new Set(
+        (Array.isArray(team.roster) ? team.roster : [])
+            .map(entry => {
+                const rosterPlayerId =
+                    entry && typeof entry === 'object'
+                        ? entry.id
+                        : entry;
+
+                return rosterPlayerId == null
+                    ? null
+                    : String(rosterPlayerId);
+            })
+            .filter(id => id !== null)
+    );
+
     const participants = [];
 
     for (const recruitId of selectedIds) {
@@ -5576,6 +5598,7 @@ export function executeRecruitingTryoutBatch(
         if (
             !player ||
             player.teamId != null ||
+            teamRosterIds.has(recruitId) ||
             !record ||
             record.status !== 'available' ||
             record.committedTeamId != null ||
@@ -6579,25 +6602,25 @@ export function processAiRecruitingDay(gameState) {
         return true;
     };
 
-    const getAiRecruitingRosterLimit = () => (
-        Number(gameState.currentWeek) === 0 &&
-        !gameState.offseasonFACompleted
-            ? 24
-            : 18
-    );
+    const getAiRecruitingRosterLimit = () =>
+        getCurrentRosterLimit(gameState);
 
     const hasAiOfferCapacity = team => {
         const teamKey = String(team.id);
         const rosterSize = getRosterObjects(team).length;
         const rosterLimit = getAiRecruitingRosterLimit();
 
+        const currentRosterIds = new Set(
+            getRosterObjects(team)
+                .filter(player => player?.id != null)
+                .map(player => String(player.id))
+        );
+
         const activeReservations = Object.entries(
             progress.recruits || {}
         ).reduce((total, [recruitId, record]) => {
             if (
-                record?.status !== 'available' ||
-                record.committedTeamId != null ||
-                record.offersByTeam?.[teamKey]?.status !== 'active'
+                record?.offersByTeam?.[teamKey]?.status !== 'active'
             ) {
                 return total;
             }
@@ -6607,7 +6630,19 @@ export function processAiRecruitingDay(gameState) {
                     String(player?.id) === String(recruitId)
             );
 
-            return prospect && prospect.teamId == null
+            const hasRefusedThisTeam =
+                Array.isArray(prospect?.refusedTeamIds) &&
+                prospect.refusedTeamIds.some(
+                    refusedTeamId =>
+                        String(refusedTeamId) === teamKey
+                );
+
+            const isValidReservation =
+                getRecruitEligibility(prospect, record) &&
+                !hasRefusedThisTeam &&
+                !currentRosterIds.has(String(recruitId));
+
+            return isValidReservation
                 ? total + 1
                 : total;
         }, 0);
