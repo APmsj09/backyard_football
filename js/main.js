@@ -18,7 +18,9 @@ import {
     getOffseasonState,
     advanceOffseasonStaffReviewDay,
     finishOffseasonStaffReviewEarly,
-    transitionOffseasonPhase
+    transitionOffseasonPhase,
+    generateTeamWalkOnInvitations,
+    acceptTeamWalkOnInvitation
 } from './game/season.js';
 import {
     initializeInheritedScoutingReports,
@@ -31,8 +33,6 @@ import {
     getEffectiveStaffWorkHours,
     applyRecruitingSweetener,
     buildAutomatedStaffAssignmentsForTeam,
-    generateTeamWalkOnInvitations,
-    acceptTeamWalkOnInvitation
 } from './game/staff.js';
 import {
     acceptCommunityFavor as acceptCommunityFavorAction
