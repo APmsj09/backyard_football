@@ -23,7 +23,8 @@ import {
 import {
     initializeInheritedScoutingReports,
     recordScoutingReportOutcome,
-    processWeeklyScoutingAssignments
+    processWeeklyScoutingAssignments,
+    advanceRecruitingTryoutScoutingReport
 } from './game/scouting.js';
 
 import {
@@ -5874,7 +5875,68 @@ window.app = {
                 return;
             }
 
-            // Resolve commitments only after every team's recruiting effort.
+            // Group tryouts improve each AI team's individual scouting
+            // report for every prospect who attended the session.
+            const processedAiTryoutAttendees = new Set();
+
+            for (const action of (
+                Array.isArray(aiResult.actions)
+                    ? aiResult.actions
+                    : []
+            )) {
+                if (
+                    action?.action !== 'tryout_batch' ||
+                    action.teamId == null ||
+                    action.playerId == null
+                ) {
+                    continue;
+                }
+
+                const attendeeKey = [
+                    String(action.teamId),
+                    String(action.sessionId || ''),
+                    String(action.playerId)
+                ].join(':');
+
+                if (processedAiTryoutAttendees.has(attendeeKey)) {
+                    continue;
+                }
+
+                processedAiTryoutAttendees.add(attendeeKey);
+
+                const evaluatingTeam = gameState.teams.find(
+                    team =>
+                        String(team?.id) === String(action.teamId)
+                );
+
+                if (!evaluatingTeam) continue;
+
+                const evaluator = Game.ensureTeamCoachingStaff(
+                    evaluatingTeam
+                ).find(
+                    coach =>
+                        String(coach?.id) === String(action.coachId)
+                );
+
+                const prospect = gameState.players.find(
+                    player =>
+                        String(player?.id) === String(action.playerId)
+                );
+
+                if (!evaluator || !prospect) continue;
+
+                Game.advanceRecruitingTryoutScoutingReport(
+                    evaluatingTeam,
+                    prospect,
+                    evaluator,
+                    50,
+                    Number(gameState.year),
+                    0,
+                    action.sessionId || null
+                );
+            }
+
+            // Resolve commitments only after recruiting and scouting work.
             result = Game.resolveRecruitingDay(gameState);
 
             if (!result?.success) {
@@ -5928,29 +5990,72 @@ window.app = {
             const renderActivityHtml = activityRecords =>
                 activityRecords.length > 0
                     ? activityRecords.map(activity => {
-                        const teamName = escapeHtml(
-                            activity.teamName || 'Team'
+                        const isGroupTryoutSession =
+                            activity.type === 'staff_assignment' &&
+                            activity.action === 'tryout_batch';
+
+                        const isGroupTryoutAttendee =
+                            activity.type === 'recruiting_action' &&
+                            activity.action === 'tryout_batch';
+
+                        const activityTeam = gameState.teams.find(
+                            team =>
+                                String(team?.id) ===
+                                String(activity.teamId)
                         );
 
+                        const activityCoach = activity.coachId != null
+                            ? [
+                                ...(Array.isArray(activityTeam?.coaches)
+                                    ? activityTeam.coaches
+                                    : []),
+                                ...Object.values(activityTeam?.staff || {})
+                            ].find(candidate =>
+                                String(candidate?.id) ===
+                                String(activity.coachId)
+                            )
+                            : null;
+
+                        const teamName = escapeHtml(
+                            activity.teamName ||
+                            activityTeam?.name ||
+                            'Team'
+                        );
+
+                        const attendeeCount = Array.isArray(
+                            activity.playerIds
+                        )
+                            ? activity.playerIds.length
+                            : 0;
+
                         const playerName = escapeHtml(
-                            activity.playerName || 'Recruit'
+                            isGroupTryoutSession
+                                ? `${attendeeCount} prospects`
+                                : activity.playerName || 'Recruit'
                         );
 
                         const actionLabel = escapeHtml(
-                            activity.label ||
-                            activity.action ||
-                            activity.type ||
-                            'Recruiting activity'
+                            isGroupTryoutSession
+                                ? 'Group tryout session'
+                                : isGroupTryoutAttendee
+                                    ? 'Group tryout · individual evaluation'
+                                    : activity.label ||
+                                      activity.action ||
+                                      activity.type ||
+                                      'Recruiting activity'
                         );
 
                         const coachName =
-                            activity.type === 'recruiting_action'
-                                ? activity.coachName || 'Staff'
+                            activity.type === 'recruiting_action' ||
+                            isGroupTryoutSession
+                                ? activity.coachName ||
+                                  activityCoach?.name ||
+                                  'Staff'
                                 : null;
 
-                        const requestedHours = Number(
-                            activity.requestedHours
-                        );
+                        const requestedHours = isGroupTryoutSession
+                            ? Number(activity.hours)
+                            : Number(activity.requestedHours);
 
                         const deliveredHours = Math.max(
                             0,
@@ -5978,6 +6083,15 @@ window.app = {
                         }
 
                         if (
+                            isGroupTryoutSession &&
+                            Number.isFinite(requestedHours) &&
+                            requestedHours > 0
+                        ) {
+                            detailParts.push(
+                                `${requestedHours}h total session cost`
+                            );
+                        } else if (
+                            !isGroupTryoutAttendee &&
                             Number.isFinite(requestedHours) &&
                             requestedHours > 0
                         ) {
@@ -5985,7 +6099,10 @@ window.app = {
                                 `${requestedHours}h assigned · ` +
                                 `${deliveredHours.toFixed(1)}h delivered`
                             );
-                        } else if (deliveredHours > 0) {
+                        } else if (
+                            !isGroupTryoutAttendee &&
+                            deliveredHours > 0
+                        ) {
                             detailParts.push(
                                 `${deliveredHours.toFixed(1)}h delivered`
                             );

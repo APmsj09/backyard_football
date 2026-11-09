@@ -3859,28 +3859,47 @@ export function getRecruitingStaffHourBudget(team, gameState = null) {
                 if (
                     plan &&
                     Array.isArray(plan.assignments) &&
-                    plan.offseasonRecruitingPlanKey !== workWeekKey
+                    (
+                        plan.offseasonRecruitingPlanKey !== workWeekKey ||
+                        !Array.isArray(
+                            plan.offseasonRecruitingWorkBaseline
+                        )
+                    )
                 ) {
-                    // Keep scouting and accepted community commitments.
-                    // Remove regular-season training and preparation.
+                    const isRecruitingAssignment = assignment => (
+                        assignment?.task === STAFF_WORK_TASKS.RECRUITING ||
+                        assignment?.source === 'recruiting'
+                    );
+
+                    // Preserve the original workload so it can be restored
+                    // after the recruiting event ends.
+                    if (
+                        !Array.isArray(
+                            plan.offseasonRecruitingWorkBaseline
+                        )
+                    ) {
+                        plan.offseasonRecruitingWorkBaseline =
+                            plan.assignments
+                                .filter(assignment =>
+                                    assignment &&
+                                    !isRecruitingAssignment(assignment)
+                                )
+                                .map(assignment => ({
+                                    ...assignment
+                                }));
+                    }
+
+                    // Recruiting week is all-hands. Protect accepted
+                    // community commitments, but suspend ordinary scouting,
+                    // training, and preparation assignments.
                     plan.assignments = plan.assignments.filter(
                         assignment =>
                             assignment &&
                             (
-                                assignment.task === STAFF_WORK_TASKS.SCOUTING ||
                                 assignment.task === 'communityService' ||
-                                assignment.task === STAFF_WORK_TASKS.RECRUITING ||
-                                assignment.source === 'recruiting'
+                                isRecruitingAssignment(assignment)
                             )
                     );
-
-                    plan.assignments.forEach(assignment => {
-                        if (
-                            assignment.task === STAFF_WORK_TASKS.SCOUTING
-                        ) {
-                            assignment.focus = 'freeAgents';
-                        }
-                    });
 
                     plan.offseasonRecruitingPlanKey = workWeekKey;
                 }
@@ -4208,7 +4227,8 @@ export function recordRecruitingStaffAssignment(
         'outreach',
         'teammateConnection',
         'roleDiscussion',
-        'practiceInvitation'
+        'practiceInvitation',
+        'tryout_batch'
     ]);
 
     if (!validActions.has(actionType)) {
@@ -4741,6 +4761,11 @@ export function executeRecruitingAction(
             label: 'Pickup practice invitation',
             pointsPerHour: 2.3,
             skills: ['teaching', 'conditioning']
+        },
+        tryout: {
+            label: 'Prospect tryout',
+            pointsPerHour: 2.4,
+            skills: ['teaching', 'evalPhysicals', 'evalTechnique']
         }
     };
 
@@ -4863,6 +4888,26 @@ export function executeRecruitingAction(
             success: false,
             message: 'Your team has already maximized this recruit’s interest.'
         };
+    }
+
+    // A team can hold only one tryout with a particular recruit
+    // during the annual recruiting week.
+    if (actionType === 'tryout') {
+        const alreadyHeldTryout = Array.isArray(recruitRecord.history) &&
+            recruitRecord.history.some(entry =>
+                entry?.type === 'recruiting_action' &&
+                entry.action === 'tryout' &&
+                String(entry.teamId) === teamKey &&
+                Number(entry.year) === Number(progress.seasonYear)
+            );
+
+        if (alreadyHeldTryout) {
+            return {
+                success: false,
+                message:
+                    'Your team has already held a tryout with this recruit this recruiting week.'
+            };
+        }
     }
 
     const assignmentResult = recordRecruitingStaffAssignment(
@@ -5358,6 +5403,493 @@ export function executeRecruitingAction(
         interestAfter: newInterest,
         remainingHours: assignmentResult.remainingHours,
         activity
+    };
+}
+
+/**
+ * Runs one coach-led group tryout for multiple recruiting prospects.
+ *
+ * The session reserves staff time once. Its delivered effort is shared
+ * across attendees, who each receive an individual recruiting record.
+ * Scouting report progression is handled separately by the scouting module.
+ */
+export function executeRecruitingTryoutBatch(
+    gameState,
+    teamId,
+    coachId,
+    playerIds
+) {
+    const SESSION_HOURS = 2;
+    const MAX_PARTICIPANTS = 8;
+
+    const state = gameState?.offseasonState;
+    const progress = state?.recruitingProgress;
+
+    const day = Number(state?.recruitingDay);
+    const recruitingDays = Number(state?.recruitingDays);
+    const year = Number(gameState?.year);
+
+    if (
+        !Array.isArray(gameState?.teams) ||
+        !Array.isArray(gameState?.players) ||
+        String(state?.phase || '').toLowerCase().replace(/[^a-z]/g, '') !== 'recruiting' ||
+        !progress ||
+        progress.initialized !== true ||
+        progress.completed === true ||
+        Number(progress.seasonYear) !== year ||
+        !Number.isInteger(day) ||
+        !Number.isInteger(recruitingDays) ||
+        day < 1 ||
+        day > recruitingDays
+    ) {
+        return {
+            success: false,
+            message: 'The recruiting week is not active.'
+        };
+    }
+
+    const team = gameState.teams.find(
+        candidate => String(candidate?.id) === String(teamId)
+    );
+
+    if (!team || team.leagueType !== 'main') {
+        return {
+            success: false,
+            message: 'The recruiting team is unavailable.'
+        };
+    }
+
+    const coach = ensureTeamCoachingStaff(team).find(
+        candidate => String(candidate?.id) === String(coachId)
+    );
+
+    if (!coach) {
+        return {
+            success: false,
+            message: 'That coach is no longer on this staff.'
+        };
+    }
+
+    const teamKey = String(team.id);
+    const coachKey = String(coach.id);
+
+    const selectedIds = [
+        ...new Set(
+            (Array.isArray(playerIds) ? playerIds : [])
+                .filter(id => id != null && String(id).trim() !== '')
+                .map(String)
+        )
+    ];
+
+    if (selectedIds.length === 0) {
+        return {
+            success: false,
+            message: 'Select at least one recruit for the tryout.'
+        };
+    }
+
+    if (selectedIds.length > MAX_PARTICIPANTS) {
+        return {
+            success: false,
+            message: `A group tryout can include up to ${MAX_PARTICIPANTS} recruits.`
+        };
+    }
+
+    const playerTeamId = gameState.playerTeam?.id == null
+        ? null
+        : String(gameState.playerTeam.id);
+
+    const isPlayerControlledTeam =
+        team.isPlayerControlled === true ||
+        (
+            playerTeamId !== null &&
+            String(team.id) === playerTeamId
+        );
+
+    // Player-controlled group tryouts must use prospects already
+    // on that team's My Recruiting List.
+    if (isPlayerControlledTeam) {
+        const recruitingList =
+            progress.teamRecruitingLists?.[teamKey];
+
+        const listedIds = new Set(
+            (Array.isArray(recruitingList) ? recruitingList : [])
+                .map(entry => String(entry?.playerId))
+        );
+
+        if (selectedIds.some(id => !listedIds.has(id))) {
+            return {
+                success: false,
+                message: 'Every selected recruit must be on your recruiting list.'
+            };
+        }
+    }
+
+    const protectedDraftIds = new Set(
+        (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
+            .filter(player => player?.id != null)
+            .map(player => String(player.id))
+    );
+
+    const participants = [];
+
+    for (const recruitId of selectedIds) {
+        const player = gameState.players.find(
+            candidate => String(candidate?.id) === recruitId
+        );
+
+        const record = progress.recruits?.[recruitId];
+
+        const age = Number(player?.age);
+
+        const statusType = String(
+            player?.status?.type || ''
+        ).toLowerCase();
+
+        const lifecycle = String(
+            player?.lifecycle || ''
+        ).toLowerCase();
+
+        const lifecycleStatus = String(
+            player?.lifecycleStatus || player?.lifecycle?.status || ''
+        ).toLowerCase();
+
+        const hasRefusedThisTeam =
+            Array.isArray(player?.refusedTeamIds) &&
+            player.refusedTeamIds.some(
+                refusedId => String(refusedId) === teamKey
+            );
+
+        const unavailableStatus = [
+            'retired',
+            'departed',
+            'temporary',
+            'injured'
+        ].includes(statusType) ||
+            [
+                'retired',
+                'departed',
+                'temporary',
+                'injured'
+            ].includes(lifecycleStatus);
+
+        if (
+            !player ||
+            player.teamId != null ||
+            !record ||
+            record.status !== 'available' ||
+            record.committedTeamId != null ||
+            hasRefusedThisTeam ||
+            !Number.isFinite(age) ||
+            age < 12 ||
+            age > 18 ||
+            protectedDraftIds.has(recruitId) ||
+            lifecycle === 'draft_eligible' ||
+            lifecycleStatus === 'draft_eligible' ||
+            unavailableStatus ||
+            Number(player.status?.duration) > 0 ||
+            Number(player.injury?.duration || player.injuryDuration || 0) > 0
+        ) {
+            return {
+                success: false,
+                message: `${player?.name || 'A selected recruit'} is no longer eligible for the tryout.`
+            };
+        }
+
+        const history = Array.isArray(record.history)
+            ? record.history
+            : [];
+
+        const alreadyTriedOut = history.some(entry =>
+            String(entry?.teamId) === teamKey &&
+            Number(entry?.year) === year &&
+            (
+                entry.action === 'tryout' ||
+                entry.action === 'tryout_batch' ||
+                entry.type === 'recruiting_tryout'
+            )
+        );
+
+        if (alreadyTriedOut) {
+            return {
+                success: false,
+                message: `${player.name} has already attended one of your tryouts this recruiting week.`
+            };
+        }
+
+        participants.push({
+            player,
+            record
+        });
+    }
+
+    // Reserve the entire session once, using the existing shared
+    // weekly staff-work capacity validation.
+    const assignmentResult = recordRecruitingStaffAssignment(
+        gameState,
+        team.id,
+        coach.id,
+        participants[0].player.id,
+        SESSION_HOURS,
+        'tryout_batch'
+    );
+
+    if (!assignmentResult.success) {
+        return assignmentResult;
+    }
+
+    const assignment = assignmentResult.assignment;
+
+    const sessionId =
+        `tryout:${year}:${day}:${teamKey}:${coachKey}:` +
+        `${progress.dailyActivity?.length || 0}`;
+
+    // Convert the single reservation from a recruit-specific entry
+    // into a session-level assignment with multiple attendees.
+    if (assignment) {
+        assignment.playerId = null;
+        assignment.playerIds = selectedIds;
+        assignment.sessionId = sessionId;
+        assignment.label = 'Group tryout';
+    }
+
+    const assignmentLog = progress.dailyActivity?.[
+        progress.dailyActivity.length - 1
+    ];
+
+    if (
+        assignmentLog?.type === 'staff_assignment' &&
+        String(assignmentLog.coachId) === coachKey &&
+        assignmentLog.action === 'tryout_batch'
+    ) {
+        assignmentLog.playerId = null;
+        assignmentLog.playerIds = selectedIds;
+        assignmentLog.sessionId = sessionId;
+        assignmentLog.label = 'Group tryout';
+    }
+
+    // The reservation is a session-level event, not an assignment
+    // belonging exclusively to the first participant.
+    const firstRecordHistory = participants[0].record.history;
+
+    if (Array.isArray(firstRecordHistory)) {
+        for (let index = firstRecordHistory.length - 1; index >= 0; index--) {
+            const entry = firstRecordHistory[index];
+
+            if (
+                entry?.type === 'staff_assignment' &&
+                entry.action === 'tryout_batch' &&
+                String(entry.coachId) === coachKey &&
+                Number(entry.year) === year &&
+                Number(entry.day) === day
+            ) {
+                firstRecordHistory.splice(index, 1);
+                break;
+            }
+        }
+    }
+
+    const rating = key => {
+        const value = Number(coach.ratings?.[key]);
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, value))
+            : 50;
+    };
+
+    const coachQuality = (
+        rating('teaching') +
+        rating('evalPhysicals') +
+        rating('evalTechnique') +
+        rating('evalCharacter')
+    ) / 4;
+
+    const skillMultiplier = 0.75 + coachQuality / 200;
+
+    const deliveredSessionHours = Math.max(
+        0,
+        Number(assignmentResult.effectiveHours) || 0
+    );
+
+    const requestedHoursPerRecruit =
+        SESSION_HOURS / participants.length;
+
+    const deliveredHoursPerRecruit =
+        deliveredSessionHours / participants.length;
+
+    const activities = [];
+
+    for (const participant of participants) {
+        const { player, record } = participant;
+
+        const currentInterest = Math.max(
+            0,
+            Math.min(
+                100,
+                Number(record.interestByTeam?.[teamKey]) || 0
+            )
+        );
+
+        // This is a modest relationship benefit, not the same reward
+        // as spending several individual recruiting hours on each player.
+        const preferenceValues = [
+            Number(player.recruitingPreferences?.relationships),
+            Number(player.recruitingPreferences?.development)
+        ].map(value =>
+            Number.isFinite(value)
+                ? Math.max(0, Math.min(100, value))
+                : 50
+        );
+
+        const averagePreference =
+            preferenceValues.reduce((total, value) => total + value, 0) /
+            preferenceValues.length;
+
+        const responseMultiplier =
+            0.90 + averagePreference / 500;
+
+        let interestGain =
+            3.5 *
+            skillMultiplier *
+            responseMultiplier *
+            Math.min(1, deliveredSessionHours / SESSION_HOURS);
+
+        if (currentInterest >= 90) {
+            interestGain *= 0.35;
+        } else if (currentInterest >= 75) {
+            interestGain *= 0.65;
+        }
+
+        const newInterest = Math.max(
+            currentInterest,
+            Math.min(100, currentInterest + Math.round(interestGain))
+        );
+
+        const actualInterestGain = newInterest - currentInterest;
+
+        if (!record.interestByTeam) {
+            record.interestByTeam = {};
+        }
+
+        record.interestByTeam[teamKey] = newInterest;
+
+        if (
+            !record.recruitingPushByTeam ||
+            typeof record.recruitingPushByTeam !== 'object'
+        ) {
+            record.recruitingPushByTeam = {};
+        }
+
+        const recruitingPush =
+            record.recruitingPushByTeam[teamKey] ||= {
+                hoursInvested: 0,
+                effectiveEffort: 0,
+                actionHoursByType: {},
+                effectiveEffortByType: {},
+                actionCountByType: {},
+                coachHoursById: {},
+                lastActionDay: null,
+                lastActionYear: null
+            };
+
+        const effectiveEffort =
+            deliveredHoursPerRecruit * skillMultiplier;
+
+        recruitingPush.hoursInvested =
+            Math.max(0, Number(recruitingPush.hoursInvested) || 0) +
+            deliveredHoursPerRecruit;
+
+        recruitingPush.effectiveEffort =
+            Math.max(0, Number(recruitingPush.effectiveEffort) || 0) +
+            effectiveEffort;
+
+        recruitingPush.actionHoursByType ||= {};
+        recruitingPush.effectiveEffortByType ||= {};
+        recruitingPush.actionCountByType ||= {};
+        recruitingPush.coachHoursById ||= {};
+
+        recruitingPush.actionHoursByType.tryout_batch =
+            (Number(recruitingPush.actionHoursByType.tryout_batch) || 0) +
+            deliveredHoursPerRecruit;
+
+        recruitingPush.effectiveEffortByType.tryout_batch =
+            (Number(recruitingPush.effectiveEffortByType.tryout_batch) || 0) +
+            effectiveEffort;
+
+        recruitingPush.actionCountByType.tryout_batch =
+            (Number(recruitingPush.actionCountByType.tryout_batch) || 0) +
+            1;
+
+        recruitingPush.coachHoursById[coachKey] =
+            (Number(recruitingPush.coachHoursById[coachKey]) || 0) +
+            deliveredHoursPerRecruit;
+
+        recruitingPush.lastActionDay = day;
+        recruitingPush.lastActionYear = year;
+
+        const activity = {
+            type: 'recruiting_action',
+            year,
+            day,
+            teamId: team.id,
+            teamName: team.name,
+            coachId: coachKey,
+            coachName: coach.name || 'Coach',
+            playerId: player.id,
+            playerName: player.name,
+            action: 'tryout_batch',
+            label: 'Group tryout',
+            sessionId,
+            sessionHours: SESSION_HOURS,
+            requestedHours: requestedHoursPerRecruit,
+            hours: requestedHoursPerRecruit,
+            effectiveHours: deliveredHoursPerRecruit,
+            skillMultiplier,
+            effectiveEffort,
+            interestBefore: currentInterest,
+            interestGain: actualInterestGain,
+            interestAfter: newInterest
+        };
+
+        record.history = Array.isArray(record.history)
+            ? record.history
+            : [];
+
+        record.history.push(activity);
+
+        progress.dailyActivity = Array.isArray(progress.dailyActivity)
+            ? progress.dailyActivity
+            : [];
+
+        progress.dailyActivity.push(activity);
+
+        activities.push({
+            playerId: player.id,
+            playerName: player.name,
+            interestBefore: currentInterest,
+            interestGain: actualInterestGain,
+            interestAfter: newInterest,
+            activity
+        });
+    }
+
+    return {
+        success: true,
+        sessionId,
+        teamId: team.id,
+        coachId: coachKey,
+        coachName: coach.name || 'Coach',
+        day,
+        year,
+        hours: SESSION_HOURS,
+        effectiveHours: deliveredSessionHours,
+        participantCount: participants.length,
+        participants: activities,
+        remainingHours: assignmentResult.remainingHours,
+        message:
+            `${coach.name || 'Your coach'} hosted a group tryout with ` +
+            `${participants.length} recruit(s). Each attendee received ` +
+            `an individual recruiting-interest update.`
     };
 }
 
@@ -5904,6 +6436,9 @@ export function processAiRecruitingDay(gameState) {
         };
     }
 
+    const AI_TRYOUT_SESSION_HOURS = 2;
+    const AI_TRYOUT_MAX_PARTICIPANTS = 8;
+
     const positionTargets = {
         QB: 2,
         RB: 2,
@@ -6432,6 +6967,14 @@ export function processAiRecruitingDay(gameState) {
                 {
                     type: 'practiceInvitation',
                     skills: ['teaching', 'conditioning']
+                },
+                {
+                    type: 'tryout',
+                    skills: [
+                        'teaching',
+                        'evalPhysicals',
+                        'evalTechnique'
+                    ]
                 }
             ];
 
@@ -6478,6 +7021,13 @@ export function processAiRecruitingDay(gameState) {
                             development * 0.65 +
                             relationship * 0.20 +
                             discipline * 0.15
+                        );
+
+                    case 'tryout':
+                        return (
+                            development * 0.35 +
+                            relationship * 0.35 +
+                            discipline * 0.30
                         );
 
                     default:
@@ -7052,6 +7602,34 @@ export function processAiRecruitingDay(gameState) {
                     decisionNoiseRange * 0.75;
 
                 const targetActions = actionOptions
+                    .filter(option => {
+                        if (option.type !== 'tryout') return true;
+
+                        // AI group tryouts require a full two-hour session.
+                        // The user-controlled team uses its manual group-tryout UI.
+                        if (
+                            isPlayerControlledTeam ||
+                            hoursToday < AI_TRYOUT_SESSION_HOURS
+                        ) {
+                            return false;
+                        }
+
+                        const alreadyHeldTryout =
+                            Array.isArray(record?.history) &&
+                            record.history.some(entry =>
+                                String(entry.teamId) === teamKey &&
+                                Number(entry.year) ===
+                                    Number(progress.seasonYear) &&
+                                (
+                                    ['tryout', 'tryout_batch'].includes(
+                                        String(entry.action || '')
+                                    ) ||
+                                    entry.type === 'recruiting_tryout'
+                                )
+                            );
+
+                        return !alreadyHeldTryout;
+                    })
                     .map(option => {
                         const skillScore = option.skills.reduce(
                             (sum, skill) => sum + skillValue(skill),
@@ -7140,6 +7718,88 @@ export function processAiRecruitingDay(gameState) {
                 const selectedAction = target.selectedAction;
 
                 if (!selectedAction) continue;
+
+                // AI tryouts are hosted as one group session rather than
+                // separate recruiting actions for individual prospects.
+                if (
+                    !isPlayerControlledTeam &&
+                    selectedAction.type === 'tryout'
+                ) {
+                    const batchTargets = evaluatedTargets
+                        .filter(candidate =>
+                            candidate.selectedAction?.type === 'tryout'
+                        )
+                        .slice(0, AI_TRYOUT_MAX_PARTICIPANTS);
+
+                    const batchResult = executeRecruitingTryoutBatch(
+                        gameState,
+                        team.id,
+                        coach.id,
+                        batchTargets.map(candidate =>
+                            candidate.player.id
+                        )
+                    );
+
+                    if (!batchResult?.success) continue;
+
+                    const participantCount = Math.max(
+                        1,
+                        Number(batchResult.participantCount) ||
+                            batchResult.participants?.length ||
+                            1
+                    );
+
+                    const sessionHours = Math.max(
+                        0,
+                        Number(batchResult.hours) ||
+                            AI_TRYOUT_SESSION_HOURS
+                    );
+
+                    const hoursPerRecruit =
+                        sessionHours / participantCount;
+
+                    const effectiveHoursPerRecruit =
+                        Math.max(
+                            0,
+                            Number(batchResult.effectiveHours) || 0
+                        ) / participantCount;
+
+                    dailyHoursRemaining = Math.max(
+                        0,
+                        dailyHoursRemaining - sessionHours
+                    );
+
+                    for (const attendee of batchResult.participants || []) {
+                        targetedToday.add(
+                            String(attendee.playerId)
+                        );
+
+                        actions.push({
+                            teamId: team.id,
+                            teamName: team.name,
+                            coachId: coach.id,
+                            coachName: coach.name || 'Coach',
+                            playerId: attendee.playerId,
+                            playerName: attendee.playerName,
+                            action: 'tryout_batch',
+                            sessionId: batchResult.sessionId,
+                            participantCount,
+                            sessionHours,
+                            hours: hoursPerRecruit,
+                            effectiveHours: effectiveHoursPerRecruit,
+                            offerExtended: false,
+                            interestGain: attendee.interestGain,
+                            interestAfter: attendee.interestAfter,
+                            sweetenerType: null,
+                            sweetenerCashSpent: 0,
+                            sweetenerTokensSpent: 0
+                        });
+                    }
+
+                    // Do not send this group through the ordinary
+                    // single-prospect recruiting-action processing below.
+                    continue;
+                }
 
                 // Divide the coach's remaining hours across the
                 // eligible prospects, favoring higher-ranked targets.

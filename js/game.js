@@ -15,6 +15,9 @@ export * from './game/play_resolution.js';
 export * from './game/telemetry.js';
 export * from './game/staff.js';
 export * from './game/negotiations.js';
+export {
+    advanceRecruitingTryoutScoutingReport
+} from './game/scouting.js';
 
 export * from './game/debug_mode.js';
 export * from './game/debug_collector.js';

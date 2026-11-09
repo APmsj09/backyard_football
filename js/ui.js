@@ -17,6 +17,12 @@ import {
 import {
     acceptCommunityFavor as acceptCommunityFavorAction
 } from './game/community.js';
+import {
+    initializeInheritedScoutingReports,
+    recordScoutingReportOutcome,
+    processWeeklyScoutingAssignments,
+    advanceRecruitingTryoutScoutingReport
+} from './game/scouting.js';
 
 let elements = {};
 let selectedPlayerId = null;
@@ -2952,6 +2958,7 @@ let recruitingQuickAssignDefaults = {
 };
 
 const recruitingQuickSelectedIds = new Set();
+const recruitingTryoutSelectedIds = new Set();
 
 export function startOffseasonFAMinigame(gameState) {
     offseasonFABids = [];
@@ -3832,6 +3839,13 @@ export function renderOffseasonFAPool(gameState) {
             .map(entry => String(entry.playerId))
     );
 
+    // Clear group-tryout selections for prospects no longer on the list.
+    for (const selectedId of recruitingTryoutSelectedIds) {
+        if (!userRecruitingListIds.has(String(selectedId))) {
+            recruitingTryoutSelectedIds.delete(selectedId);
+        }
+    }
+
     const listCoachOptions = quickBudget
         .filter(coach => coach?.coachId != null)
         .map(coach => {
@@ -3858,6 +3872,27 @@ export function renderOffseasonFAPool(gameState) {
                 remainingHours
             };
         });
+
+    const teamTryoutActivities = (
+        Array.isArray(progress.dailyActivity)
+            ? progress.dailyActivity
+            : []
+    ).filter(activity =>
+        String(activity.teamId) === playerTeamKey &&
+        Number(activity.year) === Number(gameState.year) &&
+        Number(activity.day) >= 1 &&
+        Number(activity.day) <= 7 &&
+        (
+            activity.type === 'recruiting_tryout' ||
+            ['tryout', 'tryout_batch'].includes(
+                String(activity.action || '')
+            )
+        )
+    );
+
+    const canHostGroupTryout = listCoachOptions.some(
+        coach => coach.remainingHours >= 2
+    );
 
     const userRecruitingListHtml = userRecruitingList.map(
         (entry, index) => {
@@ -3890,6 +3925,35 @@ export function renderOffseasonFAPool(gameState) {
                   player.teamId == null
                     ? 'Available'
                     : 'Unavailable';
+
+            const hasTryoutThisWeek =
+                teamTryoutActivities.some(activity =>
+                    String(activity.playerId) === playerId
+                ) ||
+                (
+                    Array.isArray(record?.history) &&
+                    record.history.some(activity =>
+                        String(activity.teamId) === playerTeamKey &&
+                        Number(activity.year) === Number(gameState.year) &&
+                        (
+                            activity.type === 'recruiting_tryout' ||
+                            (
+                                activity.type === 'recruiting_action' &&
+                                ['tryout', 'tryout_batch'].includes(
+                                    String(activity.action || '')
+                                )
+                            )
+                        )
+                    )
+                );
+
+            const canJoinGroupTryout =
+                statusLabel === 'Available' &&
+                !hasTryoutThisWeek;
+
+            if (!canJoinGroupTryout) {
+                recruitingTryoutSelectedIds.delete(playerId);
+            }
 
             const userOffer =
                 record?.offersByTeam?.[playerTeamKey] || null;
@@ -4019,7 +4083,9 @@ export function renderOffseasonFAPool(gameState) {
                 outreach: 'Personal outreach',
                 teammateConnection: 'Teammate connection',
                 roleDiscussion: 'Role discussion',
-                practiceInvitation: 'Practice invitation'
+                practiceInvitation: 'Practice invitation',
+                tryout: 'Individual tryout',
+                tryout_batch: 'Group tryout'
             };
 
             // Use the actual activity log as the source of truth.
@@ -4061,28 +4127,35 @@ export function renderOffseasonFAPool(gameState) {
             const recentWorkHtml =
                 recentStaffActivities.length > 0
                     ? recentStaffActivities.map(activity => {
-                        const coach = activity.coachId != null
+                        const isTeamActivity =
+                            activity.type === 'recruiting_sweetener';
+
+                        const coach = !isTeamActivity &&
+                            activity.coachId != null
                             ? listCoachOptions.find(candidate =>
                                 candidate.coachId === String(activity.coachId)
                             )
                             : null;
 
-                        const coachName =
-                            activity.coachName ||
-                            coach?.coachName ||
-                            'Staff contact';
+                        const coachName = isTeamActivity
+                            ? 'Team'
+                            : activity.coachName ||
+                              coach?.coachName ||
+                              'Staff';
 
-                        const actionLabel =
-                            activity.type === 'recruiting_sweetener'
-                                ? activity.label || 'Gift / favor'
-                                : actionLabels[activity.action] ||
-                                  activity.label ||
-                                  'Recruiting contact';
+                        const actionLabel = isTeamActivity
+                            ? activity.label || 'Recruiting gift / favor'
+                            : actionLabels[activity.action] ||
+                              activity.label ||
+                              'Recruiting contact';
 
-                        const hours = Math.max(
-                            0,
-                            Number(activity.hours) || 0
-                        );
+                        // Gifts and favors do not consume staff hours.
+                        const hours = isTeamActivity
+                            ? 0
+                            : Math.max(
+                                0,
+                                Number(activity.hours) || 0
+                            );
 
                         return `
                             <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[9px]">
@@ -4090,7 +4163,11 @@ export function renderOffseasonFAPool(gameState) {
                                     Day ${Math.max(1, Number(activity.day) || 1)}
                                 </span>
 
-                                <span class="text-slate-500">
+                                <span class="${
+                                    isTeamActivity
+                                        ? 'font-bold text-amber-700'
+                                        : 'text-slate-500'
+                                }">
                                     ${quickEscapeHtml(coachName)}
                                 </span>
 
@@ -4173,6 +4250,26 @@ export function renderOffseasonFAPool(gameState) {
                 <tr class="border-b border-slate-200 hover:bg-slate-50 ${
                     index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'
                 }">
+
+                    <!-- Group tryout selection -->
+                    <td class="w-10 px-3 py-3 text-center">
+                        <input
+                            type="checkbox"
+                            class="fa-tryout-select h-4 w-4 accent-emerald-700 disabled:cursor-not-allowed disabled:opacity-30"
+                            value="${quickEscapeHtml(playerId)}"
+                            data-tryout-eligible="${canJoinGroupTryout ? 'true' : 'false'}"
+                            ${recruitingTryoutSelectedIds.has(playerId) ? 'checked' : ''}
+                            ${!canJoinGroupTryout ? 'disabled' : ''}
+                            onchange="window.app_toggleRecruitingTryoutSelection('${quickEscapeHtml(playerId)}', this.checked)"
+                            title="${
+                                hasTryoutThisWeek
+                                    ? 'Already tried out this recruiting week'
+                                    : canJoinGroupTryout
+                                        ? 'Select for a group tryout'
+                                        : 'Prospect unavailable'
+                            }"
+                        />
+                    </td>
 
                     <!-- Priority rank -->
                     <td class="w-12 px-3 py-3 text-center">
@@ -4364,10 +4461,59 @@ export function renderOffseasonFAPool(gameState) {
             ${
                 userRecruitingList.length > 0
                     ? `
+                        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-emerald-50/50 px-3 py-3">
+                            <div>
+                                <div class="text-[10px] font-black uppercase tracking-wide text-slate-800">
+                                    Group Tryout
+                                </div>
+
+                                <p class="mt-1 text-[9px] text-slate-600">
+                                    Select up to 8 available prospects. One coach hosts the session for 2 staff hours total.
+                                </p>
+
+                                <div class="fa-tryout-selected-count mt-1 text-[10px] font-bold text-emerald-800">
+                                    ${recruitingTryoutSelectedIds.size}/8 selected
+                                </div>
+                            </div>
+
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onclick="window.app_selectEligibleRecruitingTryoutTargets()"
+                                    class="rounded border border-slate-300 bg-white px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-100">
+                                    Select Up to 8
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onclick="window.app_clearRecruitingTryoutSelection()"
+                                    class="rounded border border-slate-300 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-100">
+                                    Clear
+                                </button>
+
+                                <button
+                                    type="button"
+                                    id="fa-open-recruiting-tryout-batch"
+                                    data-can-host="${canHostGroupTryout ? 'true' : 'false'}"
+                                    onclick="window.app_openSelectedRecruitingTryoutBatch()"
+                                    ${recruitingTryoutSelectedIds.size === 0 || !canHostGroupTryout ? 'disabled' : ''}
+                                    class="rounded bg-emerald-700 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
+                                    Host Group Tryout (${recruitingTryoutSelectedIds.size})
+                                </button>
+                            </div>
+                        </div>
+                    `
+                    : ''
+            }
+
+            ${
+                userRecruitingList.length > 0
+                    ? `
                         <div class="overflow-x-auto">
                             <table class="w-full min-w-[1280px] text-left">
                                 <thead class="bg-slate-100">
                                     <tr class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                        <th class="px-3 py-2 text-center">Tryout</th>
                                         <th class="px-3 py-2 text-center">Rank</th>
                                         <th class="px-3 py-2">Prospect</th>
                                         <th class="px-3 py-2">Interest</th>
@@ -4498,7 +4644,9 @@ export function renderOffseasonFAPool(gameState) {
                         outreach: 'Personal outreach',
                         teammateConnection: 'Teammate connection',
                         roleDiscussion: 'Role discussion',
-                        practiceInvitation: 'Practice invitation'
+                        practiceInvitation: 'Practice invitation',
+                        tryout: 'Individual tryout',
+                        tryout_batch: 'Group tryout'
                     };
 
                     const isSweetener =
@@ -5473,67 +5621,176 @@ window.app_setRecruitingOffer = function(
 };
 
 window.app_setRecruitingTab = function(tab) {
-    const availableTabs = [
-        'prospects',
-        'list',
-        'battles'
-    ];
-
-    if (!availableTabs.includes(tab)) return;
+    if (!['prospects', 'list', 'battles'].includes(tab)) return;
 
     recruitingActiveTab = tab;
 
-    const tabs = [
-        {
-            key: 'prospects',
-            buttonId: 'fa-recruiting-tab-prospects',
-            panelId: 'fa-recruiting-prospects-panel'
-        },
-        {
-            key: 'list',
-            buttonId: 'fa-recruiting-tab-list',
-            panelId: 'fa-recruiting-list-panel'
-        },
-        {
-            key: 'battles',
-            buttonId: 'fa-recruiting-tab-battles',
-            panelId: 'fa-recruiting-battles-panel'
-        }
-    ];
+    const panels = {
+        prospects: document.getElementById(
+            'fa-recruiting-prospects-panel'
+        ),
+        list: document.getElementById(
+            'fa-recruiting-list-panel'
+        ),
+        battles: document.getElementById(
+            'fa-recruiting-battles-panel'
+        )
+    };
+
+    const buttons = {
+        prospects: document.getElementById(
+            'fa-recruiting-tab-prospects'
+        ),
+        list: document.getElementById(
+            'fa-recruiting-tab-list'
+        ),
+        battles: document.getElementById(
+            'fa-recruiting-tab-battles'
+        )
+    };
 
     const activeClass =
-        'rounded-md px-3 py-2 text-xs font-bold ' +
-        'bg-slate-900 text-white';
+        'rounded-md px-3 py-2 text-xs font-bold bg-slate-900 text-white';
 
     const inactiveClass =
-        'rounded-md px-3 py-2 text-xs font-bold ' +
-        'border border-slate-300 bg-white ' +
-        'text-slate-700 hover:bg-slate-50';
+        'rounded-md px-3 py-2 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
 
-    tabs.forEach(entry => {
-        const isActive = entry.key === tab;
-
-        const button = document.getElementById(
-            entry.buttonId
-        );
-
-        const panel = document.getElementById(
-            entry.panelId
-        );
-
-        panel?.classList.toggle('hidden', !isActive);
-
-        if (button) {
-            button.className = isActive
-                ? activeClass
-                : inactiveClass;
-
-            button.setAttribute(
-                'aria-pressed',
-                String(isActive)
-            );
-        }
+    Object.entries(panels).forEach(([key, panel]) => {
+        panel?.classList.toggle('hidden', key !== tab);
     });
+
+    Object.entries(buttons).forEach(([key, button]) => {
+        if (!button) return;
+
+        const isActive = key === tab;
+
+        button.className = isActive
+            ? activeClass
+            : inactiveClass;
+
+        button.setAttribute(
+            'aria-pressed',
+            String(isActive)
+        );
+    });
+
+    if (tab === 'list') {
+        window.app_refreshRecruitingTryoutSelection?.();
+    }
+};
+
+window.app_refreshRecruitingTryoutSelection = function() {
+    const selectedCount = recruitingTryoutSelectedIds.size;
+
+    document.querySelectorAll(
+        '#fa-recruiting-list-panel .fa-tryout-select'
+    ).forEach(checkbox => {
+        const playerId = String(checkbox.value);
+        const isSelected = recruitingTryoutSelectedIds.has(playerId);
+        const isEligible =
+            checkbox.dataset.tryoutEligible === 'true';
+
+        checkbox.checked = isSelected;
+
+        checkbox.disabled =
+            !isEligible ||
+            (
+                selectedCount >= 8 &&
+                !isSelected
+            );
+    });
+
+    document.querySelectorAll('.fa-tryout-selected-count')
+        .forEach(element => {
+            element.textContent = `${selectedCount}/8 selected`;
+        });
+
+    const button = document.getElementById(
+        'fa-open-recruiting-tryout-batch'
+    );
+
+    if (button) {
+        button.textContent =
+            `Host Group Tryout (${selectedCount})`;
+
+        button.disabled =
+            selectedCount === 0 ||
+            button.dataset.canHost !== 'true';
+    }
+};
+
+window.app_toggleRecruitingTryoutSelection = function(
+    playerId,
+    checked
+) {
+    const id = String(playerId ?? '');
+
+    if (!id) return;
+
+    if (checked) {
+        if (
+            recruitingTryoutSelectedIds.size >= 8 &&
+            !recruitingTryoutSelectedIds.has(id)
+        ) {
+            window.app_refreshRecruitingTryoutSelection();
+            return;
+        }
+
+        recruitingTryoutSelectedIds.add(id);
+    } else {
+        recruitingTryoutSelectedIds.delete(id);
+    }
+
+    window.app_refreshRecruitingTryoutSelection();
+};
+
+window.app_selectEligibleRecruitingTryoutTargets = function() {
+    const checkboxes = document.querySelectorAll(
+        '#fa-recruiting-list-panel .fa-tryout-select'
+    );
+
+    for (const checkbox of checkboxes) {
+        if (recruitingTryoutSelectedIds.size >= 8) break;
+
+        if (
+            checkbox.dataset.tryoutEligible !== 'true' ||
+            checkbox.disabled
+        ) {
+            continue;
+        }
+
+        recruitingTryoutSelectedIds.add(
+            String(checkbox.value)
+        );
+    }
+
+    window.app_refreshRecruitingTryoutSelection();
+};
+
+window.app_clearRecruitingTryoutSelection = function() {
+    recruitingTryoutSelectedIds.clear();
+
+    window.app_refreshRecruitingTryoutSelection();
+};
+
+window.app_openSelectedRecruitingTryoutBatch = function() {
+    const selectedIds = [
+        ...recruitingTryoutSelectedIds
+    ].slice(0, 8);
+
+    if (selectedIds.length === 0) return;
+
+    if (
+        typeof window.app_openRecruitingTryoutBatchModal !== 'function'
+    ) {
+        showModal(
+            'Tryout Unavailable',
+            '<p>The group tryout screen is unavailable.</p>'
+        );
+        return;
+    }
+
+    window.app_openRecruitingTryoutBatchModal(selectedIds);
 };
 
 window.app_updateRecruitingQuickDefaults = function() {
@@ -6680,8 +6937,12 @@ window.app_openRecruitingActionModal = function(playerId) {
 
             if (
                 !coachId ||
-                !['outreach', 'teammateConnection', 'roleDiscussion', 'practiceInvitation']
-                    .includes(actionType) ||
+                ![
+                    'outreach',
+                    'teammateConnection',
+                    'roleDiscussion',
+                    'practiceInvitation'
+                ].includes(actionType) ||
                 !Number.isInteger(hours) ||
                 hours < 1
             ) {
@@ -6715,16 +6976,385 @@ window.app_openRecruitingActionModal = function(playerId) {
 
             renderOffseasonFAScreen(getGameState());
 
+            const completionMessage =
+                result.message ||
+                'Your staff completed the recruiting action.';
+
             showModal(
                 'Recruiting Action Complete',
-                `<p>${escapeHtml(
-                    result.message || 'Your staff completed the recruiting action.'
-                )}</p>`,
+                `<p>${escapeHtml(completionMessage)}</p>`,
                 null,
                 'Continue'
             );
         },
         'Perform Recruiting Action'
+    );
+};
+
+window.app_openRecruitingTryoutBatchModal = function(playerIds) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    const progress = gs?.offseasonState?.recruitingProgress;
+
+    const SESSION_HOURS = 2;
+    const MAX_PARTICIPANTS = 8;
+
+    if (!team || !progress?.initialized || progress.completed === true) {
+        showModal(
+            'Tryout Unavailable',
+            '<p>The recruiting week is not active.</p>'
+        );
+        return;
+    }
+
+    const selectedIds = [
+        ...new Set(
+            (Array.isArray(playerIds) ? playerIds : [])
+                .filter(id => id != null)
+                .map(String)
+        )
+    ];
+
+    if (selectedIds.length === 0 || selectedIds.length > MAX_PARTICIPANTS) {
+        showModal(
+            'Invalid Tryout Group',
+            `<p>Select between 1 and ${MAX_PARTICIPANTS} recruits for a group tryout.</p>`
+        );
+        return;
+    }
+
+    const teamKey = String(team.id);
+    const year = Number(gs.year);
+
+    const teamRecruitingList =
+        progress.teamRecruitingLists?.[teamKey];
+
+    const listedIds = new Set(
+        (Array.isArray(teamRecruitingList) ? teamRecruitingList : [])
+            .map(entry => String(entry?.playerId))
+    );
+
+    const participants = [];
+
+    for (const recruitId of selectedIds) {
+        const player = gs.players?.find(
+            candidate => String(candidate?.id) === recruitId
+        );
+
+        const record = progress.recruits?.[recruitId];
+
+        if (
+            !listedIds.has(recruitId) ||
+            !player ||
+            player.teamId != null ||
+            !record ||
+            record.status !== 'available' ||
+            record.committedTeamId != null
+        ) {
+            showModal(
+                'Recruit Unavailable',
+                `<p>${player?.name || 'A selected recruit'} is no longer available or is not on your recruiting list.</p>`
+            );
+            return;
+        }
+
+        const hasAlreadyAttended = (
+            Array.isArray(record.history) ? record.history : []
+        ).some(entry =>
+            String(entry?.teamId) === teamKey &&
+            Number(entry?.year) === year &&
+            (
+                entry.action === 'tryout_batch' ||
+                entry.action === 'tryout' ||
+                entry.type === 'recruiting_tryout'
+            )
+        );
+
+        if (hasAlreadyAttended) {
+            showModal(
+                'Already Attended',
+                `<p>${player.name} has already attended one of your group tryouts this recruiting week. Remove that recruit from the selection and try again.</p>`
+            );
+            return;
+        }
+
+        participants.push(player);
+    }
+
+    const budget = Game.getRecruitingStaffHourBudget?.(team, gs) || [];
+
+    const coachProfiles = [
+        ...(Array.isArray(team.coaches) ? team.coaches : []),
+        ...Object.values(team.staff || {})
+    ];
+
+    const coaches = budget
+        .filter(coach =>
+            Number(coach.remainingHours) >= SESSION_HOURS
+        )
+        .map(coach => {
+            const profile = coachProfiles.find(candidate =>
+                String(candidate?.id) === String(coach.coachId)
+            );
+
+            return {
+                ...coach,
+                role: profile?.role || 'Volunteer coach'
+            };
+        });
+
+    if (coaches.length === 0) {
+        showModal(
+            'Not Enough Staff Time',
+            `<p>Your staff needs at least ${SESSION_HOURS} recruiting hours available with one coach to host a group tryout.</p>`
+        );
+        return;
+    }
+
+    const escapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    const modalHtml = `
+        <div class="space-y-4 text-left text-xs">
+            <div class="rounded bg-slate-900 p-3 text-white">
+                <div class="text-sm font-black">
+                    Group Tryout
+                </div>
+                <div class="mt-1 text-slate-300">
+                    ${participants.length} recruit${participants.length === 1 ? '' : 's'} selected
+                </div>
+                <div class="mt-2 text-amber-300 font-bold">
+                    Fixed session cost: ${SESSION_HOURS} staff hours
+                </div>
+                <div class="mt-1 text-[10px] text-slate-400">
+                    The same session cost applies regardless of the number of attendees.
+                </div>
+            </div>
+
+            <div>
+                <div class="mb-2 font-black uppercase tracking-wide text-slate-600">
+                    Attendees
+                </div>
+                <div class="max-h-48 overflow-y-auto rounded border border-slate-200 bg-white divide-y divide-slate-100">
+                    ${participants.map(player => `
+                        <div class="flex items-center justify-between gap-2 px-3 py-2">
+                            <span class="font-bold text-slate-800">
+                                ${escapeHtml(player.name)}
+                            </span>
+                            <span class="text-[10px] text-slate-500">
+                                Age ${Number(player.age) || '—'} · ${escapeHtml(player.pos || '—')}
+                            </span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div>
+                <label for="recruiting-tryout-coach"
+                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                    Host Coach
+                </label>
+                <select
+                    id="recruiting-tryout-coach"
+                    class="w-full rounded-sm border border-slate-300 bg-white p-2 text-xs">
+                    ${coaches.map(coach => `
+                        <option value="${escapeHtml(coach.coachId)}">
+                            ${escapeHtml(coach.coachName)} · ${escapeHtml(coach.role)} · ${coach.remainingHours}h remaining
+                        </option>
+                    `).join('')}
+                </select>
+            </div>
+
+            <p class="text-[10px] text-slate-500">
+                Each recruit can attend one group tryout per team during this recruiting week. The host coach provides a modest interest boost and an individual scouting update for every attendee.
+            </p>
+        </div>
+    `;
+
+    showModal(
+        'Hold Group Tryout',
+        modalHtml,
+        () => {
+            const currentState = getGameState();
+            const currentTeam = currentState?.playerTeam;
+            const currentProgress =
+                currentState?.offseasonState?.recruitingProgress;
+
+            const coachId = document.getElementById(
+                'recruiting-tryout-coach'
+            )?.value;
+
+            if (
+                !currentTeam ||
+                !currentProgress?.initialized ||
+                currentProgress.completed === true ||
+                !coachId
+            ) {
+                showModal(
+                    'Tryout Unavailable',
+                    '<p>The recruiting state or selected coach is no longer available.</p>'
+                );
+                return;
+            }
+
+            if (
+                typeof Game.advanceRecruitingTryoutScoutingReport !== 'function'
+            ) {
+                showModal(
+                    'Tryout Unavailable',
+                    '<p>The scouting evaluation system is unavailable. No session was charged.</p>'
+                );
+                return;
+            }
+
+            if (
+                typeof Game.executeRecruitingTryoutBatch !== 'function' ||
+                typeof Game.advanceRecruitingTryoutScoutingReport !== 'function'
+            ) {
+                showModal(
+                    'Tryout Unavailable',
+                    '<p>The group tryout or scouting evaluation system is unavailable. No session was charged.</p>'
+                );
+                return;
+            }
+
+            const selectedEvaluator = Game.ensureTeamCoachingStaff(
+                currentTeam
+            ).find(
+                coach =>
+                    String(coach?.id) === String(coachId)
+            );
+
+            const selectedPlayers = selectedIds.map(playerId =>
+                currentState.players.find(
+                    player =>
+                        String(player?.id) === String(playerId)
+                )
+            );
+
+            const rosterIds = new Set(
+                Game.getRosterObjects(currentTeam)
+                    .filter(player => player?.id != null)
+                    .map(player => String(player.id))
+            );
+
+            const invalidScoutingCandidate = selectedPlayers.some(
+                player =>
+                    !player ||
+                    !player.attributes ||
+                    player.teamId != null ||
+                    rosterIds.has(String(player.id))
+            );
+
+            if (!selectedEvaluator || invalidScoutingCandidate) {
+                showModal(
+                    'Tryout Unavailable',
+                    '<p>Every attendee must have a valid scouting profile, and the selected coach must still be on your staff. No session was charged.</p>'
+                );
+                return;
+            }
+
+            const result = Game.executeRecruitingTryoutBatch(
+                currentState,
+                currentTeam.id,
+                coachId,
+                selectedIds
+            );
+
+            if (!result?.success) {
+                showModal(
+                    'Group Tryout Failed',
+                    `<p>${escapeHtml(result?.message || 'The group tryout could not be completed.')}</p>`
+                );
+                return;
+            }
+
+            const evaluator = selectedEvaluator;
+
+            const scoutingResults = [];
+
+            for (const attendee of result.participants || []) {
+                const player = currentState.players?.find(
+                    candidate =>
+                        String(candidate?.id) ===
+                        String(attendee.playerId)
+                );
+
+                if (!player || !evaluator) {
+                    scoutingResults.push({
+                        playerName: attendee.playerName || 'Recruit',
+                        levelText: 'Scouting update unavailable'
+                    });
+                    continue;
+                }
+
+                const scoutingResult =
+                    Game.advanceRecruitingTryoutScoutingReport(
+                        currentTeam,
+                        player,
+                        evaluator,
+                        50,
+                        Number(currentState.year),
+                        0,
+                        result.sessionId
+                );
+
+                scoutingResults.push({
+                    playerName: player.name,
+                    levelText: scoutingResult?.success
+                        ? scoutingResult.alreadyFullyScouted
+                            ? 'Already fully scouted'
+                            : scoutingResult.levelGain > 0
+                                ? `Scouting +${scoutingResult.levelGain} level${scoutingResult.levelGain === 1 ? '' : 's'}`
+                                : 'Scouting progress updated'
+                        : 'Scouting report unchanged'
+                });
+            }
+
+            Game.saveGameState?.('backyardFootballGameState');
+
+            UI.renderOffseasonFAScreen(getGameState());
+
+            const attendeeRows = scoutingResults.map(entry => `
+                <div class="flex items-center justify-between gap-3 border-b border-slate-100 py-2">
+                    <span class="font-bold text-slate-800">
+                        ${escapeHtml(entry.playerName)}
+                    </span>
+                    <span class="text-right text-[10px] text-slate-600">
+                        ${escapeHtml(entry.levelText)}
+                    </span>
+                </div>
+            `).join('');
+
+            showModal(
+                'Group Tryout Complete',
+                `
+                    <div class="space-y-3 text-left text-xs">
+                        <p>
+                            ${escapeHtml(result.coachName)} hosted a session with
+                            ${result.participantCount} recruit${result.participantCount === 1 ? '' : 's'}.
+                        </p>
+                        <p class="font-bold text-emerald-800">
+                            ${result.hours} staff hours used for the entire group.
+                        </p>
+                        <div class="rounded border border-slate-200 bg-white px-3">
+                            ${attendeeRows}
+                        </div>
+                    </div>
+                `,
+                null,
+                'Continue'
+            );
+        },
+        'Hold Group Tryout'
     );
 };
 

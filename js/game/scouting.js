@@ -745,9 +745,20 @@ export function advanceTeamScoutingReport(
         scoutingSkillMultiplier *
         scoutingToolkitMultiplier;
 
-    const previousProgress = Number.isFinite(Number(previous?.progressPoints))
-        ? Math.max(0, Number(previous.progressPoints))
-        : 0;
+    const previousLevel = clamp(
+        Math.floor(Number(previous?.level) || 0),
+        0,
+        4
+    );
+
+    const storedProgress = Number(previous?.progressPoints);
+
+    const previousProgress = Math.max(
+        LEVEL_AT[previousLevel],
+        Number.isFinite(storedProgress)
+            ? Math.max(0, storedProgress)
+            : 0
+    );
 
     const progressPoints = Math.min(
         LEVEL_AT[4],
@@ -822,6 +833,210 @@ export function advanceTeamScoutingReport(
         evaluatedYear,
         evaluatedWeek
     });
+}
+
+
+/**
+ * Applies an individual scouting update after a prospect attends
+ * a recruiting tryout.
+ *
+ * A tryout guarantees one scouting-level advance when possible.
+ * A strong evaluator, good performance, and scouting toolkit can
+ * occasionally produce a second level of progress.
+ *
+ * The outcome is deterministic for the same session and prospect.
+ */
+export function advanceRecruitingTryoutScoutingReport(
+    team,
+    player,
+    evaluator,
+    tryoutPerformance = 50,
+    year = null,
+    week = null,
+    sessionId = null
+) {
+    if (
+        !team ||
+        !player?.id ||
+        !player.attributes ||
+        !evaluator
+    ) {
+        return {
+            success: false,
+            message: 'The scouting evaluation could not be completed.'
+        };
+    }
+
+    // Tryouts only evaluate players outside this team's roster.
+    if (
+        String(player.teamId) === String(team.id) ||
+        team.roster?.some(
+            playerId => String(playerId) === String(player.id)
+        )
+    ) {
+        return {
+            success: false,
+            message: 'This player is already on the team\'s roster.'
+        };
+    }
+
+    const previous = getTeamScoutingReport(team, player.id);
+
+    const previousLevel = clamp(
+        Math.floor(Number(previous?.level) || 0),
+        0,
+        4
+    );
+
+    if (previousLevel >= 4) {
+        return {
+            success: true,
+            alreadyFullyScouted: true,
+            previousLevel: 4,
+            level: 4,
+            levelGain: 0,
+            message: 'This prospect is already fully scouted.'
+        };
+    }
+
+    const storedProgress = Number(previous?.progressPoints);
+
+    // Older reports may not have stored progress points.
+    // Their existing scouting level still represents completed progress.
+    const previousProgress = Math.max(
+        LEVEL_AT[previousLevel],
+        Number.isFinite(storedProgress)
+            ? clamp(storedProgress, 0, LEVEL_AT[4])
+            : 0
+    );
+
+    const profile = getEvaluatorProfile(
+        evaluator,
+        team,
+        player
+    );
+
+    const scoutingToolkitLevel = Math.max(
+        0,
+        Math.min(
+            3,
+            Math.floor(
+                Number(team.storeUpgrades?.scoutingToolkitLevel) || 0
+            )
+        )
+    );
+
+    const scoutingToolkitMultiplier =
+        1 + scoutingToolkitLevel * 0.10;
+
+    const scoutingSkillMultiplier = clamp(
+        0.55 + profile.overall / 100,
+        0.55,
+        1.55
+    );
+
+    const productivity =
+        scoutingSkillMultiplier *
+        scoutingToolkitMultiplier;
+
+    const performanceValue = Number(tryoutPerformance);
+
+    const performance = clamp(
+        Number.isFinite(performanceValue)
+            ? performanceValue
+            : 50,
+        0,
+        100
+    );
+
+    // A second level is possible, but never guaranteed.
+    const secondLevelChance = clamp(
+        0.15 +
+        (profile.overall - 50) * 0.004 +
+        (performance - 50) * 0.002 +
+        scoutingToolkitLevel * 0.04,
+        0.05,
+        0.55
+    );
+
+    const seed = [
+        String(team.id),
+        String(player.id),
+        String(year ?? 'year'),
+        String(week ?? 'week'),
+        String(sessionId || 'recruiting-tryout')
+    ].join('|');
+
+    const outcomeRoll = (stableNoise(seed) + 1) / 2;
+
+    const earnsSecondLevel = outcomeRoll < secondLevelChance;
+
+    const targetLevel = Math.min(
+        4,
+        previousLevel + (earnsSecondLevel ? 2 : 1)
+    );
+
+    const targetProgress = LEVEL_AT[targetLevel];
+
+    // Add a tiny safety margin to avoid floating-point rounding
+    // leaving progress just below the next level threshold.
+    const requiredProgress = Math.max(
+        0,
+        targetProgress - previousProgress
+    ) + 0.01;
+
+    const scoutingHours = Math.max(
+        0.01,
+        requiredProgress / productivity
+    );
+
+    const advanced = advanceTeamScoutingReport(
+        team,
+        player,
+        evaluator,
+        scoutingHours,
+        year,
+        week
+    );
+
+    if (!advanced) {
+        return {
+            success: false,
+            message: 'The scouting report could not be updated.'
+        };
+    }
+
+    const updated = getTeamScoutingReport(
+        team,
+        player.id
+    );
+
+    const updatedLevel = Math.max(
+        0,
+        Math.min(4, Number(updated?.level) || 0)
+    );
+
+    if (updatedLevel < targetLevel) {
+        return {
+            success: false,
+            message: 'The scouting report did not reach its expected level.'
+        };
+    }
+
+    return {
+        success: true,
+        previousLevel,
+        level: updatedLevel,
+        levelGain: updatedLevel - previousLevel,
+        scoutingHours,
+        secondLevelChance,
+        earnedSecondLevel: updatedLevel - previousLevel >= 2,
+        report: updated,
+        message:
+            updatedLevel - previousLevel >= 2
+                ? 'The tryout produced an especially useful scouting evaluation.'
+                : 'The tryout improved the scouting report.'
+    };
 }
 
 /**
@@ -2392,7 +2607,7 @@ export function processWeeklyScoutingAssignments(
         result.hoursLimited
     )) {
         recommendations.push(
-            'Review the workload distribution and each coach’s weekly availability.'
+            "Review the workload distribution and each coach's weekly availability."
         );
     }
 
@@ -2401,7 +2616,7 @@ export function processWeeklyScoutingAssignments(
         result.status === 'no_eligible_targets'
     )) {
         recommendations.push(
-            'Review scouting and training focuses or target restrictions where no eligible players were found.'
+            "Review scouting and training focuses or target restrictions where no eligible players were found."
         );
     }
 
@@ -2409,7 +2624,7 @@ export function processWeeklyScoutingAssignments(
         result.status === 'preparation_capacity_reached'
     )) {
         recommendations.push(
-            'Consider moving some preparation hours to another task if the weekly preparation limit has already been reached.'
+            "Consider moving some preparation hours to another task if the weekly preparation limit has already been reached."
         );
     }
 
