@@ -2572,6 +2572,35 @@ function finishOffseasonFAMinigame() {
         return;
     }
 
+    const recruitingProgress =
+        gameState.offseasonState?.recruitingProgress;
+
+    const recruitingSeasonYear =
+        Number(recruitingProgress?.seasonYear);
+
+    const currentSeasonYear =
+        Number(gameState.year);
+
+    const recruitingIsComplete =
+        recruitingProgress?.initialized === true &&
+        recruitingProgress?.completed === true &&
+        Number.isInteger(recruitingSeasonYear) &&
+        recruitingSeasonYear === currentSeasonYear;
+
+    if (!recruitingIsComplete) {
+        UI.showModal(
+            'Recruiting Not Complete',
+            `
+                <p>
+                    The seven-day recruiting period must be completed
+                    before AI roster processing and walk-on invitations
+                    can begin.
+                </p>
+            `
+        );
+        return;
+    }
+
     const offseasonState = gameState.offseasonState;
 
     // Persist the AI roster-processing checkpoint so a return to this
@@ -2595,8 +2624,10 @@ function finishOffseasonFAMinigame() {
         for (const team of gameState.teams || []) {
             if (!team) continue;
 
-            if (!team.isPlayerControlled) {
-                // AI walk-ons fill toward the same 16-player target.
+            if (
+                !team.isPlayerControlled &&
+                team.leagueType === 'main'
+            ) {
                 Game.autoFillTeamWalkOns(team, 16);
             }
 

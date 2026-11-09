@@ -7257,31 +7257,14 @@ export function generateTeamWalkOnInvitations(gameState, teamId) {
         .replace(/[^a-z]/g, '');
 
     if (
-        !Array.isArray(gameState?.teams) ||
-        !Array.isArray(gameState?.players) ||
+        !gameState ||
         normalizedPhase !== 'rosterfinalization' ||
-        !progress ||
-        progress.initialized !== true ||
-        progress.completed !== true ||
-        Number(progress.seasonYear) !== year
+        gameState.offseasonFACompleted === true ||
+        !finalDayResolved
     ) {
         return {
             success: false,
-            message: 'Walk-on invitations are not available yet.',
-            offers: []
-        };
-    }
-
-    const team = gameState.teams.find(
-        candidate =>
-            String(candidate?.id) === String(teamId)
-    );
-
-    if (!team) {
-        return {
-            success: false,
-            message: 'The recruiting team is unavailable.',
-            offers: []
+            message: 'Walk-ons can only be accepted after recruiting is complete, during roster finalization.'
         };
     }
 
@@ -7644,15 +7627,32 @@ export function acceptTeamWalkOnInvitation(gameState, playerId) {
     const state = gameState?.offseasonState;
     const progress = state?.recruitingProgress;
 
-    const normalizedPhase = String(state?.phase || '')
+    const acceptancePhase = String(state?.phase || '')
         .toLowerCase()
         .replace(/[^a-z]/g, '');
 
+    const acceptanceYear = Number(gameState?.year);
+    const acceptanceTotalDays = Number(state?.recruitingDays);
+    const acceptanceCurrentDay = Number(state?.recruitingDay);
+
+    const acceptanceFinalDayResolved =
+        progress?.initialized === true &&
+        progress?.completed === true &&
+        Number(progress?.seasonYear) === acceptanceYear &&
+        Number.isInteger(acceptanceCurrentDay) &&
+        Number.isInteger(acceptanceTotalDays) &&
+        acceptanceCurrentDay >= acceptanceTotalDays &&
+        Array.isArray(progress.resolvedDays) &&
+        progress.resolvedDays.some(
+            resolvedDay =>
+                Number(resolvedDay) === acceptanceCurrentDay
+        );
+
     if (
         !gameState ||
-        normalizedPhase !== 'rosterfinalization' ||
+        acceptancePhase !== 'rosterfinalization' ||
         gameState.offseasonFACompleted === true ||
-        !progress
+        !acceptanceFinalDayResolved
     ) {
         return {
             success: false,
@@ -7687,7 +7687,9 @@ export function acceptTeamWalkOnInvitation(gameState, playerId) {
 
     if (
         !invitation ||
-        Number(invitation.seasonYear) !== Number(gameState.year)
+        Number(invitation.seasonYear) !== acceptanceYear         ||
+        invitation.status !== 'pending' ||
+        !Array.isArray(invitation.offers)
     ) {
         return {
             success: false,
@@ -7723,7 +7725,7 @@ export function acceptTeamWalkOnInvitation(gameState, playerId) {
     );
 
     const rosterSize = getRosterObjects(team).length;
-    const maximumRosterSize = 18;
+    const maximumRosterSize = REGULAR_SEASON_ROSTER_LIMIT;
 
     if (rosterSize >= maximumRosterSize) {
         invitation.status = 'full';
