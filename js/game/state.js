@@ -1768,6 +1768,37 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
             }
         });
 
+        // Rehydrate compacted draft-order team IDs into actual team objects.
+        if (Array.isArray(game.draftOrder)) {
+            game.draftOrder = game.draftOrder
+                .map(entry => {
+                    const id = entry && typeof entry === 'object'
+                        ? entry.id
+                        : entry;
+
+                    return id != null
+                        ? teamById.get(String(id)) || null
+                        : null;
+                })
+                .filter(Boolean);
+        }
+
+        // Rehydrate compacted draft-class player IDs into canonical player objects.
+        if (Array.isArray(game.draftClass)) {
+            game.draftClass = game.draftClass
+                .map(entry => {
+                    const id = entry && typeof entry === 'object'
+                        ? entry.id
+                        : entry;
+
+                    if (id == null) return null;
+
+                    return playerMap.get(String(id)) ||
+                        (typeof entry === 'object' ? entry : null);
+                })
+                .filter(Boolean);
+        }
+
         const playerTeamId = game.playerTeam?.id ?? game.playerTeam;
         game.playerTeam = playerTeamId != null ? (teamById.get(String(playerTeamId)) || null) : null;
 
