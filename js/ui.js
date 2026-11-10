@@ -2783,162 +2783,178 @@ function matchesFreeAgentPositionFilter(team, player, requestedPosition) {
     );
 }
 
+window.app_updatePlayerDbFilter = function () {
+    const gs = getGameState();
+    if (gs) renderFreeAgentsTab(gs);
+};
+
 export function renderFreeAgentsTab(gameState) {
     const container = document.getElementById('free-agents-container');
     if (!container || !gameState) return;
 
+    const userTeam = gameState.playerTeam;
     const posFilter = document.getElementById('fa-filter-pos')?.value || '';
-    const recruitingProgress =
-        gameState.offseasonState?.recruitingProgress;
+    const scopeFilter = document.getElementById('player-db-scope')?.value || 'free_agents';
+    const searchQuery = (document.getElementById('player-db-search')?.value || '').trim().toLowerCase();
 
-    const recruitingRecords = recruitingProgress?.recruits || {};
+    const teamsById = new Map((gameState.teams || []).map(t => [String(t.id), t]));
+    const isOffseasonRecruiting = gameState.offseasonState?.phase === 'recruiting' && !gameState.offseasonState?.completed;
+    const isRegularSeason = Number(gameState.currentWeek) > 0 && gameState.currentWeek <= 9;
 
-    const draftClassIds = new Set(
-        (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
-            .filter(player => player?.id != null)
-            .map(player => String(player.id))
-    );
+    // Check emergency roster shortage criteria (fewer than 8 healthy players)
+    const myRoster = getRosterObjects(userTeam);
+    const healthyCount = myRoster.filter(p => !['departed', 'retired'].includes(p.status?.type) && !(Number(p.status?.duration) > 0)).length;
+    const isEmergencyNeed = isRegularSeason && healthyCount < 8 && (Number(userTeam?.socialProfile?.favorTokens) || 0) > 0;
 
     let pool = (gameState.players || []).filter(p => {
-        if (!p || p.id == null || p.teamId != null) {
-            return false;
-        }
+        if (!p || p.id == null) return false;
+        if (['retired', 'departed'].includes(p.status?.type)) return false;
 
-        const age = Number(p.age);
+        // Search text
+        if (searchQuery && !p.name.toLowerCase().includes(searchQuery)) return false;
 
-        if (!Number.isFinite(age) || age < 12 || age > 18) {
-            return false;
-        }
+        // Scope filter
+        const team = p.teamId ? teamsById.get(String(p.teamId)) : null;
+        if (scopeFilter === 'free_agents' && p.teamId != null) return false;
+        if (scopeFilter === 'my_team' && p.teamId !== userTeam?.id) return false;
+        if (scopeFilter === 'tier1' && team?.tier !== 1) return false;
+        if (scopeFilter === 'tier2' && team?.tier !== 2) return false;
+        if (scopeFilter === 'youth' && team?.leagueType !== 'youth') return false;
 
-        const statusType = String(p.status?.type || '').toLowerCase();
-        const lifecycleStatus = String(
-            p.lifecycleStatus || p.lifecycle?.status || ''
-        ).toLowerCase();
-
-        if (
-            ['retired', 'departed', 'temporary'].includes(statusType) ||
-            ['retired', 'departed', 'temporary'].includes(lifecycleStatus)
-        ) {
-            return false;
-        }
-
-        if (
-            Number(p.status?.duration) > 0 ||
-            Number(p.injury?.duration || p.injuryDuration || 0) > 0
-        ) {
-            return false;
-        }
-
-        // Keep draft prospects out of the recruiting pool.
-        if (draftClassIds.has(String(p.id))) {
-            return false;
-        }
-
-        const record = recruitingRecords[String(p.id)];
-
-        // Only display players eligible for this recruiting period.
-        return (
-            recruitingProgress?.initialized === true &&
-            record?.status === 'available' &&
-            record?.committedTeamId == null
-        );
+        return true;
     });
 
     if (posFilter) {
-        pool = pool.filter(p =>
-            matchesFreeAgentPositionFilter(
-                gameState.playerTeam,
-                p,
-                posFilter
-            )
-        );
+        pool = pool.filter(p => matchesFreeAgentPositionFilter(userTeam, p, posFilter));
     }
 
-    pool.sort((a, b) =>
-        compareFreeAgentsByScouting(
-            a,
-            b,
-            gameState.playerTeam
-        )
-    );
+    // Sort by known team fit or scouting level
+    pool.sort((a, b) => compareFreeAgentsByScouting(a, b, userTeam));
+
+    // Cap at top 75 records to preserve DOM performance
+    const totalCount = pool.length;
+    pool = pool.slice(0, 75);
 
     if (pool.length === 0) {
-        container.innerHTML = `<p class="p-8 text-center text-slate-400 italic text-xs">No free agents currently available matching filters.</p>`;
+        container.innerHTML = `
+            <div class="p-12 text-center text-slate-400 font-sans">
+                <span class="text-3xl block mb-2">🔍</span>
+                <p class="font-bold text-sm text-slate-700">No players match the current filters.</p>
+                <p class="text-xs text-slate-500 mt-1">Try broadening your search query or selecting a different team scope.</p>
+            </div>`;
         return;
     }
 
     container.innerHTML = `
+        ${isEmergencyNeed ? `
+            <div class="bg-rose-50 border-b border-rose-200 p-2.5 px-4 flex justify-between items-center text-xs text-rose-900 shrink-0">
+                <div class="flex items-center gap-2">
+                    <span class="text-base">🚨</span>
+                    <span><b>Emergency Short Roster:</b> You have only <b>${healthyCount}</b> healthy players (8 required). Call in an available connected free agent using 1 Favor Token.</span>
+                </div>
+            </div>
+        ` : ''}
+
+        <div class="bg-slate-50 px-3 py-1.5 border-b border-slate-200 text-[10px] font-mono text-slate-500 flex justify-between">
+            <span>Showing top ${pool.length} of ${totalCount} matching players</span>
+            <span>External players display imperfect scouting estimates</span>
+        </div>
+
         <table class="min-w-full text-xs font-mono">
             <thead class="bg-slate-900 text-white uppercase text-[10px] select-none sticky top-0 z-10">
                 <tr>
-                    <th class="py-2.5 px-3 text-left font-sans">Free Agent</th>
+                    <th class="py-2.5 px-3 text-left font-sans">Player</th>
+                    <th class="py-2 px-2 text-center">Team / Status</th>
                     <th class="py-2 px-2 text-center">Pos</th>
                     <th class="py-2 px-2 text-center">Age</th>
-                    <th class="py-2 px-3 text-left">Scouting Report</th>
-                    <th class="py-2 px-2 text-center">OFF Estimate</th>
-                    <th class="py-2 px-2 text-center">DEF Estimate</th>
+                    <th class="py-2 px-3 text-left font-sans">Scouting Report</th>
+                    <th class="py-2 px-2 text-center">OFF Fit</th>
+                    <th class="py-2 px-2 text-center">DEF Fit</th>
                     <th class="py-2 px-3 text-right font-sans">Action</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
                 ${pool.map(p => {
-                    const pos = getFreeAgentDisplayPosition(
-                        gameState.playerTeam,
-                        p
-                    );
-                    const scouting = getFreeAgentScoutingView(
-                        gameState.playerTeam,
-                        p
-                    );
+                    const isMyPlayer = p.teamId === userTeam?.id;
+                    const assignedTeam = p.teamId ? teamsById.get(String(p.teamId)) : null;
+                    const pos = isMyPlayer ? (p.pos || estimateBestPosition(p)) : getFreeAgentDisplayPosition(userTeam, p);
+                    const scouting = getFreeAgentScoutingView(userTeam, p);
 
-                    const scoutingClass = scouting.level >= 3
-                        ? 'text-emerald-700'
-                        : scouting.level > 0
-                            ? 'text-blue-700'
-                            : 'text-amber-700';
+                    let offFitDisplay = '—';
+                    let defFitDisplay = '—';
 
-                    const roleLabel = scouting.projectedRole
-                        ? `<span class="block text-[10px] text-slate-500 mt-0.5">${scouting.projectedRole}</span>`
-                        : '';
+                    if (isMyPlayer) {
+                        const fits = getBestTwoWayFits(p);
+                        offFitDisplay = `<span class="font-bold text-emerald-700">${fits.offense.position} ${fits.offense.ovr}</span>`;
+                        defFitDisplay = `<span class="font-bold text-blue-700">${fits.defense.position} ${fits.defense.ovr}</span>`;
+                    } else {
+                        offFitDisplay = formatFreeAgentScoutingFit(scouting.offense);
+                        defFitDisplay = formatFreeAgentScoutingFit(scouting.defense);
+                    }
+
+                    const scoutingClass = isMyPlayer
+                        ? 'text-emerald-700 font-black'
+                        : scouting.level >= 3
+                            ? 'text-emerald-700'
+                            : scouting.level > 0
+                                ? 'text-blue-700'
+                                : 'text-slate-400';
+
+                    const scoutingLabel = isMyPlayer
+                        ? 'Rostered Player (Full Intel)'
+                        : scouting.status;
+
+                    // Action buttons by phase and context
+                    let actionButton = `
+                        <button class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider transition" onclick="app.openPlayerCard('${p.id}')">
+                            Dossier 📋
+                        </button>
+                    `;
+
+                    if (!p.teamId && isOffseasonRecruiting) {
+                        actionButton = `
+                            <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider shadow-sm transition" onclick="app.openBidModal('${p.id}')">
+                                Recruit 🤝
+                            </button>
+                        `;
+                    } else if (!p.teamId && isEmergencyNeed) {
+                        actionButton = `
+                            <button class="bg-rose-700 hover:bg-rose-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider shadow-sm transition animate-pulse" onclick="window.app_callEmergencyFriend('${p.id}')">
+                                Call Up 📞
+                            </button>
+                        `;
+                    }
+
+                    const teamBadge = isMyPlayer
+                        ? `<span class="bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded text-[9px]">YOUR ROSTER</span>`
+                        : assignedTeam
+                            ? `<span class="bg-slate-100 text-slate-700 border border-slate-200 font-semibold px-1.5 py-0.5 rounded text-[9px] truncate max-w-[110px] inline-block">${assignedTeam.name}</span>`
+                            : `<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-1.5 py-0.5 rounded text-[9px]">FREE AGENT</span>`;
 
                     return `
                     <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
                         <td class="py-2 px-3 font-sans font-semibold text-slate-900">
-                            ${p.name}
-                            <span class="block text-[10px] text-slate-400">Unsigned player</span>
+                            <span>${p.name}</span>
+                            ${p.status?.duration > 0 ? `<span class="ml-1 text-[9px] text-rose-600 font-bold">🩹 ${p.status.description}</span>` : ''}
                         </td>
+                        <td class="text-center py-2 px-2 font-sans">${teamBadge}</td>
                         <td class="text-center py-2 px-2">
                             <span class="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span>
                         </td>
                         <td class="text-center py-2 px-2 text-slate-600">${p.age}</td>
-                        <td class="py-2 px-3 font-sans min-w-[150px]">
-                            <span class="font-bold ${scoutingClass}">
-                                ${scouting.status}
-                            </span>
-
-                            <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1.5">
-                                <div
-                                    class="h-full bg-indigo-500 rounded-full"
-                                    style="width: ${scouting.progressToNextPercent}%"
-                                ></div>
-                            </div>
-
-                            <span class="block text-[9px] text-slate-500 mt-1">
-                                ${scouting.progressLabel}
-                            </span>
-
-                            ${roleLabel}
+                        <td class="py-2 px-3 font-sans min-w-[140px]">
+                            <span class="font-bold ${scoutingClass}">${scoutingLabel}</span>
+                            ${!isMyPlayer ? `
+                                <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1">
+                                    <div class="h-full bg-indigo-500 rounded-full" style="width: ${scouting.progressToNextPercent}%"></div>
+                                </div>
+                                <span class="block text-[9px] text-slate-400 mt-0.5">${scouting.progressLabel}</span>
+                            ` : ''}
                         </td>
-                        <td class="text-center py-2 px-2 font-mono text-slate-700">
-                            ${formatFreeAgentScoutingFit(scouting.offense)}
-                        </td>
-                        <td class="text-center py-2 px-2 font-mono text-slate-700">
-                            ${formatFreeAgentScoutingFit(scouting.defense)}
-                        </td>
+                        <td class="text-center py-2 px-2 font-mono text-slate-700">${offFitDisplay}</td>
+                        <td class="text-center py-2 px-2 font-mono text-slate-700">${defFitDisplay}</td>
                         <td class="text-right py-2 px-3 font-sans" onclick="event.stopPropagation()">
-                            <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider shadow-sm transition" onclick="app.openBidModal('${p.id}')">
-                                Pitch Contract 🤝
-                            </button>
+                            ${actionButton}
                         </td>
                     </tr>`;
                 }).join('')}
@@ -5078,10 +5094,10 @@ export function renderOffseasonFAPool(gameState) {
                 onclick="window.app_setRecruitingTab('prospects')"
                 class="rounded-md px-3 py-2 text-xs font-bold ${
                     recruitingActiveTab === 'prospects'
-                        ? 'bg-slate-900 text-white'
+                        ? 'bg-slate-900 text-white shadow-sm'
                         : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                 }">
-                Prospects
+                Neighborhood Prospects
                 <span class="ml-1 opacity-70">${pool.length}</span>
             </button>
 
@@ -5092,7 +5108,7 @@ export function renderOffseasonFAPool(gameState) {
                 onclick="window.app_setRecruitingTab('list')"
                 class="rounded-md px-3 py-2 text-xs font-bold ${
                     recruitingActiveTab === 'list'
-                        ? 'bg-slate-900 text-white'
+                        ? 'bg-slate-900 text-white shadow-sm'
                         : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                 }">
                 My Recruiting List
@@ -5108,7 +5124,7 @@ export function renderOffseasonFAPool(gameState) {
                 onclick="window.app_setRecruitingTab('battles')"
                 class="rounded-md px-3 py-2 text-xs font-bold ${
                     recruitingActiveTab === 'battles'
-                        ? 'bg-slate-900 text-white'
+                        ? 'bg-slate-900 text-white shadow-sm'
                         : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                 }">
                 Battle Board
@@ -5121,6 +5137,51 @@ export function renderOffseasonFAPool(gameState) {
         <div
             id="fa-recruiting-prospects-panel"
             class="${recruitingActiveTab === 'prospects' ? '' : 'hidden'}">
+
+            <!-- Contextual Filters Toolbar (Only visible in Prospects tab) -->
+            <div class="mb-3 p-2.5 rounded-lg border border-slate-200 bg-slate-50 flex flex-wrap justify-between items-center gap-2">
+                <div class="flex items-center gap-2">
+                    <input
+                        type="text"
+                        id="fa-minigame-search"
+                        placeholder="Search prospects..."
+                        value="${quickEscapeHtml(searchTerm)}"
+                        class="w-40 sm:w-52 p-1.5 border border-slate-300 rounded text-xs bg-white outline-none focus:border-emerald-500"
+                        oninput="app.renderFAPool()">
+
+                    <button
+                        type="button"
+                        class="px-2 py-1.5 border border-slate-300 rounded text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-100"
+                        onclick="
+                            document.getElementById('fa-minigame-search').value = '';
+                            window.app_setRecruitingPositionFilter('');
+                        ">
+                        Clear
+                    </button>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <span id="fa-minigame-result-count" class="text-[10px] font-bold text-slate-500 whitespace-nowrap">
+                        ${pool.length} matching prospect${pool.length === 1 ? '' : 's'}
+                    </span>
+
+                    <input type="hidden" id="fa-minigame-filter-pos" value="${quickEscapeHtml(filterPos)}">
+                    <div
+                        class="flex max-w-full flex-nowrap gap-0.5 overflow-x-auto rounded border border-slate-300 bg-white p-0.5 hide-scrollbar"
+                        role="group"
+                        aria-label="Filter prospects by position">
+                        <button type="button" data-fa-position="" aria-pressed="${filterPos === ''}" onclick="window.app_setRecruitingPositionFilter('')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${filterPos === '' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">ALL</button>
+                        <button type="button" data-fa-position="QB" aria-pressed="${filterPos === 'QB'}" onclick="window.app_setRecruitingPositionFilter('QB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${filterPos === 'QB' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">QB</button>
+                        <button type="button" data-fa-position="RB" aria-pressed="${filterPos === 'RB'}" onclick="window.app_setRecruitingPositionFilter('RB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${filterPos === 'RB' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">RB</button>
+                        <button type="button" data-fa-position="WR" aria-pressed="${filterPos === 'WR'}" onclick="window.app_setRecruitingPositionFilter('WR')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${filterPos === 'WR' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">WR</button>
+                        <button type="button" data-fa-position="TE" aria-pressed="${filterPos === 'TE'}" onclick="window.app_setRecruitingPositionFilter('TE')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${filterPos === 'TE' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">TE</button>
+                        <button type="button" data-fa-position="OL" aria-pressed="${filterPos === 'OL'}" onclick="window.app_setRecruitingPositionFilter('OL')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${filterPos === 'OL' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">OL</button>
+                        <button type="button" data-fa-position="DL" aria-pressed="${filterPos === 'DL'}" onclick="window.app_setRecruitingPositionFilter('DL')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${filterPos === 'DL' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">DL</button>
+                        <button type="button" data-fa-position="LB" aria-pressed="${filterPos === 'LB'}" onclick="window.app_setRecruitingPositionFilter('LB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${filterPos === 'LB' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">LB</button>
+                        <button type="button" data-fa-position="DB" aria-pressed="${filterPos === 'DB'}" onclick="window.app_setRecruitingPositionFilter('DB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black ${filterPos === 'DB' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">DB</button>
+                    </div>
+                </div>
+            </div>
 
             <div class="mb-3 rounded-lg border border-slate-200 bg-blue-50/60 px-3 py-2">
                 <div class="flex flex-wrap items-center gap-2">
@@ -17666,12 +17727,13 @@ function renderLiveStrategyControls() {
     if (!activeLiveGame || !team) return;
 
 
-        if (!activeLiveGame.liveGmAdjustments) {
+    if (!activeLiveGame.liveGmAdjustments) {
         activeLiveGame.liveGmAdjustments = team.liveGmAdjustments || {
             offenseFocus: 'balanced',
             defenseFocus: 'base',
             fourthDown: 'coach',
-            tempo: 'normal'
+            tempo: 'normal',
+            autoSubTendency: 'balanced'
         };
     }
     const adjustments = activeLiveGame.liveGmAdjustments;
@@ -17716,6 +17778,12 @@ function renderLiveStrategyControls() {
                 btn.className = 'gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all border-cyan-500 bg-cyan-950/60 text-cyan-200 font-bold ring-1 ring-cyan-500/50 shadow-sm';
             } else {
                 btn.className = 'gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white font-bold';
+            }
+        } else if (type === 'autoSubTendency') {
+            if (isSelected) {
+                btn.className = 'gm-tweak-btn text-center px-1.5 py-1.5 rounded border text-[9px] transition-all border-purple-500 bg-purple-950/60 text-purple-200 font-bold ring-1 ring-purple-500/50 shadow-sm';
+            } else {
+                btn.className = 'gm-tweak-btn text-center px-1.5 py-1.5 rounded border text-[9px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white font-bold';
             }
         }
     });
@@ -17775,16 +17843,17 @@ function renderLiveStrategyControls() {
     }
 }
 
-window.app_setGmLiveTweak = function(category, value) {
-    if (!activeLiveGame) return;
-    if (!activeLiveGame.liveGmAdjustments) {
-        activeLiveGame.liveGmAdjustments = {
-            offenseFocus: 'balanced',
-            defenseFocus: 'base',
-            fourthDown: 'coach',
-            tempo: 'normal'
-        };
-    }
+    window.app_setGmLiveTweak = function(category, value) {
+        if (!activeLiveGame) return;
+        if (!activeLiveGame.liveGmAdjustments) {
+            activeLiveGame.liveGmAdjustments = {
+                offenseFocus: 'balanced',
+                defenseFocus: 'base',
+                fourthDown: 'coach',
+                tempo: 'normal',
+                autoSubTendency: 'balanced'
+            };
+        }
     activeLiveGame.liveGmAdjustments[category] = value;
 
     const gameState = getGameState();
@@ -17918,29 +17987,45 @@ function runLiveGameStep() {
     }
 }
 
-/*function getPlayerLastNameForStats(player) {
-    if (typeof player?.lastName === 'string' && player.lastName.trim()) {
-        return player.lastName.trim();
+// Attach Sub UI Functions to the Global Scope for Inline Handlers
+window.app_toggleLiveSubDrawer = function(playerId) {
+    const drawer = document.getElementById(`sub-drawer-${playerId}`);
+    if (drawer) {
+        drawer.classList.toggle('hidden');
     }
+};
 
-    const fullName = typeof player?.name === 'string'
-        ? player.name.trim()
-        : '';
-
-    if (!fullName) return 'Player';
-
-    const nameParts = fullName.split(/\s+/);
-    return nameParts[nameParts.length - 1] || 'Player';
-}*/
+window.app_submitLiveSub = function(outId, inId) {
+    const gs = Game.getGameState();
+    const teamId = gs?.playerTeam?.id;
+    if (!teamId || !activeLiveGame) return;
+    
+    Game.substitutePlayers(teamId, outId, inId, activeLiveGame.gameLog);
+    
+    // Close the drawer immediately
+    const drawer = document.getElementById(`sub-drawer-${outId}`);
+    if (drawer) drawer.classList.add('hidden');
+    
+    // Force a re-render to reflect the immediate UI change
+    if (activeLiveGame.visualizationFrames?.length > 0) {
+        const lastFrame = activeLiveGame.visualizationFrames[activeLiveGame.visualizationFrames.length - 1];
+        renderLiveFieldLineup(lastFrame, gs);
+    }
+};
 
 export function renderLiveFieldLineup(frameData, gameState) {
     const container = document.getElementById('sim-field-players');
     if (!container || !frameData?.players || !gameState?.playerTeam) return;
 
     const myTeamId = gameState.playerTeam.id;
+    const team = gameState.playerTeam;
     const myPlayers = frameData.players.filter(p => p.teamId === myTeamId);
 
     if (myPlayers.length === 0) return;
+    
+    const fullRoster = Game.getGameDayRosterObjects(team);
+    const activeOffense = new Set(Object.values(team.depthChart?.offense || {}).filter(Boolean));
+    const activeDefense = new Set(Object.values(team.depthChart?.defense || {}).filter(Boolean));
 
     let html = `
         <div class="p-2.5 bg-slate-900 border-b border-slate-800 text-[10px] uppercase font-bold text-slate-400 flex justify-between items-center">
@@ -17954,20 +18039,41 @@ export function renderLiveFieldLineup(frameData, gameState) {
 
     myPlayers.forEach(p => {
         const fullPlayer = getPlayer(p.id);
-        const energy = Math.max(0, Math.round(100 - (fullPlayer?.fatigue || 0)));
+        if (!fullPlayer) return;
+        
+        const energy = Math.max(0, Math.round(100 - (fullPlayer.fatigue || 0)));
         const energyColor = energy >= 75 ? 'bg-emerald-500' : (energy >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
         let actionText = p.action || 'idle';
         actionText = actionText.replace(/_/g, ' ');
+        const isLocked = (fullPlayer.manualSubLock || 0) > 0;
+        
+        // Populate Eligible Bench Drawer Candidates
+        const drawerCandidates = fullRoster.filter(c => 
+            c.id !== fullPlayer.id && 
+            !c.isResting && 
+            !(c.status?.duration > 0) &&
+            (p.isOffense ? !activeOffense.has(c.id) : !activeDefense.has(c.id))
+        ).map(c => {
+            return {
+                player: c,
+                suit: calculateSlotSuitability(c, p.slot, p.isOffense ? 'offense' : 'defense', team),
+                energy: Math.max(0, Math.round(100 - (c.fatigue || 0)))
+            };
+        }).filter(c => c.suit > 25).sort((a,b) => b.suit - a.suit).slice(0, 4);
 
         html += `
-            <div class="p-2 hover:bg-slate-800/40 transition-colors flex items-center justify-between text-xs">
+            <!-- Active Player Row (Click to toggle drawer) -->
+            <div class="p-2 hover:bg-slate-800/40 transition-colors flex items-center justify-between text-xs cursor-pointer select-none" onclick="window.app_toggleLiveSubDrawer('${fullPlayer.id}')">
                 <div class="flex items-center gap-2 truncate pr-2">
                     <span class="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${p.isOffense ? 'bg-blue-950 text-blue-300 border border-blue-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">
                         ${p.slot || 'P'}
                     </span>
                     <div class="flex flex-col truncate">
-                        <span class="font-bold text-slate-200 truncate">${getPlayerLastNameForStats(fullPlayer)}</span>
+                        <span class="font-bold text-slate-200 truncate flex items-center gap-1">
+                            ${getPlayerLastNameForStats(fullPlayer)}
+                            ${isLocked ? '<span class="text-[9px] text-amber-500" title="Manual Substitution Lock Active">🔒</span>' : ''}
+                        </span>
                         <span class="text-[9px] text-slate-400 capitalize truncate">${actionText}</span>
                     </div>
                 </div>
@@ -17976,7 +18082,32 @@ export function renderLiveFieldLineup(frameData, gameState) {
                         <div class="${energyColor} h-full" style="width: ${energy}%"></div>
                     </div>
                     <span class="text-[9px] font-mono text-slate-400 w-6 text-right">${energy}%</span>
+                    <span class="text-slate-600 ml-1">▾</span>
                 </div>
+            </div>
+            
+            <!-- Hidden Bench Drawer -->
+            <div id="sub-drawer-${fullPlayer.id}" class="hidden bg-slate-950/80 border-t border-b border-slate-800/50 px-2 py-1.5 space-y-1">
+                <div class="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 flex justify-between">
+                    <span>Eligible Replacements</span>
+                    <span>Energy / Suitability</span>
+                </div>
+                ${drawerCandidates.length > 0 ? drawerCandidates.map(c => `
+                    <div class="flex justify-between items-center bg-slate-900 border border-slate-700/50 p-1.5 rounded-sm hover:border-slate-500 transition-colors">
+                        <div class="flex items-center gap-1.5 truncate">
+                            <span class="font-bold text-[10px] text-slate-300 truncate w-20">${getPlayerLastNameForStats(c.player)}</span>
+                            <span class="text-[9px] text-slate-400 font-mono">${c.energy}%</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="flex gap-0.5">
+                                ${Array(5).fill(0).map((_, i) => `<div class="w-1.5 h-1.5 rounded-sm ${i < Math.round(c.suit/20) ? 'bg-emerald-500' : 'bg-slate-700'}"></div>`).join('')}
+                            </div>
+                            <button class="bg-slate-700 hover:bg-amber-600 text-white font-bold px-2 py-0.5 rounded-sm text-[9px] uppercase tracking-wider transition-colors shadow-sm" onclick="app_submitLiveSub('${fullPlayer.id}', '${c.player.id}')">
+                                Sub In
+                            </button>
+                        </div>
+                    </div>
+                `).join('') : '<div class="text-[10px] text-slate-500 italic p-1">No rested bench players available.</div>'}
             </div>
         `;
     });
@@ -18571,4 +18702,124 @@ export function setSimSpeed(speedMultiplier) {
 
     liveGameSpeed = getPlaybackIntervalMs(multiplier);
     isPaused = false;
+}
+
+export function showWeeklyStaffReport(report, gameState, onContinue = null) {
+    if (!report) {
+        if (onContinue) onContinue();
+        return;
+    }
+
+    const escapeHtml = str => String(str ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+
+    const modalHtml = `
+        <div class="space-y-4 text-left text-xs font-sans max-h-[75vh] overflow-y-auto pr-1">
+            
+            <!-- Banner Header -->
+            <div class="bg-slate-900 text-white p-3.5 rounded border border-slate-700 flex justify-between items-center shadow-sm">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-base">👔</span>
+                        <h4 class="font-black text-sm uppercase tracking-wide text-amber-400">
+                            Front Office Executive Review
+                        </h4>
+                    </div>
+                    <p class="text-[11px] text-slate-300 mt-0.5">
+                        ${escapeHtml(report.teamName)} · Season ${report.year}, Week ${report.week} Debrief
+                    </p>
+                </div>
+                ${report.outcomes.matchResult ? `
+                    <div class="text-right">
+                        <span class="text-[9px] uppercase tracking-wider block font-bold ${report.outcomes.matchResult.won ? 'text-emerald-400' : 'text-rose-400'}">
+                            ${report.outcomes.matchResult.won ? 'VICTORY' : 'DEFEAT'}
+                        </span>
+                        <span class="font-mono text-sm font-black">
+                            ${report.outcomes.matchResult.teamScore} - ${report.outcomes.matchResult.oppScore}
+                        </span>
+                    </div>
+                ` : ''}
+            </div>
+
+            <!-- 1. NEEDS ATTENTION (Urgent items first) -->
+            ${report.attentionItems.length > 0 ? `
+                <div class="rounded border border-rose-200 bg-rose-50/70 p-3">
+                    <div class="flex items-center gap-1.5 mb-2 border-b border-rose-200 pb-1">
+                        <span class="text-xs font-black uppercase text-rose-800">⚠️ Needs Attention (${report.attentionItems.length})</span>
+                    </div>
+                    <div class="space-y-1.5">
+                        ${report.attentionItems.map(item => `
+                            <div class="bg-white border border-rose-200 p-2 rounded flex items-start gap-2 text-[11px]">
+                                <span class="text-sm shrink-0">${item.icon}</span>
+                                <div class="min-w-0">
+                                    <span class="font-bold text-slate-900">${escapeHtml(item.title)}</span>
+                                    <p class="text-slate-600 mt-0.5">${escapeHtml(item.detail)}</p>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : `
+                <div class="rounded border border-emerald-200 bg-emerald-50/50 p-2.5 text-center text-emerald-900 font-bold text-[11px]">
+                    ✓ No urgent roster, health, or financial crises this week.
+                </div>
+            `}
+
+            <!-- 2. EVIDENCE-BASED TACTICAL RECOMMENDATIONS -->
+            <div class="rounded border border-slate-200 bg-white p-3 shadow-sm">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-1.5 mb-2">
+                    <h5 class="font-black text-[10px] uppercase tracking-wider text-slate-700 flex items-center gap-1">
+                        <span>💡</span> Staff Tactical & Practice Recommendations
+                    </h5>
+                    <span class="text-[9px] text-slate-400">Based on observed opponent snaps & mastery</span>
+                </div>
+                <div class="space-y-2">
+                    ${report.recommendations.length > 0 ? report.recommendations.map(rec => `
+                        <div class="bg-slate-50 border border-slate-200 p-2.5 rounded">
+                            <span class="font-bold text-slate-900 block text-[11px]">${escapeHtml(rec.title)}</span>
+                            <p class="text-slate-600 text-[10px] mt-0.5 leading-relaxed">${escapeHtml(rec.detail)}</p>
+                        </div>
+                    `).join('') : '<p class="text-slate-400 italic text-[11px] py-1">Staff has no specific strategic deviations to recommend.</p>'}
+                </div>
+            </div>
+
+            <!-- 3. PERFORMANCE & BREAKTHROUGHS -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <!-- Coach Gains -->
+                <div class="rounded border border-slate-200 bg-white p-3 shadow-sm">
+                    <h5 class="font-black text-[10px] uppercase tracking-wider text-slate-700 border-b border-slate-100 pb-1 mb-2">
+                        👔 Staff Skill Progression
+                    </h5>
+                    ${report.outcomes.coachImprovements.length > 0 ? `
+                        <div class="space-y-1">
+                            ${report.outcomes.coachImprovements.map(c => `
+                                <div class="text-[10px] bg-slate-50 p-1.5 rounded flex justify-between items-center">
+                                    <span class="font-semibold text-slate-800">${escapeHtml(c.coachName)}</span>
+                                    <span class="font-bold text-blue-700">+1 ${escapeHtml(c.skill)} (${c.newRating})</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<p class="text-slate-400 italic text-[10px]">No staff rating breakthroughs this week.</p>'}
+                </div>
+
+                <!-- Handled Automatically -->
+                <div class="rounded border border-slate-200 bg-white p-3 shadow-sm">
+                    <h5 class="font-black text-[10px] uppercase tracking-wider text-slate-700 border-b border-slate-100 pb-1 mb-2">
+                        🟢 Handled by Staff (Automated)
+                    </h5>
+                    <div class="space-y-1.5">
+                        ${report.automatedWork.map(w => `
+                            <div class="text-[10px] text-slate-600">
+                                <span class="font-bold text-slate-800">${w.icon} ${escapeHtml(w.title)}:</span> ${escapeHtml(w.detail)}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    `;
+
+    showModal("Weekly Management Report", modalHtml, onContinue, "Acknowledge & Continue", null, "Close");
 }

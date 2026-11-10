@@ -529,6 +529,9 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = nul
 
     if (swappedCount > 0) {
         inPlayer.isResting = false;
+        // Lock the player into the lineup for ~4 plays to prevent immediate AI reversal
+        inPlayer.manualSubLock = 4;
+        
         const inEnergy = Math.max(0, Math.round(100 - (inPlayer.fatigue || 0)));
         const outEnergy = Math.max(0, Math.round(100 - (outPlayer.fatigue || 0)));
         const logMsg = `🔄 SUB (${lastSlot}): ${inPlayer.name} (${inEnergy}% E) enters for ${outPlayer.name} (${outEnergy}% E).`;
@@ -546,17 +549,20 @@ export function autoMakeSubstitutions(team, options = {}, gameLog = null) {
     const coach = team.staff?.coach || team.coach;
     const personality = coach?.biases?.personality?.name;
 
-    // Coach personality shapes in-game rotation patience
-    let fatigueLimit = options.thresholdFatigue || 75;
-    let recoverLimit = 40;
+    // 1. Unified Energy-Based Policy (Converted to internal fatigue scale: fatigue = 100 - energy)
+    const tendency = options.autoSubTendency || 'balanced';
+    
+    // Ironman: Sub below 20% energy (Fatigue Limit: 80)
+    // Balanced: Sub below 40% energy (Fatigue Limit: 60)
+    // Frequent: Sub below 60% energy (Fatigue Limit: 40)
+    let baseFatigueLimit = 60; 
+    if (tendency === 'ironman') baseFatigueLimit = 80;
+    else if (tendency === 'frequent') baseFatigueLimit = 40;
 
-    if (personality === 'Old-School Disciplinarian') {
-        fatigueLimit = 85; // Expects kids to push through burning lungs
-        recoverLimit = 50;
-    } else if (personality === "Players' Coach") {
-        fatigueLimit = 65; // Rests starters early so every kid gets on the field
-        recoverLimit = 35;
-    }
+    // 2. Soft Coach Overrides (Bounded to +/- 5 influence, never breaks GM setting)
+    let coachOffset = 0;
+    if (personality === 'Old-School Disciplinarian') coachOffset = 5; // Pushes kids slightly harder
+    else if (personality === "Players' Coach") coachOffset = -5; // Subs slightly earlier
 
     const fullRoster = getGameDayRosterObjects(team);
     let subsDone = 0;
@@ -572,17 +578,44 @@ export function autoMakeSubstitutions(team, options = {}, gameLog = null) {
             const currentId = chart[slot];
             const currentPlayer = fullRoster.find(p => p.id === currentId);
 
+            // 3. Position-Group Rotation Philosophy
+            let posGroupOffset = 0;
+            let basePos = slot.replace(/\d/g, '');
+            if (['OT', 'OG', 'C'].includes(basePos)) basePos = 'OL';
+            if (['CB', 'S', 'FS', 'SS'].includes(basePos)) basePos = 'DB';
+            if (['DE', 'DT', 'NT'].includes(basePos)) basePos = 'DL';
+            if (basePos === 'FB') basePos = 'RB';
+
+            if (basePos === 'QB' || basePos === 'OL') {
+                // Strong continuity protection (sub 15% later)
+                posGroupOffset = 15; 
+            } else if (basePos === 'RB' || basePos === 'DL') {
+                // High rotation dependency (sub 10% earlier)
+                posGroupOffset = -10; 
+            }
+
+            // Final dynamically calculated limit for this specific slot
+            let fatigueLimit = baseFatigueLimit + coachOffset + posGroupOffset;
+            fatigueLimit = Math.max(15, Math.min(95, fatigueLimit)); // Sane bounds
+
+            // Hysteresis: Require a ~25 energy point recovery buffer before returning
+            let recoverLimit = Math.max(5, fatigueLimit - 25);
+
             if (currentPlayer) {
                 if ((currentPlayer.fatigue || 0) >= fatigueLimit) currentPlayer.isResting = true;
                 if ((currentPlayer.fatigue || 0) <= recoverLimit) currentPlayer.isResting = false;
             }
 
             const isTwoWayFatigued = side === 'defense' && (currentPlayer?.fatigue || 0) > 55;
-            const needsSub = !currentPlayer ||
+            const isManualLocked = (currentPlayer?.manualSubLock || 0) > 0;
+            const isInjured = currentPlayer?.status?.duration > 0;
+            
+            // 4. Manual Substitution Lock Safeguard (Injury bypasses the lock)
+            const needsSub = !currentPlayer || isInjured || (!isManualLocked && (
                 currentPlayer.isResting ||
                 (currentPlayer.fatigue || 0) >= fatigueLimit ||
-                isTwoWayFatigued ||
-                currentPlayer.status?.duration > 0;
+                isTwoWayFatigued
+            ));
 
             if (!needsSub) continue;
 

@@ -6586,9 +6586,20 @@ export function processAiRecruitingDay(gameState) {
 
         if (
             ['retired', 'departed', 'temporary', 'injured'].includes(statusType) ||
-            ['retired', 'departed', 'temporary', 'injured'].includes(lifecycleStatus) ||
-            lifecycle === 'draft_eligible' ||
-            lifecycleStatus === 'draft_eligible' ||
+            [
+                'retired',
+                'departed',
+                'temporary',
+                'injured',
+                'draft_eligible'
+            ].includes(lifecycleStatus) ||
+            [
+                'retired',
+                'departed',
+                'temporary',
+                'injured',
+                'draft_eligible'
+            ].includes(lifecycle) ||
             draftClassIds.has(String(player.id)) ||
             (Number(player.status?.duration) > 0) ||
             (Number(player.injury?.duration || player.injuryDuration || 0) > 0) ||
@@ -6602,8 +6613,13 @@ export function processAiRecruitingDay(gameState) {
         return true;
     };
 
-    const getAiRecruitingRosterLimit = () =>
-        getCurrentRosterLimit(gameState);
+    const getAiRecruitingRosterLimit = () => {
+        const isSummerRosterWindow =
+            gameState.currentWeek === 0 &&
+            !gameState.offseasonFACompleted;
+
+        return isSummerRosterWindow ? 24 : 18;
+    };
 
     const hasAiOfferCapacity = team => {
         const teamKey = String(team.id);
@@ -6619,8 +6635,16 @@ export function processAiRecruitingDay(gameState) {
         const activeReservations = Object.entries(
             progress.recruits || {}
         ).reduce((total, [recruitId, record]) => {
+            const activeOffer =
+                record?.offersByTeam?.[teamKey];
+
             if (
-                record?.offersByTeam?.[teamKey]?.status !== 'active'
+                activeOffer?.status !== 'active' ||
+                (
+                    activeOffer.offeredYear != null &&
+                    Number(activeOffer.offeredYear) !==
+                        Number(gameState.year)
+                )
             ) {
                 return total;
             }
@@ -10563,38 +10587,17 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
             : 50;
     };
 
-    const offenseInstinct = getCoachRating(
-        offenseCoach,
-        'gameplanInstinct'
-    );
-
-    const defenseInstinct = getCoachRating(
-        defenseCoach,
-        'gameplanInstinct'
-    );
+    const offenseInstinct = getCoachRating(offenseCoach, 'gameplanInstinct');
+    const defenseInstinct = getCoachRating(defenseCoach, 'gameplanInstinct');
 
     const currentOffForm = team.formations?.offense || 'Balanced';
+    const currentDefForm = team.formations?.defense || '3-2-3';
 
     // Individual coaching tendencies influence tactical preferences.
-    const offenseRiskTolerance = getStaffBehaviorTendency(
-        offenseCoach,
-        'riskTolerance'
-    );
-
-    const offenseDiscipline = getStaffBehaviorTendency(
-        offenseCoach,
-        'discipline'
-    );
-
-    const defenseRiskTolerance = getStaffBehaviorTendency(
-        defenseCoach,
-        'riskTolerance'
-    );
-
-    const defenseDiscipline = getStaffBehaviorTendency(
-        defenseCoach,
-        'discipline'
-    );
+    const offenseRiskTolerance = getStaffBehaviorTendency(offenseCoach, 'riskTolerance');
+    const offenseDiscipline = getStaffBehaviorTendency(offenseCoach, 'discipline');
+    const defenseRiskTolerance = getStaffBehaviorTendency(defenseCoach, 'riskTolerance');
+    const defenseDiscipline = getStaffBehaviorTendency(defenseCoach, 'discipline');
 
     // Coaching ability reduces decision errors, but never eliminates them.
     const getDecisionNoise = (coach, schemeSkill) => {
@@ -10603,97 +10606,46 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
             getCoachRating(coach, 'gameplanInstinct') * 0.35 +
             getCoachRating(coach, 'inGameAdjustments') * 0.20;
 
-        const noiseRange =
-            2 + ((100 - decisionQuality) / 100) * 8;
-
+        const noiseRange = 2 + ((100 - decisionQuality) / 100) * 8;
         return (Math.random() * 2 - 1) * noiseRange;
     };
 
     const allOffKeys = Object.keys(offensivePlaybook).filter(k => k !== 'Punt_Punt' && !['Uni_InsideZone', 'Uni_QuickSlants', 'Uni_FourVerts'].includes(k));
     const allDefKeys = Object.keys(defensivePlaybook).filter(k => k !== 'PuntReturn_Classic' && !['Cover_2_Zone_Base', 'Cover_1_Robber', 'GoalLine_RunStuff'].includes(k));
 
-    const installedOffense = Array.isArray(
-        team.gameplan.installedOffense
-    )
-        ? team.gameplan.installedOffense
-        : [];
+    const installedOffense = Array.isArray(team.gameplan.installedOffense) ? team.gameplan.installedOffense : [];
+    const installedDefense = Array.isArray(team.gameplan.installedDefense) ? team.gameplan.installedDefense : [];
 
-    const installedDefense = Array.isArray(
-        team.gameplan.installedDefense
-    )
-        ? team.gameplan.installedDefense
-        : [];
+    const getInstalledPlayContinuityBonus = (installedPlays, playKey) => installedPlays.includes(playKey) ? 10 : 0;
 
-    const getInstalledPlayContinuityBonus = (
-        installedPlays,
-        playKey
-    ) => installedPlays.includes(playKey) ? 6 : 0;
-
-    // Staff preparation improves the odds that targeted plays make the
-    // gameplan. Actual hours are reduced by staff availability/reliability.
-    const prepCoaches = Array.isArray(team.coaches)
-        ? team.coaches.filter(coach => coach?.id != null)
-        : [];
+    // Staff preparation improves the odds that targeted plays make the gameplan.
+    const prepCoaches = Array.isArray(team.coaches) ? team.coaches.filter(coach => coach?.id != null) : [];
 
     const getPreparationScoreBonus = (task, playKey) => {
         const skillKeys = task === 'offensePrep'
-            ? [
-                'offSchemeMastery',
-                'gameplanInstinct',
-                'inGameAdjustments'
-            ]
-            : [
-                'defSchemeMastery',
-                'gameplanInstinct',
-                'inGameAdjustments'
-            ];
+            ? ['offSchemeMastery', 'gameplanInstinct', 'inGameAdjustments']
+            : ['defSchemeMastery', 'gameplanInstinct', 'inGameAdjustments'];
 
         let totalBonus = 0;
 
         for (const assignment of team.staffWorkPlan?.assignments || []) {
-            if (
-                assignment?.task !== task ||
-                assignment.coachId == null
-            ) {
-                continue;
-            }
+            if (assignment?.task !== task || assignment.coachId == null) continue;
 
             const targetKeys = Array.isArray(assignment.playKeys)
                 ? assignment.playKeys
-                : (
-                    task === 'offensePrep'
-                        ? team.gameplan.installedOffense
-                        : team.gameplan.installedDefense
-                );
+                : (task === 'offensePrep' ? team.gameplan.installedOffense : team.gameplan.installedDefense);
 
-            if (!Array.isArray(targetKeys) || !targetKeys.includes(playKey)) {
-                continue;
-            }
+            if (!Array.isArray(targetKeys) || !targetKeys.includes(playKey)) continue;
 
-            const effectiveHours = getEffectiveStaffWorkHours(
-                team,
-                assignment
-            );
+            const effectiveHours = getEffectiveStaffWorkHours(team, assignment);
+            if (!Number.isFinite(effectiveHours) || effectiveHours <= 0) continue;
 
-            if (!Number.isFinite(effectiveHours) || effectiveHours <= 0) {
-                continue;
-            }
-
-            const assignedCoach = prepCoaches.find(
-                coach =>
-                    String(coach.id) === String(assignment.coachId)
-            );
-
+            const assignedCoach = prepCoaches.find(coach => String(coach.id) === String(assignment.coachId));
             const ratings = assignedCoach?.ratings || {};
 
             const skillScore = skillKeys.reduce((sum, key) => {
                 const value = Number(ratings[key]);
-
-                return sum + (
-                    Number.isFinite(value)
-                        ? Math.max(0, Math.min(100, value))
-                        : 50
-                );
+                return sum + (Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 50);
             }, 0) / skillKeys.length;
 
             const hoursFactor = Math.min(1, effectiveHours / 8);
@@ -10705,218 +10657,226 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         return Math.min(18, totalBonus);
     };
 
-        const instructionPriorityScores = {
-        must: 18,
-        high: 9,
-        normal: 0,
-        monitor: -8,
-        ignore: -24
+    const instructionPriorityScores = {
+        must: 18, high: 9, normal: 0, monitor: -8, ignore: -24
     };
 
     const getInstructionPriorityScore = rawValue => {
-        const value = rawValue &&
-            typeof rawValue === 'object'
-                ? rawValue.priority ?? rawValue.level
-                : rawValue;
-
-        if (
-            typeof value === 'number' &&
-            Number.isFinite(value)
-        ) {
-            return (
-                Math.max(0, Math.min(100, value)) - 50
-            ) * 0.30;
+        const value = rawValue && typeof rawValue === 'object' ? rawValue.priority ?? rawValue.level : rawValue;
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return (Math.max(0, Math.min(100, value)) - 50) * 0.30;
         }
 
-        const normalized = String(value ?? '')
-            .trim()
-            .toLowerCase();
-
-        if (
-            normalized !== '' &&
-            Number.isFinite(Number(normalized))
-        ) {
-            return (
-                Math.max(
-                    0,
-                    Math.min(100, Number(normalized))
-                ) - 50
-            ) * 0.30;
+        const normalized = String(value ?? '').trim().toLowerCase();
+        if (normalized !== '' && Number.isFinite(Number(normalized))) {
+            return (Math.max(0, Math.min(100, Number(normalized))) - 50) * 0.30;
         }
 
         return instructionPriorityScores[normalized] ?? 0;
     };
 
-    const getInstructionEmphasisScore = (
-        emphasis,
-        playKey,
-        play
-    ) => {
-        if (
-            !emphasis ||
-            typeof emphasis !== 'object' ||
-            Array.isArray(emphasis)
-        ) {
-            return 0;
-        }
-
+    const getInstructionEmphasisScore = (emphasis, playKey, play) => {
+        if (!emphasis || typeof emphasis !== 'object' || Array.isArray(emphasis)) return 0;
         const entries = Object.entries(emphasis);
 
         const findEmphasisValue = key => {
-            const normalizedKey = String(key)
-                .trim()
-                .toLowerCase();
-
-            const entry = entries.find(
-                ([mapKey]) =>
-                    String(mapKey).trim().toLowerCase() ===
-                    normalizedKey
-            );
-
+            const normalizedKey = String(key).trim().toLowerCase();
+            const entry = entries.find(([mapKey]) => String(mapKey).trim().toLowerCase() === normalizedKey);
             return entry?.[1];
         };
 
-        // An individual play instruction takes precedence over
-        // broader type, concept, or tag instructions.
         const exactPlayPriority = findEmphasisValue(playKey);
-
-        if (exactPlayPriority != null) {
-            return getInstructionPriorityScore(
-                exactPlayPriority
-            );
-        }
+        if (exactPlayPriority != null) return getInstructionPriorityScore(exactPlayPriority);
 
         const descriptors = [
             play?.type,
             play?.concept,
             ...(Array.isArray(play?.tags) ? play.tags : []),
             ...(play?.blitz ? ['blitz'] : [])
-        ].filter(value =>
-            typeof value === 'string' && value.trim()
-        );
+        ].filter(value => typeof value === 'string' && value.trim());
 
-        const matchingValues = [
-            ...new Set(
-                descriptors.map(value =>
-                    String(value).trim().toLowerCase()
-                )
-            )
-        ]
+        const matchingValues = [...new Set(descriptors.map(value => String(value).trim().toLowerCase()))]
             .map(findEmphasisValue)
             .filter(value => value != null);
 
         if (matchingValues.length === 0) return 0;
 
-        return matchingValues.reduce(
-            (total, value) =>
-                total + getInstructionPriorityScore(value),
-            0
-        ) / matchingValues.length;
+        return matchingValues.reduce((total, value) => total + getInstructionPriorityScore(value), 0) / matchingValues.length;
     };
 
-    // Score offensive plays based on Coach Bias + Roster Fit + GM Directive
-    const scoredOff = allOffKeys.map(key => {
-        const play = offensivePlaybook[key];
-        let score = 50;
+    const rosterFitCache = new Map();
 
-        if (
-            offenseTacticalId === 'spread_passing_specialist' &&
-            play.type === 'pass'
-        ) {
-            score += 25;
+    // ---------------------------------------------------------
+    // 1. OFFENSE PLAYBOOK & FORMATION EVALUATION
+    // ---------------------------------------------------------
+    const scoreOffensivePlay = (playKey) => {
+        const play = offensivePlaybook[playKey];
+        const knowledge = getOffensivePlayKnowledge(playKey, play);
+        
+        let fit = rosterFitCache.get(playKey);
+        if (!fit) {
+            fit = getPlayRosterFitSnapshot(team, knowledge);
+            rosterFitCache.set(playKey, fit);
         }
+        const fitScore = fit ? (fit.executionFit * 0.75 + fit.mentalFit * 0.25) : 50;
+        const mastery = Number(team.gameplan.mastery?.[playKey]) || 40;
+        
+        let score = (fitScore * 0.55) + (mastery * 0.45);
 
-        if (
-            offenseTacticalId === 'power_run_specialist' &&
-            play.type === 'run'
-        ) {
-            score += 25;
-        }
+        // Coach Tactical Preference (Soft limits)
+        let prefBonus = 0;
+        if (offenseTacticalId === 'spread_passing_specialist' && play.type === 'pass') prefBonus += 8;
+        if (offenseTacticalId === 'power_run_specialist' && play.type === 'run') prefBonus += 8;
         if (play.tags?.includes('pa') || play.tags?.includes('trick')) {
-            score += Math.max(
-                -6,
-                Math.min(
-                    16,
-                    5 +
-                    (offenseInstinct - 50) * 0.10 +
-                    (offenseRiskTolerance - 50) * 0.08 -
-                    (offenseDiscipline - 50) * 0.04
-                )
-            );
+            prefBonus += Math.max(-6, Math.min(6, ((offenseInstinct - 50) * 0.10) + ((offenseRiskTolerance - 50) * 0.08) - ((offenseDiscipline - 50) * 0.04)));
         }
+        score += prefBonus;
+        
+        score += getInstalledPlayContinuityBonus(installedOffense, playKey);
+        score += getInstructionEmphasisScore(offenseEmphasis, playKey, play);
+        score += getPreparationScoreBonus('offensePrep', playKey);
+        score += getDecisionNoise(offenseCoach, 'offSchemeMastery');
+        
+        return score;
+    };
 
-        score += getInstalledPlayContinuityBonus(
-            installedOffense,
-            key
-        );
-
-        score += getInstructionEmphasisScore(
-            offenseEmphasis,
-            key,
-            play
-        );
-
-        score += getPreparationScoreBonus('offensePrep', key);
-
-        return {
-            key,
-            score: score + getDecisionNoise(
-                offenseCoach,
-                'offSchemeMastery'
-            )
-        };
-    }).sort((a, b) => b.score - a.score);
-
-    // Score defensive schemes
-    const scoredDef = allDefKeys.map(key => {
-        const play = defensivePlaybook[key];
-        let score = 50;
-
-        if (
-            defenseTacticalId === 'pressure_oriented_defender' &&
-            play.blitz
-        ) {
-            score += 30;
+    const offPlayScores = new Map();
+    for (const key of allOffKeys) offPlayScores.set(key, scoreOffensivePlay(key));
+    
+    let bestOffForm = currentOffForm;
+    let bestOffFormScore = -Infinity;
+    let finalOffenseInstalls = [];
+    
+    for (const formKey of Object.keys(offenseFormations)) {
+        if (formKey === 'Punt') continue;
+        
+        const compatiblePlays = allOffKeys.filter(playKey => {
+            const play = offensivePlaybook[playKey];
+            if (Array.isArray(play.compatibleFormations) && play.compatibleFormations.length > 0) {
+                return play.compatibleFormations.includes(formKey);
+            }
+            return true; // Universal play
+        });
+        
+        compatiblePlays.sort((a, b) => offPlayScores.get(b) - offPlayScores.get(a));
+        const top8 = compatiblePlays.slice(0, 8);
+        
+        let formScore = top8.reduce((sum, key) => sum + offPlayScores.get(key), 0);
+        
+        // Transition cost to prevent erratic weekly playbook shifts
+        if (formKey !== currentOffForm) formScore -= 25;
+        
+        if (formScore > bestOffFormScore && top8.length >= 8) {
+            bestOffFormScore = formScore;
+            bestOffForm = formKey;
+            finalOffenseInstalls = top8;
         }
+    }
+    
+    // Ensure fallback if no custom plays met requirements
+    if (finalOffenseInstalls.length < 8) {
+        finalOffenseInstalls = [...installedOffense].slice(0, 8);
+    }
 
-        if (
-            defenseTacticalId === 'conservative_game_manager' &&
-            !play.blitz
-        ) {
-            score += 20;
+    // ---------------------------------------------------------
+    // 2. DEFENSE PLAYBOOK & FORMATION EVALUATION
+    // ---------------------------------------------------------
+    const defFormationMatchesCriteria = (form, criteria) => {
+        if (!form || !criteria) return false;
+        const p = form.personnel || {};
+        const front = (p.DL || 0) + (p.LB || 0);
+        if (criteria.minDL && (p.DL || 0) < criteria.minDL) return false;
+        if (criteria.minLB && (p.LB || 0) < criteria.minLB) return false;
+        if (criteria.minDB && (p.DB || 0) < criteria.minDB) return false;
+        if (criteria.minWR && (p.WR || 0) < criteria.minWR) return false;
+        if (criteria.minFront && front < criteria.minFront) return false;
+        return true;
+    };
+
+    const isPlayCompatibleWithDefenseForm = (play, formKey) => {
+        if (!play) return false;
+        if (Array.isArray(play.compatibleFormations) && play.compatibleFormations.includes(formKey)) return true;
+        if (play.compatibleCriteria) {
+            const form = defenseFormations[formKey];
+            if (defFormationMatchesCriteria(form, play.compatibleCriteria)) return true;
         }
+        if (!play.hasOwnProperty('compatibleFormations') && !play.hasOwnProperty('compatibleCriteria')) return true;
+        return false;
+    };
 
-        // Individual tendencies influence willingness to blitz.
+    const scoreDefensivePlay = (playKey) => {
+        const play = defensivePlaybook[playKey];
+        const knowledge = getDefensivePlayKnowledge(playKey, play);
+        
+        let fit = rosterFitCache.get(playKey);
+        if (!fit) {
+            fit = getPlayRosterFitSnapshot(team, knowledge);
+            rosterFitCache.set(playKey, fit);
+        }
+        const fitScore = fit ? (fit.executionFit * 0.75 + fit.mentalFit * 0.25) : 50;
+        const mastery = Number(team.gameplan.mastery?.[playKey]) || 40;
+        
+        let score = (fitScore * 0.55) + (mastery * 0.45);
+
+        // Coach Tactical Preference (Soft limits)
+        let prefBonus = 0;
+        if (defenseTacticalId === 'pressure_oriented_defender' && play.blitz) prefBonus += 8;
+        if (defenseTacticalId === 'conservative_game_manager' && !play.blitz) prefBonus += 6;
         if (play.blitz) {
-            score +=
-                (defenseRiskTolerance - 50) * 0.12 -
-                (defenseDiscipline - 50) * 0.04;
+            prefBonus += ((defenseRiskTolerance - 50) * 0.10) - ((defenseDiscipline - 50) * 0.05);
         }
+        score += Math.max(-5, Math.min(10, prefBonus));
+        
+        score += getInstalledPlayContinuityBonus(installedDefense, playKey);
+        score += getInstructionEmphasisScore(defenseEmphasis, playKey, play);
+        score += getPreparationScoreBonus('defensePrep', playKey);
+        score += getDecisionNoise(defenseCoach, 'defSchemeMastery');
+        
+        return score;
+    };
 
-        score += getInstalledPlayContinuityBonus(
-            installedDefense,
-            key
+    const defPlayScores = new Map();
+    for (const key of allDefKeys) defPlayScores.set(key, scoreDefensivePlay(key));
+    
+    let bestDefForm = currentDefForm;
+    let bestDefFormScore = -Infinity;
+    let finalDefenseInstalls = [];
+    
+    for (const formKey of Object.keys(defenseFormations)) {
+        if (formKey === 'Punt_Return') continue;
+        
+        const compatiblePlays = allDefKeys.filter(playKey => 
+            isPlayCompatibleWithDefenseForm(defensivePlaybook[playKey], formKey)
         );
+        
+        compatiblePlays.sort((a, b) => defPlayScores.get(b) - defPlayScores.get(a));
+        const top8 = compatiblePlays.slice(0, 8);
+        
+        let formScore = top8.reduce((sum, key) => sum + defPlayScores.get(key), 0);
+        
+        // Transition cost to prevent erratic weekly playbook shifts
+        if (formKey !== currentDefForm) formScore -= 25;
+        
+        if (formScore > bestDefFormScore && top8.length >= 8) {
+            bestDefFormScore = formScore;
+            bestDefForm = formKey;
+            finalDefenseInstalls = top8;
+        }
+    }
 
-        score += getInstructionEmphasisScore(
-            defenseEmphasis,
-            key,
-            play
-        );
+    if (finalDefenseInstalls.length < 8) {
+        finalDefenseInstalls = [...installedDefense].slice(0, 8);
+    }
 
-        score += getPreparationScoreBonus('defensePrep', key);
-
-        return {
-            key,
-            score: score + getDecisionNoise(
-                defenseCoach,
-                'defSchemeMastery'
-            )
-        };
-    }).sort((a, b) => b.score - a.score);
-
-    team.gameplan.installedOffense = scoredOff.slice(0, 8).map(s => s.key);
-    team.gameplan.installedDefense = scoredDef.slice(0, 8).map(s => s.key);
+    // ---------------------------------------------------------
+    // 3. APPLY FINDINGS TO TEAM GAMEPLAN
+    // ---------------------------------------------------------
+    team.formations = team.formations || {};
+    team.formations.offense = bestOffForm;
+    team.formations.defense = bestDefForm;
+    
+    team.gameplan.installedOffense = finalOffenseInstalls;
+    team.gameplan.installedDefense = finalDefenseInstalls;
 }
 
 export function processWeeklyStaffPreparation(
@@ -11964,4 +11924,195 @@ export function processStaffMarketDecay(gameState) {
     gameState.availableStaff = validMarket;
 
     enforceCoachMarketCapacity(gameState);
+}
+
+/**
+ * Builds an evidence-based executive weekly staff report for the GM.
+ * Distinguishes routine automation from actionable exceptions and recommendations.
+ */
+export function generateWeeklyStaffReport(team, gameState, userMatch = null) {
+    if (!team || !gameState) return null;
+
+    const currentYear = Number(gameState.year) || 1;
+    const currentWeek = Number(gameState.currentWeek) || 0;
+    const coaches = ensureTeamCoachingStaff(team);
+    const roster = getRosterObjects(team);
+
+    // 1. HANDLED AUTOMATICALLY
+    const automatedWork = [];
+    const assignments = team.staffWorkPlan?.assignments || [];
+
+    let totalScoutHours = 0;
+    let totalTrainHours = 0;
+    let totalPrepHours = 0;
+
+    assignments.forEach(assignment => {
+        const hours = getEffectiveStaffWorkHours(team, assignment);
+        if (assignment.task === 'scouting') totalScoutHours += hours;
+        else if (assignment.task === 'training') totalTrainHours += hours;
+        else if (assignment.task === 'offensePrep' || assignment.task === 'defensePrep') totalPrepHours += hours;
+    });
+
+    if (totalScoutHours > 0) {
+        automatedWork.push({
+            icon: '🔭',
+            title: 'Prospect Scouting Completed',
+            detail: `${totalScoutHours.toFixed(1)} effective staff hours invested in prospect reports.`
+        });
+    }
+
+    if (totalTrainHours > 0) {
+        automatedWork.push({
+            icon: '🏋️',
+            title: 'Weekly Player Training Executed',
+            detail: `${totalTrainHours.toFixed(1)} effective coaching hours delivered across assigned position groups.`
+        });
+    }
+
+    if (totalPrepHours > 0) {
+        automatedWork.push({
+            icon: '📋',
+            title: 'Gameplan Installation & Reps',
+            detail: `${totalPrepHours.toFixed(1)} hours spent installing schemes and drilling play familiarity.`
+        });
+    }
+
+    // Finances auto-update
+    const autoSnack = team.finances?.autoSnack;
+    if (autoSnack && autoSnack !== 'none') {
+        automatedWork.push({
+            icon: '🧃',
+            title: `Snack Plan Billed (${autoSnack.toUpperCase()})`,
+            detail: 'Weekly team refreshments served to maintain conditioning.'
+        });
+    }
+
+    // 2. NEEDS ATTENTION
+    const attentionItems = [];
+
+    // Injuries & Status
+    const injuredPlayers = roster.filter(p => Number(p.status?.duration) > 0);
+    injuredPlayers.forEach(p => {
+        attentionItems.push({
+            severity: 'high',
+            icon: '🩹',
+            title: `${p.name} Unavailable`,
+            detail: `${p.status.description || 'Injured'} — Out for ${p.status.duration} more week(s).`
+        });
+    });
+
+    // High Fatigue Warning
+    const exhaustedPlayers = roster.filter(p => (p.fatigue || 0) >= 60);
+    if (exhaustedPlayers.length > 0) {
+        attentionItems.push({
+            severity: 'medium',
+            icon: '⚠️',
+            title: `${exhaustedPlayers.length} Player(s) Entering Red-Zone Fatigue`,
+            detail: `Low stamina risk on game day: ${exhaustedPlayers.slice(0, 3).map(p => p.name).join(', ')}${exhaustedPlayers.length > 3 ? '...' : ''}. Consider a lighter practice.`
+        });
+    }
+
+    // Roster Depth Alert
+    const activeHealthy = roster.length - injuredPlayers.length;
+    if (activeHealthy < 8) {
+        attentionItems.push({
+            severity: 'high',
+            icon: '🚨',
+            title: 'Critical Roster Shortage',
+            detail: `Only ${activeHealthy} healthy players available (minimum 8 required to avoid forfeit). Call emergency friends immediately.`
+        });
+    }
+
+    // Low Funds
+    if (Number(team.finances?.balance || 0) < 5.00) {
+        attentionItems.push({
+            severity: 'low',
+            icon: '💰',
+            title: 'Low Team Fund Balance',
+            detail: `Balance is $${Number(team.finances?.balance || 0).toFixed(2)}. Consider neighborhood chores or dues collection.`
+        });
+    }
+
+    // 3. EVIDENCE-BASED TACTICAL RECOMMENDATIONS
+    const recommendations = [];
+
+    // Check Upcoming Matchup
+    const nextWeekIdx = currentWeek; // Week just advanced
+    const gamesPerWeek = Math.max(1, Math.floor((gameState.teams?.length || 20) / 2));
+    const nextGames = (gameState.schedule || []).slice(nextWeekIdx * gamesPerWeek, (nextWeekIdx + 1) * gamesPerWeek);
+    const nextMatch = nextGames.find(g => String(g.home?.id) === String(team.id) || String(g.away?.id) === String(team.id));
+
+    const opponent = nextMatch 
+        ? (String(nextMatch.home.id) === String(team.id) ? nextMatch.away : nextMatch.home)
+        : null;
+
+    if (opponent) {
+        const oppTendencies = team.playcallTendencies?.snapCounts?.opponents?.[String(opponent.id)];
+        const oppCalls = oppTendencies?.offense?.totalCalls || 0;
+
+        if (oppCalls >= 6) {
+            let runCalls = 0;
+            for (const [key, count] of Object.entries(oppTendencies.offense.byPlay || {})) {
+                if (offensivePlaybook[key]?.type === 'run') runCalls += Number(count) || 0;
+            }
+            const runRate = Math.round((runCalls / oppCalls) * 100);
+
+            if (runRate >= 60) {
+                recommendations.push({
+                    type: 'tactical',
+                    icon: '💡',
+                    title: `Anticipate Ground Attack vs. ${opponent.name}`,
+                    detail: `Opponent ran the ball on ${runRate}% of plays (${runCalls}/${oppCalls} scouted snaps). Recommend setting Defense Focus to "Stack the Box" or installing Run Fit schemes.`
+                });
+            } else if (runRate <= 40) {
+                recommendations.push({
+                    type: 'tactical',
+                    icon: '💡',
+                    title: `Pass-Heavy Secondary Threat vs. ${opponent.name}`,
+                    detail: `Opponent throws on ${100 - runRate}% of snaps (${oppCalls - runCalls}/${oppCalls} scouted snaps). Recommend preparing Deep Shell coverage.`
+                });
+            }
+        } else {
+            recommendations.push({
+                type: 'preparation',
+                icon: '🕵️',
+                title: `Limited Intel on ${opponent.name}`,
+                detail: `Only ${oppCalls} snaps scouted for next week's opponent. Staff recommends dedicating prep hours to film study to unlock tactical counters.`
+            });
+        }
+    }
+
+    // Playbook Mastery Recommendation
+    const installed = team.gameplan?.installedOffense || [];
+    const lowMasteryPlays = installed.filter(k => (team.gameplan?.mastery?.[k] || 40) < 50);
+    if (lowMasteryPlays.length > 0) {
+        recommendations.push({
+            type: 'practice',
+            icon: '📋',
+            title: 'Low Scheme Mastery on Custom Plays',
+            detail: `${lowMasteryPlays.length} installed plays have under 50% team mastery. Recommend scheduling Chalk Talk to accelerate route execution.`
+        });
+    }
+
+    // 4. PERFORMANCE & OUTCOMES
+    const outcomes = {
+        matchResult: userMatch ? {
+            opponentName: userMatch.homeTeam?.id === team.id ? userMatch.awayTeam?.name : userMatch.homeTeam?.name,
+            teamScore: userMatch.homeTeam?.id === team.id ? userMatch.homeScore : userMatch.awayScore,
+            oppScore: userMatch.homeTeam?.id === team.id ? userMatch.awayScore : userMatch.homeScore,
+            won: userMatch.homeTeam?.id === team.id ? (userMatch.homeScore > userMatch.awayScore) : (userMatch.awayScore > userMatch.homeScore)
+        } : null,
+        playerImprovements: team._lastPlayerImprovements || [],
+        coachImprovements: team._lastCoachImprovements || []
+    };
+
+    return {
+        year: currentYear,
+        week: currentWeek,
+        teamName: team.name,
+        automatedWork,
+        attentionItems,
+        recommendations,
+        outcomes
+    };
 }

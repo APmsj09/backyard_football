@@ -672,56 +672,10 @@
 
             <!-- Main Content Grid -->
             <div class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-hidden min-h-0">
-                <!-- Available Prospects Pool (8 cols) -->
+                <!-- Main Operations Board (8-9 cols) -->
                 <div
                     class="lg:col-span-8 xl:col-span-9 min-w-0 bg-white border border-slate-300 rounded-sm shadow-sm flex flex-col overflow-hidden min-h-0">
-                    <div class="p-2 border-b border-slate-200 bg-slate-50 flex flex-wrap justify-between items-center gap-2 shrink-0">
-                        <span class="font-bold text-xs uppercase tracking-wider text-slate-700">
-                            Available Neighborhood Prospects
-                        </span>
-
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span
-                                id="fa-minigame-result-count"
-                                class="text-[10px] font-bold text-slate-500 whitespace-nowrap">
-                                Prospects
-                            </span>
-
-                            <input
-                                type="text"
-                                id="fa-minigame-search"
-                                placeholder="Search prospects..."
-                                class="w-40 sm:w-52 p-1.5 border border-slate-300 rounded text-xs bg-white outline-none focus:border-emerald-500"
-                                oninput="app.renderFAPool()">
-
-                            <button
-                                type="button"
-                                class="px-2 py-1.5 border border-slate-300 rounded text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-100"
-                                onclick="
-                                    document.getElementById('fa-minigame-search').value = '';
-                                    window.app_setRecruitingPositionFilter('');
-                                ">
-                                Clear
-                            </button>
-
-                            <input type="hidden" id="fa-minigame-filter-pos" value="">
-                            <div
-                                class="flex max-w-full flex-nowrap gap-0.5 overflow-x-auto rounded border border-slate-300 bg-white p-0.5 hide-scrollbar"
-                                role="group"
-                                aria-label="Filter prospects by position">
-                                <button type="button" data-fa-position="" aria-pressed="true" onclick="window.app_setRecruitingPositionFilter('')" class="shrink-0 rounded-sm bg-slate-900 px-1.5 py-1 text-[9px] font-black text-white">ALL</button>
-                                <button type="button" data-fa-position="QB" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('QB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">QB</button>
-                                <button type="button" data-fa-position="RB" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('RB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">RB</button>
-                                <button type="button" data-fa-position="WR" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('WR')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">WR</button>
-                                <button type="button" data-fa-position="TE" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('TE')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">TE</button>
-                                <button type="button" data-fa-position="OL" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('OL')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">OL</button>
-                                <button type="button" data-fa-position="DL" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('DL')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">DL</button>
-                                <button type="button" data-fa-position="LB" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('LB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">LB</button>
-                                <button type="button" data-fa-position="DB" aria-pressed="false" onclick="window.app_setRecruitingPositionFilter('DB')" class="shrink-0 rounded-sm px-1.5 py-1 text-[9px] font-black text-slate-600 hover:bg-slate-100">DB</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="fa-minigame-pool-tbody" class="flex-grow overflow-auto min-h-0"></div>
+                    <div id="fa-minigame-pool-tbody" class="flex-grow overflow-auto min-h-0 p-3"></div>
                 </div>
 
                 <!-- Active Bids & Day Recap (4 cols) -->
@@ -796,7 +750,7 @@
                     <button class="tab-button active whitespace-nowrap" data-tab="my-team"><span class="text-base mr-1">📋</span> Roster</button>
                     <button class="tab-button whitespace-nowrap" data-tab="depth-chart"><span class="text-base mr-1">♟️</span> Strategy</button>
                     <button class="tab-button whitespace-nowrap" data-tab="front-office"><span class="text-base mr-1">🏢</span> Front Office</button>
-                    <button class="tab-button whitespace-nowrap" data-tab="free-agents"><span class="text-base mr-1">🏃</span> Free Agents</button>
+                    <button class="tab-button whitespace-nowrap" data-tab="free-agents"><span class="text-base mr-1">🔍</span> Player Database</button>
                     <button class="tab-button whitespace-nowrap" data-tab="league"><span class="text-base mr-1">🏆</span> League</button>
                     <button class="tab-button whitespace-nowrap" data-tab="community">
                         <span class="text-base mr-1">🤝</span> Community
@@ -833,37 +787,39 @@
                         </div>
 
                         <div class="flex-grow overflow-y-auto p-4 bg-gray-50 flex flex-col min-h-0">
-                            <div id="depth-chart-offense-pane" class="depth-chart-sub-pane flex-grow grid grid-cols-1 2xl:grid-cols-5 gap-4 min-h-0">
-                                <div class="2xl:col-span-5 min-w-0 bg-white p-2.5 rounded border border-slate-200 shadow-sm flex flex-col gap-1.5 shrink-0">
+                            <!-- Offense Formations Pane (Properly hidden by default; 12-col desktop layout) -->
+                            <div id="depth-chart-offense-pane" class="depth-chart-sub-pane hidden flex-grow grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
+                                <div class="lg:col-span-12 min-w-0 bg-white p-2.5 rounded border border-slate-200 shadow-sm flex flex-col gap-1.5 shrink-0">
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs font-black uppercase tracking-wider text-slate-800">Offensive Scheme & Personnel</span>
                                         <button class="auto-lineup-btn px-2.5 py-1 bg-slate-900 text-white rounded text-[10px] font-bold hover:bg-slate-800 transition uppercase tracking-wider" onclick="window.app_autoResetLineup()">⚡ Auto-Set Best</button>
                                     </div>
                                     <div id="offense-formation-pills" class="flex flex-wrap gap-1.5"></div>
                                 </div>
-                                <div class="visual-field-container 2xl:col-span-2 min-w-0 shrink-0">
+                                <div class="visual-field-container lg:col-span-5 min-w-0 shrink-0">
                                     <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">OFFENSE</div>
                                     <div id="offense-visual-field" class="w-full h-full relative"></div>
                                 </div>
-                                <div class="2xl:col-span-3 min-w-0 bg-white p-4 rounded-lg border shadow-sm flex flex-col shrink-0 min-h-0">
+                                <div class="lg:col-span-7 min-w-0 bg-white p-4 rounded-lg border shadow-sm flex flex-col shrink-0 min-h-0">
                                     <h4 class="font-bold text-gray-700 mb-2 shrink-0">Deployment & Roster Telemetry</h4>
                                     <div id="offense-bench-table" class="w-full overflow-x-auto min-h-0 pb-6"></div>
                                 </div>
                             </div>
 
-                            <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden flex-grow grid grid-cols-1 2xl:grid-cols-5 gap-4 min-h-0">
-                                <div class="2xl:col-span-5 min-w-0 bg-white p-2.5 rounded border border-slate-200 shadow-sm flex flex-col gap-1.5 shrink-0">
+                            <!-- Defense Formations Pane (12-col desktop layout) -->
+                            <div id="depth-chart-defense-pane" class="depth-chart-sub-pane hidden flex-grow grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
+                                <div class="lg:col-span-12 min-w-0 bg-white p-2.5 rounded border border-slate-200 shadow-sm flex flex-col gap-1.5 shrink-0">
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs font-black uppercase tracking-wider text-slate-800">Defensive Scheme & Personnel</span>
                                         <button class="auto-lineup-btn px-2.5 py-1 bg-slate-900 text-white rounded text-[10px] font-bold hover:bg-slate-800 transition uppercase tracking-wider" onclick="window.app_autoResetLineup()">⚡ Auto-Set Best</button>
                                     </div>
                                     <div id="defense-formation-pills" class="flex flex-wrap gap-1.5"></div>
                                 </div>
-                                <div class="visual-field-container 2xl:col-span-2 min-w-0 shrink-0">
+                                <div class="visual-field-container lg:col-span-5 min-w-0 shrink-0">
                                     <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/40 text-white px-3 py-1 rounded text-xs font-bold tracking-widest z-20">DEFENSE</div>
                                     <div id="defense-visual-field" class="w-full h-full relative"></div>
                                 </div>
-                                <div class="2xl:col-span-3 min-w-0 bg-white p-4 rounded-lg border shadow-sm flex flex-col shrink-0 min-h-0">
+                                <div class="lg:col-span-7 min-w-0 bg-white p-4 rounded-lg border shadow-sm flex flex-col shrink-0 min-h-0">
                                     <h4 class="font-bold text-gray-700 mb-2 shrink-0">Deployment & Roster Telemetry</h4>
                                     <div id="defense-bench-table" class="w-full overflow-x-auto min-h-0 pb-6"></div>
                                 </div>
@@ -899,15 +855,31 @@
                         </div>
                     </div>
 
-                    <!-- 4. Free Agents -->
+                    <!-- 4. Player Database & Scouting Intelligence -->
                     <div id="tab-content-free-agents" class="tab-pane hidden flex flex-col h-full min-h-0">
                         <div class="p-2 px-3 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-2 items-center justify-between shrink-0">
                             <div class="flex items-center gap-2">
-                                <h3 class="text-sm font-black uppercase tracking-wider text-slate-800 hidden sm:block">Park Free Agents</h3>
+                                <h3 class="text-sm font-black uppercase tracking-wider text-slate-800 hidden sm:block">Player Database</h3>
+                                
+                                <!-- Search & Scope Dropdown -->
+                                <input type="search" id="player-db-search" placeholder="Search player name..."
+                                    class="p-1.5 border border-slate-300 rounded text-xs bg-white w-40 sm:w-48 outline-none focus:border-slate-500"
+                                    oninput="window.app_updatePlayerDbFilter()">
+
+                                <select id="player-db-scope" onchange="window.app_updatePlayerDbFilter()"
+                                    class="p-1.5 border border-slate-300 rounded text-xs bg-white font-bold text-slate-700 outline-none focus:border-slate-500">
+                                    <option value="all">Entire League</option>
+                                    <option value="free_agents" selected>Free Agents Only</option>
+                                    <option value="my_team">My Team</option>
+                                    <option value="tier1">Premier Parks (Tier 1)</option>
+                                    <option value="tier2">Sandlot Circuit (Tier 2)</option>
+                                    <option value="youth">Pee-Wee League</option>
+                                </select>
                             </div>
+
                             <div class="flex items-center gap-2">
                                 <input type="hidden" id="fa-filter-pos" value="">
-                                <div class="flex max-w-full flex-nowrap gap-0.5 overflow-x-auto rounded border border-slate-300 bg-white p-0.5 hide-scrollbar" role="group" aria-label="Filter free agents by position">
+                                <div class="flex max-w-full flex-nowrap gap-0.5 overflow-x-auto rounded border border-slate-300 bg-white p-0.5 hide-scrollbar" role="group" aria-label="Filter database by position">
                                     <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="" aria-pressed="true" onclick="window.app_setPositionFilter('fa-filter-pos', '')">ALL</button>
                                     <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="QB" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'QB')">QB</button>
                                     <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="RB" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'RB')">RB</button>
@@ -918,9 +890,6 @@
                                     <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="LB" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'LB')">LB</button>
                                     <button type="button" class="position-filter-button" data-position-filter="fa-filter-pos" data-position="DB" aria-pressed="false" onclick="window.app_setPositionFilter('fa-filter-pos', 'DB')">DB</button>
                                 </div>
-                                <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded text-xs uppercase tracking-wider shadow-sm transition" onclick="app.autoFillRoster()">
-                                    ⚡ Auto-Fill Walk-Ons (14)
-                                </button>
                             </div>
                         </div>
                         <div id="free-agents-container" class="flex-grow overflow-y-auto p-0 min-h-0 bg-white"></div>
@@ -983,7 +952,6 @@
                                             <div id="stats-sort-options" class="grid max-h-64 grid-cols-2 gap-1 overflow-y-auto" role="listbox" aria-label="Sort statistics"></div>
                                         </div>
                                     </div>
-                                    </select>
                                 </div>
                                 <div id="player-stats-container" class="flex-grow overflow-y-auto p-0 min-h-0"></div>
                             </div>
@@ -1202,7 +1170,7 @@
                                 </div>
                             </div>
 
-                            <!-- 4th-Down Directive & Tempo -->
+                            <!-- 4th-Down Directive, Tempo & Auto-Sub -->
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <!-- 4th Down Directive -->
                                 <div class="bg-gray-800/90 p-2.5 rounded-lg border border-gray-700/80 shadow-sm">
@@ -1239,6 +1207,20 @@
                                             class="gm-tweak-btn text-left px-2 py-1.5 rounded border text-[10px] transition-all bg-gray-900 border-gray-700 hover:border-gray-500 font-bold text-gray-200">
                                             Hurry-Up (Fast)
                                         </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Auto-Sub Tendency -->
+                                <div class="bg-gray-800/90 p-2.5 rounded-lg border border-gray-700/80 shadow-sm sm:col-span-2">
+                                    <div class="flex justify-between text-[10px] font-extrabold text-purple-400 uppercase mb-1.5 tracking-wider">
+                                        <span>Ironman</span>
+                                        <span>Auto-Sub Tendency</span>
+                                        <span>Frequent</span>
+                                    </div>
+                                    <div class="flex rounded border border-gray-700 bg-gray-900 p-0.5" role="group">
+                                        <button type="button" data-gm-type="autoSubTendency" data-gm-val="ironman" onclick="window.app_setGmLiveTweak('autoSubTendency', 'ironman')" class="gm-tweak-btn flex-1 rounded-sm px-1 py-1.5 text-[9px] font-bold bg-gray-900 text-gray-300">Ironman (&lt;20%)</button>
+                                        <button type="button" data-gm-type="autoSubTendency" data-gm-val="balanced" onclick="window.app_setGmLiveTweak('autoSubTendency', 'balanced')" class="gm-tweak-btn flex-1 rounded-sm px-1 py-1.5 text-[9px] font-bold bg-gray-900 text-gray-300">Balanced (&lt;40%)</button>
+                                        <button type="button" data-gm-type="autoSubTendency" data-gm-val="frequent" onclick="window.app_setGmLiveTweak('autoSubTendency', 'frequent')" class="gm-tweak-btn flex-1 rounded-sm px-1 py-1.5 text-[9px] font-bold bg-gray-900 text-gray-300">Frequent (&lt;60%)</button>
                                     </div>
                                 </div>
                             </div>

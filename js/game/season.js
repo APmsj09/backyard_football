@@ -571,6 +571,64 @@ export function transitionOffseasonPhase(
     };
 }
 
+function processEndSeasonFinances(gameState) {
+    if (!gameState || !gameState.teams) return;
+    
+    const year = Number(gameState.year);
+    if (!Number.isInteger(year)) return;
+
+    gameState.teams.forEach(team => {
+        if (!team || team.leagueType !== 'main') return;
+        
+        if (!team.finances) {
+            team.finances = { balance: 10.00, waivedDues: [], autoSnack: 'none' };
+        }
+        
+        // Base community funding
+        let revenue = 35.00;
+        
+        // League Tier TV/Merch Revenue
+        if (team.tier === 1) revenue += 40.00;
+        else if (team.tier === 2) revenue += 15.00;
+        
+        // Performance Bonus
+        const wins = Number(team.wins) || 0;
+        revenue += wins * 6.00;
+        
+        // Street Cred / Fan Turnout
+        const cred = Number(team.socialProfile?.streetCred) || 50;
+        revenue += (cred / 100) * 35.00;
+        
+        // Championship Bonus
+        const isPremierChamp = gameState.history?.seasons?.some(
+            s => s.year === year && s.champion === team.name
+        );
+        const isSandlotChamp = gameState.history?.seasons?.some(
+            s => s.year === year && s.tier2Champion === team.name
+        );
+        
+        if (isPremierChamp) revenue += 50.00;
+        else if (isSandlotChamp) revenue += 25.00;
+
+        const totalRevenue = Math.round(revenue * 100) / 100;
+        
+        const currentBalance = Number.isFinite(Number(team.finances.balance)) 
+            ? Number(team.finances.balance) 
+            : 10.00;
+            
+        team.finances.balance = Math.round((currentBalance + totalRevenue) * 100) / 100;
+        
+        // Record the transaction. (recordFinanceLedgerEntry safely ignores Years 1-4 to save memory)
+        recordFinanceLedgerEntry(
+            team, 
+            gameState, 
+            'season_revenue', 
+            `End of Season ${year} Revenue`, 
+            totalRevenue
+        );
+    });
+}
+
 /**
  * Advances the two-day coach carousel without forcing an immediate transition
  * to the rookie draft.
@@ -3934,13 +3992,13 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
             });
         }
 
-        // Develop coaching staffs during historical seasons too, so
-        // AI teams enter Year 5 with coaching histories of their own.
-        processWeeklyCoachDevelopment(
+        // Develop coaching staffs and record gains for weekly reporting
+        const coachGains = processWeeklyCoachDevelopment(
             t,
             game.year,
             game.currentWeek
         );
+        t._lastCoachImprovements = coachGains || [];
     });
 
     // Resolve accepted community favors exactly once, after all weekly
@@ -5821,18 +5879,18 @@ export function resolveRecruitingDay(gameState = game) {
 
         if (!Array.isArray(team.roster)) return null;
 
-        const rosterIds = team.roster;
+        const rosterPlayers = getRosterObjects(team);
 
         const alreadyOnRoster =
             player?.id != null &&
-            rosterIds.some(
-                rosterPlayerId =>
-                    String(rosterPlayerId) === String(player.id)
+            rosterPlayers.some(
+                rosterPlayer =>
+                    String(rosterPlayer?.id) === String(player.id)
             );
 
         if (alreadyOnRoster) return null;
 
-        const rosterSize = rosterIds.length;
+        const rosterSize = rosterPlayers.length;
         const rosterLimit = getCurrentRosterLimit(gameState);
 
         // Check actual roster capacity at commitment time.
@@ -5884,10 +5942,21 @@ export function resolveRecruitingDay(gameState = game) {
             age < 12 ||
             age > 18 ||
             protectedDraftIds.has(String(player.id)) ||
-            lifecycle === 'draft_eligible' ||
-            lifecycleStatus === 'draft_eligible' ||
+            [
+                'retired',
+                'departed',
+                'temporary',
+                'injured',
+                'draft_eligible'
+            ].includes(lifecycle) ||
+            [
+                'retired',
+                'departed',
+                'temporary',
+                'injured',
+                'draft_eligible'
+            ].includes(lifecycleStatus) ||
             ['retired', 'departed', 'temporary', 'injured'].includes(statusType) ||
-            ['retired', 'departed', 'temporary', 'injured'].includes(lifecycleStatus) ||
             Number(player.status?.duration) > 0 ||
             Number(player.injury?.duration || player.injuryDuration || 0) > 0
         ) {
@@ -11116,6 +11185,9 @@ export function advanceToOffseason() {
             }))
         );
     });
+
+    // 💡 Execute the End of Season Financial Audit
+    processEndSeasonFinances(game);
 
     // Age all existing coaches after completed-season career records
     // have been captured, including coaches who entered the market

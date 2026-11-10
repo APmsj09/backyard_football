@@ -154,6 +154,40 @@ function getScoutedPlaycallAttributeValue(team, player, skill) {
     return 50 + (midpoint - 50) * effectiveConfidence;
 }
 
+function getScoutedPositionOverall(team, player, position) {
+    if (!team || !player || !position) return 50;
+
+    const report = getTeamScoutingReport(team, player.id);
+    const rawConfidence = Number(report?.confidence);
+    const confidence = Number.isFinite(rawConfidence) 
+        ? Math.max(0, Math.min(1, rawConfidence > 1 ? rawConfidence / 100 : rawConfidence)) 
+        : 0;
+
+    // If we don't have enough scouting info, return an average baseline
+    if (confidence < 0.25) return 50;
+
+    const fit = [
+        report?.evaluation?.offenseFit,
+        report?.evaluation?.defenseFit
+    ].find(candidate => 
+        String(candidate?.position || '').toUpperCase() === position &&
+        candidate.low != null &&
+        candidate.high != null &&
+        Number.isFinite(Number(candidate.low)) &&
+        Number.isFinite(Number(candidate.high)) &&
+        Number(candidate.high) >= Number(candidate.low)
+    );
+
+    if (!fit) return 50;
+
+    const low = Number(fit.low);
+    const high = Number(fit.high);
+    const midpoint = (low + high) / 2;
+
+    // Lower-confidence reports lean toward the lower end of the estimated range.
+    return low + (midpoint - low) * confidence;
+}
+
 function getPlaycallSituationKey(down, yardsToGo, ballOn, scoreDiff, drivesRemaining) {
     const situations = getPlaycallSituationKeys(
         down,
@@ -390,21 +424,27 @@ function getPlaycallKnowledgeAdjustment(
                 mentalSkills
             );
 
-            // Unknown scouting information does not become an assumed rating.
-            // When both categories are known, execution carries more weight.
-            if (
-                executionAverage === null &&
-                mentalAverage === null
-            ) {
-                continue;
-            }
+            const positionalBaseline = getScoutedPositionOverall(
+                team, 
+                player, 
+                position
+            );
 
-            const value =
-                executionAverage !== null &&
-                mentalAverage !== null
-                    ? executionAverage * 0.70 +
-                        mentalAverage * 0.30
-                    : executionAverage ?? mentalAverage;
+            // Roster fit uses a 70% positional baseline, 20% execution skill, 
+            // and 10% mental/IQ fit to prevent single attributes from dominating.
+            const hasExec = executionAverage !== null;
+            const hasMental = mentalAverage !== null;
+
+            let value;
+            if (hasExec && hasMental) {
+                value = positionalBaseline * 0.70 + executionAverage * 0.20 + mentalAverage * 0.10;
+            } else if (hasExec) {
+                value = positionalBaseline * 0.75 + executionAverage * 0.25;
+            } else if (hasMental) {
+                value = positionalBaseline * 0.85 + mentalAverage * 0.15;
+            } else {
+                value = positionalBaseline;
+            }
 
             // Consistency represents execution reliability, not intelligence.
             // Keep its influence small and independent of the IQ calculation.
@@ -4330,6 +4370,11 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             player.careerStats.snapsThisSeason = (player.careerStats.snapsThisSeason || 0) + 1;
             player.snapsThisWeek = (player.snapsThisWeek || 0) + 1;
 
+            // Decrement the manual substitution lock counter
+            if (player.manualSubLock > 0) {
+                player.manualSubLock--;
+            }
+
             // PASSIVE HUDDLE RECOVERY: Players catch their breath between plays based on their stamina rating
             const staminaRating = player.attributes?.physical?.stamina || 50;
             const recoveryAmt = 1.5 + (staminaRating / 25); // Recovers roughly 3.5% to 5.5% fatigue per play
@@ -4631,11 +4676,12 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
         drivesRemaining
     };
 
-    const offThreshold = offense.isPlayerControlled ? (offense.autoSubThreshold || gameInstance.autoSubThreshold || 65) : 65;
-    const defThreshold = defense.isPlayerControlled ? (defense.autoSubThreshold || gameInstance.autoSubThreshold || 65) : 65;
+    // Resolve the active rotation policy. TWEAKS tab liveGmAdjustments take priority.
+    const offTendency = offense.liveGmAdjustments?.autoSubTendency || offense.autoSubTendency || 'balanced';
+    const defTendency = defense.liveGmAdjustments?.autoSubTendency || defense.autoSubTendency || 'balanced';
 
-    autoMakeSubstitutions(offense, { thresholdFatigue: offThreshold, chance: 1.0 }, gameInstance.gameLog);
-    autoMakeSubstitutions(defense, { thresholdFatigue: defThreshold, chance: 1.0 }, gameInstance.gameLog);
+    autoMakeSubstitutions(offense, { autoSubTendency: offTendency }, gameInstance.gameLog);
+    autoMakeSubstitutions(defense, { autoSubTendency: defTendency }, gameInstance.gameLog);
 
         const configuredOffenseFormation = offense.formations.offense;
     const configuredDefenseFormation = defense.formations.defense;

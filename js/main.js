@@ -5,7 +5,7 @@ import {
     recordTeamGamePlanningOutcome
 } from './game/play_resolution.js';
 import { isDebugMode, setDebugMode, debugCollector } from './game.js';
-import { positionOverallWeights, estimateBestPosition, calculateOverall } from './game/player.js';
+import { positionOverallWeights, estimateBestPosition, calculateOverall, calculateSlotSuitability } from './game/player.js';
 import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
 import { formatHeight } from './utils.js';
 import {
@@ -3758,9 +3758,30 @@ function finishWeekSimulation(results, expectedWeekKey) {
     gameState = Game.getGameState();
     Game.saveGameState(activeSaveKey);
 
-    if (results && results.length > 0) {
-        UI.showModal(`Week ${gameState.currentWeek} Summary`, buildResultsModalHtml(results));
-    }
+    // Stage 9: Generate and trigger the Weekly Staff Report
+    const userMatch = results?.find(
+        r => r && (r.homeTeam?.id === gameState.playerTeam?.id || r.awayTeam?.id === gameState.playerTeam?.id)
+    );
+
+    import('./game/staff.js').then(s => {
+        const report = s.generateWeeklyStaffReport(gameState.playerTeam, gameState, userMatch);
+        gameState._latestStaffReport = report;
+
+        if (report) {
+            UI.showWeeklyStaffReport(report, gameState, () => {
+                if (results && results.length > 0) {
+                    UI.showModal(`Week ${gameState.currentWeek} League Summary`, buildResultsModalHtml(results));
+                }
+            });
+        } else if (results && results.length > 0) {
+            UI.showModal(`Week ${gameState.currentWeek} Summary`, buildResultsModalHtml(results));
+        }
+    }).catch(err => {
+        console.error("Staff report build error:", err);
+        if (results && results.length > 0) {
+            UI.showModal(`Week ${gameState.currentWeek} Summary`, buildResultsModalHtml(results));
+        }
+    });
 
     UI.renderDashboard(gameState);
     UI.showScreen('dashboard-screen');
@@ -6032,6 +6053,13 @@ window.app = {
 
         return acceptedFavor;
     },
+    openWeeklyStaffReport: () => {
+        if (gameState?._latestStaffReport) {
+            UI.showWeeklyStaffReport(gameState._latestStaffReport, gameState);
+        } else {
+            UI.showModal("Staff Report", "<p class='text-xs text-slate-500 italic p-3'>No staff report available for the current week yet.</p>");
+        }
+    },
     renderFAPool: () => {
         if (gameState) UI.renderOffseasonFAPool(gameState);
     },
@@ -8194,6 +8222,25 @@ window.app = {
             }
         }
     }
+};
+
+window.app_callEmergencyFriend = function (playerId) {
+    const gs = Game.getGameState() || gameState;
+    const team = gs?.playerTeam;
+    if (!team) return;
+
+    const res = Game.callFriend(playerId);
+    gameState = Game.getGameState() || gs;
+    Game.saveGameState(activeSaveKey);
+
+    UI.showModal(
+        res.success ? "Emergency Player Arrived!" : "Call-Up Declined",
+        `<p class="text-sm text-slate-700 p-2">${res.message}</p>`,
+        () => {
+            UI.switchTab('free-agents', gameState);
+        },
+        "Continue"
+    );
 };
 
 window.app_toggleWatchlist = (id) => UI.toggleWatchlistPlayer(id);

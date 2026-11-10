@@ -362,9 +362,11 @@ export function calculateAiTeamNeedAndDesire(
         .map(p => calculateOverall(p, bestPos))
         .sort((a, b) => b - a);
 
+    const expectedDepartures = naturalPlayers.filter(p => p.age >= 18).length;
+
     const missingStarters = Math.max(
         0,
-        requiredStarters - naturalPlayers.length
+        requiredStarters - (naturalPlayers.length - expectedDepartures)
     );
 
     const isDesperateVoid = missingStarters > 0;
@@ -372,7 +374,7 @@ export function calculateAiTeamNeedAndDesire(
     // Backups matter only after the team can field its starting unit.
     const backupCount = Math.max(
         0,
-        naturalPlayers.length - requiredStarters
+        (naturalPlayers.length - expectedDepartures) - requiredStarters
     );
 
     const missingBackups = isDesperateVoid
@@ -390,9 +392,14 @@ export function calculateAiTeamNeedAndDesire(
     const perceivedPlayerOvr = Math.round(playerOvr + evalNoise);
 
     // Compare against the weakest actual starter when the room is filled.
-    const currentStarterOvr = sortedStarters.length >= requiredStarters
-        ? sortedStarters[requiredStarters - 1]
-        : (sortedStarters[sortedStarters.length - 1] || 0);
+    // If the weakest starter is retiring, find the next guy on the depth chart.
+    const returningStarters = naturalPlayers.filter(p => p.age < 18)
+        .map(p => calculateOverall(p, bestPos))
+        .sort((a, b) => b - a);
+
+    const currentStarterOvr = returningStarters.length >= requiredStarters
+        ? returningStarters[requiredStarters - 1]
+        : (returningStarters[returningStarters.length - 1] || 0);
 
     const upgradeDelta = isDesperateVoid
         ? perceivedPlayerOvr - 30
@@ -490,28 +497,42 @@ export function calculateAiTeamNeedAndDesire(
         desireScore += 15;
     }
 
-    // 4. SCHEME & TACTICAL BIAS ALIGNMENT
-    if (tacticalId === 'spread_passing_specialist') {
-        if (['WR', 'TE', 'QB'].includes(bestPos)) {
-            desireScore += 22;
-        }
-    } else if (tacticalId === 'power_run_specialist') {
-        if (['OL', 'RB', 'TE'].includes(bestPos)) {
-            desireScore += 22;
-        }
+    // 4. PROGRAM DIRECTION & TACTICAL BIAS ALIGNMENT
+    // The GM's program direction provides the primary organization structure.
+    const programDirection = aiTeam.teamInstructions?.departments?.recruiting?.philosophy || gmDirective;
+    let schemeBonus = 0;
 
-        if (bestPos === 'WR') {
-            desireScore -= 14;
-        }
-    } else if (tacticalId === 'pressure_oriented_defender') {
-        if (
-            ['DL', 'LB', 'DB'].includes(bestPos) &&
-            speed !== null &&
-            speed > 60
-        ) {
-            desireScore += 18;
+    if (programDirection === 'WIN_NOW') {
+        // Favor older, immediate starters
+        if (perceivedPlayerOvr >= 58) schemeBonus += 12;
+        if (age >= 16) schemeBonus += 8;
+        if (age <= 13) schemeBonus -= 15;
+    } else if (programDirection === 'DEVELOP_YOUTH') {
+        // Favor young, high potential kids
+        if (age <= 14) schemeBonus += 12;
+        if (age >= 17) schemeBonus -= 10;
+        
+        // Peek at potential if we scouted enough to have an estimate
+        const potRange = scoutingReport?.potentialRange;
+        if (potRange && reportConfidence >= 0.6) {
+            if (potRange.bestPossible === 'A' || potRange.worstPossible === 'B') schemeBonus += 15;
+            if (potRange.worstPossible === 'F' || potRange.worstPossible === 'D') schemeBonus -= 10;
         }
     }
+
+    // Coach Tactical Biases remain a soft secondary influence (+/- 8 instead of +/- 22)
+    if (tacticalId === 'spread_passing_specialist') {
+        if (['WR', 'TE', 'QB'].includes(bestPos)) schemeBonus += 8;
+    } else if (tacticalId === 'power_run_specialist') {
+        if (['OL', 'RB', 'TE'].includes(bestPos)) schemeBonus += 8;
+        if (bestPos === 'WR') schemeBonus -= 5;
+    } else if (tacticalId === 'pressure_oriented_defender') {
+        if (['DL', 'LB', 'DB'].includes(bestPos) && speed !== null && speed > 60) {
+            schemeBonus += 8;
+        }
+    }
+    
+    desireScore += schemeBonus;
 
     // 5. SCOUTING BIAS TASTES
     if (scoutingId === 'athletic_bias_evaluator') {
