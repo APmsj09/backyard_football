@@ -190,6 +190,21 @@ export function decreaseRelationship(p1Id, p2Id) {
     if (!p2.social.rivalIds.includes(p1Id)) p2.social.rivalIds.push(p1Id);
 }
 
+function getTrainingReportConfidence(team, player) {
+    const report = getTeamScoutingReport(team, player?.id);
+
+    const rawConfidence = Number(report?.confidence);
+
+    const confidence = Number.isFinite(rawConfidence)
+        ? Math.max(0, Math.min(1, rawConfidence))
+        : 0;
+
+    return {
+        report,
+        confidence
+    };
+}
+
 export function getScoutedPlayerInfo(
     player,
     relationshipLevelNum,
