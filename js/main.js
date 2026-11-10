@@ -10,6 +10,7 @@ import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, def
 import { formatHeight } from './utils.js';
 import {
     getCurrentRosterLimit,
+    REGULAR_SEASON_ROSTER_LIMIT,
     TEMPORARY_HELP_THRESHOLD,
     processSeasonStartDues,
     COACH_CAROUSEL_DAYS,
@@ -2302,7 +2303,7 @@ function showWalkOnInvitationModal(invitation) {
     const rosterSize =
         Game.getRosterObjects(team).length;
 
-    const maximumRosterSize = 18;
+    const maximumRosterSize = REGULAR_SEASON_ROSTER_LIMIT;
     const remainingSpots = Math.max(
         0,
         maximumRosterSize - rosterSize
@@ -2400,13 +2401,13 @@ function showWalkOnInvitationModal(invitation) {
                 <p class="mt-1 text-xs text-amber-900">
                     You can sign them without spending recruiting time
                     or team funds. Your recommended roster target is
-                    16 players, but you can continue up to 18.
+                    16 players, but you can continue up to ${maximumRosterSize}.
                 </p>
             </div>
 
             <div class="flex items-center justify-between text-xs font-bold text-slate-600">
                 <span>YOUR ROSTER</span>
-                <span>${rosterSize}/18 players</span>
+                <span>${rosterSize}/${maximumRosterSize} players</span>
             </div>
 
             <div class="h-2 overflow-hidden rounded-full bg-slate-200">

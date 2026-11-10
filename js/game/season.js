@@ -7315,6 +7315,60 @@ export function generateTeamWalkOnInvitations(gameState, teamId) {
     const targetRosterSize = 16;
     const maximumRosterSize = REGULAR_SEASON_ROSTER_LIMIT;
 
+    // Restore the existing list before deciding whether new invitations
+    // are needed. Never reroll an invitation for the same season.
+    const existingInvitation =
+        progress.walkOnInvitationsByTeam?.[teamKey];
+
+    if (
+        existingInvitation &&
+        Number(existingInvitation.seasonYear) === year &&
+        rosterSize >= maximumRosterSize
+    ) {
+        existingInvitation.currentRosterSize = rosterSize;
+        existingInvitation.status = 'full';
+
+        (existingInvitation.offers || []).forEach(candidate => {
+            if (candidate.status === 'offered') {
+                candidate.status = 'expired';
+            }
+        });
+
+        return {
+            success: true,
+            needsWalkOns: false,
+            invitation: existingInvitation,
+            offers: existingInvitation.offers || []
+        };
+    }
+
+    // Restore the existing list before deciding whether new invitations
+    // are needed. Never reroll an invitation for the same season.
+    const existingInvitation =
+        progress.walkOnInvitationsByTeam?.[teamKey];
+
+    if (
+        existingInvitation &&
+        Number(existingInvitation.seasonYear) === year &&
+        rosterSize >= maximumRosterSize
+    ) {
+        existingInvitation.currentRosterSize = rosterSize;
+        existingInvitation.status = 'full';
+
+        (existingInvitation.offers || []).forEach(candidate => {
+            if (candidate.status === 'offered') {
+                candidate.status = 'expired';
+            }
+        });
+
+        return {
+            success: true,
+            needsWalkOns: false,
+            invitation: existingInvitation,
+            offers: existingInvitation.offers || []
+        };
+    }
+
     if (rosterSize >= maximumRosterSize) {
         return {
             success: true,
@@ -7322,10 +7376,6 @@ export function generateTeamWalkOnInvitations(gameState, teamId) {
             offers: []
         };
     }
-
-    // Return the existing invitation list rather than rerolling it.
-    const existingInvitation =
-        progress.walkOnInvitationsByTeam?.[teamKey];
 
     if (
         existingInvitation &&
@@ -7435,7 +7485,13 @@ export function generateTeamWalkOnInvitations(gameState, teamId) {
                     'injured',
                     'draft_eligible'
                 ].includes(lifecycleStatus) &&
-                lifecycle !== 'draft_eligible' &&
+                ![
+                    'retired',
+                    'departed',
+                    'temporary',
+                    'injured',
+                    'draft_eligible'
+                ].includes(lifecycle) &&
                 !(Number(player.status?.duration) > 0) &&
                 !(
                     Number(
@@ -7687,7 +7743,8 @@ export function acceptTeamWalkOnInvitation(gameState, playerId) {
 
     if (
         !invitation ||
-        Number(invitation.seasonYear) !== acceptanceYear         ||
+        String(invitation.teamId) !== teamKey ||
+        Number(invitation.seasonYear) !== acceptanceYear ||
         invitation.status !== 'pending' ||
         !Array.isArray(invitation.offers)
     ) {
@@ -7821,7 +7878,13 @@ export function acceptTeamWalkOnInvitation(gameState, playerId) {
             'injured',
             'draft_eligible'
         ].includes(lifecycleStatus) &&
-        lifecycle !== 'draft_eligible' &&
+        ![
+            'retired',
+            'departed',
+            'temporary',
+            'injured',
+            'draft_eligible'
+        ].includes(lifecycle) &&
         !(Number(player.status?.duration) > 0) &&
         !(
             Number(
