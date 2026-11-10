@@ -27,20 +27,14 @@ export function getDecisionProfile(playerState, tick = null) {
         return null;
     }
 
-    let profile = playerState._decisionProfile;
-
-    if (
-        Number.isFinite(tick) &&
-        playerState._decisionProfileTick === tick &&
-        profile
-    ) {
-        return profile;
+    // Attributes like IQ, Consistency, and Personality do not change mid-play.
+    // Cache the profile permanently on the player state object for the duration of the snap.
+    if (playerState._decisionProfile) {
+        return playerState._decisionProfile;
     }
 
-    if (!profile) {
-        profile = {};
-        playerState._decisionProfile = profile;
-    }
+    const profile = {};
+    playerState._decisionProfile = profile;
 
     const personality = playerState.personality || {};
 
@@ -130,10 +124,6 @@ export function getDecisionProfile(playerState, tick = null) {
     profile.decisionQuality = decisionQuality;
     profile.assignmentDiscipline = assignmentDiscipline;
     profile.riskTolerance = riskTolerance;
-
-    if (Number.isFinite(tick)) {
-        playerState._decisionProfileTick = tick;
-    }
 
     return profile;
 }

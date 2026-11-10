@@ -8,25 +8,28 @@ export const MOVEMENT_MODEL = Object.freeze({
     maxAge: 18,
     fallbackAge: 12,
 
-    // Top speed, in yards per second
-    baseSpeedYPS: 5.4,
-    speedRatingBonusYPS: 4.5,
-    // Expected body weight by age
+    // Top speed, in yards per second (Tuned down for realistic youth/HS speed)
+    // 4.8 + 3.8 = 8.6 YPS max (approx 4.6 40-yard dash for an elite 99-speed 18yo)
+    baseSpeedYPS: 4.8,
+    speedRatingBonusYPS: 3.8,
+    
+    // Expected body weight by age (75 at 8yo, ~195 at 18yo)
     weightAtMinAgeLbs: 75,
-    weightPerYearLbs: 10,
+    weightPerYearLbs: 12, // Increased from 10 to match physics.js curve
 
     // Top-speed penalty for weight above the age-based expectation
-    speedWeightPenaltyPerLb: 0.0012,
-    minimumSpeedWeightFactor: 0.82,
+    // Increased penalty so heavy linemen lumber more realistically
+    speedWeightPenaltyPerLb: 0.0015,
+    minimumSpeedWeightFactor: 0.75,
 
-    // Acceleration, in yards per second squared
-    baseAccelerationYPS2: 2.8,
-    explosivenessAccelerationBonusYPS2: 2.8,
+    // Acceleration, in yards per second squared (Tuned down to add weight/inertia)
+    baseAccelerationYPS2: 2.2,
+    explosivenessAccelerationBonusYPS2: 2.6,
     agilityAccelerationBonusYPS2: 0.45,
 
     // Acceleration penalty for weight above the age-based expectation
-    weightAccelerationPenaltyPerLb: 0.001,
-    minimumAccelerationWeightFactor: 0.82
+    weightAccelerationPenaltyPerLb: 0.0015,
+    minimumAccelerationWeightFactor: 0.70
 });
 
 function clamp(value, min, max) {
@@ -197,5 +200,6 @@ export function getPlayerAccelerationYPS2(player = {}) {
             MOVEMENT_MODEL.agilityAccelerationBonusYPS2
         );
 
-    return Math.max(2.4, acceleration * weightFactor);
+    // Lowered floor to allow heavy linemen to be slower off the snap
+    return Math.max(1.8, acceleration * weightFactor);
 }

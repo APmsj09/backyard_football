@@ -2711,10 +2711,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         }
 
         if (!pState.isOffense) {
-                        // After a completed pass, defenders pursue the actual ball carrier.
+        // After a completed pass, defenders pursue the actual ball carrier.
             if (isPassCompleted && ballCarrierState) {
                 const dist = getDistance(pState, ballCarrierState);
-                const leadTime = Math.min(1.2, Math.max(0.3, dist / 16));
+                const iq = pState.playbookIQ || 50;
+                
+                // Smart lead time based on distance and football IQ
+                const baseLead = dist / 12.0;
+                const iqLeadBonus = (iq / 100) * 0.3;
+                const leadTime = Math.min(1.5, Math.max(0.15, baseLead + iqLeadBonus));
 
                 let predX =
                     ballCarrierState.x + ((ballCarrierState.vx || 0) * leadTime);
@@ -2726,7 +2731,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                 // At close range, prioritize making contact rather than chasing
                 // another predicted point beyond the receiver.
-                if (dist <= 5.5) {
+                // Lowered from 5.5y to 1.8y so defenders don't tail-chase from 15 feet away!
+                if (dist <= 1.8) {
                     predX = ballCarrierState.x;
                     pursuitTargetY = ballCarrierState.y;
                 } else {
@@ -2996,7 +3002,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         return;
                     }
 
-                                        // Committed pursuit retains tracking awareness even if runner sprints beyond the 21y vision cone.
+                    // Committed pursuit retains tracking awareness even if runner sprints beyond the 21y vision cone.
                     // Once a defender has identified a live runner, preserve a useful amount of anticipation
                     // instead of letting weak perception reduce the lead almost to zero.
                     const effectivePerception = hasCommittedToLiveRunner
@@ -3008,9 +3014,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         Math.max(0.65, effectivePerception)
                     );
 
-                    const blendFactor =
-                        Math.min(1.0, Math.max(0.3, (dist - 0.8) / 3.0)) *
-                        predictionConfidence;
+                    // High IQ players trust their pursuit angles and don't resort to tail-chasing
+                    const iqFactor = (iq || 50) / 100;
+                    const minBlend = 0.45 + (iqFactor * 0.35); 
+                    const blendFactor = Math.min(1.0, Math.max(minBlend, dist / 6.0)) * predictionConfidence;
 
                     const carrierVX = Number.isFinite(chaseTarget.vx)
                         ? chaseTarget.vx
@@ -3128,8 +3135,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     );
 
                     // Close-range pursuit should prioritize contact over predicting a future position.
-                    // Otherwise, the defender can keep chasing a point beyond the runner.
-                    if (dist <= 5.5) {
+                    // Lowered from 5.5 to 1.8 yards so defenders take proper cut-off angles instead of trailing.
+                    if (dist <= 1.8) {
                         predX = chaseTarget.x;
                         pursuitTargetY = chaseTarget.y;
                     }
@@ -3147,43 +3154,34 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const flightTime = playState.tick - (playState.ballState.throwTick || 0);
                 const reactionDelay = Math.max(2, 12 - Math.floor(iq / 10));
 
-                // Let deep safeties process coverage assignments in executeAssignment.
-                const isDeepZoneDB =
-                    pState.role === 'DB' &&
-                    pState.assignment?.includes('zone_deep');
+                const isDeepZoneDB = pState.role === 'DB' && pState.assignment?.includes('zone_deep');
 
-                if (flightTime > reactionDelay && !isDeepZoneDB) {
+                if (flightTime > reactionDelay) {
                     if (ballPos.isThrowAway) {
                         setHoldIntent(pState, pState.x, pState.y);
                         pState.action = 'idle';
                     } else {
-                        const interceptionPoint =
-                            getReachablePassInterceptionPoint(pState, ballPos);
+                        const interceptionPoint = getReachablePassInterceptionPoint(pState, ballPos);
 
                         if (interceptionPoint) {
-                            setPointIntent(
-                                pState,
-                                interceptionPoint.x,
-                                interceptionPoint.y,
-                                0.5
-                            );
-
+                            setPointIntent(pState, interceptionPoint.x, interceptionPoint.y, 0.5);
                             pState.action = 'tracking_ball';
                         } else {
-                            // Even if an interception trajectory cannot be undercut, defenders covering
-                            // the target receiver MUST converge to contest the catch and make the tackle!
                             const isAssignedToTarget = assignment?.includes(ballPos.targetPlayerId) ||
                                 (ballPos.targetPlayerId && pState.assignedPlayerSlot === offenseStates.find(o => o.id === ballPos.targetPlayerId)?.slot);
 
                             const distToLanding = Math.hypot(pState.x - ballPos.targetX, pState.y - ballPos.targetY);
 
-                            if (isAssignedToTarget || distToLanding < 6.5) {
+                            // Deep safeties break on the ball if it's within a reasonable range (15y) 
+                            // to prevent them from standing still while a pass is completed in front of them.
+                            const breakThreshold = isDeepZoneDB ? 15.0 : 6.5;
+
+                            if (isAssignedToTarget || distToLanding < breakThreshold) {
                                 let trackTargetY = ballPos.targetY;
                                 
-                                // Do not let deep safeties bite on shallow checkdowns while the ball is in the air.
-                                // If the ball is thrown short, let the linebackers rally to it.
-                                if (isDeepZoneDB) {
-                                    trackTargetY = Math.max(LOS + 8.0, trackTargetY);
+                                if (isDeepZoneDB && distToLanding > 6.0) {
+                                    // Deep safeties take a conservative angle to keep the ball in front of them
+                                    trackTargetY = Math.max(LOS + 6.0, trackTargetY + 2.5);
                                 }
                                 
                                 setPointIntent(pState, ballPos.targetX, trackTargetY, 0.45);
@@ -3366,6 +3364,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
             if (pState.jamTicks > 0) {
                 pState.jamTicks--;
+                pState.hasPressed = true; // Track that we engaged in press coverage
                 const dx = targetRec.x - pState.x;
                 const dy = targetRec.y - pState.y;
                 const dist = Math.max(0.1, Math.hypot(dx, dy));
@@ -3401,10 +3400,10 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             let perfectX = targetRec.x + cushionX;
             let perfectY = targetRec.y + cushionY;
 
-            // Once the receiver reaches or crosses the DB's level, transition to hip-to-hip trail coverage.
-            // Do not continue commanding the DB to stand directly in front of the receiver's forward running lane.
+            // Once the receiver reaches the DB's level OR the DB just finished a jam, 
+            // transition to hip-to-hip trail coverage so they don't backpedal into a 3-yard cushion.
             const isReceiverReleasing = targetRec.y >= (pState.y - 0.4);
-            if (isReceiverReleasing && !targetSlot.startsWith('RB')) {
+            if ((isReceiverReleasing || pState.hasPressed) && !targetSlot.startsWith('RB')) {
                 perfectY = targetRec.y - 0.2; // Trail slightly on the hip
                 perfectX = targetRec.x + (targetRec.x < CENTER_X ? 0.8 : -0.8); // Maintain inside/outside shoulder leverage
             }
@@ -3457,7 +3456,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
     } else if (assignment?.startsWith('zone_')) {
         const zone = zoneBoundaries[assignment];
-        const zoneCenter = getZoneCenter(assignment, LOS);
+        const zoneCenter = { ...getZoneCenter(assignment, LOS) }; // CLONED to prevent permanent object mutation
         const isDeep = assignment.includes('deep') || pState.slot.startsWith('S');
         const defenderProfile = getDecisionProfile(pState, playState.tick);
         const iq = defenderProfile?.awareness ?? (pState.playbookIQ || 50);

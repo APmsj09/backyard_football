@@ -878,24 +878,24 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         // are more likely to change lanes unnecessarily.
         const offsetDiffFromPrev = Math.abs(offset - prevOffset);
         const laneStickiness =
-            20 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.2); // Buffed stickiness
+            25 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.25); // Increased stickiness!
 
         // HEAVY REVERSAL PENALTY: Prevent erratic zig-zagging behind the line (e.g. flipping from -3 to +3)
         const isReversingAcrossCenter = Math.sign(offset) !== 0 && Math.sign(prevOffset) !== 0 && Math.sign(offset) !== Math.sign(prevOffset);
         if (isReversingAcrossCenter && isBehindLine) {
-            score -= 55; // Substantial penalty to prevent vacillating back and forth behind the line
+            score -= 65; // Substantial penalty to prevent vacillating back and forth behind the line
         }
 
         if (offsetDiffFromPrev < 0.5) {
             score += laneStickiness;
         } else if (!(centerThreatDetected && lateralShift >= 3.0)) {
             score -= offsetDiffFromPrev * (
-                5.0 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.04)
+                8.0 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.08) // Increased change penalty
             );
 
             // Severe penalty for large lateral jumps
             if (offsetDiffFromPrev >= 2.5) {
-                score -= 50;
+                score -= 60;
             }
         }
         
@@ -1034,7 +1034,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     // Latch absolute field corridor when committing to a cut
     if (bestOffset !== prevOffset) {
-        runner._laneLockTicks = 18; // Increased from 10 to allow cuts to physically develop
+        runner._laneLockTicks = Math.round(22 + ((100 - agility) / 5)); // Longer commitment to cuts
         runner._lockedLaneX = bestTargetX;
 
         if (debugEnabled) {
@@ -1345,58 +1345,6 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
     const progression = qbState.readProgression;
 
-    if (typeof qbState.ticksOnCurrentRead === 'undefined') qbState.ticksOnCurrentRead = 0;
-    if (typeof qbState.currentReadTargetSlot === 'undefined') qbState.currentReadTargetSlot = progression[0];
-
-    // --- ELITE QB EYE MANIPULATION (Looking off Safeties) ---
-    // Smooth probability: 50 IQ = 0% chance, 90 IQ = ~28% chance to look off safeties
-    const eyeManipChance = Math.max(0, (qbIQ - 50) / 100) * 0.7; 
-    
-    if (playState.tick < 30 && progression.length > 1 && Math.random() < eyeManipChance) {
-        const trueTarget = offenseStates.find(o => o.slot === progression[0]);
-        if (trueTarget && trueTarget.initialX !== undefined) {
-            const decoy = offenseStates.find(o =>
-                o.slot !== 'QB1' &&
-                !o.slot.startsWith('OL') &&
-                o.slot !== trueTarget.slot &&
-                (o.action?.includes('route') || o.action === 'run_path') &&
-                o.initialX !== undefined &&
-                Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6)
-            );
-            if (decoy) {
-                qbState.currentReadTargetSlot = decoy.slot;
-                if (debugEnabled && qbState._lastLoggedDecoy !== decoy.slot) {
-                    logPlayDebug('QB_EYE_MANIPULATION', `${qbState.name} uses eyes to look safety off primary read (${progression[0]}) using decoy ${decoy.slot}`, {
-                        trueRead: progression[0],
-                        decoySlot: decoy.slot
-                    });
-                    qbState._lastLoggedDecoy = decoy.slot;
-                }
-                if (gameLog && playState.tick === 25 && Math.random() < 0.1) {
-                    pushGameLog(gameLog, `[Tick ${playState.tick}] 👀 ${qbState.name} uses his eyes to look the safety off his primary read!`, playState);
-                }
-            } else {
-                qbState.currentReadTargetSlot = progression[0];
-            }
-        } else {
-            qbState.currentReadTargetSlot = progression[0];
-        }
-    } else {
-        // Normal progression tracking with telemetry on read transitions
-        const readIndex = Math.min(progression.length - 1, Math.floor(qbState.ticksInPocket / (Math.max(8, (110 - qbIQ) / 3))));
-
-        if (debugEnabled && qbState._lastReadIndex !== readIndex) {
-            logPlayDebug('QB_READ_PROGRESSION', `${qbState.name} advances to read #${readIndex + 1} (${progression[readIndex]})`, {
-                tick: playState.tick,
-                targetSlot: progression[readIndex],
-                readIndex: readIndex + 1
-            });
-            qbState._lastReadIndex = readIndex;
-        }
-
-        qbState.currentReadTargetSlot = progression[readIndex];
-    }
-
     if (!progression || progression.length === 0) {
         const emergencyProgression = offenseStates
             .filter(p => p.slot !== 'QB1' && !p.slot.startsWith('OL'))
@@ -1408,7 +1356,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             return;
         }
         qbState.readProgression = emergencyProgression;
-        qbState.currentReadTargetSlot = emergencyProgression[0];
+        progression.push(...emergencyProgression);
     }
 
     const unblocked = defenseStates
@@ -1436,6 +1384,60 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     // The threat must close to within 2.5 yards of the QB.
     const isHotReadSituation =
         isPressured && pressureDistance < 2.5;
+
+    // --- UNIFIED SCAN LOGIC ---
+    let scanSpeedBase = Math.max(12, (150 - qbProcessing) / 4.5);
+    if (isPressured) {
+        const pressureProcessingMod = 1.05 - (qbDecision / 220);
+        scanSpeedBase *= Math.max(0.80, pressureProcessingMod);
+    }    
+
+    if (qbState.effectiveScanTicks === undefined) qbState.effectiveScanTicks = 0;
+    qbState.effectiveScanTicks += qbState.hasCompletedDropback ? 1 : 0.6; // Read slower while dropping back
+
+    const readIndex = Math.min(progression.length - 1, Math.floor(qbState.effectiveScanTicks / scanSpeedBase));
+    
+    if (debugEnabled && qbState._lastReadIndex !== readIndex) {
+        logPlayDebug('QB_READ_PROGRESSION', `${qbState.name} advances to read #${readIndex + 1} (${progression[readIndex]})`, {
+            tick: playState.tick,
+            targetSlot: progression[readIndex],
+            readIndex: readIndex + 1
+        });
+        qbState._lastReadIndex = readIndex;
+    }
+
+    // --- ELITE QB EYE MANIPULATION (Looking off Safeties) ---
+    const eyeManipChance = Math.max(0, (qbIQ - 50) / 100) * 0.7; 
+    if (playState.tick < 30 && progression.length > 1 && readIndex === 0 && Math.random() < eyeManipChance) {
+        const trueTarget = offenseStates.find(o => o.slot === progression[0]);
+        if (trueTarget && trueTarget.initialX !== undefined) {
+            const decoy = offenseStates.find(o =>
+                o.slot !== 'QB1' && !o.slot.startsWith('OL') &&
+                o.slot !== trueTarget.slot &&
+                (o.action?.includes('route') || o.action === 'run_path') &&
+                o.initialX !== undefined && Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6)
+            );
+            if (decoy) {
+                qbState.currentReadTargetSlot = decoy.slot;
+                if (debugEnabled && qbState._lastLoggedDecoy !== decoy.slot) {
+                    logPlayDebug('QB_EYE_MANIPULATION', `${qbState.name} uses eyes to look safety off primary read (${progression[0]}) using decoy ${decoy.slot}`, {
+                        trueRead: progression[0],
+                        decoySlot: decoy.slot
+                    });
+                    qbState._lastLoggedDecoy = decoy.slot;
+                }
+                if (gameLog && playState.tick === 25 && Math.random() < 0.1) {
+                    pushGameLog(gameLog, `[Tick ${playState.tick}] 👀 ${qbState.name} uses his eyes to look the safety off his primary read!`, playState);
+                }
+            } else {
+                qbState.currentReadTargetSlot = progression[0];
+            }
+        } else {
+            qbState.currentReadTargetSlot = progression[0];
+        }
+    } else {
+        qbState.currentReadTargetSlot = progression[readIndex];
+    }
 
     const getTargetValue = (slotOrRole) => {
         const rec = offenseStates.find(r =>
@@ -1708,7 +1710,11 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 score -= (60 - qbPower) * 1.0;
             }
             if (minProjectedSeparation >= 3.0 && defendersClosingIn === 0) {
-                score += 10 + (qbIQ * 0.05);
+                score += 5 + (qbIQ * 0.04);
+            }
+            // Add a small penalty for deep routes to make QBs hesitate unless it's a great look
+            if (depth > 20 && minProjectedSeparation < 4.0) {
+                score -= 8;
             }
         }
 
@@ -1935,36 +1941,10 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         return;
     }
 
-        // QB progression timing:
-    // Average processors take about 20 ticks (0.8 seconds) to advance
-    // to another read. Elite QBs process faster, but cannot scan instantly.
-    let scanSpeedBase = Math.max(15, (150 - qbProcessing) / 5.0);
-
-    if (isPressured) {
-        // Pressure speeds up decisions modestly without granting instant
-        // knowledge of the entire route progression.
-        const pressureProcessingMod = 1.05 - (qbDecision / 220);
-        scanSpeedBase *= Math.max(0.85, pressureProcessingMod);
-    }
-
-    // Progression scanning starts once the QB completes the dropback.
-    // Until then, the QB remains focused primarily on Read #1.
-    if (qbState.hasCompletedDropback) {
-        qbState.ticksSetInPocket = (qbState.ticksSetInPocket || 0) + 1;
-    } else {
-        qbState.ticksSetInPocket = 0;
-    }
-
-    const timedReadsVisible = Math.min(
-        progression.length,
-        1 + Math.floor(qbState.ticksSetInPocket / scanSpeedBase)
-    );
-
-    // A hot read gives the QB an immediate outlet beyond the primary read.
-    // It does not instantly reveal every receiver in the progression.
-    const numReadsVisible = isHotReadSituation
-        ? Math.min(progression.length, Math.max(2, timedReadsVisible))
-        : timedReadsVisible;
+    // Ensure previous reads are still visible so the QB can come back to them
+    const numReadsVisible = isHotReadSituation 
+        ? Math.min(progression.length, Math.max(2, readIndex + 1)) 
+        : Math.min(progression.length, readIndex + 1);
 
     // DEEPER FIX: Scale dropback duration by play type. 
     // Quick passes can fire at ~1.3s (32 ticks), but deep drops need at least 1.7s (42 ticks) to develop.

@@ -498,14 +498,15 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // --- 6. CARRYING MOMENTUM & CUTTING ---
     const currentSpeed = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
     let turningPenalty = 1.0;
+    let dot = 1.0;
 
     if (currentSpeed > 0.5 && distToTarget > 0.1) {
         // Dot Product: 1.0 = Straight, 0.0 = 90 degree cut, -1.0 = U-turn
-        const dot = ((pState.vx / currentSpeed) * (dx / distToTarget)) + ((pState.vy / currentSpeed) * (dy / distToTarget));
+        dot = ((pState.vx / currentSpeed) * (dx / distToTarget)) + ((pState.vy / currentSpeed) * (dy / distToTarget));
 
         // WEIGHT IMPACT ON CUTS:
-        // Heavier players drift significantly more on sharp cuts. Agility fights this drift.
-        const cutStability = 0.4 + (agiFactor * 0.5) - ((weightRatio - 1.0) * 0.3);
+        // Increased base cut stability so players don't drop to 40% speed on hard cuts (fixes the "molasses" effect)
+        const cutStability = 0.65 + (agiFactor * 0.35) - ((weightRatio - 1.0) * 0.25);
         turningPenalty = Math.max(cutStability, dot);
     }
     const effectiveMaxSpeed = maxPossibleSpeed * turningPenalty;
@@ -517,6 +518,14 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // Athletes planting their cleats to stop or cut can brake significantly faster
     // than they can accelerate forward from a dead stop (prevents ice-skating drift).
     let maxDecelerationYPS2 = maxAccelerationYPS2 * 2.85;
+
+    // "Plant and Drive" Burst: When accelerating from a stop, or driving out of a cut,
+    // grant a temporary acceleration multiplier based on Explosiveness to snap up to top speed.
+    // Applied AFTER maxDeceleration so braking physics remain grounded and realistic.
+    if (dot > 0.4 && currentSpeed < (maxPossibleSpeed * 0.88)) {
+        const expFactor = (pState.explosiveness || 50) / 100;
+        maxAccelerationYPS2 *= (1.4 + (expFactor * 0.8)); // 1.8x to 2.2x forward acceleration burst
+    }
 
     // Steering response can change independently of the physical limits.
     let accelRate = maxAccelerationYPS2;
@@ -1227,7 +1236,7 @@ function calculateGapFriction(pState, allPlayers) {
 
                 if (distToGap < 0.9) {
                     // Squeezing through a seam provides resistance, not complete paralysis
-                    let friction = 0.65 + (Math.max(0, gapWidth - 0.5) / 1.1) * 0.35;
+                    let friction = 0.75 + (Math.max(0, gapWidth - 0.5) / 1.1) * 0.25;
                     
                     // Powerful runners drop their pads and power through tight interior seams
                     const pStr = pState.str || pState.strength || 50;
@@ -1235,7 +1244,7 @@ function calculateGapFriction(pState, allPlayers) {
                     const powerFactor = ((pStr / 100) * 0.5) + (((pWgt - 180) / 140) * 0.5);
                     friction += (powerFactor * 0.20);
                     
-                    friction = Math.max(0.60, Math.min(1.0, friction));
+                    friction = Math.max(0.65, Math.min(1.0, friction));
                     if (friction < minFriction) minFriction = friction;
                 }
             }
