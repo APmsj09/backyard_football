@@ -619,12 +619,7 @@ export function autoMakeSubstitutions(team, options = {}, gameLog = null) {
 
             if (!needsSub) continue;
 
-            let basePos = slot.replace(/\d/g, '');
-            if (['OT', 'OG', 'C'].includes(basePos)) basePos = 'OL';
-            if (['CB', 'S', 'FS', 'SS'].includes(basePos)) basePos = 'DB';
-            if (['DE', 'DT', 'NT'].includes(basePos)) basePos = 'DL';
-            if (basePos === 'FB') basePos = 'RB';
-
+            // basePos is already declared and normalized above
             let searchBuckets = [basePos];
             if (basePos === 'OL') searchBuckets.push('DL', 'TE');
             else if (basePos === 'DL') searchBuckets.push('OL', 'LB', 'TE');
