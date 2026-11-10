@@ -21,7 +21,7 @@ import {
     OFFSEASON_PHASES,
     transitionOffseasonPhase
 } from './season.js';
-import { isDebugMode } from './debug_mode';
+import { isDebugMode } from './debug_mode.js';
 
 export const DRAFT_ROUNDS_ROOKIE = 3;
 
