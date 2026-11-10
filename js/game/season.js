@@ -2084,6 +2084,7 @@ export function getTeamOverall(team) {
 export function generateHistoricalStats(team, score) {
     const roster = getRosterObjects(team);
 
+    // Initialize all gameStats for active roster players
     roster.forEach(p => {
         if (p && !p.gameStats) {
             p.gameStats = {
@@ -2115,62 +2116,128 @@ export function generateHistoricalStats(team, score) {
         }
     });
 
+    // Helper: Gathers starters AND rotational backups so the entire roster gets realistic reps
     const getRoleEntries = (side, positionPrefix) => {
         const depth = team.depthChart?.[side] || {};
-        const hasAssignments = Object.values(depth).some(
-            playerId => playerId != null && playerId !== ''
-        );
+        const depthPool = team.depthOrder?.[positionPrefix] || [];
+        const seenPlayerIds = new Set();
+        const entries = [];
 
-        if (hasAssignments) {
-            const seenPlayerIds = new Set();
+        // 1. Primary starters from depth chart slots (includes FB mapping for RB)
+        Object.entries(depth).forEach(([slot, playerId]) => {
+            if (!playerId) return;
+            const isMatch = slot.startsWith(positionPrefix) || (positionPrefix === 'RB' && slot.startsWith('FB'));
+            if (isMatch && !seenPlayerIds.has(String(playerId))) {
+                const player = roster.find(p => p && String(p.id) === String(playerId));
+                if (player?.gameStats) {
+                    seenPlayerIds.add(String(playerId));
+                    const ovr = calculateOverall(player, positionPrefix);
+                    const stamina = player.attributes?.physical?.stamina || 50;
+                    entries.push({ slot, player, tier: 'starter', ovr, stamina });
+                }
+            }
+        });
 
-            return Object.entries(depth)
-                .filter(([slot, playerId]) =>
-                    slot.startsWith(positionPrefix) &&
-                    playerId != null &&
-                    playerId !== ''
-                )
-                .map(([slot, playerId]) => ({
-                    slot,
-                    player: roster.find(p =>
-                        p && String(p.id) === String(playerId)
-                    )
-                }))
-                .filter(entry => {
-                    if (!entry.player?.gameStats) return false;
-
-                    const playerId = String(entry.player.id);
-                    if (seenPlayerIds.has(playerId)) return false;
-
-                    seenPlayerIds.add(playerId);
-                    return true;
+        // 2. Rotational backups & reserves from depth order and roster viability
+        depthPool.forEach((playerId, index) => {
+            if (!playerId || seenPlayerIds.has(String(playerId))) return;
+            const player = roster.find(p => p && String(p.id) === String(playerId));
+            if (player?.gameStats) {
+                seenPlayerIds.add(String(playerId));
+                const ovr = calculateOverall(player, positionPrefix);
+                const stamina = player.attributes?.physical?.stamina || 50;
+                entries.push({
+                    slot: `${positionPrefix}_sub_${index + 1}`,
+                    player,
+                    tier: index === 0 ? 'rotation' : 'reserve',
+                    ovr,
+                    stamina
                 });
-        }
+            }
+        });
 
-        const favoritePositionKey = side === 'offense'
-            ? 'favoriteOffensivePosition'
-            : 'favoriteDefensivePosition';
+        // 3. Fallback: Catch any natural players at this position not yet placed
+        const favoritePositionKey = side === 'offense' ? 'favoriteOffensivePosition' : 'favoriteDefensivePosition';
+        roster.forEach(player => {
+            if (!player?.gameStats || seenPlayerIds.has(String(player.id))) return;
+            const natPos = player[favoritePositionKey] || player.pos;
+            if (natPos === positionPrefix || isPlayerViableForPosition(player, positionPrefix)) {
+                seenPlayerIds.add(String(player.id));
+                const ovr = calculateOverall(player, positionPrefix);
+                const stamina = player.attributes?.physical?.stamina || 50;
+                entries.push({
+                    slot: `${positionPrefix}_bench`,
+                    player,
+                    tier: 'reserve',
+                    ovr,
+                    stamina
+                });
+            }
+        });
 
-        return roster
-            .filter(p =>
-                p?.gameStats &&
-                (p[favoritePositionKey] || p.pos) === positionPrefix
-            )
-            .map((player, index) => ({
-                slot: `${positionPrefix}${index + 1}`,
-                player
-            }));
+        // Compute baseline benchmark from the top starter(s) in this room
+        const starterEntries = entries.filter(e => e.tier === 'starter');
+        const topStarterOvr = starterEntries.length > 0
+            ? Math.max(...starterEntries.map(s => s.ovr))
+            : (entries[0]?.ovr || 50);
+
+        const topStarterStamina = starterEntries.length > 0
+            ? Math.round(starterEntries.reduce((sum, s) => sum + s.stamina, 0) / starterEntries.length)
+            : 50;
+
+        entries.forEach(e => {
+            e.topStarterOvr = topStarterOvr;
+            e.topStarterStamina = topStarterStamina;
+        });
+
+        return entries;
     };
 
+    // Role weights: Scaled by Base, Skill Gap vs. Starter, and Stamina
     const getRoleWeight = entry => {
-        const position = entry.slot.replace(/\d+$/, '');
-        const slotNumber = Number(entry.slot.match(/\d+$/)?.[0]) || 1;
+        const position = entry.slot.split('_')[0].replace(/\d+$/, '');
+        const isStarter = entry.tier === 'starter' || !entry.tier;
+        const isRotation = entry.tier === 'rotation';
 
-        if (position === 'WR') return slotNumber === 1 ? 4 : 3;
-        if (position === 'TE') return slotNumber === 1 ? 3 : 2;
-        if (position === 'RB') return slotNumber === 1 ? 2 : 1;
+        let baseWeight = 4;
+        if (position === 'WR') baseWeight = 5;
+        else if (position === 'TE') baseWeight = 4;
+        else if (position === 'RB' || position === 'FB') baseWeight = 6;
+        else if (position === 'QB') baseWeight = 14;
+        else if (position === 'DL' || position === 'LB' || position === 'DB') baseWeight = 5;
 
-        return 1;
+        // 1. Stamina Factor: high stamina gives greater volume capacity without fatigue
+        const stamina = entry.stamina || 50;
+        const staminaFactor = Math.max(0.70, Math.min(1.30, 0.75 + (stamina / 200)));
+
+        if (isStarter) {
+            return Math.max(1, Math.round(baseWeight * staminaFactor * 10) / 10);
+        }
+
+        // 2. Skill Gap: close skill creates a committee; wide gap creates a bellcow
+        const ovrGap = Math.max(0, (entry.topStarterOvr || 50) - (entry.ovr || 50));
+        const gapAdjustment = Math.max(-0.12, Math.min(0.16, (10 - ovrGap) * 0.01));
+
+        // 3. Starter Stamina Need: low starter stamina forces more backup rotations
+        const starterStamina = entry.topStarterStamina || 50;
+        const starterFatigueNeed = (50 - starterStamina) * 0.003;
+
+        let shareRatio = isRotation ? 0.22 : 0.07;
+        shareRatio += gapAdjustment + starterFatigueNeed;
+
+        // Position-specific ratio guardrails
+        if (position === 'QB') {
+            // Backup QBs rarely take snaps unless blowout or starter gassed
+            shareRatio = Math.max(0.04, Math.min(0.18, shareRatio));
+        } else if (position === 'RB') {
+            // RBs frequently form 65/35 committees
+            shareRatio = Math.max(0.06, Math.min(0.42, shareRatio));
+        } else {
+            shareRatio = Math.max(0.05, Math.min(0.35, shareRatio));
+        }
+
+        const finalWeight = baseWeight * shareRatio * staminaFactor;
+        return Math.max(0.5, Math.round(finalWeight * 10) / 10);
     };
 
     const distributeTotal = (total, entries) => {
@@ -2180,28 +2247,19 @@ export function generateHistoricalStats(team, score) {
         const weights = entries.map(getRoleWeight);
         const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
 
+        if (totalWeight <= 0) return entries.map(() => 0);
+
         let cumulativeWeight = 0;
-
         return weights.map(weight => {
-            const before = Math.floor(
-                safeTotal * cumulativeWeight / totalWeight
-            );
-
+            const before = Math.floor(safeTotal * cumulativeWeight / totalWeight);
             cumulativeWeight += weight;
-
-            const after = Math.floor(
-                safeTotal * cumulativeWeight / totalWeight
-            );
-
+            const after = Math.floor(safeTotal * cumulativeWeight / totalWeight);
             return after - before;
         });
     };
 
     const addStat = (entry, stat, amount) => {
-        if (!entry?.player?.gameStats || !Number.isFinite(amount) || amount <= 0) {
-            return;
-        }
-
+        if (!entry?.player?.gameStats || !Number.isFinite(amount) || amount <= 0) return;
         const stats = entry.player.gameStats;
         stats[stat] = (Number(stats[stat]) || 0) + amount;
     };
@@ -2216,142 +2274,110 @@ export function generateHistoricalStats(team, score) {
     const linebackers = getRoleEntries('defense', 'LB');
     const defensiveBacks = getRoleEntries('defense', 'DB');
 
-    const qb = qbs[0] || null;
     const totalTouchdowns = Math.floor(Math.max(0, score) / 7);
-    const passTds = qb ? Math.floor(totalTouchdowns * 0.6) : 0;
+    const passTds = qbs.length > 0 ? Math.floor(totalTouchdowns * 0.6) : 0;
     const rushTds = totalTouchdowns - passTds;
 
-    let passAttempts = 0;
-    let passCompletions = 0;
+    // --- 1. PASSING (Starter QB gets ~85%, backup gets ~15% in garbage time) ---
+    const totalPassAttempts = getRandomInt(16, 26);
+    const qbAttemptShares = distributeTotal(totalPassAttempts, qbs);
+    const qbTdShares = distributeTotal(passTds, qbs);
 
-    if (qb) {
-        passAttempts = getRandomInt(15, 25);
-        passCompletions = Math.floor(
-            passAttempts * (0.5 + Math.random() * 0.2)
-        );
+    qbs.forEach((entry, idx) => {
+        const att = qbAttemptShares[idx] || 0;
+        if (att <= 0) return;
+        const comp = Math.floor(att * (0.52 + Math.random() * 0.18));
+        addStat(entry, 'passAttempts', att);
+        addStat(entry, 'passCompletions', comp);
+        addStat(entry, 'passYards', comp * getRandomInt(8, 12));
+        addStat(entry, 'touchdowns', qbTdShares[idx] || 0);
+        if (Math.random() < 0.35) addStat(entry, 'interceptionsThrown', 1);
+    });
 
-        addStat(qb, 'passAttempts', passAttempts);
-        addStat(qb, 'passCompletions', passCompletions);
-        addStat(
-            qb,
-            'passYards',
-            passCompletions * getRandomInt(8, 12)
-        );
-        addStat(qb, 'touchdowns', passTds);
-        addStat(qb, 'interceptionsThrown', getRandomInt(0, 2));
-    }
-
+    // --- 2. RUSHING (RB1 takes lead, RB2 & backup take rotational carries) ---
     const rushers = runningBacks.length > 0 ? runningBacks : qbs;
-    const rushAttemptShares = distributeTotal(
-        rushers.length > 0 ? getRandomInt(10, 20) : 0,
-        rushers
-    );
+    const totalRushes = getRandomInt(12, 22);
+    const rushAttemptShares = distributeTotal(totalRushes, rushers);
     const rushTdShares = distributeTotal(rushTds, rushers);
 
     rushers.forEach((entry, index) => {
         const attempts = rushAttemptShares[index] || 0;
-
+        if (attempts <= 0) return;
         addStat(entry, 'rushAttempts', attempts);
         addStat(entry, 'rushYards', attempts * getRandomInt(3, 6));
         addStat(entry, 'touchdowns', rushTdShares[index] || 0);
     });
 
+    // --- 3. RECEIVING (All WRs, TEs, and RBs get realistic target distribution) ---
     const receiverMap = new Map();
-
     [...wideReceivers, ...tightEnds, ...runningBacks].forEach(entry => {
         const playerId = String(entry.player.id);
         const existing = receiverMap.get(playerId);
-
         if (!existing || getRoleWeight(entry) > getRoleWeight(existing)) {
             receiverMap.set(playerId, entry);
         }
     });
 
     const receivers = [...receiverMap.values()];
-    const targetShares = distributeTotal(passAttempts, receivers);
-    const receptionShares = distributeTotal(passCompletions, receivers);
+    const totalCompletions = qbs.reduce((sum, qb) => sum + (qb.player.gameStats?.passCompletions || 0), 0);
+    const targetShares = distributeTotal(totalPassAttempts, receivers);
+    const receptionShares = distributeTotal(totalCompletions, receivers);
     const receivingTdShares = distributeTotal(passTds, receivers);
 
     receivers.forEach((entry, index) => {
         const targets = targetShares[index] || 0;
-        const receptions = Math.min(
-            targets,
-            receptionShares[index] || 0
-        );
-        const isTightEnd = entry.slot.startsWith('TE');
-        const receivingYardsPerCatch = getRandomInt(
-            isTightEnd ? 8 : 9,
-            isTightEnd ? 13 : 15
-        );
+        const receptions = Math.min(targets, receptionShares[index] || 0);
+        if (targets <= 0) return;
+
+        const isTightEnd = entry.slot.includes('TE');
+        const yardsPerCatch = getRandomInt(isTightEnd ? 8 : 9, isTightEnd ? 13 : 15);
 
         addStat(entry, 'targets', targets);
         addStat(entry, 'receptions', receptions);
-        addStat(
-            entry,
-            'recYards',
-            receptions * receivingYardsPerCatch
-        );
+        addStat(entry, 'recYards', receptions * yardsPerCatch);
 
         if (targets > receptions && Math.random() < 0.12) {
             addStat(entry, 'drops', 1);
         }
-
-        addStat(
-            entry,
-            'touchdowns',
-            Math.min(receptions, receivingTdShares[index] || 0)
-        );
+        addStat(entry, 'touchdowns', Math.min(receptions, receivingTdShares[index] || 0));
     });
 
+    // --- 4. OFFENSIVE LINE (All linemen log pancake blocks) ---
     offensiveLine.forEach(entry => {
-        addStat(entry, 'pancakes', getRandomInt(0, 3));
+        const isStarter = entry.tier === 'starter';
+        addStat(entry, 'pancakes', isStarter ? getRandomInt(0, 3) : (Math.random() < 0.4 ? 1 : 0));
     });
 
+    // --- 5. DEFENSE (Starters & rotational depth accumulate tackles & takeaways) ---
     defensiveLine.forEach(entry => {
-        addStat(entry, 'tackles', getRandomInt(1, 4));
-
-        if (Math.random() < 0.25) {
-            addStat(entry, 'sacks', 1);
-        }
-
-        if (Math.random() < 0.025) {
-            addStat(entry, 'fumblesRecovered', 1);
-        }
+        const isStarter = entry.tier === 'starter';
+        addStat(entry, 'tackles', isStarter ? getRandomInt(1, 4) : getRandomInt(0, 2));
+        if (Math.random() < (isStarter ? 0.22 : 0.08)) addStat(entry, 'sacks', 1);
+        if (Math.random() < 0.02) addStat(entry, 'fumblesRecovered', 1);
     });
 
     linebackers.forEach(entry => {
-        addStat(entry, 'tackles', getRandomInt(2, 5));
-
-        if (Math.random() < 0.12) {
-            addStat(entry, 'sacks', 1);
-        }
-
-        if (Math.random() < 0.02) {
-            addStat(entry, 'interceptions', 1);
-        }
-
-        if (Math.random() < 0.025) {
-            addStat(entry, 'fumblesRecovered', 1);
-        }
+        const isStarter = entry.tier === 'starter';
+        addStat(entry, 'tackles', isStarter ? getRandomInt(2, 5) : getRandomInt(1, 3));
+        if (Math.random() < (isStarter ? 0.12 : 0.04)) addStat(entry, 'sacks', 1);
+        if (Math.random() < (isStarter ? 0.04 : 0.01)) addStat(entry, 'interceptions', 1);
+        if (Math.random() < 0.02) addStat(entry, 'fumblesRecovered', 1);
     });
 
     defensiveBacks.forEach(entry => {
-        addStat(entry, 'tackles', getRandomInt(1, 3));
-        addStat(entry, 'returnYards', getRandomInt(0, 10));
-
-        if (Math.random() < 0.04) {
+        const isStarter = entry.tier === 'starter';
+        addStat(entry, 'tackles', isStarter ? getRandomInt(1, 4) : getRandomInt(0, 2));
+        if (Math.random() < (isStarter ? 0.06 : 0.02)) {
             addStat(entry, 'interceptions', 1);
             addStat(entry, 'returnYards', getRandomInt(5, 25));
         }
-
-        if (Math.random() < 0.015) {
-            addStat(entry, 'fumblesRecovered', 1);
-        }
+        if (Math.random() < 0.015) addStat(entry, 'fumblesRecovered', 1);
     });
 }
 
 export function simulateHistoricalMatch(homeTeam, awayTeam) {
-    if (homeTeam && awayTeam) {
+    // Only youth league matchups use the probabilistic youth simulator
+    if (homeTeam?.leagueType === 'youth' && awayTeam?.leagueType === 'youth') {
         try {
             const result = simulateYouthMatch(homeTeam, awayTeam);
 
@@ -2378,6 +2404,7 @@ export function simulateHistoricalMatch(homeTeam, awayTeam) {
         }
     }
 
+    // Main-League Franchises (Tier 1 & Tier 2) generate full box scores and player stats
     const homeOvr = getTeamOverall(homeTeam);
     const awayOvr = getTeamOverall(awayTeam);
 
@@ -2393,11 +2420,24 @@ export function simulateHistoricalMatch(homeTeam, awayTeam) {
     generateHistoricalStats(homeTeam, homeScore);
     generateHistoricalStats(awayTeam, awayScore);
 
-    // Record realistic snap counts so retention logic doesn't penalize starters as "benched"
-    [...getRosterObjects(homeTeam), ...getRosterObjects(awayTeam)].forEach(p => {
-        if (!p.careerStats) p.careerStats = { seasonsPlayed: 0 };
-        p.careerStats.snapsThisSeason = (p.careerStats.snapsThisSeason || 0) + 38;
-    });
+        // Record realistic snap distribution across starters, rotation, and reserves with stamina influence
+        [homeTeam, awayTeam].forEach(team => {
+            const offStarters = new Set(Object.values(team.depthChart?.offense || {}).filter(Boolean));
+            const defStarters = new Set(Object.values(team.depthChart?.defense || {}).filter(Boolean));
+
+            getRosterObjects(team).forEach(p => {
+                if (!p.careerStats) p.careerStats = { seasonsPlayed: 0 };
+                const isStarter = offStarters.has(p.id) || defStarters.has(p.id);
+                const isTwoWay = offStarters.has(p.id) && defStarters.has(p.id);
+
+                const stm = p.attributes?.physical?.stamina || 50;
+                const stmOffset = Math.round((stm - 50) * 0.08); // -3 to +3 snaps based on conditioning
+
+                const baseSnaps = isTwoWay ? getRandomInt(42, 48) : (isStarter ? getRandomInt(30, 36) : getRandomInt(8, 16));
+                const finalSnaps = Math.max(4, baseSnaps + stmOffset);
+                p.careerStats.snapsThisSeason = (p.careerStats.snapsThisSeason || 0) + finalSnaps;
+            });
+        });
 
     finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore);
 }
