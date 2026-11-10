@@ -12,7 +12,7 @@ import { pushGameLog } from './collisions.js';
 import { getRandom } from '../utils.js';
 
 export const slotPriority = {
-    'QB1': 100, 'OL2': 90, 'OL1': 85, 'OL3': 80, 'RB1': 75, 'WR1': 70, 'TE1': 65, 'WR2': 60, 'WR3': 55, 'RB2': 50, 'WR4': 45, 'TE2': 40, 'WR5': 35,
+    'QB1': 100, 'OL2': 90, 'OL1': 85, 'OL3': 80, 'OL4': 75, 'RB1': 75, 'WR1': 70, 'TE1': 65, 'WR2': 60, 'WR3': 55, 'RB2': 50, 'WR4': 45, 'TE2': 40, 'WR5': 35,
     'LB2': 100, 'LB1': 95, 'DB1': 85, 'DB3': 80, 'DB2': 75, 'DL1': 65, 'DL3': 60, 'DL2': 55, 'DL4': 50, 'DB5': 45
 };
 

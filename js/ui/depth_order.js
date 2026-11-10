@@ -1,9 +1,59 @@
 import * as Game from '../game.js';
 import { getGameState, saveGameState, getGameDayRosterObjects } from '../game/state.js';
 import { isPlayerViableForPosition } from '../game/depth_chart.js';
-import { calculateOverall, estimateBestPosition } from '../game/player.js';
+import {
+    calculateOverall,
+    calculateSlotSuitability,
+    estimateBestPosition
+} from '../game/player.js';
+
+import { offenseFormations, defenseFormations } from '../data.js';
 import { showModal, hideModal } from '../ui.js';
 import { formatHeight } from '../utils.js';
+
+let activeDepthChartTab = 'offense';
+
+const getFormationSlotInfo = (team, side, slot, fallbackPosition) => {
+    if (side !== 'offense' && side !== 'defense') {
+        return {
+            displayLabel: slot,
+            ratingPosition: fallbackPosition,
+            hasRoleRating: false
+        };
+    }
+
+    const formationKey = team.formations?.[side] ||
+        (side === 'offense' ? 'Balanced' : '3-2-3');
+
+    const formationMap = side === 'offense'
+        ? offenseFormations
+        : defenseFormations;
+
+    const displayLabel = formationMap[formationKey]
+        ?.slotLabels?.[slot] || slot;
+
+    const hasRoleRating = displayLabel !== slot;
+
+    return {
+        displayLabel,
+        ratingPosition: hasRoleRating
+            ? displayLabel
+            : fallbackPosition,
+        hasRoleRating
+    };
+};
+
+const getFormationSlotDisplayLabel = (team, side, slot) => {
+    const formationKey = side === 'offense'
+        ? team.formations?.offense || 'Balanced'
+        : team.formations?.defense || '3-2-3';
+
+    const formation = side === 'offense'
+        ? offenseFormations[formationKey]
+        : defenseFormations[formationKey];
+
+    return formation?.slotLabels?.[slot] || slot;
+};
 
 export function renderDepthOrderPane(gameState) {
     const pane = document.getElementById("depth-order-container");
@@ -110,10 +160,23 @@ export function renderDepthOrderPane(gameState) {
 
                 <div class="max-h-[360px] overflow-y-auto divide-y divide-slate-100">
                     ${players.length ? players.map((player, index) => {
-                        const ovr = calculateOverall(player, pos);
                         const starterSlot = starterSlotsByPosition[pos]?.get(
                             String(player.id)
                         );
+
+                        const formationSide = isOffensePosition ? 'offense' : 'defense';
+
+                        const starterSlotInfo = starterSlot
+                            ? getFormationSlotInfo(team, formationSide, starterSlot, pos)
+                            : null;
+
+                        const starterDisplaySlot = starterSlotInfo?.displayLabel || null;
+                        const ovrPosition = starterSlotInfo?.ratingPosition || pos;
+                        const ovrLabel = starterSlotInfo?.hasRoleRating
+                            ? `${starterDisplaySlot} OVR`
+                            : `${pos} OVR`;
+
+                        const ovr = calculateOverall(player, ovrPosition);
                         const sameSidePositions = isOffensePosition
                             ? ['QB', 'RB', 'WR', 'TE', 'OL']
                             : ['DL', 'LB', 'DB'];
@@ -126,7 +189,12 @@ export function renderDepthOrderPane(gameState) {
                                 playerSlots.has(String(player.id))
                             )
                             .map(([otherPosition, playerSlots]) =>
-                                `${otherPosition} ${playerSlots.get(String(player.id))}`
+                                getFormationSlotInfo(
+                                    team,
+                                    formationSide,
+                                    playerSlots.get(String(player.id)),
+                                    otherPosition
+                                ).displayLabel
                             );
                         const multiStartBadge = otherStarterSlots.length > 0
                             ? `
@@ -162,7 +230,7 @@ export function renderDepthOrderPane(gameState) {
 
                                         ${starterSlot ? `
                                             <span class="text-[9px] ${starterBadgeClass} rounded px-1 py-0.5 font-black shrink-0">
-                                                STARTER · ${starterSlot}
+                                                STARTER · ${starterDisplaySlot}
                                             </span>
                                         ` : ''}
 
@@ -190,7 +258,7 @@ export function renderDepthOrderPane(gameState) {
                                             ${ovr}
                                         </span>
                                         <span class="block text-[8px] text-slate-400 font-bold uppercase">
-                                            OVR
+                                            ${ovrLabel}
                                         </span>
                                     </div>
 
@@ -239,6 +307,13 @@ export function renderDepthOrderPane(gameState) {
         else if (posKey === 'FB') evalPosKey = 'TE';
         else if (posKey === 'NCB') evalPosKey = 'DB';
 
+        const slotInfo = getFormationSlotInfo(team, side, slot, evalPosKey);
+        const displayLabel = slotInfo.displayLabel;
+        const ratingPosition = slotInfo.ratingPosition;
+        const ovrLabel = slotInfo.hasRoleRating
+            ? displayLabel
+            : evalPosKey;
+
         const isLocked = (side === 'specialTeams' || side === 'specialists')
             ? Object.prototype.hasOwnProperty.call(
                 team.specialistOverrides || {},
@@ -251,7 +326,11 @@ export function renderDepthOrderPane(gameState) {
                 <div class="border-2 border-dashed ${isLocked ? 'border-amber-400 bg-amber-50' : 'border-rose-300 bg-rose-50/50'} p-2.5 rounded flex justify-between items-center cursor-pointer hover:bg-rose-100 transition"
                      onclick="window.openSlotPicker('${slot}', '${side}')">
                     <div>
-                        <span class="font-black text-xs text-rose-800 uppercase">${slot}</span>
+                    <span
+                        class="font-black text-xs text-rose-800 uppercase"
+                        title="Backend slot: ${slot}">
+                        ${displayLabel}
+                    </span>
                         <p class="text-[10px] ${isLocked ? 'text-amber-700' : 'text-rose-600'} font-bold">
                             ${isLocked ? '🔒 Locked Vacant' : '⚠️ Unassigned — Click to Assign'}
                         </p>
@@ -262,17 +341,19 @@ export function renderDepthOrderPane(gameState) {
                 </div>`;
         }
 
-        const ovr = calculateOverall(player, evalPosKey);
+        const ovr = calculateOverall(player, ratingPosition);
         const isIronman = Object.values(offChart).includes(player.id) && Object.values(defChart).includes(player.id);
         const energy = Math.max(0, Math.round(100 - (player.fatigue || 0)));
         const badgeColor = side === 'offense' ? 'bg-blue-900 text-blue-200' : (side === 'defense' ? 'bg-rose-900 text-rose-200' : (side === 'specialTeams' ? 'bg-amber-900 text-amber-200' : 'bg-indigo-900 text-indigo-200'));
 
         return `
-            <div class="bg-white border ${isLocked ? 'border-amber-400 shadow-sm' : 'border-slate-200'} p-2.5 rounded flex justify-between items-center hover:border-slate-400 transition cursor-pointer"
-                 onclick="window.openSlotPicker('${slot}', '${side}')">
+            <div
+                title="Backend slot: ${slot}"
+                class="bg-white border ${isLocked ? 'border-amber-400 shadow-sm' : 'border-slate-200'} p-2.5 rounded flex justify-between items-center hover:border-slate-400 transition cursor-pointer"
+                onclick="window.openSlotPicker('${slot}', '${side}')">
                 <div class="flex items-center gap-2.5 min-w-0">
                     <div class="w-8 h-8 rounded font-black text-xs flex items-center justify-center shrink-0 ${badgeColor}">
-                        ${slot}
+                        ${displayLabel}
                     </div>
                     <div class="min-w-0">
                         <div class="flex items-center gap-1.5 flex-wrap">
@@ -289,29 +370,52 @@ export function renderDepthOrderPane(gameState) {
                 </div>
                 <div class="text-right shrink-0 pl-2">
                     <span class="text-base font-black ${ovr >= 70 ? 'text-emerald-700' : 'text-slate-800'}">${ovr}</span>
-                    <span class="text-[9px] text-slate-400 uppercase font-bold block -mt-1">${posKey} OVR</span>
+                    <span class="text-[9px] text-slate-400 uppercase font-bold block -mt-1">${ovrLabel} OVR</span>
                 </div>
             </div>`;
     };
 
+    const renderActiveFormationSlots = (slots, side) => {
+        if (!slots.length) {
+            return `
+                <div class="p-5 text-center text-xs text-slate-400 italic">
+                    No formation slots available.
+                </div>
+            `;
+        }
+
+        return `
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+                ${slots.map(slot => renderSlotCard(slot, side)).join('')}
+            </div>
+        `;
+    };
+
+    const offenseSlots = offenseFormations[offFormKey]?.slots || [];
+    const defenseSlots = defenseFormations[defFormKey]?.slots || [];
+
+    const tabClass = tab => activeDepthChartTab === tab
+        ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50';
+
     pane.innerHTML = `
-        <!-- Universal Depth Chart Header -->
-        <div class="mb-4 bg-slate-900 text-white rounded p-3 flex flex-wrap justify-between items-center gap-3 shrink-0">
+        <!-- Depth Chart Header -->
+        <div class="mb-4 bg-slate-900 text-white rounded p-3 flex flex-wrap justify-between items-center gap-3">
             <div class="min-w-0">
                 <span class="font-black text-sm uppercase tracking-wider">
-                    Position Depth Order
+                    Depth Chart
                 </span>
 
                 <p class="text-[10px] text-slate-400 mt-1">
-                    Order players by position. STARTER badges reflect the active formations.
+                    Set your starters, manage positional depth, and configure specialists.
                 </p>
 
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
                     <span class="text-[10px] text-blue-300 font-bold">
-                        ACTIVE OFFENSE: ${offFormKey}
+                        OFFENSE: ${offFormKey}
                     </span>
                     <span class="text-[10px] text-rose-300 font-bold">
-                        ACTIVE DEFENSE: ${defFormKey}
+                        DEFENSE: ${defFormKey}
                     </span>
                 </div>
             </div>
@@ -331,20 +435,56 @@ export function renderDepthOrderPane(gameState) {
             </div>
         </div>
 
-        <!-- Universal Core Position Rankings + Specialists -->
-        <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,2.2fr)_minmax(260px,0.8fr)] gap-4 pb-6 min-w-0">
+        <!-- Main Depth Chart Subtabs -->
+        <div class="flex gap-2 border-b border-slate-200 pb-2 mb-4 overflow-x-auto">
+            <button
+                class="px-4 py-2 rounded border text-xs font-black uppercase tracking-wider whitespace-nowrap ${tabClass('offense')}"
+                onclick="window.setDepthChartTab('offense')">
+                🏈 Offense
+            </button>
 
-            <!-- All Eight Core Positions -->
-            <div class="min-w-0 space-y-4">
+            <button
+                class="px-4 py-2 rounded border text-xs font-black uppercase tracking-wider whitespace-nowrap ${tabClass('defense')}"
+                onclick="window.setDepthChartTab('defense')">
+                🛡 Defense
+            </button>
 
-                <!-- Offensive Positions -->
+            <button
+                class="px-4 py-2 rounded border text-xs font-black uppercase tracking-wider whitespace-nowrap ${tabClass('specialTeams')}"
+                onclick="window.setDepthChartTab('specialTeams')">
+                🦶 Special Teams
+            </button>
+        </div>
+
+        <!-- OFFENSE TAB -->
+        ${activeDepthChartTab === 'offense' ? `
+            <div class="space-y-5 pb-6">
+
                 <section class="space-y-2">
-                    <div class="flex justify-between items-center border-b border-slate-200 pb-1">
-                        <h4 class="font-black text-xs text-blue-950 uppercase tracking-wider">
-                            Offensive Depth
+                    <div class="flex flex-wrap justify-between items-center border-b border-blue-200 pb-2">
+                        <div>
+                            <h4 class="font-black text-sm text-blue-950 uppercase tracking-wider">
+                                Active Offensive Lineup
+                            </h4>
+                            <p class="text-[10px] text-slate-500 mt-1">
+                                Click a position to assign its starter. Position labels reflect the active formation.
+                            </p>
+                        </div>
+                        <span class="text-[10px] font-bold text-blue-800 bg-blue-50 px-2 py-1 rounded">
+                            ${offenseSlots.length} Slots
+                        </span>
+                    </div>
+
+                    ${renderActiveFormationSlots(offenseSlots, 'offense')}
+                </section>
+
+                <section class="space-y-2">
+                    <div class="flex justify-between items-center border-b border-blue-200 pb-2">
+                        <h4 class="font-black text-sm text-blue-950 uppercase tracking-wider">
+                            Offensive Depth Rankings
                         </h4>
                         <span class="text-[9px] text-slate-400 uppercase font-bold">
-                            QB · RB · WR · TE · OL
+                            Automatic fallback order
                         </span>
                     </div>
 
@@ -352,15 +492,38 @@ export function renderDepthOrderPane(gameState) {
                         ${['QB', 'RB', 'WR', 'TE', 'OL'].map(renderPositionDepthCard).join('')}
                     </div>
                 </section>
+            </div>
+        ` : ''}
 
-                <!-- Defensive Positions -->
+        <!-- DEFENSE TAB -->
+        ${activeDepthChartTab === 'defense' ? `
+            <div class="space-y-5 pb-6">
+
                 <section class="space-y-2">
-                    <div class="flex justify-between items-center border-b border-slate-200 pb-1">
-                        <h4 class="font-black text-xs text-rose-950 uppercase tracking-wider">
-                            Defensive Depth
+                    <div class="flex flex-wrap justify-between items-center border-b border-rose-200 pb-2">
+                        <div>
+                            <h4 class="font-black text-sm text-rose-950 uppercase tracking-wider">
+                                Active Defensive Lineup
+                            </h4>
+                            <p class="text-[10px] text-slate-500 mt-1">
+                                Assign individual defensive ends, tackles, corners, and safeties.
+                            </p>
+                        </div>
+                        <span class="text-[10px] font-bold text-rose-800 bg-rose-50 px-2 py-1 rounded">
+                            ${defenseSlots.length} Slots
+                        </span>
+                    </div>
+
+                    ${renderActiveFormationSlots(defenseSlots, 'defense')}
+                </section>
+
+                <section class="space-y-2">
+                    <div class="flex justify-between items-center border-b border-rose-200 pb-2">
+                        <h4 class="font-black text-sm text-rose-950 uppercase tracking-wider">
+                            Defensive Depth Rankings
                         </h4>
                         <span class="text-[9px] text-slate-400 uppercase font-bold">
-                            DL · LB · DB
+                            Automatic fallback order
                         </span>
                     </div>
 
@@ -369,59 +532,77 @@ export function renderDepthOrderPane(gameState) {
                     </div>
                 </section>
             </div>
+        ` : ''}
 
-            <!-- Specialized Assignments -->
-            <aside class="min-w-0 space-y-4">
+        <!-- SPECIAL TEAMS TAB -->
+        ${activeDepthChartTab === 'specialTeams' ? `
+            <div class="space-y-5 pb-6">
 
-                <!-- Special Teams -->
-                <section class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
-                    <div class="flex justify-between items-center border-b border-slate-200 pb-2">
-                        <h4 class="font-black text-xs text-amber-900 uppercase tracking-wider">
-                            Special Teams
+                <section class="bg-amber-50/50 border border-amber-200 rounded p-3 space-y-3">
+                    <div class="border-b border-amber-200 pb-2">
+                        <h4 class="font-black text-sm text-amber-950 uppercase tracking-wider">
+                            Special Teams Specialists
                         </h4>
-                        <span class="text-[10px] text-slate-500 font-mono">
-                            Specialists
-                        </span>
+                        <p class="text-[10px] text-slate-500 mt-1">
+                            Players assigned to dedicated kicking and return duties.
+                        </p>
                     </div>
 
-                    <div class="space-y-1.5">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         ${renderSlotCard('PR', 'specialTeams')}
                         ${renderSlotCard('P', 'specialTeams')}
                     </div>
 
-                    <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200 space-y-0.5">
-                        <div><b>PR:</b> Punt returner (Speed & Hands).</div>
-                        <div><b>P:</b> Punter (Throw Power & Accuracy).</div>
+                    <div class="text-[10px] text-slate-500 italic">
+                        <b>PR:</b> Punt returner — speed, agility, and hands.
+                        <br>
+                        <b>P:</b> Punter — throwing power and accuracy.
                     </div>
                 </section>
 
-                <!-- Package Specialists -->
-                <section class="bg-slate-50 border border-slate-200 rounded p-3 space-y-2">
-                    <div class="flex justify-between items-center border-b border-slate-200 pb-2">
-                        <h4 class="font-black text-xs text-indigo-900 uppercase tracking-wider">
+                <section class="bg-indigo-50/50 border border-indigo-200 rounded p-3 space-y-3">
+                    <div class="border-b border-indigo-200 pb-2">
+                        <h4 class="font-black text-sm text-indigo-950 uppercase tracking-wider">
                             Package Specialists
                         </h4>
-                        <span class="text-[10px] text-slate-500 font-mono">
-                            Situational
-                        </span>
+                        <p class="text-[10px] text-slate-500 mt-1">
+                            Situational assignments used in specific offensive and defensive packages.
+                        </p>
                     </div>
 
-                    <div class="space-y-1.5">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         ${renderSlotCard('FB', 'specialists')}
                         ${renderSlotCard('SLOT', 'specialists')}
                         ${renderSlotCard('NCB', 'specialists')}
                     </div>
 
-                    <div class="mt-2 text-[10px] text-slate-500 italic p-1 border-t border-slate-200 space-y-0.5">
-                        <div><b>FB:</b> Lead blocker in Power/Jumbo sets.</div>
-                        <div><b>SLOT:</b> Slot WR in Spread/Trips sets.</div>
-                        <div><b>NCB:</b> Extra DB in Nickel/Dime packages.</div>
+                    <div class="text-[10px] text-slate-500 italic">
+                        <b>FB:</b> Lead blocker in Power/Jumbo sets.
+                        <br>
+                        <b>SLOT:</b> Slot receiver in Spread/Trips sets.
+                        <br>
+                        <b>NCB:</b> Extra defensive back in Nickel/Dime packages.
                     </div>
-                </section>
-            </aside>
-        </div>
-    `;
+                ` : ''}
+                `;
+
+                pane.dataset.activeTab = activeDepthChartTab;
+
+                document.dispatchEvent(new CustomEvent('depth-chart-inner-tab-rendered', {
+                    detail: {
+                        tab: activeDepthChartTab
+                 }
+        }));
 }
+
+window.setDepthChartTab = function(tab) {
+    const validTabs = ['offense', 'defense', 'specialTeams'];
+
+    if (!validTabs.includes(tab)) return;
+
+    activeDepthChartTab = tab;
+    renderDepthOrderPane(getGameState());
+};
 
 window.movePositionDepthOrder = function(position, playerId, direction) {
     const gs = getGameState();
@@ -576,9 +757,16 @@ window.openSlotPicker = function(arg1, arg2) {
     const otherSide = side === 'offense' ? 'defense' : 'offense';
     const otherChart = team.depthChart?.[otherSide] || {};
 
+    const displaySlotLabel = isCoreFormationSlot
+        ? getFormationSlotDisplayLabel(team, side, slot)
+        : slot;
+
+    const hasRoleRating = isCoreFormationSlot && displaySlotLabel !== slot;
+    const ratingPosition = hasRoleRating ? displaySlotLabel : evalPosKey;
+
     const currentStarterId = activeChart[slot];
     const currentStarter = roster.find(p => p && p.id === currentStarterId);
-    const currentStarterOvr = currentStarter ? calculateOverall(currentStarter, evalPosKey) : null;
+    const currentStarterOvr = currentStarter ? calculateOverall(currentStarter, ratingPosition) : null;
 
     const skillConfigs = POSITION_KEY_SKILLS[posKey] || POSITION_KEY_SKILLS[evalPosKey] || POSITION_KEY_SKILLS['WR'];
 
@@ -650,16 +838,32 @@ window.openSlotPicker = function(arg1, arg2) {
             isPlayerViableForPosition(p, evalPosKey)
         )
         .map(p => {
-            const ovr = calculateOverall(p, evalPosKey);
+            const ovr = calculateOverall(p, ratingPosition);
 
             const fitScore = isCoreFormationSlot
-                ? ovr
+                ? calculateSlotSuitability(p, slot, side, team)
                 : getSpecialistFitScore(p, posKey);
 
             const isCurrentStarter = p.id === currentStarterId;
             const existingSlotThisSide = Object.entries(activeChart).find(([s, id]) => id === p.id && s !== slot)?.[0] || null;
+            const existingSlotThisSideLabel = existingSlotThisSide
+                ? getFormationSlotDisplayLabel(team, side, existingSlotThisSide)
+                : null;
+
             const startsOnOtherSide = Object.entries(otherChart).find(([_, id]) => id === p.id)?.[0] || null;
-            const otherOvr = startsOnOtherSide ? calculateOverall(p, startsOnOtherSide.replace(/\d/g, '')) : null;
+            const startsOnOtherSideLabel = startsOnOtherSide
+                ? getFormationSlotDisplayLabel(team, otherSide, startsOnOtherSide)
+                : null;
+
+            const otherRatingPosition = startsOnOtherSide
+                ? (startsOnOtherSideLabel !== startsOnOtherSide
+                    ? startsOnOtherSideLabel
+                    : startsOnOtherSide.replace(/\d/g, ''))
+                : null;
+
+            const otherOvr = startsOnOtherSide
+                ? calculateOverall(p, otherRatingPosition)
+                : null;
 
             return {
                 player: p,
@@ -667,7 +871,9 @@ window.openSlotPicker = function(arg1, arg2) {
                 fitScore,
                 isCurrentStarter,
                 existingSlotThisSide,
+                existingSlotThisSideLabel,
                 startsOnOtherSide,
+                startsOnOtherSideLabel,
                 otherOvr,
                 delta: currentStarterOvr !== null && !isCurrentStarter
                     ? (ovr - currentStarterOvr)
@@ -684,8 +890,12 @@ window.openSlotPicker = function(arg1, arg2) {
             <div class="bg-slate-900 text-white p-3 rounded flex justify-between items-center shadow-sm">
                 <div>
                     <div class="flex items-center gap-2">
-                        <span class="font-black text-sm uppercase text-amber-400">${side.toUpperCase()} ${slot}</span>
-                        <span class="text-slate-400 font-mono text-[11px]">(${posKey} Position)</span>
+                    <span class="font-black text-sm uppercase text-amber-400">
+                        ${side.toUpperCase()} ${displaySlotLabel}
+                    </span>
+                    <span class="text-slate-400 font-mono text-[11px]">
+                        (${evalPosKey} eligibility)
+                    </span>
                     </div>
                     <p class="text-[10px] text-slate-300 font-mono mt-0.5">
                         Key Skills: <b class="text-white">${skillConfigs.map(s => s.label).join(' • ')}</b>
@@ -706,7 +916,7 @@ window.openSlotPicker = function(arg1, arg2) {
 
             <!-- Candidate Roster List -->
             <div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1 pb-4">
-                ${candidates.map(({ player, ovr, fitScore, isCurrentStarter, existingSlotThisSide, startsOnOtherSide, otherOvr, delta }) => {
+                ${candidates.map(({ player, ovr, fitScore, isCurrentStarter, existingSlotThisSide, existingSlotThisSideLabel, startsOnOtherSide, startsOnOtherSideLabel, otherOvr, delta }) => {
                     const natPos = player.pos || estimateBestPosition(player);
                     const energy = Math.max(0, Math.round(100 - (player.fatigue || 0)));
                     const energyColor = energy >= 75 ? 'bg-emerald-500' : (energy >= 50 ? 'bg-amber-500' : 'bg-rose-500');
@@ -759,8 +969,8 @@ window.openSlotPicker = function(arg1, arg2) {
                             <!-- Badges Row -->
                             <div class="flex items-center gap-1.5 flex-wrap mb-2">
                                 ${isCurrentStarter ? '<span class="text-[9px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.5 rounded uppercase">Current Starter</span>' : ''}
-                                ${existingSlotThisSide ? `<span class="text-[9px] bg-blue-100 text-blue-900 border border-blue-300 font-black px-1.5 py-0.5 rounded uppercase">⇄ Starts at ${existingSlotThisSide}</span>` : ''}
-                                ${startsOnOtherSide ? `<span class="text-[9px] bg-indigo-100 text-indigo-900 border border-indigo-200 font-bold px-1.5 py-0.5 rounded">⚡ 2-Way: ${startsOnOtherSide} (${otherOvr})</span>` : ''}
+                                ${existingSlotThisSide ? `<span class="text-[9px] bg-blue-100 text-blue-900 border border-blue-300 font-black px-1.5 py-0.5 rounded uppercase">⇄ Starts at ${existingSlotThisSideLabel}</span>` : ''}
+                                ${startsOnOtherSide ? `<span class="text-[9px] bg-indigo-100 text-indigo-900 border border-indigo-200 font-bold px-1.5 py-0.5 rounded">⚡ 2-Way: ${startsOnOtherSideLabel} (${otherOvr})</span>` : ''}
                                 ${isInjured ? `<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-1.5 py-0.5 rounded">🩹 Out ${player.status.duration}w</span>` : ''}
                             </div>
 
@@ -795,12 +1005,11 @@ window.openSlotPicker = function(arg1, arg2) {
                                     <span class="text-xl font-black ${ovr >= 70 ? 'text-emerald-700' : (ovr >= 50 ? 'text-slate-800' : 'text-slate-400')}">${ovr}</span>
                                     ${deltaBadge}
                                 </div>
-                                <span class="text-[9px] text-slate-400 font-bold uppercase block sm:-mt-1">${posKey} OVR</span>
-                                ${!isCoreFormationSlot ? `
-                                    <span class="text-[9px] text-indigo-700 font-black uppercase block">
-                                        Role Fit ${Math.round(fitScore)}
-                                    </span>
-                                ` : ''}
+                                <span class="text-[9px] text-slate-400 font-bold uppercase block sm:-mt-1">${hasRoleRating ? displaySlotLabel : evalPosKey} OVR</span>
+                            <span class="text-[9px] text-indigo-700 font-black uppercase block">
+                                ${isCoreFormationSlot ? 'Slot Fit' : 'Role Fit'}
+                                ${Math.round(fitScore)}
+                            </span>
                             </div>
 
                             <button class="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-black px-4 py-2 rounded text-xs uppercase tracking-wider shadow-sm transition whitespace-nowrap"
@@ -815,7 +1024,7 @@ window.openSlotPicker = function(arg1, arg2) {
     `;
 
     // FIX: Using showModal from ui.js instead of undefined Game.showModal
-    showModal(`Assign Starter for ${side.toUpperCase()} ${slot}`, modalHtml);
+    showModal(`Assign Starter for ${side.toUpperCase()} ${displaySlotLabel}`, modalHtml);
 };
 
 // Safe alias for ui.js visual field circles

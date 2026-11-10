@@ -96,6 +96,153 @@ export const positionOverallWeights = {
     }
 };
 
+export const roleOverallWeights = {
+    // OFFENSIVE LINE
+    LT: {
+        blocking: 0.30,
+        strength: 0.21,
+        agility: 0.16,
+        playbookIQ: 0.12,
+        weight: 0.07,
+        consistency: 0.08,
+        toughness: 0.06
+    },
+
+    C: {
+        blocking: 0.30,
+        strength: 0.20,
+        playbookIQ: 0.20,
+        consistency: 0.14,
+        toughness: 0.10,
+        weight: 0.06
+    },
+
+    LG: {
+        blocking: 0.30,
+        strength: 0.27,
+        weight: 0.16,
+        playbookIQ: 0.10,
+        toughness: 0.10,
+        consistency: 0.07
+    },
+
+    RG: {
+        blocking: 0.30,
+        strength: 0.27,
+        weight: 0.16,
+        playbookIQ: 0.10,
+        toughness: 0.10,
+        consistency: 0.07
+    },
+
+    RT: {
+        blocking: 0.31,
+        strength: 0.24,
+        weight: 0.16,
+        agility: 0.10,
+        playbookIQ: 0.10,
+        toughness: 0.05,
+        consistency: 0.04
+    },
+
+    // DEFENSIVE LINE
+    DE: {
+        blockShedding: 0.26,
+        strength: 0.20,
+        speed: 0.18,
+        explosiveness: 0.14,
+        tackling: 0.10,
+        weight: 0.06,
+        toughness: 0.06
+    },
+
+    DT: {
+        blockShedding: 0.27,
+        strength: 0.25,
+        weight: 0.18,
+        tackling: 0.12,
+        toughness: 0.08,
+        speed: 0.05,
+        explosiveness: 0.05
+    },
+
+    NT: {
+        blockShedding: 0.24,
+        strength: 0.28,
+        weight: 0.25,
+        tackling: 0.10,
+        toughness: 0.08,
+        speed: 0.03,
+        explosiveness: 0.02
+    },
+
+    // DEFENSIVE BACKS
+    CB: {
+        speed: 0.24,
+        coverage: 0.24,
+        agility: 0.18,
+        playbookIQ: 0.12,
+        catchingHands: 0.08,
+        jumping: 0.06,
+        tackling: 0.04,
+        explosiveness: 0.04
+    },
+
+    FS: {
+        speed: 0.20,
+        coverage: 0.24,
+        playbookIQ: 0.18,
+        agility: 0.12,
+        catchingHands: 0.10,
+        tackling: 0.08,
+        jumping: 0.05,
+        explosiveness: 0.03
+    },
+
+    SS: {
+        speed: 0.16,
+        coverage: 0.16,
+        playbookIQ: 0.16,
+        tackling: 0.20,
+        strength: 0.15,
+        agility: 0.07,
+        toughness: 0.06,
+        catchingHands: 0.04
+    },
+
+    NB: {
+        speed: 0.20,
+        coverage: 0.22,
+        agility: 0.20,
+        tackling: 0.13,
+        playbookIQ: 0.10,
+        catchingHands: 0.07,
+        explosiveness: 0.05,
+        strength: 0.03
+    }
+};
+
+const normalizeRolePosition = role => {
+    const value = String(role || '').toUpperCase();
+
+    if (value === 'C') return 'C';
+    if (value.startsWith('LT')) return 'LT';
+    if (value.startsWith('LG')) return 'LG';
+    if (value.startsWith('RG')) return 'RG';
+    if (value.startsWith('RT')) return 'RT';
+
+    if (value.startsWith('DE')) return 'DE';
+    if (value.startsWith('DT')) return 'DT';
+    if (value === 'NT') return 'NT';
+
+    if (value.startsWith('CB')) return 'CB';
+    if (value.startsWith('FS')) return 'FS';
+    if (value.startsWith('SS')) return 'SS';
+    if (value.startsWith('NB')) return 'NB';
+
+    return value;
+};
+
 export function estimateBestPosition(scoutedPlayer) {
     if (!scoutedPlayer || !scoutedPlayer.attributes) return 'UTIL';
 
@@ -230,7 +377,11 @@ export function estimateBestPosition(scoutedPlayer) {
 export function calculateOverall(player, position) {
     if (!player || !player.attributes) return 0;
     const attrs = player.attributes;
-    const relevantWeights = positionOverallWeights[position];
+    const rolePosition = normalizeRolePosition(position);
+
+    const relevantWeights =
+        roleOverallWeights[rolePosition] ||
+        positionOverallWeights[position];
     if (!relevantWeights) return 0;
 
     let score = 0;
@@ -264,6 +415,14 @@ export function calculateSlotSuitability(player, slot, side, team) {
     const formationName = team.formations[side];
     const formationData = side === 'offense' ? offenseFormations[formationName] : defenseFormations[formationName];
     const basePosition = slot.replace(/\d/g, '');
+
+    const slotRole = normalizeRolePosition(
+        formationData?.slotLabels?.[slot]
+    );
+
+    if (roleOverallWeights[slotRole]) {
+        return calculateOverall(player, slotRole);
+    }
 
     if (!formationData?.slotPriorities?.[slot]) {
         return calculateOverall(player, basePosition);

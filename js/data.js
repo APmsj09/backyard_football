@@ -189,6 +189,19 @@ export const routeTree = {
     'Wall_Alley_Right': { path: [{ x: 2, y: -1 }, { x: 8, y: 1 }, { x: 10, y: 5 }] }
 };
 
+const STANDARD_OL_SLOT_LABELS = Object.freeze({
+    OL1: 'LT',
+    OL2: 'C',
+    OL3: 'RT'
+});
+
+const FOUR_OL_SLOT_LABELS = Object.freeze({
+    OL1: 'LT',
+    OL2: 'C',
+    OL3: 'RG',
+    OL4: 'RT'
+});
+
 // --- OFFENSIVE FORMATIONS (Corrected 8-Man Alignments) ---
 export const offenseFormations = {
     'Balanced': {
@@ -217,6 +230,40 @@ export const offenseFormations = {
             OL3: { strength: 3, blocking: 3 }
         }
     },
+
+    'Heavy4OL': {
+        name: 'Heavy 4-OL Right',
+        slots: ['QB1', 'RB1', 'WR1', 'TE1', 'OL1', 'OL2', 'OL3', 'OL4'],
+        personnel: { QB: 1, RB: 1, WR: 1, TE: 1, OL: 4 },
+        mapping: {
+            QB: 'QB1',
+            RB: 'RB1',
+            X: 'WR1',
+            Y: 'TE1',
+            OL: ['OL1', 'OL2', 'OL3', 'OL4']
+        },
+        coordinates: {
+            QB1: [0, -1.5],       // Under center
+            RB1: [0, -5.6],       // Tailback
+            WR1: [-16.0, -0.2],   // Split wide left
+            TE1: [4.6, -0.2],     // Attached to the heavy right side
+            OL1: [-1.5, -0.2],    // LT
+            OL2: [0, -0.2],       // Center
+            OL3: [1.5, -0.2],     // RG
+            OL4: [3.0, -0.2]      // RT
+        },
+        slotPriorities: {
+            QB1: { throwingAccuracy: 3, throwPower: 2, playbookIQ: 2 },
+            RB1: { strength: 2, carrying: 3, speed: 2, playbookIQ: 2 },
+            WR1: { speed: 3, catchingHands: 3 },
+            TE1: { blocking: 3, strength: 3, catchingHands: 2 },
+            OL1: { strength: 3, blocking: 3 },
+            OL2: { strength: 3, blocking: 3, playbookIQ: 1 },
+            OL3: { strength: 3, blocking: 3 },
+            OL4: { strength: 3, blocking: 3 }
+        }
+    },
+
     'Spread': {
         name: 'Spread',
         slots: ['QB1', 'WR1', 'WR2', 'WR3', 'WR4', 'OL1', 'OL2', 'OL3'],
@@ -401,6 +448,12 @@ export const offenseFormations = {
         }
     }
 };
+
+Object.values(offenseFormations).forEach(formation => {
+    formation.slotLabels = STANDARD_OL_SLOT_LABELS;
+});
+
+offenseFormations.Heavy4OL.slotLabels = FOUR_OL_SLOT_LABELS;
 
 // --- EXPANDED OFFENSIVE PLAYBOOK ---
 export const offensivePlaybook = {
@@ -1336,6 +1389,87 @@ export const defenseFormations = {
         }
     }
 };
+
+const DEFENSIVE_FORMATION_SLOT_LABELS = {
+    '3-2-3': {
+        DL1: 'DE-L',
+        DL2: 'NT',
+        DL3: 'DE-R',
+        DB1: 'CB-L',
+        DB2: 'FS',
+        DB3: 'SS'
+    },
+
+    '2-3-3': {
+        DL1: 'DT-L',
+        DL2: 'DT-R',
+        DB1: 'CB-L',
+        DB2: 'FS',
+        DB3: 'SS'
+    },
+
+    '4-2-2': {
+        DL1: 'DE-L',
+        DL2: 'DT-L',
+        DL3: 'DT-R',
+        DL4: 'DE-R',
+        DB1: 'FS-L',
+        DB2: 'SS-R'
+    },
+
+    '4-1-3': {
+        DL1: 'DE-L',
+        DL2: 'DT-L',
+        DL3: 'DT-R',
+        DL4: 'DE-R',
+        DB1: 'CB-L',
+        DB2: 'CB-R',
+        DB3: 'FS'
+    },
+
+    '3-1-4': {
+        DL1: 'DE-L',
+        DL2: 'NT',
+        DL3: 'DE-R',
+        DB1: 'CB-L',
+        DB2: 'CB-R',
+        DB3: 'NB',
+        DB4: 'FS'
+    },
+
+    '3-0-5': {
+        DL1: 'DE-L',
+        DL2: 'NT',
+        DL3: 'DE-R',
+        DB1: 'CB-L',
+        DB2: 'CB-R',
+        DB3: 'NB-L',
+        DB4: 'NB-R',
+        DB5: 'FS'
+    },
+
+    'Punt_Return': {
+        DL1: 'DE-L',
+        DL2: 'DE-R',
+        DB1: 'CB-L',
+        DB2: 'CB-R',
+        DB4: 'Upback'
+    }
+};
+
+Object.entries(DEFENSIVE_FORMATION_SLOT_LABELS).forEach(
+    ([formationKey, slotLabels]) => {
+        defenseFormations[formationKey].slotLabels = slotLabels;
+    }
+);
+
+export function getFormationSlotLabel(side, formationKey, slot) {
+    const formations = side === 'defense'
+        ? defenseFormations
+        : offenseFormations;
+
+    return formations[formationKey]?.slotLabels?.[slot] || slot;
+}
 
 // --- DEFENSIVE PLAYBOOK (8-Man Optimized) ---
 export const defensivePlaybook = {

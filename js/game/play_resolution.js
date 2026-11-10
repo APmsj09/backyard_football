@@ -56,7 +56,7 @@ const PLAYCALL_POSITION_SLOTS = {
     FB: ['RB2', 'FB'],
     WR: ['WR1', 'WR2', 'WR3', 'WR4'],
     TE: ['TE1', 'TE2'],
-    OL: ['OL1', 'OL2', 'OL3'],
+    OL: ['OL1', 'OL2', 'OL3', 'OL4'],
     DL: ['DL1', 'DL2', 'DL3', 'DL4'],
     LB: ['LB1', 'LB2', 'LB3'],
     DB: ['DB1', 'DB2', 'DB3', 'DB4', 'DB5']
