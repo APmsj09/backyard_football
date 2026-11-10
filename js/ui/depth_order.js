@@ -583,16 +583,8 @@ export function renderDepthOrderPane(gameState) {
                         <br>
                         <b>NCB:</b> Extra defensive back in Nickel/Dime packages.
                     </div>
-                ` : ''}
-                `;
-
-                pane.dataset.activeTab = activeDepthChartTab;
-
-                document.dispatchEvent(new CustomEvent('depth-chart-inner-tab-rendered', {
-                    detail: {
-                        tab: activeDepthChartTab
-                 }
-        }));
+         ` : ''}
+    `;
 }
 
 window.setDepthChartTab = function(tab) {

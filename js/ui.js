@@ -4,7 +4,7 @@ import {
     saveGameState, getRelationshipLevel, getScoutedPlayerInfo, getGameState,
     getRosterObjects, getPlayer, rebuildDepthChartFromOrder, assignPlayerToSlot
 } from './game.js';
-import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames, offensivePlaybook, defensivePlaybook, routeTree } from './data.js';
+import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames, offensivePlaybook, defensivePlaybook, routeTree, getFormationSlotLabel } from './data.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills } from './game/player.js';
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
@@ -14092,9 +14092,12 @@ function renderDepthChartTab(gameState) {
     const gs = getGameState();
     if (!gs?.playerTeam) return;
 
-    const activeSub = document.querySelector(
-        "#depth-chart-subtabs .depth-chart-tab.active"
-    )?.dataset.subTab || "depth-order";
+    renderFormationPills('offense', offenseFormations, gs.playerTeam.formations.offense);
+    renderFormationPills('defense', defenseFormations, gs.playerTeam.formations.defense);
+    renderDepthChartSide('offense', gs);
+    renderDepthChartSide('defense', gs);
+
+    const activeSub = document.querySelector(".depth-chart-tab.active")?.dataset.subTab || "depth-order";
 
     const offensePane = document.getElementById("depth-chart-offense-pane");
     const defensePane = document.getElementById("depth-chart-defense-pane");
@@ -14103,24 +14106,17 @@ function renderDepthChartTab(gameState) {
     const playbookPane = document.getElementById("playbook-manager-container");
     const practicePane = document.getElementById("practice-manager-container");
 
-    // The old standalone formation panes are no longer main navigation tabs.
-    if (offensePane) offensePane.classList.add("hidden");
-    if (defensePane) defensePane.classList.add("hidden");
-
+    if (offensePane) offensePane.classList.toggle("hidden", activeSub !== "offense");
+    if (defensePane) defensePane.classList.toggle("hidden", activeSub !== "defense");
     if (overallsPane) overallsPane.classList.toggle("hidden", activeSub !== "overalls");
     if (depthOrderPane) depthOrderPane.classList.toggle("hidden", activeSub !== "depth-order");
     if (playbookPane) playbookPane.classList.toggle("hidden", activeSub !== "playbook");
     if (practicePane) practicePane.classList.toggle("hidden", activeSub !== "practice");
 
-    if (activeSub === "depth-order") {
-        renderDepthOrderPane(gs);
-    } else if (activeSub === "overalls") {
-        renderPositionalOveralls();
-    } else if (activeSub === "playbook") {
-        renderPlaybookManager(gs);
-    } else if (activeSub === "practice") {
-        renderPracticeManager(gs);
-    }
+    if (activeSub === "depth-order") renderDepthOrderPane(gs);
+    else if (activeSub === "overalls") renderPositionalOveralls();
+    else if (activeSub === "playbook") renderPlaybookManager(gs);
+    else if (activeSub === "practice") renderPracticeManager(gs);
 }
 
 function renderFormationPills(side, formationMap, selectedKey) {
@@ -14353,16 +14349,11 @@ function renderDepthChartSide(side, gameState) {
     const formKey = formations[side] || (side === 'offense' ? 'Balanced' : '3-2-3');
     const formationData = (side === 'offense' ? offenseFormations : defenseFormations)[formKey];
 
-    const getFormationSlotDisplayLabel = (targetTeam, targetSide, targetSlot) => {
-        const targetFormKey = targetTeam.formations?.[targetSide] ||
-            (targetSide === 'offense' ? 'Balanced' : '3-2-3');
+    const otherFormKey = formations[otherSide] ||
+        (otherSide === 'offense' ? 'Balanced' : '3-2-3');
 
-        const targetFormationMap = targetSide === 'offense'
-            ? offenseFormations
-            : defenseFormations;
-
-        return targetFormationMap[targetFormKey]?.slotLabels?.[targetSlot] || targetSlot;
-    };
+    const offenseFormKey = side === 'offense' ? formKey : otherFormKey;
+    const defenseFormKey = side === 'defense' ? formKey : otherFormKey;
 
     visualField.innerHTML = '';
         const losMarker = document.createElement('div');
@@ -14460,7 +14451,7 @@ function renderDepthChartSide(side, gameState) {
                 if (['DE', 'DT', 'NT'].includes(posKey)) posKey = 'DL';
                 if (['CB', 'S'].includes(posKey)) posKey = 'DB';
 
-                const slotLabel = getFormationSlotDisplayLabel(gameState.playerTeam, side, slotId);
+                const slotLabel = getFormationSlotLabel(side, formKey, slotId);
                 const hasRoleRating = slotLabel !== slotId;
                 const ratingPosition = hasRoleRating ? slotLabel : posKey;
                 const displayPosition = hasRoleRating ? slotLabel : posKey;
@@ -14473,7 +14464,7 @@ function renderDepthChartSide(side, gameState) {
                 // Two-Way check
                 const otherSlot = player ? Object.entries(otherChart).find(([_, id]) => id === player.id)?.[0] : null;
                 const otherSlotLabel = otherSlot
-                    ? getFormationSlotDisplayLabel(gameState.playerTeam, otherSide, otherSlot)
+                    ? getFormationSlotLabel(otherSide, otherFormKey, otherSlot)
                     : null;
 
                 let ringColor = 'border-slate-500';
@@ -14559,10 +14550,10 @@ function renderDepthChartSide(side, gameState) {
         const defSlot = Object.entries(depthChart.defense || {}).find(([_, id]) => id === p.id)?.[0] || null;
 
         const offSlotLabel = offSlot
-            ? getFormationSlotDisplayLabel(gameState.playerTeam, 'offense', offSlot)
+            ? getFormationSlotLabel('offense', offenseFormKey, offSlot)
             : null;
         const defSlotLabel = defSlot
-            ? getFormationSlotDisplayLabel(gameState.playerTeam, 'defense', defSlot)
+            ? getFormationSlotLabel('defense', defenseFormKey, defSlot)
             : null;
 
         const isIronman = offSlot && defSlot;
@@ -16478,59 +16469,7 @@ export function renderOffseasonScreen(report, year) {
 export function setupDragAndDrop(onDrop) { }
 
 export function setupDepthChartTabs() {
-    const subTabs = document.querySelectorAll("#depth-chart-subtabs .depth-chart-tab");
-
-    // Synchronize formation diagrams with the active Depth Chart inner tab.
-    if (document.body.dataset.depthChartInnerTabListener !== "true") {
-        document.addEventListener('depth-chart-inner-tab-rendered', event => {
-            const mainTab = document.querySelector(
-                "#depth-chart-subtabs .depth-chart-tab.active"
-            )?.dataset.subTab;
-
-            const activeInnerTab = event.detail?.tab;
-            const isDepthChartView = mainTab === "depth-order";
-         
-            const gs = isDepthChartView ? getGameState() : null;
-
-            const offensePane = document.getElementById("depth-chart-offense-pane");
-            const defensePane = document.getElementById("depth-chart-defense-pane");
-
-            if (offensePane) {
-                offensePane.classList.toggle(
-                    "hidden",
-                    !isDepthChartView || activeInnerTab !== "offense"
-                );
-            }
-
-            if (defensePane) {
-                defensePane.classList.toggle(
-                    "hidden",
-                    !isDepthChartView || activeInnerTab !== "defense"
-                );
-            }
-
-            if (gs?.playerTeam && activeInnerTab === "offense") {
-                renderFormationPills(
-                    'offense',
-                    offenseFormations,
-                    gs.playerTeam.formations.offense
-                );
-                renderDepthChartSide('offense', gs);
-            } else if (gs?.playerTeam && activeInnerTab === "defense") {
-                renderFormationPills(
-                    'defense',
-                    defenseFormations,
-                    gs.playerTeam.formations.defense
-                );
-                renderDepthChartSide('defense', gs);
-            }
-
-        });
-
-        document.body.dataset.depthChartInnerTabListener = "true";
-    }
-
-    const validTabs = ['depth-order', 'overalls', 'playbook', 'practice'];
+    const subTabs = document.querySelectorAll(".depth-chart-tab");
 
     const legacyTabClasses = [
         "bg-blue-50",
@@ -16554,12 +16493,12 @@ export function setupDepthChartTabs() {
         "border"
     ];
 
-    const setActiveTabStyle = activeSubTab => {
-        subTabs.forEach(tab => {
-            tab.classList.remove(...legacyTabClasses);
+    const setActiveTabStyle = (activeSubTab) => {
+        subTabs.forEach(t => {
+            t.classList.remove(...legacyTabClasses);
 
-            if (tab.dataset.subTab === activeSubTab) {
-                tab.classList.add(
+            if (t.dataset.subTab === activeSubTab) {
+                t.classList.add(
                     "active",
                     "bg-slate-900",
                     "text-white",
@@ -16568,8 +16507,8 @@ export function setupDepthChartTabs() {
                     "shadow-sm"
                 );
             } else {
-                tab.classList.remove("active");
-                tab.classList.add(
+                t.classList.remove("active");
+                t.classList.add(
                     "bg-white",
                     "text-slate-600",
                     "border",
@@ -16579,7 +16518,16 @@ export function setupDepthChartTabs() {
         });
     };
 
-    const switchSubTab = subTab => {
+    const switchSubTab = (subTab) => {
+        const validTabs = [
+            "depth-order",
+            "offense",
+            "defense",
+            "overalls",
+            "playbook",
+            "practice"
+        ];
+
         if (!validTabs.includes(subTab)) return;
 
         setActiveTabStyle(subTab);
@@ -16591,10 +16539,8 @@ export function setupDepthChartTabs() {
         const playbookPane = document.getElementById("playbook-manager-container");
         const practicePane = document.getElementById("practice-manager-container");
 
-        // Formation diagrams will be integrated into the Depth Chart workspace.
-        if (offensePane) offensePane.classList.add("hidden");
-        if (defensePane) defensePane.classList.add("hidden");
-
+        if (offensePane) offensePane.classList.toggle("hidden", subTab !== "offense");
+        if (defensePane) defensePane.classList.toggle("hidden", subTab !== "defense");
         if (overallsPane) overallsPane.classList.toggle("hidden", subTab !== "overalls");
         if (depthOrderPane) depthOrderPane.classList.toggle("hidden", subTab !== "depth-order");
         if (playbookPane) playbookPane.classList.toggle("hidden", subTab !== "playbook");
@@ -16602,10 +16548,16 @@ export function setupDepthChartTabs() {
 
         const gs = getGameState();
 
-        if (subTab === "depth-order") {
-            renderDepthOrderPane(gs);
+        if (subTab === "offense") {
+            renderFormationPills('offense', offenseFormations, gs?.playerTeam?.formations?.offense);
+            renderDepthChartSide('offense', gs);
+        } else if (subTab === "defense") {
+            renderFormationPills('defense', defenseFormations, gs?.playerTeam?.formations?.defense);
+            renderDepthChartSide('defense', gs);
         } else if (subTab === "overalls") {
             renderPositionalOveralls();
+        } else if (subTab === "depth-order") {
+            renderDepthOrderPane(gs);
         } else if (subTab === "playbook") {
             renderPlaybookManager(gs);
         } else if (subTab === "practice") {
@@ -16613,9 +16565,7 @@ export function setupDepthChartTabs() {
         }
     };
 
-    const initialSubTab = document.querySelector(
-        "#depth-chart-subtabs .depth-chart-tab.active"
-    )?.dataset.subTab || "depth-order";
+    const initialSubTab = document.querySelector(".depth-chart-tab.active")?.dataset.subTab || "depth-order";
 
     switchSubTab(initialSubTab);
 
