@@ -53,6 +53,11 @@ const getDraftRosterLimit = () => getCurrentRosterLimit(gameState);
 const MIN_HEALTHY_PLAYERS = 8;
 const WEEKS_IN_SEASON = 9;
 
+const escapeHtml = value =>
+    String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[character]);
+
 const MIN_STARTING_COACH_SKILL = 20;
 const MAX_STARTING_COACH_SKILL = 70;
 const STARTING_COACH_SKILL_BUDGET = 330;
@@ -2151,7 +2156,13 @@ async function runAIDraftPicks() {
             }
         }
     } catch (e) {
-        console.error("Draft loop error:", e);
+        console.error('Draft loop error:', e);
+        UI.showModal(
+            'Draft Error',
+            `<p>The draft stopped at pick #${(gameState.currentPick ?? 0) + 1}.</p>
+            <p class="font-bold text-rose-700">${escapeHtml(e?.message || String(e))}</p>
+            <pre class="mt-2 whitespace-pre-wrap text-xs">${escapeHtml(e?.stack || '')}</pre>`
+        );
     } finally {
         isDraftingLocked = false;
     }
@@ -2236,7 +2247,8 @@ function resolveOffseasonFreeAgentScouting() {
 
 async function handleDraftEnd() {
     if (!gameState) return;
-    Game.completeDraft();
+    // This function performs DRAFT -> RECRUITING itself below.
+    Game.completeDraft({ transitionToRecruiting: false });
     Game.generateDraftSummary();
     Game.generateSchedule();
     Game.generateWeeklyFreeAgents();

@@ -21,6 +21,7 @@ import {
     OFFSEASON_PHASES,
     transitionOffseasonPhase
 } from './season.js';
+import { isDebugMode } from './debug_mode';
 
 export const DRAFT_ROUNDS_ROOKIE = 3;
 
@@ -36,60 +37,61 @@ const INELIGIBLE_DRAFT_STATUSES = new Set([
  * Year 1 is the inaugural draft and retains its separate eligibility rule.
  * Year 2 onward requires a documented, completed Pee Wee career.
  */
-export function isEligibleDraftProspect(prospect, year = game?.year) {
-    if (!prospect || prospect.teamId) return false;
+export function getDraftIneligibilityReason(prospect, year = game?.year) {
+    if (!prospect) return 'missing_prospect';
+    if (prospect.teamId) return 'already_on_team';
 
-    // Preserve the inaugural-draft rules.
     if (Number(year) === 1) {
-        return (
-            Number(prospect.age) >= 11 &&
-            prospect.personality?.entersDraft !== false
-        );
+        if (Number(prospect.age) < 11) return 'inaugural_too_young';
+        if (prospect.personality?.entersDraft === false) return 'opted_out';
+        return null;
     }
 
-    const prospectAge = Number(prospect.age);
-
-    if (
-        prospect.lifecycle !== 'draft_eligible' ||
-        !Number.isInteger(prospectAge) ||
-        prospectAge < 12 ||
-        prospect.personality?.entersDraft === false ||
-        INELIGIBLE_DRAFT_STATUSES.has(prospect.status?.type)
-    ) {
-        return false;
+    const age = Number(prospect.age);
+    if (prospect.lifecycle !== 'draft_eligible') return 'lifecycle_not_draft_eligible';
+    if (!Number.isInteger(age) || age < 12) return 'under_12';
+    if (prospect.personality?.entersDraft === false) return 'opted_out';
+    if (INELIGIBLE_DRAFT_STATUSES.has(prospect.status?.type)) {
+        return `status_${prospect.status.type}`;
     }
 
     const entryAge = Number(prospect.youthEntryAge);
     const seasonsPlayed = Number(prospect.youthSeasonsPlayed);
-
-    if (
-        !Number.isInteger(entryAge) ||
-        entryAge < 8 ||
-        entryAge > 11 ||
-        !Number.isInteger(seasonsPlayed) ||
-        seasonsPlayed < 0
-    ) {
-        return false;
-    }
+    if (!Number.isInteger(entryAge) || entryAge < 8 || entryAge > 11) return 'bad_youth_entry_age';
+    if (!Number.isInteger(seasonsPlayed) || seasonsPlayed < 0) return 'bad_youth_seasons_played';
 
     const requiredSeasons = 12 - entryAge;
-    const youthHistory = Array.isArray(prospect.youthSeasonHistory)
-        ? prospect.youthSeasonHistory
-        : [];
-
+    const history = Array.isArray(prospect.youthSeasonHistory) ? prospect.youthSeasonHistory : [];
     const documentedSeasonYears = new Set(
-        youthHistory
-            .filter(season =>
-                season?.year != null &&
-                Number.isInteger(Number(season.year))
-            )
-            .map(season => Number(season.year))
+        history
+            .filter(s => s?.year != null && Number.isInteger(Number(s.year)))
+            .map(s => Number(s.year))
     ).size;
 
-    return (
-        seasonsPlayed >= requiredSeasons &&
-        documentedSeasonYears >= requiredSeasons
+    if (seasonsPlayed < requiredSeasons) return 'too_few_seasons_counter';
+    if (documentedSeasonYears < requiredSeasons) return 'too_few_seasons_documented';
+    return null;
+}
+
+export function isEligibleDraftProspect(prospect, year = game?.year) {
+    return getDraftIneligibilityReason(prospect, year) === null;
+}
+
+function logDraftClassAudit(incoming, year) {
+    if (!isDebugMode()) return;
+    const reasons = {};
+    incoming.forEach(p => {
+        const r = getDraftIneligibilityReason(p, year) || 'ELIGIBLE';
+        reasons[r] = (reasons[r] || 0) + 1;
+    });
+    const youthRosterIds = new Set(
+        game.teams.filter(t => t.leagueType === 'youth')
+            .flatMap(t => (t.roster || []).map(String))
     );
+    const orphanedYouth = game.players.filter(
+        p => p?.lifecycle === 'youth' && !youthRosterIds.has(String(p.id))
+    ).length;
+    console.info('[Draft Audit]', { year, incoming: incoming.length, reasons, orphanedYouth });
 }
 
 const OFFENSIVE_POSITION_FITS = ['QB', 'RB', 'WR', 'TE', 'OL'];
@@ -720,9 +722,8 @@ export function setupDraft() {
 
         // Only admit prospects with a documented, completed Pee Wee history.
         // Do not manufacture extra rookies to fill the draft board.
-        const incomingDraftClass = Array.isArray(game.draftClass)
-            ? game.draftClass
-            : [];
+        const incomingDraftClass = Array.isArray(game.draftClass) ? game.draftClass : [];
+        logDraftClassAudit(incomingDraftClass, game.year);
 
         game.draftClass = incomingDraftClass.filter(
             prospect => isEligibleDraftProspect(prospect, game.year)

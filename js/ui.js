@@ -1,3 +1,4 @@
+//ui.js
 import * as Game from './game.js';
 import {
     saveGameState, getRelationshipLevel, getScoutedPlayerInfo, getGameState,
@@ -940,13 +941,25 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
     const poolSource = isYouthStatsView
         ? (gameState.players || []).filter(player => {
-            if (!player?.teamId) return false;
+            if (!player) return false;
+
+            // Retain graduates and former Pee Wee players in the history view.
+            const hasYouthHistory =
+                Array.isArray(player.youthSeasonHistory) &&
+                player.youthSeasonHistory.length > 0;
+
+            if (hasYouthHistory) return true;
+
+            if (!player.teamId) return false;
 
             const assignedTeam = (gameState.teams || []).find(team =>
                 String(team?.id) === String(player.teamId)
             );
 
-            return assignedTeam?.leagueType === 'youth';
+            return (
+                player.lifecycle === 'youth' &&
+                assignedTeam?.leagueType === 'youth'
+            );
         })
         : Array.isArray(gameState.draftClass)
             ? gameState.draftClass
@@ -968,13 +981,18 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         if (isYouthStatsView) {
             const age = Number(player.age);
 
-            return (
+            const isActiveYouth =
                 player.lifecycle === 'youth' &&
                 player.teamId != null &&
                 Number.isInteger(age) &&
                 age >= 8 &&
-                age <= 11
-            );
+                age <= 11;
+
+            const hasYouthHistory =
+                Array.isArray(player.youthSeasonHistory) &&
+                player.youthSeasonHistory.length > 0;
+
+            return isActiveYouth || hasYouthHistory;
         }
 
         // The actual draft must only show unassigned eligible prospects.

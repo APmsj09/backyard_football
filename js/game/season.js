@@ -1761,31 +1761,6 @@ export function createPlayerTeam(teamName, options = {}) {
     return playerTeam;
 }
 
-/*export function setupDraft() {
-    if (!game || !game.teams) return;
-    game.draftOrder = [];
-    game.currentPick = 0;
-    game.pickHistory = [];
-
-    let sortedTeams;
-    if (game.year === 1) {
-        sortedTeams = [...game.teams].filter(t => t).sort(() => 0.5 - Math.random());
-    } else {
-        sortedTeams = [...game.teams].filter(t => t).sort((a, b) => (a.wins || 0) - (b.wins || 0) || (b.losses || 0) - (a.losses || 0));
-    }
-
-    game.teams.forEach(team => {
-        if (team) team.draftNeeds = Math.max(0, ROSTER_LIMIT - (team.roster?.length || 0));
-    });
-
-    const maxNeeds = Math.max(0, ...game.teams.map(t => t?.draftNeeds || 0));
-    if (maxNeeds === 0) return;
-
-    for (let i = 0; i < maxNeeds; i++) {
-        game.draftOrder.push(...(i % 2 === 0 ? sortedTeams : [...sortedTeams].reverse()));
-    }
-}
-*/
 export function addPlayerToTeam(player, team, gameState = game) {
     if (
         !player ||
@@ -11298,6 +11273,12 @@ export function advanceToOffseason() {
         // Youth players are handled separately below.
         // Do not age/develop them again in the universal player lifecycle pass.
         if (team?.leagueType === 'youth' || player.lifecycle === 'youth') {
+            if (
+                ['busy', 'injured'].includes(player.status?.type) ||
+                Number(player.status?.duration) > 0
+            ) {
+                player.status = { type: 'healthy', description: '', duration: 0 };
+            }
             return;
         }
 
@@ -11678,13 +11659,13 @@ export function advanceToOffseason() {
 
     // Re-compile valid rosters based on the updated universal player pool
     game.teams.forEach(team => {
-                team.roster = game.players
-            .filter(p =>
-                p &&
-                p.teamId === team.id &&
-                !['retired', 'departed', 'temporary'].includes(p.status?.type) &&
-                (!p.status || p.status.duration === 0 || p.status.type === 'healthy')
-            )
+        team.roster = game.players
+            .filter(p => {
+                if (!p || p.teamId !== team.id) return false;
+                if (['retired', 'departed', 'temporary'].includes(p.status?.type)) return false;
+                if (team.leagueType === 'youth') return true; // no availability filter for youth
+                return !p.status || p.status.duration === 0 || p.status.type === 'healthy';
+            })
             .map(p => p.id);
 
         // Remove special-team and package assignments that reference players
@@ -11882,7 +11863,10 @@ export function advanceToOffseason() {
                 const bestFriend = kid.social?.bestFriendId
                     ? getPlayer(kid.social.bestFriendId)
                     : null;
-                const friendOnMainTeam = bestFriend && bestFriend.teamId;
+                const bestFriendTeam = bestFriend?.teamId != null
+                    ? game.teams.find(t => String(t.id) === String(bestFriend.teamId))
+                    : null;
+                const friendOnMainTeam = bestFriendTeam?.leagueType === 'main';
 
                 let entersDraft = true;
 
