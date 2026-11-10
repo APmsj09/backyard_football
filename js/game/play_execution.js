@@ -1617,6 +1617,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             if (strugglingBattle && strugglingBattle.defender) {
                 target = strugglingBattle.defender; // Assist teammate!
+                blocker.dynamicTargetId = target.id;
+                assignedThreats.add(target.id);
             }
         }
 
@@ -3400,11 +3402,14 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             let perfectX = targetRec.x + cushionX;
             let perfectY = targetRec.y + cushionY;
 
-            // Once the receiver reaches the DB's level OR the DB just finished a jam, 
-            // transition to hip-to-hip trail coverage so they don't backpedal into a 3-yard cushion.
+            // Transition to hip-to-hip trail coverage or drive on cuts so DBs don't backpedal into a 5-yard cushion on slants/curls.
+            const isBreakingHorizontally = Math.abs(targetRec.vx || 0) > 3.0 && Math.abs(targetRec.vy || 0) < 2.5;
+            const isSettled = targetRec.action === 'route_complete' || (Math.hypot(targetRec.vx || 0, targetRec.vy || 0) < 1.0);
             const isReceiverReleasing = targetRec.y >= (pState.y - 0.4);
-            if ((isReceiverReleasing || pState.hasPressed) && !targetSlot.startsWith('RB')) {
-                perfectY = targetRec.y - 0.2; // Trail slightly on the hip
+            
+            // If the WR cuts hard laterally, stops, or blows past the DB, drop the cushion and close in!
+            if ((isReceiverReleasing || pState.hasPressed || isBreakingHorizontally || isSettled) && !targetSlot.startsWith('RB')) {
+                perfectY = targetRec.y - (isBreakingHorizontally || isSettled ? 1.0 : 0.2); // Drive downhill on cuts, trail on go routes
                 perfectX = targetRec.x + (targetRec.x < CENTER_X ? 0.8 : -0.8); // Maintain inside/outside shoulder leverage
             }
 

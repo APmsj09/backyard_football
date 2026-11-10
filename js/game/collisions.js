@@ -700,7 +700,8 @@ export function checkFumbleRecovery(playState, gameLog, tackleRange) {
         p.stunnedTicks === 0 &&
         p.balanceState !== 'downed' &&
         !p.isEngaged &&
-        getDistance(p, ballPos) < tackleRange
+        getDistance(p, ballPos) < tackleRange &&
+        !(p.id === ballPos.lastDroppedById && (playState.tick - (ballPos.droppedTick || 0)) < 15)
     );
 
     if (playersInRange.length === 0) return null;
@@ -810,7 +811,8 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
             // Shed block if carrier is close (<=5.0y) OR if carrier has broken past LOS on an open run
             // Also shed immediately if the carrier has blown past the defender downfield.
-            const shouldAttemptShed = distToCarrier < 5.0 || (carrierPastLOS && distToCarrier < 20.0) || carrierIsPastDefender;
+            const isPassRusher = playState.type === 'pass' && !playState.ballState?.inAir && (defender.role === 'DL' || defender.assignment?.includes('rush') || defender.assignment?.includes('blitz'));
+            const shouldAttemptShed = distToCarrier < 5.0 || (carrierPastLOS && distToCarrier < 20.0) || carrierIsPastDefender || (isPassRusher && distToCarrier < 15.0);
 
             if (shouldAttemptShed) {
                 const reactionScore = (defender.playbookIQ || 50) + (defender.blockShedding || 50);

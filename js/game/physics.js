@@ -981,7 +981,9 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
         // Chasing a moving ball carrier or turning to track an airborne ball 
         // does not constitute being stuck in geometry or colliding with an obstacle.
-        const isDynamicAction = ['pursuit', 'tracking_ball'].includes(pState.action);
+        const isDynamicAction = ['pursuit', 'tracking_ball'].includes(pState.action) ||
+            Boolean(pState.isBallCarrier) ||
+            (pState.action && (pState.action.startsWith('zone_') || pState.action.startsWith('man_cover_')));
 
         const isStalled =
             distToTarget > 2.0 &&

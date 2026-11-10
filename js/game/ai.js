@@ -1542,10 +1542,12 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
             // Deep safety over-the-top capping check (caps at max 2)
             const isSafetyOrDeepDB = d.role === 'DB' && (d.y > playState.lineOfScrimmage + 9);
-            const isOverTheTop = d.y > (rec.y - 1.0) && Math.abs(projDefX - projRecX) < 4.5 && projDist < 6.0;
+            // Recognize any DB sitting deeper than the route as a threat to drive downhill
+            const isOverTheTop = d.y > (rec.y - 1.0) && Math.abs(projDefX - projRecX) < 4.5 && projDist < 7.0;
 
-            if (depth > 10 && (isOverTheTop || (isSafetyOrDeepDB && projDist < 5.0))) {
-                minProjectedSeparation = Math.min(minProjectedSeparation, projDist * 0.85);
+            // Removed the `depth > 10` requirement so QBs recognize DB cushions on short routes too
+            if (isOverTheTop || (isSafetyOrDeepDB && projDist < 5.0)) {
+                minProjectedSeparation = Math.min(minProjectedSeparation, projDist * 0.75); // Shrink perceived window
                 defendersClosingIn = Math.min(3, defendersClosingIn + 1);
             }
 
@@ -1947,9 +1949,10 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         : Math.min(progression.length, readIndex + 1);
 
     // DEEPER FIX: Scale dropback duration by play type. 
-    // Quick passes can fire at ~1.3s (32 ticks), but deep drops need at least 1.7s (42 ticks) to develop.
+    // Quick passes can fire at ~1.8s (45 ticks), but deep drops need at least ~2.3s (58 ticks) to develop.
+    // This allows the pass rush to engage and routes to develop their cuts.
     const isQuickPlay = playState.playKey?.includes('Quick') || playState.playKey?.includes('Screen');
-    const MIN_DROPBACK_TICKS = isQuickPlay ? 34 : 47;
+    const MIN_DROPBACK_TICKS = isQuickPlay ? 45 : 58;
     // canThrowStandard is calculated below, after the pocket deadline is known.
     
     // NATURAL POCKET CLOCK:
