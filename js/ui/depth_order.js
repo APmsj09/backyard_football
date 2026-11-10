@@ -82,15 +82,19 @@ export function renderDepthOrderPane(gameState) {
     const depthOrder = team.depthOrder || {};
 
         const starterSlotsByPosition = {
-        QB: new Map(),
-        RB: new Map(),
-        WR: new Map(),
-        TE: new Map(),
-        OL: new Map(),
-        DL: new Map(),
-        LB: new Map(),
-        DB: new Map()
-    };
+            QB: new Map(),
+            RB: new Map(),
+            WR: new Map(),
+            TE: new Map(),
+            OL: new Map(),
+            DL: new Map(),
+            DE: new Map(),
+            DT: new Map(),
+            LB: new Map(),
+            DB: new Map(),
+            CB: new Map(),
+            S: new Map()
+        };
 
     const getCorePositionForSlot = slot => {
         let posKey = String(slot).replace(/\d+/g, '');
@@ -103,13 +107,29 @@ export function renderDepthOrderPane(gameState) {
         return posKey;
     };
 
-    const recordFormationStarters = (chart, validPositions) => {
+    const getDepthPositionForSlot = (slot, side) => {
+        const corePosition = getCorePositionForSlot(slot);
+
+        if (side !== 'defense') return corePosition;
+
+        const label = getFormationSlotDisplayLabel(team, side, slot);
+
+        if (label.startsWith('DE')) return 'DE';
+        if (label.startsWith('DT') || label === 'NT') return 'DT';
+        if (label.startsWith('CB') || label.startsWith('NB')) return 'CB';
+        if (label.startsWith('FS') || label.startsWith('SS')) return 'S';
+
+        return corePosition;
+    };
+
+    const recordFormationStarters = (chart, validPositions, side) => {
         Object.entries(chart || {}).forEach(([slot, playerId]) => {
-            const pos = getCorePositionForSlot(slot);
+            const pos = getDepthPositionForSlot(slot, side);
 
             if (
                 playerId != null &&
-                validPositions.includes(pos)
+                validPositions.includes(pos) &&
+                starterSlotsByPosition[pos]
             ) {
                 starterSlotsByPosition[pos].set(
                     String(playerId),
@@ -121,12 +141,14 @@ export function renderDepthOrderPane(gameState) {
 
     recordFormationStarters(
         offChart,
-        ['QB', 'RB', 'WR', 'TE', 'OL']
+        ['QB', 'RB', 'WR', 'TE', 'OL'],
+        'offense'
     );
 
     recordFormationStarters(
         defChart,
-        ['DL', 'LB', 'DB']
+        ['DL', 'DE', 'DT', 'LB', 'DB', 'CB', 'S'],
+        'defense'
     );
 
     const rosterById = new Map(
@@ -176,10 +198,15 @@ export function renderDepthOrderPane(gameState) {
                             ? `${starterDisplaySlot} OVR`
                             : `${pos} OVR`;
 
-                        const ovr = calculateOverall(player, ovrPosition);
+                        const ovr = ovrPosition === 'S'
+                            ? Math.round(
+                                (calculateOverall(player, 'FS') +
+                                    calculateOverall(player, 'SS')) / 2
+                            )
+                            : calculateOverall(player, ovrPosition);
                         const sameSidePositions = isOffensePosition
                             ? ['QB', 'RB', 'WR', 'TE', 'OL']
-                            : ['DL', 'LB', 'DB'];
+                            : ['DL', 'DE', 'DT', 'LB', 'DB', 'CB', 'S'];
                         const otherStarterSlots = Object.entries(
                             starterSlotsByPosition
                         )
@@ -198,8 +225,9 @@ export function renderDepthOrderPane(gameState) {
                             );
                         const multiStartBadge = otherStarterSlots.length > 0
                             ? `
-                                <span class="text-[9px] bg-amber-100 text-amber-900 rounded px-1 py-0.5 font-black shrink-0" title="Starts at multiple ${isOffensePosition ? 'offensive' : 'defensive'} positions: ${otherStarterSlots.join(', ')}">
-                                    MULTI-${isOffensePosition ? 'OFF' : 'DEF'} · ${otherStarterSlots.join(', ')}
+                                <span class="text-[9px] bg-slate-100 text-slate-700 border border-slate-200 rounded px-1 py-0.5 font-bold shrink-0"
+                                      title="Currently assigned to another starting position">
+                                    STARTER ELSEWHERE · ${otherStarterSlots.join(', ')}
                                 </span>
                             `
                             : '';
@@ -528,7 +556,7 @@ export function renderDepthOrderPane(gameState) {
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-3">
-                        ${['DL', 'LB', 'DB'].map(renderPositionDepthCard).join('')}
+                        ${['DE', 'DT', 'LB', 'CB', 'S'].map(renderPositionDepthCard).join('')}
                     </div>
                 </section>
             </div>
@@ -583,7 +611,9 @@ export function renderDepthOrderPane(gameState) {
                         <br>
                         <b>NCB:</b> Extra defensive back in Nickel/Dime packages.
                     </div>
-         ` : ''}
+                </section>
+            </div>
+        ` : ''}
     `;
 }
 
@@ -601,7 +631,10 @@ window.movePositionDepthOrder = function(position, playerId, direction) {
     const team = gs?.playerTeam;
     if (!team) return;
 
-    const validPositions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+    const validPositions = [
+        'QB', 'RB', 'WR', 'TE', 'OL',
+        'DL', 'DE', 'DT', 'LB', 'DB', 'CB', 'S'
+    ];
 
     if (!validPositions.includes(position)) return;
 

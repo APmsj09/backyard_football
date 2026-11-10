@@ -106,57 +106,126 @@ export function populateNaturalDepthOrder(team) {
     const rosterObjs = getGameDayRosterObjects(team);
     team.depthOrder = {
         'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [],
-        'DL': [], 'LB': [], 'DB': []
+        'DL': [], 'DE': [], 'DT': [],
+        'LB': [],
+        'DB': [], 'CB': [], 'S': []
     };
 
     const coach = team.staff?.coach || team.coach;
     const personality = coach?.biases?.personality?.name;
     const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
 
-    // Coach evaluates player culture & fits based on archetype
+    const getPositionOverall = (p, pos) => {
+        if (pos === 'S') {
+            const fsOvr = calculateOverall(p, 'FS');
+            const ssOvr = calculateOverall(p, 'SS');
+            return Math.round((fsOvr + ssOvr) / 2);
+        }
+
+        return calculateOverall(p, pos);
+    };
+
+    // Coach evaluates player culture & fits based on archetype.
     const getCoachEvaluationScore = (p, pos) => {
-        let score = calculateOverall(p, pos);
+        let score = getPositionOverall(p, pos);
         const ethic = p.personality?.workEthic || 50;
         const ego = p.personality?.ego || 50;
         const toughness = p.attributes?.mental?.toughness || 50;
 
         if (personality === 'Old-School Disciplinarian') {
-            if (ethic < 40) score -= 8; // Disciplinarian refuses to start lazy kids
-            if (ego > 75) score -= 6;   // Clashes with divas
-            if (toughness > 65) score += 5; // Loves hard-nosed grinders
+            if (ethic < 40) score -= 8;
+            if (ego > 75) score -= 6;
+            if (toughness > 65) score += 5;
         } else if (personality === "Peaked in '94") {
             const str = p.attributes?.physical?.strength || 50;
             const wgt = p.attributes?.physical?.weight || 150;
-            if (str > 60 || wgt > 180) score += 6; // Values raw size and brute power
+            if (str > 60 || wgt > 180) score += 6;
         } else if (personality === "Players' Coach") {
             const loyalty = p.personality?.loyalty || 50;
-            if (loyalty > 65) score += 4; // Rewards loyal team players
+            if (loyalty > 65) score += 4;
         }
 
-        // GM Directives override
+        // GM Directives override.
         if (gmDirective === 'DEVELOP_YOUTH' && p.age <= 14) {
-            score += 7; // Pushes young prospects into starting depth
+            score += 7;
         }
 
         return score;
     };
 
+    // Broad position rankings remain available during the transition.
     const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
+
     positions.forEach(pos => {
         const viable = rosterObjs.filter(p => isPlayerViableForPosition(p, pos));
-        viable.sort((a, b) => getCoachEvaluationScore(b, pos) - getCoachEvaluationScore(a, pos));
+
+        viable.sort(
+            (a, b) =>
+                getCoachEvaluationScore(b, pos) -
+                getCoachEvaluationScore(a, pos)
+        );
+
         team.depthOrder[pos] = viable.map(p => p.id);
+    });
+
+    // Specialized defensive rankings.
+    const defensiveGroups = [
+        { position: 'DE', eligibility: 'DL' },
+        { position: 'DT', eligibility: 'DL' },
+        { position: 'CB', eligibility: 'DB' },
+        { position: 'S', eligibility: 'DB' }
+    ];
+
+    defensiveGroups.forEach(({ position, eligibility }) => {
+        const viable = rosterObjs.filter(
+            p => isPlayerViableForPosition(p, eligibility)
+        );
+
+        viable.sort(
+            (a, b) =>
+                getCoachEvaluationScore(b, position) -
+                getCoachEvaluationScore(a, position)
+        );
+
+        team.depthOrder[position] = viable.map(p => p.id);
     });
 }
 
 export function pruneUnnaturalDepthOrder(team) {
     if (!team || !team.depthOrder || typeof team.depthOrder !== 'object') return;
 
+    // Migrate older depth charts into the new specialized rooms.
+    const legacyGroups = {
+        DE: 'DL',
+        DT: 'DL',
+        CB: 'DB',
+        S: 'DB'
+    };
+
+    Object.entries(legacyGroups).forEach(([newPosition, oldPosition]) => {
+        if (!Array.isArray(team.depthOrder[newPosition])) {
+            team.depthOrder[newPosition] = [
+                ...(team.depthOrder[oldPosition] || [])
+            ];
+        }
+    });
+
+    // Specialized roles still use their broad position for eligibility.
+    const eligibilityPositions = {
+        DE: 'DL',
+        DT: 'DL',
+        CB: 'DB',
+        S: 'DB'
+    };
+
     Object.keys(team.depthOrder).forEach(pos => {
         if (!Array.isArray(team.depthOrder[pos])) return;
+
+        const eligibilityPosition = eligibilityPositions[pos] || pos;
+
         team.depthOrder[pos] = team.depthOrder[pos].filter(pid => {
             const p = getPlayer(pid);
-            return isPlayerViableForPosition(p, pos);
+            return isPlayerViableForPosition(p, eligibilityPosition);
         });
     });
 }
@@ -274,11 +343,28 @@ export function rebuildDepthChartFromOrder(team) {
     sortedDefSlots.forEach(slot => {
         if (newDefChart[slot] !== undefined) return;
 
+        const slotLabel = defenseFormations[defFormKey]?.slotLabels?.[slot] || slot;
+
         let posKey = slot.replace(/\d+/g, '');
         if (['CB', 'S'].includes(posKey)) posKey = 'DB';
         if (['DE', 'DT'].includes(posKey)) posKey = 'DL';
 
-        let searchBuckets = [posKey];
+        let specializedBucket = null;
+
+        if (slotLabel.startsWith('DE')) {
+            specializedBucket = 'DE';
+        } else if (slotLabel.startsWith('DT') || slotLabel === 'NT') {
+            specializedBucket = 'DT';
+        } else if (slotLabel.startsWith('CB') || slotLabel.startsWith('NB')) {
+            specializedBucket = 'CB';
+        } else if (slotLabel.startsWith('FS') || slotLabel.startsWith('SS')) {
+            specializedBucket = 'S';
+        }
+
+        let searchBuckets = specializedBucket
+            ? [specializedBucket, posKey]
+            : [posKey];
+
         if (posKey === 'DB') searchBuckets.push('WR', 'LB');
         if (posKey === 'LB') searchBuckets.push('DL', 'DB', 'TE');
         if (posKey === 'DL') searchBuckets.push('LB', 'OL');

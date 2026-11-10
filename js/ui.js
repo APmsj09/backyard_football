@@ -39,6 +39,7 @@ let liveGameCurrentIndex = 0;
 let currentLiveGameResult = null;
 let huddleTimeout = null;
 let activeLiveGame = null;
+let lastRenderedFrame = null;
 let liveGameCallback = null;
 let liveGameInterval = null;
 let isSkipping = false;
