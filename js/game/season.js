@@ -1729,7 +1729,23 @@ export function createPlayerTeam(teamName, options = {}) {
 }
 */
 export function addPlayerToTeam(player, team, gameState = game) {
-    if (!player || !team || !team.roster || typeof player.id === 'undefined') return false;
+    if (
+        !player ||
+        !team ||
+        !Array.isArray(team.roster) ||
+        player.id == null
+    ) {
+        return false;
+    }
+
+    // A player already assigned to another team must be released from
+    // that team before being added here. This prevents duplicate ownership.
+    if (
+        player.teamId != null &&
+        String(player.teamId) !== String(team.id)
+    ) {
+        return false;
+    }
 
     // A player who permanently walked away over a broken promise cannot
     // return to that specific team through any recruiting pathway.
@@ -1742,6 +1758,34 @@ export function addPlayerToTeam(player, team, gameState = game) {
 
     if (hasRefusedThisTeam) return false;
 
+    // Reject players who are still listed on another team's roster,
+    // even if their player.teamId field is missing or stale.
+    const listedOnAnotherTeam =
+        Array.isArray(gameState?.teams) &&
+        gameState.teams.some(candidateTeam => {
+            if (
+                !candidateTeam ||
+                String(candidateTeam.id) === String(team.id) ||
+                !Array.isArray(candidateTeam.roster)
+            ) {
+                return false;
+            }
+
+            return candidateTeam.roster.some(entry => {
+                const rosterPlayerId =
+                    entry && typeof entry === 'object'
+                        ? entry.id
+                        : entry;
+
+                return (
+                    rosterPlayerId != null &&
+                    String(rosterPlayerId) === String(player.id)
+                );
+            });
+        });
+
+    if (listedOnAnotherTeam) return false;
+
     const currentLimit = getCurrentRosterLimit(gameState);
     if (team.roster.length >= currentLimit) return false;
 
@@ -1753,9 +1797,13 @@ export function addPlayerToTeam(player, team, gameState = game) {
     if (alreadyOnRoster) return false;
 
     if (player.number == null) {
-        const offOvr = calculateOverall(player, player.favoriteOffensivePosition);
-        const defOvr = calculateOverall(player, player.favoriteDefensivePosition);
-        const primaryPos = (offOvr >= defOvr) ? player.favoriteOffensivePosition : player.favoriteDefensivePosition;
+        // Use the publicly listed position for jersey-number preferences.
+        // Do not inspect hidden ratings just to choose a uniform number.
+        const primaryPos = normalizeTrainingPosition(
+            player.pos ||
+            player.position ||
+            player.Pos
+        ) || 'ATH';
 
         let preferredRanges = [];
         switch (primaryPos) {
@@ -1802,8 +1850,31 @@ export function addPlayerToTeam(player, team, gameState = game) {
     player.teamId = team.id;
     team.roster.push(player.id);
 
-    if (!team.depthOrder || Array.isArray(team.depthOrder)) {
-        team.depthOrder = { 'QB': [], 'RB': [], 'WR': [], 'TE': [], 'OL': [], 'DL': [], 'LB': [], 'DB': [] };
+    if (
+        !team.depthOrder ||
+        typeof team.depthOrder !== 'object' ||
+        Array.isArray(team.depthOrder)
+    ) {
+        team.depthOrder = {
+            QB: [],
+            RB: [],
+            WR: [],
+            TE: [],
+            OL: [],
+            DL: [],
+            LB: [],
+            DB: []
+        };
+    }
+
+    // Ensure every standard position has a valid depth-order array.
+    for (const position of [
+        'QB', 'RB', 'WR', 'TE',
+        'OL', 'DL', 'LB', 'DB'
+    ]) {
+        if (!Array.isArray(team.depthOrder[position])) {
+            team.depthOrder[position] = [];
+        }
     }
 
     let offPos = player.favoriteOffensivePosition || 'WR';
@@ -1817,9 +1888,31 @@ export function addPlayerToTeam(player, team, gameState = game) {
     if (['DE', 'DT', 'NT'].includes(defPos)) defPos = 'DL';
     if (!team.depthOrder[defPos]) defPos = 'DB';
 
-    team.depthOrder[offPos].push(player.id);
-    if (team.depthOrder[defPos] && !team.depthOrder[defPos].includes(player.id)) {
-        team.depthOrder[defPos].push(player.id);
+    // Add the player only when that ID is not already present.
+    const addToDepthOrder = position => {
+        const depthList = team.depthOrder[position];
+
+        const alreadyListed = depthList.some(entry => {
+            const existingId =
+                entry && typeof entry === 'object'
+                    ? entry.id
+                    : entry;
+
+            return (
+                existingId != null &&
+                String(existingId) === String(player.id)
+            );
+        });
+
+        if (!alreadyListed) {
+            depthList.push(player.id);
+        }
+    };
+
+    addToDepthOrder(offPos);
+
+    if (defPos !== offPos) {
+        addToDepthOrder(defPos);
     }
 
     return true;
@@ -4155,39 +4248,174 @@ export function processSeasonStartDues(gameState = game) {
 }
 
 export function getTeamNetworkRecruits(team) {
-    if (!team || !team.roster || !game || !game.players) return [];
+    if (
+        !team ||
+        !Array.isArray(team.roster) ||
+        !game ||
+        !Array.isArray(game.players)
+    ) {
+        return [];
+    }
 
-    const rosterIds = new Set(team.roster);
-    const unassignedPlayers = game.players.filter(p =>
-        p &&
-        !p.teamId &&
-        p.status?.type !== 'retired' &&
-        p.status?.type !== 'departed' &&
-        !p.refusedTeamIds?.includes(team.id)
+    const rosterIds = new Set(
+        team.roster
+            .map(entry =>
+                entry && typeof entry === 'object'
+                    ? entry.id
+                    : entry
+            )
+            .filter(id => id != null)
+            .map(String)
     );
 
+    // Exclude players already assigned to a permanent roster,
+    // even if their player.teamId field is missing or stale.
+    const permanentlyAssignedIds = new Set();
+
+    // Temporary friends are unavailable to every other team.
+    const temporarilyAssignedIds = new Set();
+
+    for (const candidateTeam of game.teams || []) {
+        if (!candidateTeam) continue;
+
+        for (const entry of candidateTeam.roster || []) {
+            const id =
+                entry && typeof entry === 'object'
+                    ? entry.id
+                    : entry;
+
+            if (id != null) {
+                permanentlyAssignedIds.add(String(id));
+            }
+        }
+
+        for (const id of candidateTeam.temporaryPlayers || []) {
+            if (id != null) {
+                temporarilyAssignedIds.add(String(id));
+            }
+        }
+    }
+
+    const unassignedPlayers = game.players.filter(player => {
+        if (
+            !player ||
+            player.id == null ||
+            player.teamId != null
+        ) {
+            return false;
+        }
+
+        const playerId = String(player.id);
+
+        const statusType = String(
+            player.status?.type || ''
+        ).toLowerCase();
+
+        const lifecycle = String(
+            player.lifecycle || ''
+        ).toLowerCase();
+
+        const lifecycleStatus = String(
+            player.lifecycleStatus ||
+            player.lifecycle?.status ||
+            ''
+        ).toLowerCase();
+
+        const refusedThisTeam =
+            Array.isArray(player.refusedTeamIds) &&
+            player.refusedTeamIds.some(
+                refusedId =>
+                    String(refusedId) === String(team.id)
+            );
+
+        const previousDecline =
+            team.temporaryFriendDeclines?.[playerId];
+
+        const declinedThisWeek =
+            Number(previousDecline?.seasonYear) ===
+                Number(game.year) &&
+            Number(previousDecline?.week) ===
+                Number(game.currentWeek);
+
+        return (
+            !declinedThisWeek &&
+            !permanentlyAssignedIds.has(playerId) &&
+            !temporarilyAssignedIds.has(playerId) &&
+            !rosterIds.has(playerId) &&
+            ![
+                'retired',
+                'departed',
+                'temporary',
+                'injured'
+            ].includes(statusType) &&
+            ![
+                'retired',
+                'departed',
+                'temporary',
+                'injured',
+                'draft_eligible'
+            ].includes(lifecycle) &&
+            ![
+                'retired',
+                'departed',
+                'temporary',
+                'injured',
+                'draft_eligible'
+            ].includes(lifecycleStatus) &&
+            !(Number(player.status?.duration) > 0) &&
+            !(
+                Number(
+                    player.injury?.duration ||
+                    player.injuryDuration ||
+                    0
+                ) > 0
+            ) &&
+            !refusedThisTeam
+        );
+    });
+
     const connectedRecruits = [];
+
     unassignedPlayers.forEach(freeAgent => {
         let highestRelationship = relationshipLevels.STRANGER.level;
         let connectedTeammate = null;
 
         for (const rosterPlayerId of rosterIds) {
-            const rel = getRelationshipLevel(rosterPlayerId, freeAgent.id);
+            const rel = getRelationshipLevel(
+                rosterPlayerId,
+                freeAgent.id
+            );
+
             if (rel > highestRelationship) {
                 highestRelationship = rel;
                 connectedTeammate = getPlayer(rosterPlayerId);
             }
         }
 
-        if (highestRelationship >= relationshipLevels.ACQUAINTANCE.level) {
-            const scouted = getScoutedPlayerInfo(freeAgent, highestRelationship);
-            scouted.connectedBuddyName = connectedTeammate?.name || 'A teammate';
+        if (
+            highestRelationship >=
+            relationshipLevels.ACQUAINTANCE.level
+        ) {
+            const scouted = getScoutedPlayerInfo(
+                freeAgent,
+                highestRelationship,
+                team
+            );
+
+            if (!scouted) return;
+
+            scouted.connectedBuddyName =
+                connectedTeammate?.name || 'A teammate';
+
             scouted.networkStrength = highestRelationship;
+
             connectedRecruits.push(scouted);
         }
     });
 
-    return connectedRecruits.sort((a, b) => b.networkStrength - a.networkStrength);
+    return connectedRecruits.sort(
+        (a, b) => b.networkStrength - a.networkStrength
+    );
 }
 
 export function generateWeeklyFreeAgents() {
@@ -4201,15 +4429,17 @@ export function callFriend(playerId) {
     }
     const team = game.playerTeam;
 
-    // Permanent player additions are restricted to the offseason
-    // recruiting window. In-season emergency help uses temporary friends.
+    // Temporary friends are an in-season emergency option.
+    // Week 0 is reserved for offseason roster management.
+    const currentWeek = Number(game.currentWeek);
+
     if (
-        game.offseasonState?.phase !== OFFSEASON_PHASES.RECRUITING ||
-        game.draftCompleted !== true
+        !Number.isInteger(currentWeek) ||
+        currentWeek <= 0
     ) {
         return {
             success: false,
-            message: 'Permanent player additions are only available during offseason recruiting.'
+            message: 'Temporary friends can only be called during the regular season.'
         };
     }
     if (!team.socialProfile) team.socialProfile = { favorTokens: 3, streetCred: 50 };
@@ -4260,14 +4490,31 @@ export function callFriend(playerId) {
             message: `Your team already has ${activeCount} available players. Friends can only be called when fewer than 8 players are available.`
         };
     }
-    const player = game.freeAgents.find(
+    // Confirm the player is still in the available network-recruit pool.
+    // The pool entry is a scouting-safe display object, not the full player.
+    const networkRecruit = game.freeAgents.find(
         p => p && String(p.id) === String(playerId)
     );
+
+    if (!networkRecruit) {
+        return {
+            success: false,
+            message: "That player is no longer hanging around the park this week."
+        };
+    }
+
+    // Resolve the underlying player for internal relationship and
+    // acceptance calculations. Do not expose this object through the
+    // network-recruit display data.
+    const player = getPlayer(playerId) ||
+        (game.players || []).find(
+            p => p && String(p.id) === String(playerId)
+        );
 
     if (!player) {
         return {
             success: false,
-            message: "That player is no longer hanging around the park this week."
+            message: "That player could not be found."
         };
     }
 
@@ -4315,7 +4562,9 @@ export function callFriend(playerId) {
     const captain = roster.find(r => r.id === team.captainId);
     if (captain && captain.personality?.clique === player.personality?.clique) {
         interestScore += 10;
-        decisionReasons.push(`vibes with team captain ${captain.name.split(' ')[0]} (${player.personality.clique})`);
+        decisionReasons.push(
+            `shares a team-culture connection with captain ${captain.name.split(' ')[0]}`
+        );
     }
 
     // 2. Sworn Rival Penalty
@@ -4326,20 +4575,101 @@ export function callFriend(playerId) {
     }
 
     // 3. Caliber, Ego & Positional Reality Check
-    const bestPos = player.pos || estimateBestPosition(player);
-    const myOvr = calculateOverall(player, bestPos);
+    // External prospect ability must come from this team's scouting report,
+    // never from the prospect's actual hidden attributes.
+    const {
+        report: prospectReport,
+        confidence: prospectConfidence
+    } = getTrainingReportConfidence(team, player);
+
+    const listedPosition = normalizeTrainingPosition(
+        player.pos ||
+        player.position ||
+        player.Pos
+    );
+
+    const reportedFits = [
+        prospectReport?.evaluation?.offenseFit,
+        prospectReport?.evaluation?.defenseFit
+    ]
+        .map(fit => {
+            const position = normalizeTrainingPosition(fit?.position);
+            const low = Number(fit?.low);
+            const high = Number(fit?.high);
+
+            if (
+                !position ||
+                fit?.low == null ||
+                fit?.high == null ||
+                !Number.isFinite(low) ||
+                !Number.isFinite(high) ||
+                high < low ||
+                (
+                    listedPosition &&
+                    position !== listedPosition
+                )
+            ) {
+                return null;
+            }
+
+            return {
+                position,
+                low,
+                high,
+                estimate: low +
+                    ((high - low) / 2) * prospectConfidence
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.estimate - a.estimate);
+
+    const bestReportedFit = prospectConfidence >= 0.50
+        ? reportedFits[0] || null
+        : null;
+
+    const bestPos =
+        listedPosition ||
+        bestReportedFit?.position ||
+        null;
+
+    const hasAbilityEstimate =
+        prospectReport != null &&
+        prospectConfidence >= 0.50 &&
+        bestReportedFit !== null;
+
+    const myOvr = hasAbilityEstimate
+        ? bestReportedFit.estimate
+        : 50;
+
     const ego = player.personality?.ego || 50;
 
-    // Check competitor caliber at position
-    const posCompetitors = roster.filter(p => isPlayerViableForPosition(p, bestPos));
-    const topStarterOvr = posCompetitors.map(p => calculateOverall(p, bestPos)).sort((a, b) => b - a)[0] || 0;
+    // Compare against the actual ability of our own roster players.
+    const posCompetitors = bestPos
+        ? roster.filter(p =>
+            isPlayerViableForPosition(p, bestPos)
+        )
+        : [];
 
-    if (topStarterOvr >= myOvr + 4 && ego > 60) {
+    const topStarterOvr = bestPos
+        ? posCompetitors
+            .map(p => calculateOverall(p, bestPos))
+            .sort((a, b) => b - a)[0] || 0
+        : 0;
+
+    if (
+        hasAbilityEstimate &&
+        bestPos &&
+        topStarterOvr >= myOvr + 4 &&
+        ego > 60
+    ) {
         interestScore -= 24;
         decisionReasons.push(`won't ride the pine behind established starter at ${bestPos}`);
-    } else if (myOvr >= 45 || healthyCount < 9) {
+    } else if (
+        (hasAbilityEstimate && myOvr >= 45) ||
+        healthyCount < 9
+    ) {
         interestScore += 14;
-    } else if (ego > 65) {
+    } else if (hasAbilityEstimate && ego > 65) {
         interestScore -= 20;
         decisionReasons.push(`demands real playing time before lending a hand`);
     }
@@ -4355,11 +4685,12 @@ export function callFriend(playerId) {
 
     // Dynamic threshold: Stars won't show up for a simple favor without massive friendship ties
     let callThreshold = 50;
-    if (myOvr >= 58) callThreshold = 66;
-    else if (myOvr >= 48) callThreshold = 56;
 
-    // Remove from the weekly free agent screen
-    game.freeAgents = game.freeAgents.filter(p => p && p.id !== playerId);
+    if (hasAbilityEstimate && myOvr >= 58) {
+        callThreshold = 66;
+    } else if (hasAbilityEstimate && myOvr >= 48) {
+        callThreshold = 56;
+    }
 
     if (interestScore >= callThreshold) {
         // Player accepts as a temporary friend, not a permanent roster member.
@@ -4380,6 +4711,13 @@ export function callFriend(playerId) {
                 message: `${player.name} is already part of the team.`
             };
         }
+
+        // Remove the prospect only after their acceptance is confirmed.
+        game.freeAgents = game.freeAgents.filter(
+            candidate =>
+                candidate &&
+                String(candidate.id) !== String(player.id)
+        );
 
         player.status = {
             type: 'temporary',
@@ -4408,10 +4746,38 @@ export function callFriend(playerId) {
         addMessage("Roster Update: Friend Joined", message);
         return { success: true, message };
     } else {
-        // Player declines offer!
-        const declineReason = decisionReasons.slice(-1)[0] || 'was not interested in joining right now';
-        const message = `✋ ${player.name} declined the invite: ${declineReason}. (Favor Token preserved).`;
-        addMessage("Roster Update: Invite Declined", message);
+        // Record the decline for this team and week.
+        // The prospect can become available again next week.
+        if (
+            !team.temporaryFriendDeclines ||
+            typeof team.temporaryFriendDeclines !== 'object' ||
+            Array.isArray(team.temporaryFriendDeclines)
+        ) {
+            team.temporaryFriendDeclines = {};
+        }
+
+        team.temporaryFriendDeclines[String(player.id)] = {
+            seasonYear: Number(game.year),
+            week: Number(game.currentWeek)
+        };
+
+        // Remove this prospect from the current weekly display.
+        game.freeAgents = game.freeAgents.filter(
+            candidate =>
+                candidate &&
+                String(candidate.id) !== String(player.id)
+        );
+
+        const declineReason =
+            decisionReasons.slice(-1)[0] ||
+            'was not interested in joining right now';
+
+        const message =
+            `✋ ${player.name} declined the invite: ${declineReason}. ` +
+            '(Favor Token preserved).';
+
+        addMessage('Roster Update: Invite Declined', message);
+
         return { success: false, message };
     }
 }
@@ -7031,11 +7397,30 @@ export function resolveRecruitingDay(gameState = game) {
 }
 
 export function executeAICutDowns() {
-    if (!game || !game.teams) return;
+    if (!game || !Array.isArray(game.teams)) return;
+
     const limit = REGULAR_SEASON_ROSTER_LIMIT;
 
+    const playerTeamId = game.playerTeam?.id == null
+        ? null
+        : String(game.playerTeam.id);
+
     game.teams.forEach(team => {
-        if (team.isPlayerControlled || !team.roster || team.roster.length <= limit) return;
+        const isPlayerControlledTeam =
+            team?.isPlayerControlled === true ||
+            (
+                playerTeamId !== null &&
+                String(team?.id) === playerTeamId
+            );
+
+        if (
+            !team ||
+            isPlayerControlledTeam ||
+            !Array.isArray(team.roster) ||
+            team.roster.length <= limit
+        ) {
+            return;
+        }
 
         const rosterObjs = getRosterObjects(team);
 
@@ -7229,8 +7614,28 @@ export function executeAICutDowns() {
         playersToCut.forEach(p => {
             p.teamId = null;
             p.number = null;
-            p.status = { type: 'healthy', description: 'Cut during summer tryouts', duration: 0 };
-            team.roster = team.roster.filter(id => id !== p.id);
+
+            const hasActiveInjury =
+                String(p.status?.type || '').toLowerCase() === 'injured' ||
+                Number(p.status?.duration) > 0 ||
+                Number(
+                    p.injury?.duration ||
+                    p.injuryDuration ||
+                    0
+                ) > 0;
+
+            // Cutting a player must not erase an existing injury.
+            if (!hasActiveInjury) {
+                p.status = {
+                    type: 'healthy',
+                    description: 'Cut during summer tryouts',
+                    duration: 0
+                };
+            }
+
+            team.roster = team.roster.filter(
+                id => String(id) !== String(p.id)
+            );
         });
 
         aiSetDepthChart(team);
@@ -7996,9 +8401,19 @@ export function acceptTeamWalkOnInvitation(gameState, playerId) {
         maximumRosterSize
     };
 }
-
 export function autoFillTeamWalkOns(team, targetSize = 14) {
-    if (!team || !game || !game.players) return 0;
+    if (
+        !team ||
+        !game ||
+        !Array.isArray(game.players) ||
+        !Array.isArray(team.roster)
+    ) {
+        return 0;
+    }
+
+    targetSize = Number.isFinite(Number(targetSize))
+        ? Math.max(0, Math.floor(Number(targetSize)))
+        : 14;
 
     const isPlayerControlledTeam =
         team.isPlayerControlled === true ||
@@ -8086,13 +8501,44 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
             .map(String)
     );
 
+    // Exclude players still listed on another team's roster, even if
+    // their player.teamId field is missing or stale.
+    const playersOnOtherRosters = new Set();
+
+    for (const otherTeam of game.teams || []) {
+        if (
+            !otherTeam ||
+            String(otherTeam.id) === String(team.id) ||
+            !Array.isArray(otherTeam.roster)
+        ) {
+            continue;
+        }
+
+        for (const entry of otherTeam.roster) {
+            const id =
+                entry && typeof entry === 'object'
+                    ? entry.id
+                    : entry;
+
+            if (id != null) {
+                playersOnOtherRosters.add(String(id));
+            }
+        }
+    }
+
+    // Remember failed assignments so one rejected prospect cannot
+    // prevent the AI team from considering other available candidates.
+    const rejectedCandidateIds = new Set();
+
     while (team.roster.length < targetSize && team.roster.length < limit) {
         const unassigned = game.players.filter(player => {
             if (
                 !player ||
                 player.id == null ||
                 player.teamId != null ||
-                teamRosterIds.has(String(player.id))
+                teamRosterIds.has(String(player.id)) ||
+                playersOnOtherRosters.has(String(player.id)) ||
+                rejectedCandidateIds.has(String(player.id))
             ) {
                 return false;
             }
@@ -8156,7 +8602,13 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
                     'injured',
                     'draft_eligible'
                 ].includes(lifecycleStatus) &&
-                lifecycle !== 'draft_eligible' &&
+                ![
+                    'retired',
+                    'departed',
+                    'temporary',
+                    'injured',
+                    'draft_eligible'
+                ].includes(lifecycle) &&
                 !(Number(player.status?.duration) > 0) &&
                 !(
                     Number(
@@ -8265,7 +8717,7 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
 
             added++;
         } else {
-            break;
+            rejectedCandidateIds.add(String(recruit.id));
         }
     }
     if (added > 0) aiSetDepthChart(team);
@@ -8290,26 +8742,44 @@ export function aiManageRoster(team) {
         team.temporaryPlayers = [];
     }
 
+    const countedTemporaryIds = new Set();
+
     const availableTemporaryCount = team.temporaryPlayers
         .map(id => getPlayer(id))
-        .filter(player =>
-            player &&
-            player.id != null &&
-            player.teamId == null &&
-            player.status?.type === 'temporary' &&
-            Number(player.status.duration || 0) <= 0 &&
-            !team.roster.some(
-                id => String(id) === String(player.id)
-            ) &&
-            !(game.teams || []).some(other =>
+        .filter(player => {
+            if (
+                !player ||
+                player.id == null ||
+                player.teamId != null ||
+                player.status?.type !== 'temporary' ||
+                Number(player.status.duration || 0) > 0 ||
+                team.roster.some(
+                    id => String(id) === String(player.id)
+                )
+            ) {
+                return false;
+            }
+
+            const playerId = String(player.id);
+
+            if (countedTemporaryIds.has(playerId)) {
+                return false;
+            }
+
+            const assignedElsewhere = (game.teams || []).some(other =>
                 other &&
                 String(other.id) !== String(team.id) &&
                 Array.isArray(other.temporaryPlayers) &&
                 other.temporaryPlayers.some(
-                    id => String(id) === String(player.id)
+                    id => String(id) === playerId
                 )
-            )
-        ).length;
+            );
+
+            if (assignedElsewhere) return false;
+
+            countedTemporaryIds.add(playerId);
+            return true;
+        }).length;
 
     let playableCount =
         availablePermanentCount + availableTemporaryCount;

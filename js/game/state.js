@@ -190,76 +190,125 @@ export function decreaseRelationship(p1Id, p2Id) {
     if (!p2.social.rivalIds.includes(p1Id)) p2.social.rivalIds.push(p1Id);
 }
 
-export function getScoutedPlayerInfo(player, relationshipLevelNum) {
-    if (!player) return null;
+export function getScoutedPlayerInfo(
+    player,
+    relationshipLevelNum,
+    team = game?.playerTeam
+) {
+    if (!player || player.id == null) return null;
 
-    const levelInfo = Object.values(relationshipLevels).find(rl => rl.level === relationshipLevelNum) || relationshipLevels.STRANGER;
-    let accuracy = levelInfo.scoutAccuracy;
+    const levelInfo =
+        Object.values(relationshipLevels).find(
+            rl => rl.level === relationshipLevelNum
+        ) || relationshipLevels.STRANGER;
 
-    // Park Scout Rating adjusts scouting clarity (+/- 15%).
-    const userScout = game?.playerTeam?.staff?.scout;
-    if (userScout) {
-        const evalScore = (
-            (userScout.ratings?.evalTechnique ?? 50) +
-            (userScout.ratings?.evalPhysicals ?? 50)
-        ) / 200;
+    const {
+        report,
+        confidence
+    } = getTrainingReportConfidence(team, player);
 
-        accuracy = accuracy + (evalScore - 0.5) * 0.3;
-    }
+    // Build an attribute object from public measurements and this
+    // team's stored scouting ranges only.
+    const safeAttributes = {};
 
-    // The GM contributes general scouting ability and specialist knowledge.
-    const gmProfile = game?.playerTeam?.gmProfile;
+    // Height and weight are public, observable measurements.
+    for (const [category, values] of Object.entries(
+        player.attributes || {}
+    )) {
+        if (!values || typeof values !== 'object') continue;
 
-    accuracy += gmProfile?.bonuses?.scoutingAccuracy || 0;
+        for (const attribute of ['height', 'weight']) {
+            const value = values[attribute];
 
-    const actualPosition = player.pos || estimateBestPosition(player);
-
-    if (gmProfile?.expertisePositions?.includes(actualPosition)) {
-        accuracy += gmProfile.expertiseScoutingBonus || 0;
-    }
-
-    // Combine all scouting influences before concealing the player's attributes.
-    accuracy = Math.min(1.0, Math.max(0.2, accuracy));
-
-    const scoutedPlayer = JSON.parse(JSON.stringify(player));
-    scoutedPlayer.relationshipName = levelInfo.name;
-    scoutedPlayer.relationshipColor = levelInfo.color;
-
-    if (accuracy < 1.0 && player.potential) {
-        const potentialGrades = ['A', 'B', 'C', 'D', 'F'];
-        const actualIndex = potentialGrades.indexOf(player.potential);
-        if (actualIndex !== -1) {
-            const range = Math.floor((1.0 - accuracy) * (potentialGrades.length / 2));
-            const minIndex = Math.max(0, actualIndex - range);
-            const maxIndex = Math.min(potentialGrades.length - 1, actualIndex + range);
-            if (minIndex !== maxIndex) {
-                scoutedPlayer.potential = `${potentialGrades[minIndex]}-${potentialGrades[maxIndex]}`;
-            }
-        } else { scoutedPlayer.potential = '?'; }
-    }
-
-    if (accuracy < 0.95 && scoutedPlayer.attributes) {
-        const range = Math.round(15 * (1.0 - accuracy));
-        for (const category in scoutedPlayer.attributes) {
-            if (!scoutedPlayer.attributes[category]) continue;
-            for (const attr in scoutedPlayer.attributes[category]) {
-                if (['height', 'weight'].includes(attr)) continue;
-                const actualValue = player.attributes[category]?.[attr];
-                if (typeof actualValue === 'number') {
-                    const lowBound = Math.max(1, actualValue - range);
-                    const highBound = Math.min(99, actualValue + range);
-                    if (highBound - lowBound > 1) {
-                        scoutedPlayer.attributes[category][attr] = `${lowBound}-${highBound}`;
-                    } else {
-                        scoutedPlayer.attributes[category][attr] = actualValue;
-                    }
-                } else {
-                    scoutedPlayer.attributes[category][attr] = "?";
+            if (
+                typeof value === 'number' &&
+                Number.isFinite(value)
+            ) {
+                if (!safeAttributes[category]) {
+                    safeAttributes[category] = {};
                 }
+
+                safeAttributes[category][attribute] = value;
             }
         }
     }
-        return scoutedPlayer;
+
+    // All other ability information must come from the requesting
+    // team's own scouting report.
+    const reportedRanges = report?.attributeRanges || {};
+
+    for (const [category, values] of Object.entries(reportedRanges)) {
+        if (!values || typeof values !== 'object') continue;
+
+        for (const [attribute, range] of Object.entries(values)) {
+            if (
+                !range ||
+                range.low == null ||
+                range.high == null
+            ) {
+                continue;
+            }
+
+            const low = Number(range.low);
+            const high = Number(range.high);
+
+            if (
+                !Number.isFinite(low) ||
+                !Number.isFinite(high) ||
+                high < low
+            ) {
+                continue;
+            }
+
+            if (!safeAttributes[category]) {
+                safeAttributes[category] = {};
+            }
+
+            const roundedLow = Math.max(1, Math.min(99, Math.round(low)));
+            const roundedHigh = Math.max(1, Math.min(99, Math.round(high)));
+
+            safeAttributes[category][attribute] =
+                roundedLow === roundedHigh
+                    ? String(roundedLow)
+                    : `${roundedLow}-${roundedHigh}`;
+        }
+    }
+
+    const listedPosition =
+        player.pos ||
+        player.position ||
+        player.Pos ||
+        'ATH';
+
+    const reportLevel = Number(report?.level);
+
+    return {
+        id: player.id,
+        name: player.name || 'Unknown Player',
+        age: Number(player.age) || null,
+
+        // Position is public information, not an inferred hidden rating.
+        pos: listedPosition,
+
+        height: player.height ?? null,
+        weight: player.weight ?? null,
+
+        attributes: safeAttributes,
+
+        // Relationship information is separate from ability evaluation.
+        relationshipName: levelInfo.name,
+        relationshipColor: levelInfo.color,
+
+        // Scouting information is limited to this team's report.
+        scoutingLevel:
+            Number.isInteger(reportLevel) &&
+            reportLevel >= 1 &&
+            reportLevel <= 4
+                ? reportLevel
+                : 0,
+
+        scoutingConfidence: confidence
+    };
 }
 
 const SCOUTING_REPORT_SCHEMA_VERSION = 1;
@@ -633,22 +682,67 @@ export function setTeamScoutingReport(team, playerId, report) {
 export function getRosterObjects(team) {
     if (!team || !Array.isArray(team.roster)) return [];
 
-    if (playerMap.size === 0 && game && game.players) {
-        game.players.forEach(p => {
-            if (p && p.id) playerMap.set(p.id, p);
+    const allPlayers = Array.isArray(game?.players)
+        ? game.players
+        : [];
+
+    if (playerMap.size === 0) {
+        allPlayers.forEach(player => {
+            if (player && player.id != null) {
+                playerMap.set(player.id, player);
+            }
         });
     }
 
     const validIds = [];
-    team.roster.forEach(id => {
-        const p = playerMap.get(id);
-        if (p) {
-            validIds.push(id);
+    const rosterObjects = [];
+    const seenIds = new Set();
+
+    team.roster.forEach(entry => {
+        const rosterId =
+            entry && typeof entry === 'object'
+                ? entry.id
+                : entry;
+
+        if (rosterId == null) return;
+
+        const rosterKey = String(rosterId);
+
+        if (seenIds.has(rosterKey)) return;
+
+        let player = playerMap.get(rosterId);
+
+        // Handle string-versus-number ID differences.
+        if (!player) {
+            player = allPlayers.find(
+                candidate =>
+                    candidate &&
+                    candidate.id != null &&
+                    String(candidate.id) === rosterKey
+            );
+
+            if (player) {
+                playerMap.set(player.id, player);
+            }
         }
+
+        if (!player) return;
+
+        const canonicalId = String(player.id);
+
+        if (seenIds.has(canonicalId)) return;
+
+        seenIds.add(rosterKey);
+        seenIds.add(canonicalId);
+
+        // Keep the permanent roster in canonical player-ID format.
+        validIds.push(player.id);
+        rosterObjects.push(player);
     });
 
     team.roster = validIds;
-    return team.roster.map(id => playerMap.get(id)).filter(Boolean);
+
+    return rosterObjects;
 }
 
 export function getTemporaryRosterObjects(team) {

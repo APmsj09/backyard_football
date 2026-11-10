@@ -2582,11 +2582,28 @@ function finishOffseasonFAMinigame() {
     const currentSeasonYear =
         Number(gameState.year);
 
+    const recruitingTotalDays =
+        Number(gameState.offseasonState?.recruitingDays);
+
+    const recruitingCurrentDay =
+        Number(gameState.offseasonState?.recruitingDay);
+
+    const recruitingFinalDayResolved =
+        Number.isInteger(recruitingTotalDays) &&
+        Number.isInteger(recruitingCurrentDay) &&
+        recruitingCurrentDay >= recruitingTotalDays &&
+        Array.isArray(recruitingProgress?.resolvedDays) &&
+        recruitingProgress.resolvedDays.some(
+            resolvedDay =>
+                Number(resolvedDay) === recruitingCurrentDay
+        );
+
     const recruitingIsComplete =
         recruitingProgress?.initialized === true &&
         recruitingProgress?.completed === true &&
         Number.isInteger(recruitingSeasonYear) &&
-        recruitingSeasonYear === currentSeasonYear;
+        recruitingSeasonYear === currentSeasonYear &&
+        recruitingFinalDayResolved;
 
     if (!recruitingIsComplete) {
         UI.showModal(
