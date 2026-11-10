@@ -7252,25 +7252,61 @@ export function generateTeamWalkOnInvitations(gameState, teamId) {
     const progress = state?.recruitingProgress;
 
     const year = Number(gameState?.year);
+
     const normalizedPhase = String(state?.phase || '')
         .toLowerCase()
         .replace(/[^a-z]/g, '');
 
+    const totalDays = Number(state?.recruitingDays);
+    const currentDay = Number(state?.recruitingDay);
+
+    const finalDayResolved =
+        progress?.initialized === true &&
+        progress?.completed === true &&
+        Number(progress?.seasonYear) === year &&
+        Number.isInteger(currentDay) &&
+        Number.isInteger(totalDays) &&
+        currentDay >= totalDays &&
+        Array.isArray(progress?.resolvedDays) &&
+        progress.resolvedDays.some(
+            resolvedDay =>
+                Number(resolvedDay) === currentDay
+        );
+
     if (
         !gameState ||
+        !progress ||
+        !Number.isInteger(year) ||
         normalizedPhase !== 'rosterfinalization' ||
         gameState.offseasonFACompleted === true ||
         !finalDayResolved
     ) {
         return {
             success: false,
-            message: 'Walk-ons can only be accepted after recruiting is complete, during roster finalization.'
+            message: 'Walk-on invitations can only be generated after recruiting is complete, during roster finalization.',
+            offers: []
         };
     }
 
     const playerTeamId = gameState.playerTeam?.id == null
         ? null
         : String(gameState.playerTeam.id);
+
+    const team = Array.isArray(gameState.teams)
+        ? gameState.teams.find(
+            candidate =>
+                candidate &&
+                String(candidate.id) === String(teamId)
+        )
+        : null;
+
+    if (!team) {
+        return {
+            success: false,
+            message: 'The requested team could not be found.',
+            offers: []
+        };
+    }
 
     const isPlayerTeam =
         team.isPlayerControlled === true ||
@@ -7287,60 +7323,11 @@ export function generateTeamWalkOnInvitations(gameState, teamId) {
         };
     }
 
-    const totalDays = Number(state.recruitingDays);
-
-    const currentDay = Number(state.recruitingDay);
-
-    const finalDayResolved =
-        progress.completed === true &&
-        Number.isInteger(currentDay) &&
-        Number.isInteger(totalDays) &&
-        currentDay >= totalDays &&
-        Array.isArray(progress.resolvedDays) &&
-        progress.resolvedDays.some(
-            resolvedDay => Number(resolvedDay) === currentDay
-        );
-
-    if (!finalDayResolved) {
-        return {
-            success: false,
-            message: 'The final recruiting day must be resolved first.',
-            offers: []
-        };
-    }
-
     const teamKey = String(team.id);
     const rosterSize = getRosterObjects(team).length;
 
     const targetRosterSize = 16;
     const maximumRosterSize = REGULAR_SEASON_ROSTER_LIMIT;
-
-    // Restore the existing list before deciding whether new invitations
-    // are needed. Never reroll an invitation for the same season.
-    const existingInvitation =
-        progress.walkOnInvitationsByTeam?.[teamKey];
-
-    if (
-        existingInvitation &&
-        Number(existingInvitation.seasonYear) === year &&
-        rosterSize >= maximumRosterSize
-    ) {
-        existingInvitation.currentRosterSize = rosterSize;
-        existingInvitation.status = 'full';
-
-        (existingInvitation.offers || []).forEach(candidate => {
-            if (candidate.status === 'offered') {
-                candidate.status = 'expired';
-            }
-        });
-
-        return {
-            success: true,
-            needsWalkOns: false,
-            invitation: existingInvitation,
-            offers: existingInvitation.offers || []
-        };
-    }
 
     // Restore the existing list before deciding whether new invitations
     // are needed. Never reroll an invitation for the same season.
