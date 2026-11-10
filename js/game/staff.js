@@ -3137,11 +3137,19 @@ export const TEAM_PRIORITY_LEVELS = Object.freeze([
     'ignore'
 ]);
 
-const TEAM_EXPERIENCE_PRESETS = Object.freeze([
+export const TEAM_EXPERIENCE_PRESETS = Object.freeze([
     'casual_gm',
     'hands_on_gm',
     'director_of_football_operations',
     'custom'
+]);
+
+export const TEAM_PROGRAM_DIRECTIONS = Object.freeze([
+    'balanced',
+    'physicality',
+    'speed_and_space',
+    'versatility',
+    'defensive_pressure'
 ]);
 
 function ensureInstructionObject(parent, key) {
@@ -3154,6 +3162,73 @@ function ensureInstructionObject(parent, key) {
     }
 
     return parent[key];
+}
+
+/**
+ * Applies a high-level management preset across all departments without destroying
+ * customized position priorities or roster notes.
+ */
+export function applyManagementPreset(team, presetKey) {
+    if (!team) return null;
+    const instructions = ensureTeamInstructions(team);
+    if (!TEAM_EXPERIENCE_PRESETS.includes(presetKey)) return instructions;
+
+    instructions.experiencePreset = presetKey;
+    if (presetKey === 'custom') return instructions;
+
+    const depts = instructions.departments;
+
+    if (presetKey === 'casual_gm') {
+        instructions.autonomy = 'guided';
+        depts.recruiting.autonomy = 'guided';
+        depts.recruiting.automaticOfferPolicy.enabled = true;
+        depts.recruiting.automaticOfferPolicy.minimumInterest = 25;
+        depts.recruiting.giftSpendingPolicy.allowGifts = true;
+        depts.recruiting.giftSpendingPolicy.maxGiftPerRecruit = 10.00;
+
+        depts.scouting.autonomy = 'guided';
+        depts.development.autonomy = 'guided';
+        depts.practice.autonomy = 'guided';
+        depts.gameplan.autonomy = 'guided';
+        depts.staff.autonomy = 'guided';
+        if (team.gameplan) {
+            team.gameplan.delegatePractice = true;
+            team.gameplan.delegateGameplan = true;
+        }
+    } else if (presetKey === 'hands_on_gm') {
+        instructions.autonomy = 'direct';
+        depts.recruiting.autonomy = 'direct';
+        depts.recruiting.automaticOfferPolicy.enabled = false;
+        depts.recruiting.giftSpendingPolicy.allowGifts = false;
+
+        depts.scouting.autonomy = 'guided';
+        depts.development.autonomy = 'guided';
+        depts.practice.autonomy = 'direct';
+        depts.gameplan.autonomy = 'direct';
+        depts.staff.autonomy = 'guided';
+        if (team.gameplan) {
+            team.gameplan.delegatePractice = false;
+            team.gameplan.delegateGameplan = false;
+        }
+    } else if (presetKey === 'director_of_football_operations') {
+        instructions.autonomy = 'delegate';
+        depts.recruiting.autonomy = 'delegate';
+        depts.recruiting.automaticOfferPolicy.enabled = true;
+        depts.recruiting.automaticOfferPolicy.minimumInterest = 30;
+        depts.recruiting.giftSpendingPolicy.allowGifts = true;
+        depts.recruiting.giftSpendingPolicy.maxGiftPerRecruit = 15.00;
+
+        depts.scouting.autonomy = 'delegate';
+        depts.development.autonomy = 'delegate';
+        depts.practice.autonomy = 'delegate';
+        depts.gameplan.autonomy = 'delegate';
+        depts.staff.autonomy = 'delegate';
+        if (team.gameplan) {
+            team.gameplan.delegatePractice = true;
+            team.gameplan.delegateGameplan = true;
+        }
+    }
+    return instructions;
 }
 
 /**
@@ -3183,6 +3258,12 @@ export function ensureTeamInstructions(team) {
         instructions.experiencePreset
     )) {
         instructions.experiencePreset = 'casual_gm';
+    }
+
+    if (!TEAM_PROGRAM_DIRECTIONS.includes(
+        instructions.programDirection
+    )) {
+        instructions.programDirection = 'balanced';
     }
 
     const departments = ensureInstructionObject(
@@ -3256,6 +3337,20 @@ export function ensureTeamInstructions(team) {
     } else {
         automaticOfferPolicy.minimumInterest = null;
     }
+
+    const giftSpendingPolicy = ensureInstructionObject(
+        recruiting,
+        'giftSpendingPolicy'
+    );
+
+    if (typeof giftSpendingPolicy.allowGifts !== 'boolean') {
+        giftSpendingPolicy.allowGifts = true;
+    }
+
+    const maxGift = Number(giftSpendingPolicy.maxGiftPerRecruit);
+    giftSpendingPolicy.maxGiftPerRecruit = Number.isFinite(maxGift) && maxGift >= 0
+        ? Math.round(maxGift * 100) / 100
+        : 10.00;
 
     // Scouting has its own priorities and information objectives.
     ensureDepartment(
@@ -7573,6 +7668,25 @@ export function processAiRecruitingDay(gameState) {
                     (Math.random() * 2 - 1) *
                     targetJudgmentNoiseRange;
 
+                // Roster-led identity: GM Program Direction influences target interest
+                const programDirection = team.teamInstructions?.programDirection || 'balanced';
+                let programDirectionAdjustment = 0;
+
+                if (programDirection === 'physicality') {
+                    const str = Number(scoutingReport?.attributeRanges?.physical?.strength?.high || 50);
+                    if (['OL', 'DL'].includes(position)) programDirectionAdjustment += 6;
+                    if (str >= 65) programDirectionAdjustment += 4;
+                } else if (programDirection === 'speed_and_space') {
+                    const spd = Number(scoutingReport?.attributeRanges?.physical?.speed?.high || 50);
+                    if (['WR', 'DB', 'RB'].includes(position)) programDirectionAdjustment += 6;
+                    if (spd >= 65) programDirectionAdjustment += 4;
+                } else if (programDirection === 'versatility') {
+                    const hasTwoWayFit = reportedFits.length >= 2;
+                    if (hasTwoWayFit) programDirectionAdjustment += 7;
+                } else if (programDirection === 'defensive_pressure') {
+                    if (['DL', 'LB'].includes(position)) programDirectionAdjustment += 7;
+                }
+
                 const score =
                     rosterNeed * 7 +
                     (hasKnownFriend ? 16 : 0) +
@@ -7586,6 +7700,7 @@ export function processAiRecruitingDay(gameState) {
                     ownInterest * 0.20 +
                     scoutingAdjustment +
                     scoutingPreferenceAdjustment +
+                    programDirectionAdjustment +
                     competitionAdjustment +
                     recruitingPriority.adjustment * priorityInfluence +
                     targetJudgmentNoise;
@@ -8019,6 +8134,12 @@ export function processAiRecruitingDay(gameState) {
                     totalDays - day
                 );
 
+                const giftSpendingPolicy = recruitingInstructions.giftSpendingPolicy || {};
+                const allowGifts = !isPlayerControlledTeam || giftSpendingPolicy.allowGifts !== false;
+                const maxGiftCap = isPlayerControlledTeam
+                    ? (Number(giftSpendingPolicy.maxGiftPerRecruit) || 10.00)
+                    : Infinity;
+
                 const shouldConsiderSweetener =
                     canAutomatePlayerTeamSweeteners &&
                     Number(result.interestAfter) >= 18 &&
@@ -8032,14 +8153,17 @@ export function processAiRecruitingDay(gameState) {
                 if (shouldConsiderSweetener) {
                     const balance = Number(team.finances?.balance);
 
-                    // Preserve a modest cash reserve instead of allowing AI
-                    // recruiting to consume the entire team balance.
+                    // Preserve a modest cash reserve
                     const reserve = Number.isFinite(balance)
                         ? Math.max(10, balance * 0.15)
                         : Infinity;
 
-                    const spendableCash = Number.isFinite(balance)
-                        ? Math.max(0, balance - reserve)
+                    // Enforce GM Gift Spending Ceiling per recruit
+                    const alreadySpentOnRecruit = Number(recruitRecord?.recruitingPushByTeam?.[teamKey]?.cashSpent) || 0;
+                    const remainingGiftBudget = Math.max(0, maxGiftCap - alreadySpentOnRecruit);
+
+                    const spendableCash = allowGifts && Number.isFinite(balance)
+                        ? Math.min(Math.max(0, balance - reserve), remainingGiftBudget)
                         : 0;
 
                     const availableFavorTokens = Math.max(

@@ -10263,19 +10263,138 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 History
             </button>
         </nav>
-                <div
+        <div
             class="staff-hub-pane hidden"
             data-staff-pane="strategy">
 
-            <div class="mb-3 rounded border border-slate-200 bg-slate-50 p-3">
-                <h3 class="text-xs font-black uppercase tracking-wide text-slate-900">
-                    GM Strategy & Delegation
-                </h3>
-                <p class="mt-1 text-[11px] leading-relaxed text-slate-600">
-                    Set the priorities. Your staff will use their skills,
-                    available time, and judgment to carry out the work.
-                </p>
-            </div>
+            <!-- 1. MANAGEMENT PRESETS -->
+            <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <div>
+                        <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-900">
+                            Management Style Presets
+                        </h4>
+                        <p class="text-[10px] text-slate-500">
+                            One-click configurations to set how much you delegate to your staff.
+                        </p>
+                    </div>
+                    <span class="rounded bg-slate-100 border border-slate-200 px-2 py-0.5 text-[9px] font-mono font-bold uppercase text-slate-600">
+                        Active: ${(team.teamInstructions?.experiencePreset || 'casual_gm').replace(/_/g, ' ').toUpperCase()}
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button type="button"
+                        onclick="window.app_setManagementPreset('casual_gm')"
+                        class="p-2.5 rounded border text-left transition ${team.teamInstructions?.experiencePreset === 'casual_gm' ? 'border-amber-500 bg-amber-50/60 ring-1 ring-amber-500/40' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}">
+                        <div class="font-black text-xs text-slate-900">Casual GM</div>
+                        <p class="text-[10px] text-slate-600 mt-1">Guided staff, automated routine tasks, auto-offers on top targets.</p>
+                    </button>
+
+                    <button type="button"
+                        onclick="window.app_setManagementPreset('hands_on_gm')"
+                        class="p-2.5 rounded border text-left transition ${team.teamInstructions?.experiencePreset === 'hands_on_gm' ? 'border-blue-500 bg-blue-50/60 ring-1 ring-blue-500/40' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}">
+                        <div class="font-black text-xs text-slate-900">Hands-On GM</div>
+                        <p class="text-[10px] text-slate-600 mt-1">Direct control over playbooks, practice, and manual recruiting offers.</p>
+                    </button>
+
+                    <button type="button"
+                        onclick="window.app_setManagementPreset('director_of_football_operations')"
+                        class="p-2.5 rounded border text-left transition ${team.teamInstructions?.experiencePreset === 'director_of_football_operations' ? 'border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500/40' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}">
+                        <div class="font-black text-xs text-slate-900">Director of Ops</div>
+                        <p class="text-[10px] text-slate-600 mt-1">Full delegation of coaching duties; focus on staff, finances, and roster strategy.</p>
+                    </button>
+                </div>
+            </section>
+
+            <!-- 2. PROGRAM DIRECTION (ROSTER-LED IDENTITY) -->
+            <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
+                <div class="mb-2">
+                    <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-900">
+                        Program Direction (Team Identity)
+                    </h4>
+                    <p class="text-[10px] text-slate-500">
+                        Guides scouting and recruiting priorities without locking your coaches into a rigid playbook scheme.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-1.5" role="group" aria-label="Program Direction">
+                    ${[
+                        ['balanced', 'Balanced', 'Even development across all positions'],
+                        ['physicality', 'Physicality', 'Power, trench dominance & strength'],
+                        ['speed_and_space', 'Speed & Space', 'Playmakers, twitch & perimeter speed'],
+                        ['versatility', 'Versatility', 'Two-way ironmen & multi-role athletes'],
+                        ['defensive_pressure', 'Pressure', 'Aggressive front-7 & turnover hunting']
+                    ].map(([key, label, desc]) => {
+                        const active = (team.teamInstructions?.programDirection || 'balanced') === key;
+                        return `
+                            <button type="button"
+                                aria-pressed="${active}"
+                                onclick="window.app_setProgramDirection('${key}')"
+                                class="p-2 rounded border text-left transition ${active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'}">
+                                <span class="block text-xs font-bold leading-tight">${label}</span>
+                                <span class="block text-[9px] mt-0.5 opacity-70 leading-snug">${desc}</span>
+                            </button>
+                        `;
+                    }).join('')}
+                </div>
+            </section>
+
+            <!-- 3. RECRUITING POLICY LIMITS (GIFT CEILING & AUTO-OFFER) -->
+            <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
+                <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-900 mb-2">
+                    Recruiting Automation & Spending Limits
+                </h4>
+                
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Auto-Offer Policy -->
+                    <div class="bg-slate-50 p-2.5 rounded border border-slate-200">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-xs font-bold text-slate-800">Automatic Roster Offers</span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox"
+                                    ${team.teamInstructions?.departments?.recruiting?.automaticOfferPolicy?.enabled ? 'checked' : ''}
+                                    onchange="window.app_setRecruitingAutoPolicy('offerEnabled', this.checked)"
+                                    class="h-4 w-4 accent-emerald-600">
+                            </label>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mb-2">
+                            Allows staff to extend offers to high-priority targets when interest threshold is met.
+                        </p>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-bold text-slate-600">Minimum Interest:</span>
+                            <input type="number" min="15" max="90" step="5"
+                                value="${team.teamInstructions?.departments?.recruiting?.automaticOfferPolicy?.minimumInterest ?? 25}"
+                                onchange="window.app_setRecruitingAutoPolicy('offerThreshold', this.value)"
+                                class="w-16 p-1 text-xs border border-slate-300 rounded font-bold text-center bg-white">
+                            <span class="text-[10px] text-slate-400">/ 100</span>
+                        </div>
+                    </div>
+
+                    <!-- Gift Spending Ceiling -->
+                    <div class="bg-slate-50 p-2.5 rounded border border-slate-200">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-xs font-bold text-slate-800">Recruiting Gift Spending Cap</span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox"
+                                    ${team.teamInstructions?.departments?.recruiting?.giftSpendingPolicy?.allowGifts !== false ? 'checked' : ''}
+                                    onchange="window.app_setRecruitingAutoPolicy('allowGifts', this.checked)"
+                                    class="h-4 w-4 accent-emerald-600">
+                            </label>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mb-2">
+                            Maximum team cash automated coaches can spend on gifts per recruit.
+                        </p>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-bold text-slate-600">Max Gift / Recruit: $</span>
+                            <input type="number" min="0" max="35" step="1"
+                                value="${team.teamInstructions?.departments?.recruiting?.giftSpendingPolicy?.maxGiftPerRecruit ?? 10}"
+                                onchange="window.app_setRecruitingAutoPolicy('maxGift', this.value)"
+                                class="w-16 p-1 text-xs border border-slate-300 rounded font-bold text-center bg-white">
+                        </div>
+                    </div>
+                </div>
+            </section>
 
             <section class="mb-3 rounded border border-slate-200 bg-white p-3">
                 <div class="mb-2">
@@ -18823,3 +18942,45 @@ export function showWeeklyStaffReport(report, gameState, onContinue = null) {
 
     showModal("Weekly Management Report", modalHtml, onContinue, "Acknowledge & Continue", null, "Close");
 }
+
+window.app_setManagementPreset = function (presetKey) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team) return;
+
+    import('./game/staff.js').then(s => {
+        s.applyManagementPreset(team, presetKey);
+        saveGameState();
+        renderStaffTab(gs);
+    }).catch(err => console.error("Failed to apply preset:", err));
+};
+
+window.app_setProgramDirection = function (directionKey) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team?.teamInstructions) return;
+
+    team.teamInstructions.programDirection = directionKey;
+    saveGameState();
+    renderStaffTab(gs);
+};
+
+window.app_setRecruitingAutoPolicy = function (field, value) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    const recruiting = team?.teamInstructions?.departments?.recruiting;
+    if (!recruiting) return;
+
+    if (field === 'offerEnabled') {
+        recruiting.automaticOfferPolicy.enabled = Boolean(value);
+    } else if (field === 'offerThreshold') {
+        recruiting.automaticOfferPolicy.minimumInterest = Math.max(10, Math.min(95, Number(value) || 25));
+    } else if (field === 'allowGifts') {
+        recruiting.giftSpendingPolicy.allowGifts = Boolean(value);
+    } else if (field === 'maxGift') {
+        recruiting.giftSpendingPolicy.maxGiftPerRecruit = Math.max(0, Math.min(50, Number(value) || 10));
+    }
+
+    saveGameState();
+    renderStaffTab(gs);
+};
