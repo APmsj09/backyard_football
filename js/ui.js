@@ -14353,6 +14353,17 @@ function renderDepthChartSide(side, gameState) {
     const formKey = formations[side] || (side === 'offense' ? 'Balanced' : '3-2-3');
     const formationData = (side === 'offense' ? offenseFormations : defenseFormations)[formKey];
 
+    const getFormationSlotDisplayLabel = (targetTeam, targetSide, targetSlot) => {
+        const targetFormKey = targetTeam.formations?.[targetSide] ||
+            (targetSide === 'offense' ? 'Balanced' : '3-2-3');
+
+        const targetFormationMap = targetSide === 'offense'
+            ? offenseFormations
+            : defenseFormations;
+
+        return targetFormationMap[targetFormKey]?.slotLabels?.[targetSlot] || targetSlot;
+    };
+
     visualField.innerHTML = '';
         const losMarker = document.createElement('div');
         losMarker.className = 'absolute left-0 w-full h-1.5 bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.9)] z-0';
@@ -16513,7 +16524,7 @@ export function setupDepthChartTabs() {
                 );
                 renderDepthChartSide('defense', gs);
             }
-            
+
         });
 
         document.body.dataset.depthChartInnerTabListener = "true";
