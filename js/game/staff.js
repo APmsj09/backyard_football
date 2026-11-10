@@ -6,7 +6,9 @@ import {
     lastNames,
     offensivePlaybook,
     defensivePlaybook,
-    gmArchetypes
+    gmArchetypes,
+    offenseFormations,
+    defenseFormations
 } from '../data.js';
 import {
     getRosterObjects,
