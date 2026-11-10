@@ -5,7 +5,7 @@ import {
     getRosterObjects, getPlayer, rebuildDepthChartFromOrder, assignPlayerToSlot
 } from './game.js';
 import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames, offensivePlaybook, defensivePlaybook, routeTree, getFormationSlotLabel } from './data.js';
-import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills } from './game/player.js';
+import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills, calculateSlotSuitability } from './game/player.js';
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';

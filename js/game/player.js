@@ -239,6 +239,7 @@ const normalizeRolePosition = role => {
     if (value.startsWith('FS')) return 'FS';
     if (value.startsWith('SS')) return 'SS';
     if (value.startsWith('NB')) return 'NB';
+    if (value === 'UPBACK') return 'DB';
 
     return value;
 };
