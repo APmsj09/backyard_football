@@ -5581,15 +5581,33 @@ export function openPlayerCard(playerId) {
             </div>
         </div>`;
 
-    const progressionHistory = Array.isArray(player.progression)
-        ? player.progression
+    const youthSeasons = Array.isArray(player.youthSeasonHistory)
+        ? player.youthSeasonHistory.map(ys => ({
+              year: ys.year,
+              age: ys.age,
+              teamName: `${ys.teamName || 'Pee Wee'} (Youth)`,
+              stats: ys.stats || {}
+          }))
         : [];
 
-    const seasonStatsTableHtml = progressionHistory.length > 0
+    const mainSeasons = Array.isArray(player.progression)
+        ? player.progression.map(pr => ({
+              year: pr.year,
+              age: pr.age,
+              teamName: pr.teamName,
+              stats: pr.stats || {}
+          }))
+        : [];
+
+    const unifiedSeasons = [...youthSeasons, ...mainSeasons].sort(
+        (a, b) => (Number(a.year) || 0) - (Number(b.year) || 0)
+    );
+
+    const seasonStatsTableHtml = unifiedSeasons.length > 0
         ? `
             <div class="border border-slate-200 rounded p-3">
                 <h5 class="font-bold text-xs uppercase tracking-wider text-slate-600 mb-2">
-                    Season-by-Season
+                    Season-by-Season (Youth + Pro)
                 </h5>
                 <div class="overflow-x-auto">
                     <table class="min-w-full text-xs font-mono">
@@ -5607,12 +5625,13 @@ export function openPlayerCard(playerId) {
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100 text-[11px]">
-                            ${progressionHistory.map(pr => {
+                            ${unifiedSeasons.map(pr => {
                                 const st = pr.stats || {};
+                                const isYouth = String(pr.teamName).includes('Youth');
                                 return `
-                                    <tr>
+                                    <tr class="${isYouth ? 'bg-amber-50/40 text-amber-950' : ''}">
                                         <td class="p-1.5 font-bold">Y${pr.year}</td>
-                                        <td class="p-1.5 font-sans truncate max-w-[90px]">
+                                        <td class="p-1.5 font-sans truncate max-w-[100px]" title="${pr.teamName || '—'}">
                                             ${pr.teamName || '—'}
                                         </td>
                                         <td class="p-1.5 text-center">${Number(st.passYards) || 0}</td>
