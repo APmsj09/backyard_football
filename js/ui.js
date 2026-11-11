@@ -10454,7 +10454,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         </nav>
         <div
             class="staff-hub-pane hidden"
-            data-staff-pane="priorities"
+            data-staff-pane="priorities">
 
             <!-- 1. MANAGEMENT PRESETS -->
             <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
@@ -10793,7 +10793,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
         <div
             class="staff-hub-pane"
-            data-staff-pane="staff"
+            data-staff-pane="staff">
 
     `;
 
@@ -12008,7 +12008,11 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         </section>
     `;
 
-    // Finish the overview before opening the other management sections.
+    // Close the coach-list pane before adding the career-history pane.
+    html += `
+        </div>
+    `;
+
     html += `
         <div
             class="staff-hub-pane hidden"
@@ -12381,7 +12385,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     html += `
         <div
             class="staff-hub-pane hidden"
-            data-staff-pane="advanced"
+            data-staff-pane="advanced">
     `;
 
     // 2. Weekly Staff Workload
