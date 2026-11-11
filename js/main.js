@@ -4567,6 +4567,67 @@ export function openCoachCard(coachId) {
         roleLabel = 'Assistant Coach · Trainer';
     }
 
+    // Read the coach's canonical department assignments.
+    const departmentLabels = {
+        scouting: 'Scouting',
+        recruiting: 'Recruiting',
+        offense: 'Offensive Strategy',
+        defense: 'Defensive Strategy',
+        development: 'Player Development'
+    };
+
+    const departmentAssignments =
+        team?.teamInstructions?.staffAssignments || {};
+
+    const departmentResponsibilities = Object.entries(
+        departmentLabels
+    ).flatMap(([departmentKey, label]) => {
+        const assignment =
+            departmentAssignments[departmentKey];
+
+        if (!assignment) return [];
+
+        const isLead =
+            assignment.leadCoachId != null &&
+            String(assignment.leadCoachId) === currentCoachId;
+
+        if (isLead) {
+            return [{ label, role: 'Department Lead' }];
+        }
+
+        const isSupport = Array.isArray(
+            assignment.supportCoachIds
+        ) && assignment.supportCoachIds.some(
+            id => String(id) === currentCoachId
+        );
+
+        return isSupport
+            ? [{ label, role: 'Supporting Staff' }]
+            : [];
+    });
+
+    const departmentResponsibilitiesHtml =
+        departmentResponsibilities.length > 0
+            ? departmentResponsibilities.map(item => `
+                <div class="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-white px-3 py-2">
+                    <span class="text-xs font-bold text-slate-800">
+                        ${escapeCoachText(item.label)}
+                    </span>
+                    <span class="text-[9px] font-bold uppercase tracking-wide ${
+                        item.role === 'Department Lead'
+                            ? 'text-blue-700'
+                            : 'text-slate-500'
+                    }">
+                        ${item.role}
+                    </span>
+                </div>
+            `).join('')
+            : `
+                <p class="text-xs text-slate-500 italic">
+                    No department leadership or support assignments.
+                </p>
+            `;
+
     const teamName = team?.name ||
         (coach.teamId != null ? 'Unknown Team' : 'Free Agent');
 
@@ -4772,6 +4833,23 @@ export function openCoachCard(coachId) {
 
             <!-- OVERVIEW -->
             <div id="ccard-pane-overview" class="ccard-pane space-y-3">
+
+                ${team ? `
+                    <section class="rounded border border-slate-200 bg-slate-50 p-3">
+                        <div class="mb-2">
+                            <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-800">
+                                Department Responsibilities
+                            </h5>
+                            <p class="mt-1 text-[10px] text-slate-500">
+                                Current leadership and supporting assignments.
+                            </p>
+                        </div>
+
+                        <div class="space-y-2">
+                            ${departmentResponsibilitiesHtml}
+                        </div>
+                    </section>
+                ` : ''}
 
                 <div class="grid grid-cols-2 gap-2 text-xs">
                     <div class="bg-slate-50 p-3 rounded border border-slate-200">

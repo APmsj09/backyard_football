@@ -9,7 +9,16 @@ import { positionOverallWeights, estimateBestPosition, calculateOverall, getPros
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';
-import { applyRecruitingSweetener, buildAutomatedStaffAssignmentsForTeam } from './game/staff.js';
+import {
+    applyRecruitingSweetener,
+    buildAutomatedStaffAssignmentsForTeam,
+    STAFF_DEPARTMENT_DEFINITIONS,
+    ensureTeamStaffDepartmentAssignments,
+    autoAssignTeamStaffDepartments,
+    setTeamStaffDepartmentLead,
+    setTeamStaffDepartmentSupport,
+    calculateCoachRoleFit
+} from './game/staff.js';
 import { DEFAULT_PLAYBACK_INTERVAL_MS, getPlaybackIntervalMs } from './game/simulation_config.js';
 import {
     getCurrentRosterLimit,
@@ -3877,11 +3886,22 @@ export function renderOffseasonFAPool(gameState) {
         };
     }).filter(coach => coach.remainingHours > 0);
 
+    const recruitingLeadCoachId = String(
+        gameState.playerTeam.teamInstructions
+            ?.staffAssignments?.recruiting?.leadCoachId ?? ''
+    );
+
     if (!quickAssignCoaches.some(coach =>
         String(coach.coachId) === String(recruitingQuickAssignDefaults.coachId)
     )) {
+        const assignedLead = quickAssignCoaches.find(coach =>
+            String(coach.coachId) === recruitingLeadCoachId
+        );
+
         recruitingQuickAssignDefaults.coachId =
-            quickAssignCoaches[0]?.coachId || '';
+            assignedLead?.coachId ||
+            quickAssignCoaches[0]?.coachId ||
+            '';
     }
 
     const quickSelectedCoach = quickAssignCoaches.find(coach =>
@@ -9049,7 +9069,10 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         ? team.coaches.filter(Boolean)
         : [];
 
-
+    const staffDepartmentAssignments =
+        ensureTeamStaffDepartmentAssignments(team) ||
+        team.teamInstructions?.staffAssignments ||
+        {};
 
     const developmentAssignments = Array.isArray(
         developmentWorkPlan?.assignments
@@ -10359,9 +10382,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     window.app_switchStaffTab = tab => {
         const allowedTabs = [
             'overview',
-            'strategy',
-            'workload',
-            'history'
+            'staff',
+            'priorities',
+            'advanced'
         ];
 
         if (!allowedTabs.includes(tab)) return;
@@ -10388,12 +10411,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
         container.querySelector('#staff-hub-automation')?.classList.toggle(
             'hidden',
-            tab !== 'workload'
+            tab !== 'advanced'
         );
     };
 
     html += `
-        <nav class="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1"
+        <nav
+            class="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1"
             aria-label="Staff management sections">
 
             <button
@@ -10407,30 +10431,30 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             <button
                 type="button"
                 class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
-                data-staff-tab="strategy"
-                onclick="app_switchStaffTab('strategy')">
-                Strategy
+                data-staff-tab="staff"
+                onclick="app_switchStaffTab('staff')">
+                Staff
             </button>
 
             <button
                 type="button"
                 class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
-                data-staff-tab="workload"
-                onclick="app_switchStaffTab('workload')">
-                Workload
+                data-staff-tab="priorities"
+                onclick="app_switchStaffTab('priorities')">
+                Priorities
             </button>
 
             <button
                 type="button"
                 class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
-                data-staff-tab="history"
-                onclick="app_switchStaffTab('history')">
-                History
+                data-staff-tab="advanced"
+                onclick="app_switchStaffTab('advanced')">
+                Advanced
             </button>
         </nav>
         <div
             class="staff-hub-pane hidden"
-            data-staff-pane="strategy">
+            data-staff-pane="priorities"
 
             <!-- 1. MANAGEMENT PRESETS -->
             <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
@@ -10769,7 +10793,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
         <div
             class="staff-hub-pane"
-            data-staff-pane="overview">
+            data-staff-pane="staff"
 
     `;
 
@@ -10782,6 +10806,397 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             '"': '&quot;',
             "'": '&#39;'
         })[character]);
+
+    const staffDepartmentDescriptions = {
+        scouting:
+            'Leads prospect evaluations, scouting reports, and talent discovery.',
+
+        recruiting:
+            'Leads prospect relationships, recruiting outreach, and recruiting strategy.',
+
+        offense:
+            'Leads offensive preparation, game planning, and offensive play selection.',
+
+        defense:
+            'Leads defensive preparation, matchup analysis, and defensive play selection.',
+
+        development:
+            'Leads player improvement, teaching, practice direction, and individual development.'
+    };
+
+    const getStaffDepartmentWorkload = coachId => {
+        const assignments = Array.isArray(developmentWorkPlan?.assignments)
+            ? developmentWorkPlan.assignments
+            : [];
+
+        return assignments
+            .filter(assignment =>
+                String(assignment?.coachId) === String(coachId)
+            )
+            .reduce(
+                (total, assignment) =>
+                    total + Math.max(
+                        0,
+                        Number(assignment?.hours) || 0
+                    ),
+                0
+            );
+    };
+
+    window.app_openStaffDepartmentModal = departmentKey => {
+        const latestState = Game.getGameState() || gameState;
+        const latestTeam = latestState?.playerTeam;
+
+        const definition =
+            STAFF_DEPARTMENT_DEFINITIONS[departmentKey];
+
+        if (!latestTeam || !definition) return;
+
+        const assignments =
+            ensureTeamStaffDepartmentAssignments(latestTeam);
+
+        const assignment = assignments?.[departmentKey];
+
+        if (!assignment) return;
+
+        const coaches =
+            Game.ensureTeamCoachingStaff?.(latestTeam) ||
+            latestTeam.coaches ||
+            [];
+
+        const rankedCoaches = coaches
+            .filter(coach => coach?.id != null)
+            .map(coach => ({
+                coach,
+                fit: calculateCoachRoleFit(
+                    coach,
+                    definition.fitRole
+                ),
+                assignedHours: getStaffDepartmentWorkload(coach.id),
+                capacity: Math.max(
+                    0,
+                    Number(coach.availability?.weeklyHours) || 0
+                )
+            }))
+            .sort((a, b) => b.fit - a.fit);
+
+        const bestFitId = rankedCoaches[0]?.coach?.id == null
+            ? null
+            : String(rankedCoaches[0].coach.id);
+
+        const currentLeadId = assignment.leadCoachId == null
+            ? null
+            : String(assignment.leadCoachId);
+
+        const currentSupportIds = new Set(
+            (assignment.supportCoachIds || []).map(String)
+        );
+
+        const inlineHandler = source => overviewEscape(source);
+
+        const leadOptionsHtml = rankedCoaches.map(entry => {
+            const coach = entry.coach;
+            const coachId = String(coach.id);
+
+            const selected = coachId === currentLeadId;
+            const bestFit = coachId === bestFitId;
+
+            const roleLabel = coach.isUserCoach
+                ? 'GM / Your Coaching Profile'
+                : coach.role || 'Volunteer Coach';
+
+            const handler = inlineHandler(
+                `window.app_setStaffDepartmentLead(${JSON.stringify(departmentKey)}, ${JSON.stringify(coachId)})`
+            );
+
+            return `
+                <button
+                    type="button"
+                    ${selected ? 'disabled' : ''}
+                    onclick="${handler}"
+                    class="w-full rounded-lg border ${
+                        selected
+                            ? 'border-emerald-500 bg-emerald-50'
+                            : 'border-slate-200 bg-white hover:border-blue-400 hover:bg-blue-50'
+                    } p-3 text-left transition disabled:cursor-default">
+
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-bold text-sm text-slate-900">
+                            ${overviewEscape(coach.name || 'Unnamed Coach')}
+                        </span>
+
+                        <div class="flex items-center gap-1">
+                            ${bestFit ? `
+                                <span class="rounded bg-blue-100 px-2 py-1 text-[9px] font-bold uppercase text-blue-800">
+                                    Best skill fit
+                                </span>
+                            ` : ''}
+
+                            ${selected ? `
+                                <span class="rounded bg-emerald-100 px-2 py-1 text-[9px] font-bold uppercase text-emerald-800">
+                                    Department Lead
+                                </span>
+                            ` : ''}
+                        </div>
+                    </div>
+
+                    <div class="mt-1 text-[10px] text-slate-500">
+                        ${overviewEscape(roleLabel)}
+                    </div>
+
+                    <div class="mt-2 grid grid-cols-2 gap-2">
+                        <div class="rounded bg-slate-50 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Department Fit
+                            </span>
+                            <span class="font-black text-sm text-slate-900">
+                                ${entry.fit}
+                            </span>
+                        </div>
+
+                        <div class="rounded bg-slate-50 p-2">
+                            <span class="block text-[9px] uppercase text-slate-500">
+                                Weekly Workload
+                            </span>
+                            <span class="font-black text-sm text-slate-900">
+                                ${entry.assignedHours}/${entry.capacity} hrs
+                            </span>
+                        </div>
+                    </div>
+                </button>
+            `;
+        }).join('');
+
+        const supportOptionsHtml = rankedCoaches
+            .filter(entry =>
+                String(entry.coach.id) !== String(currentLeadId ?? '')
+            )
+            .map(entry => {
+                const coach = entry.coach;
+                const coachId = String(coach.id);
+
+                const isSupporting =
+                    currentSupportIds.has(coachId);
+
+                const handler = inlineHandler(
+                    `window.app_toggleStaffDepartmentSupport(${JSON.stringify(departmentKey)}, ${JSON.stringify(coachId)})`
+                );
+
+                return `
+                    <button
+                        type="button"
+                        onclick="${handler}"
+                        class="w-full flex items-center justify-between gap-3 rounded border ${
+                            isSupporting
+                                ? 'border-blue-400 bg-blue-50'
+                                : 'border-slate-200 bg-white hover:bg-slate-50'
+                        } p-2.5 text-left">
+
+                        <div class="min-w-0">
+                            <span class="block truncate text-xs font-bold text-slate-800">
+                                ${overviewEscape(coach.name || 'Unnamed Coach')}
+                            </span>
+                            <span class="text-[10px] text-slate-500">
+                                Fit: ${entry.fit} · ${entry.assignedHours}/${entry.capacity} hrs
+                            </span>
+                        </div>
+
+                        <span class="shrink-0 text-[10px] font-bold ${
+                            isSupporting ? 'text-blue-800' : 'text-slate-500'
+                        }">
+                            ${isSupporting ? 'Remove Support' : '+ Add Support'}
+                        </span>
+                    </button>
+                `;
+            }).join('');
+
+        showModal(
+            `${overviewEscape(definition.label)} Department`,
+            `
+                <div class="space-y-4 text-left">
+
+                    <div class="rounded-lg bg-slate-50 p-3">
+                        <p class="text-xs leading-relaxed text-slate-700">
+                            ${overviewEscape(
+                                staffDepartmentDescriptions[departmentKey]
+                            )}
+                        </p>
+
+                        <p class="mt-2 text-[10px] text-slate-500">
+                            The lead is accountable for this department.
+                            Support coaches contribute additional expertise.
+                            All staff still share their existing weekly time limits.
+                        </p>
+                    </div>
+
+                    <section>
+                        <div class="mb-2 flex items-center justify-between gap-2">
+                            <h4 class="text-xs font-black uppercase tracking-wide text-slate-800">
+                                Department Lead
+                            </h4>
+
+                            ${currentLeadId ? `
+                                <button
+                                    type="button"
+                                    class="text-[10px] font-bold text-rose-700 hover:text-rose-900"
+                                    onclick="${inlineHandler(
+                                        `window.app_setStaffDepartmentLead(${JSON.stringify(departmentKey)}, null)`
+                                    )}">
+                                    Clear Lead
+                                </button>
+                            ` : ''}
+                        </div>
+
+                        <div class="max-h-72 space-y-2 overflow-y-auto pr-1">
+                            ${leadOptionsHtml}
+                        </div>
+                    </section>
+
+                    <section class="border-t border-slate-200 pt-3">
+                        <div class="mb-2">
+                            <h4 class="text-xs font-black uppercase tracking-wide text-slate-800">
+                                Support Staff
+                            </h4>
+                            <p class="mt-1 text-[10px] text-slate-500">
+                                Optional. Add coaches with complementary skills.
+                            </p>
+                        </div>
+
+                        <div class="max-h-56 space-y-2 overflow-y-auto pr-1">
+                            ${supportOptionsHtml || `
+                                <p class="text-xs text-slate-500">
+                                    No additional staff members available.
+                                </p>
+                            `}
+                        </div>
+                    </section>
+
+                </div>
+            `,
+            null,
+            'Confirm',
+            null,
+            'Done'
+        );
+    };
+
+    window.app_setStaffDepartmentLead = (
+        departmentKey,
+        coachId
+    ) => {
+        const latestState = Game.getGameState() || gameState;
+        const latestTeam = latestState?.playerTeam;
+
+        if (!latestTeam) return;
+
+        const result = setTeamStaffDepartmentLead(
+            latestTeam,
+            departmentKey,
+            coachId
+        );
+
+        if (!result.success) {
+            showModal(
+                'Assignment Not Saved',
+                `<p>${overviewEscape(result.message)}</p>`
+            );
+            return;
+        }
+
+        saveGameState();
+        renderStaffTab(latestState);
+
+        window.app_openStaffDepartmentModal(departmentKey);
+    };
+
+    window.app_toggleStaffDepartmentSupport = (
+        departmentKey,
+        coachId
+    ) => {
+        const latestState = Game.getGameState() || gameState;
+        const latestTeam = latestState?.playerTeam;
+
+        if (!latestTeam) return;
+
+        const assignments =
+            ensureTeamStaffDepartmentAssignments(latestTeam);
+
+        const currentIds =
+            assignments?.[departmentKey]?.supportCoachIds || [];
+
+        const isCurrentlyAssigned = currentIds.some(
+            id => String(id) === String(coachId)
+        );
+
+        const result = setTeamStaffDepartmentSupport(
+            latestTeam,
+            departmentKey,
+            coachId,
+            !isCurrentlyAssigned
+        );
+
+        if (!result.success) {
+            showModal(
+                'Assignment Not Saved',
+                `<p>${overviewEscape(result.message)}</p>`
+            );
+            return;
+        }
+
+        saveGameState();
+        renderStaffTab(latestState);
+
+        window.app_openStaffDepartmentModal(departmentKey);
+    };
+
+    window.app_autoAssignStaffDepartmentLeads = () => {
+        showModal(
+            'Automatically Assign Department Leads?',
+            `
+                <div class="space-y-2 text-sm text-slate-700">
+                    <p>
+                        Your staff will be evaluated for all five department
+                        leadership positions.
+                    </p>
+
+                    <p>
+                        The recommendations consider skill fit, personality,
+                        coaching experience, availability, reliability,
+                        and existing leadership workload.
+                    </p>
+
+                    <p class="text-xs text-amber-800">
+                        Existing department leads will be replaced.
+                        Your optional support assignments will be preserved
+                        where possible.
+                    </p>
+                </div>
+            `,
+            () => {
+                const latestState = Game.getGameState() || gameState;
+                const latestTeam = latestState?.playerTeam;
+
+                if (!latestTeam) return;
+
+                const result =
+                    autoAssignTeamStaffDepartments(latestTeam);
+
+                if (!result.success) {
+                    showModal(
+                        'Automatic Assignment Failed',
+                        `<p>${overviewEscape(result.message)}</p>`
+                    );
+                    return;
+                }
+
+                saveGameState();
+                renderStaffTab(latestState);
+            },
+            'Assign Leads',
+            null,
+            'Cancel'
+        );
+    };
 
     const overviewSkillAverage = values => {
         const valid = values.filter(value => value !== null);
@@ -11595,11 +12010,19 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
     // Finish the overview before opening the other management sections.
     html += `
-        </div>
-
-                <div
+        <div
             class="staff-hub-pane hidden"
-            data-staff-pane="history">
+            data-staff-pane="staff">
+
+            <details class="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+                <summary class="cursor-pointer list-none text-xs font-bold text-slate-800">
+                    Coaching Career History
+                    <span class="ml-2 text-[10px] font-normal text-slate-500">
+                        View career records and archives
+                    </span>
+                </summary>
+
+                <div class="pt-3">
 
             <section class="mb-3 rounded-lg border border-slate-200 bg-white p-4">
                 <h4 class="text-sm font-black uppercase tracking-wide text-slate-900">
@@ -11693,13 +12116,272 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 Each coach's complete career history is also available from
                 their individual profile.
             </p>
+
+                </div>
+            </details>
+        </div>
+    `;
+
+    const staffDepartmentCards = Object.entries(
+        STAFF_DEPARTMENT_DEFINITIONS
+    ).map(([departmentKey, definition]) => {
+        const assignment =
+            staffDepartmentAssignments?.[departmentKey] || {};
+
+        const lead = currentCoaches.find(coach =>
+            String(coach?.id) === String(assignment.leadCoachId ?? '')
+        );
+
+        const supportCoaches = (
+            assignment.supportCoachIds || []
+        ).map(id =>
+            currentCoaches.find(coach =>
+                String(coach?.id) === String(id)
+            )
+        ).filter(Boolean);
+
+        const assignedHours = lead
+            ? getStaffDepartmentWorkload(lead.id)
+            : 0;
+
+        const weeklyCapacity = lead
+            ? Math.max(
+                0,
+                Number(lead.availability?.weeklyHours) || 0
+            )
+            : 0;
+
+        const departmentFit = lead
+            ? calculateCoachRoleFit(lead, definition.fitRole)
+            : null;
+
+        const leadDepartmentCount = lead
+            ? Object.values(staffDepartmentAssignments).filter(
+                entry =>
+                    String(entry?.leadCoachId ?? '') ===
+                    String(lead.id)
+            ).length
+            : 0;
+
+        const workloadRatio = weeklyCapacity > 0
+            ? assignedHours / weeklyCapacity
+            : 0;
+
+        let statusLabel = 'Covered';
+        let statusClass = 'border-emerald-200 bg-emerald-50 text-emerald-800';
+        let needsAttention = false;
+
+        if (!lead) {
+            statusLabel = 'Lead needed';
+            statusClass = 'border-amber-200 bg-amber-50 text-amber-800';
+            needsAttention = true;
+        } else if (workloadRatio >= 1) {
+            statusLabel = 'Over capacity';
+            statusClass = 'border-rose-200 bg-rose-50 text-rose-800';
+            needsAttention = true;
+        } else if (departmentFit < 40) {
+            statusLabel = 'Weak role fit';
+            statusClass = 'border-amber-200 bg-amber-50 text-amber-800';
+            needsAttention = true;
+        } else if (workloadRatio >= 0.85) {
+            statusLabel = 'Near capacity';
+            statusClass = 'border-amber-200 bg-amber-50 text-amber-800';
+            needsAttention = true;
+        } else if (leadDepartmentCount > 1) {
+            statusLabel = `Leads ${leadDepartmentCount} departments`;
+            statusClass = 'border-blue-200 bg-blue-50 text-blue-800';
+        }
+
+        const supportSummary = supportCoaches.length > 0
+            ? supportCoaches.map(coach =>
+                overviewEscape(coach.name || 'Unnamed Coach')
+            ).join(' · ')
+            : 'No supporting staff assigned';
+
+        return {
+            key: departmentKey,
+            label: definition.label,
+            description: staffDepartmentDescriptions[departmentKey],
+            lead,
+            supportSummary,
+            departmentFit,
+            assignedHours,
+            weeklyCapacity,
+            statusLabel,
+            statusClass,
+            needsAttention
+        };
+    });
+
+    const departmentsCovered = staffDepartmentCards.filter(
+        entry => entry.lead
+    ).length;
+
+    const departmentsNeedingAttention = staffDepartmentCards.filter(
+        entry => entry.needsAttention
+    ).length;
+
+    html += `
+        <div
+            class="staff-hub-pane"
+            data-staff-pane="overview">
+
+            <section class="mb-4 rounded-lg border border-slate-200 bg-white p-4">
+
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h3 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                            Team Staff Responsibilities
+                        </h3>
+
+                        <p class="mt-1 text-xs leading-relaxed text-slate-500">
+                            Assign a lead to each department. Supporting coaches
+                            are optional. Your staff will execute within their
+                            available weekly time.
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        onclick="window.app_autoAssignStaffDepartmentLeads()"
+                        class="shrink-0 rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800">
+                        Auto-assign Leads
+                    </button>
+                </div>
+
+                <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Departments
+                        </span>
+                        <span class="text-xl font-black text-slate-900">
+                            ${staffDepartmentCards.length}
+                        </span>
+                    </div>
+
+                    <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Leads Assigned
+                        </span>
+                        <span class="text-xl font-black text-slate-900">
+                            ${departmentsCovered}/${staffDepartmentCards.length}
+                        </span>
+                    </div>
+
+                    <div class="col-span-2 rounded border ${
+                        departmentsNeedingAttention > 0
+                            ? 'border-amber-200 bg-amber-50'
+                            : 'border-emerald-200 bg-emerald-50'
+                    } p-3 sm:col-span-1">
+                        <span class="block text-[9px] font-bold uppercase ${
+                            departmentsNeedingAttention > 0
+                                ? 'text-amber-800'
+                                : 'text-emerald-800'
+                        }">
+                            Needs Attention
+                        </span>
+                        <span class="text-xl font-black ${
+                            departmentsNeedingAttention > 0
+                                ? 'text-amber-900'
+                                : 'text-emerald-900'
+                        }">
+                            ${departmentsNeedingAttention}
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+            <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+
+                ${staffDepartmentCards.map(department => `
+                    <button
+                        type="button"
+                        onclick="window.app_openStaffDepartmentModal('${department.key}')"
+                        class="w-full rounded-lg border border-slate-200 bg-white p-4 text-left transition hover:border-blue-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <h4 class="text-sm font-black text-slate-900">
+                                    ${overviewEscape(department.label)}
+                                </h4>
+
+                                <p class="mt-1 text-[10px] leading-relaxed text-slate-500">
+                                    ${overviewEscape(department.description)}
+                                </p>
+                            </div>
+
+                            <span class="shrink-0 rounded border px-2 py-1 text-[9px] font-bold uppercase ${department.statusClass}">
+                                ${overviewEscape(department.statusLabel)}
+                            </span>
+                        </div>
+
+                        <div class="mt-4 rounded bg-slate-50 p-3">
+                            <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                Department Lead
+                            </span>
+
+                            <div class="mt-1 flex items-center justify-between gap-2">
+                                <span class="text-sm font-bold text-slate-900">
+                                    ${overviewEscape(
+                                        department.lead?.name ||
+                                        'Unassigned'
+                                    )}
+                                </span>
+
+                                <span class="text-[10px] font-bold text-blue-700">
+                                    ${department.lead ? 'Change' : 'Assign'} →
+                                </span>
+                            </div>
+
+                            ${department.lead ? `
+                                <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-600">
+                                    <span>
+                                        Department fit:
+                                        <b>${department.departmentFit}</b>
+                                    </span>
+
+                                    <span>
+                                        Workload:
+                                        <b>${department.assignedHours}/${department.weeklyCapacity} hrs</b>
+                                    </span>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <div class="mt-3">
+                            <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                Supporting Staff
+                            </span>
+
+                            <span class="mt-1 block text-[11px] text-slate-700">
+                                ${department.supportSummary}
+                            </span>
+                        </div>
+
+                        <div class="mt-3 flex justify-end border-t border-slate-100 pt-2">
+                            <span class="text-[10px] font-bold text-blue-700">
+                                Manage Department →
+                            </span>
+                        </div>
+                    </button>
+                `).join('')}
+
+            </div>
+
+            <p class="mt-4 text-[10px] leading-relaxed text-slate-500">
+                Department leadership influences how staff work is prioritized
+                and allocated. Coaches can lead more than one department, but
+                their total weekly workload remains limited by availability,
+                schedule, and reliability.
+            </p>
+
         </div>
     `;
 
     html += `
         <div
             class="staff-hub-pane hidden"
-            data-staff-pane="workload">
+            data-staff-pane="advanced"
     `;
 
     // 2. Weekly Staff Workload

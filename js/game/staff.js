@@ -2888,6 +2888,45 @@ function buildDefaultAutomatedStaffAssignments(
     const staffAutonomy =
         departments.staff?.autonomy || 'guided';
 
+    const staffAssignments = instructions?.staffAssignments || {};
+
+    const taskDepartmentKeys = {
+        scouting: 'scouting',
+        training: 'development',
+        offensePrep: 'offense',
+        defensePrep: 'defense'
+    };
+
+    const getDepartmentAssignmentMultiplier = (coach, task) => {
+        const departmentKey = taskDepartmentKeys[task];
+
+        if (!departmentKey) return 1;
+
+        const assignment = staffAssignments[departmentKey];
+
+        if (!assignment || coach?.id == null) return 1;
+
+        const coachId = String(coach.id);
+
+        if (
+            assignment.leadCoachId != null &&
+            String(assignment.leadCoachId) === coachId
+        ) {
+            return 1.35;
+        }
+
+        if (
+            Array.isArray(assignment.supportCoachIds) &&
+            assignment.supportCoachIds.some(
+                id => String(id) === coachId
+            )
+        ) {
+            return 1.12;
+        }
+
+        return 1;
+    };
+
     // Direct control means the GM manages the assignments manually.
     if (staffAutonomy === 'direct') {
         return [];
@@ -3052,8 +3091,10 @@ function buildDefaultAutomatedStaffAssignments(
     for (const { coach, capacity } of eligibleCoaches) {
         const weightedTasks = tasks.map(item => ({
             task: item.task,
-            weight: item.priority *
-                (0.5 + taskScore(coach, item.task) / 100)
+            weight:
+                item.priority *
+                (0.5 + taskScore(coach, item.task) / 100) *
+                getDepartmentAssignmentMultiplier(coach, item.task)
         }));
 
         const totalWeight = weightedTasks.reduce(
@@ -3145,6 +3186,34 @@ export const TEAM_EXPERIENCE_PRESETS = Object.freeze([
     'director_of_football_operations',
     'custom'
 ]);
+
+export const STAFF_DEPARTMENT_DEFINITIONS = Object.freeze({
+    scouting: Object.freeze({
+        label: 'Scouting',
+        task: STAFF_WORK_TASKS.SCOUTING,
+        fitRole: 'scouting'
+    }),
+    recruiting: Object.freeze({
+        label: 'Recruiting',
+        task: STAFF_WORK_TASKS.RECRUITING,
+        fitRole: 'recruiting'
+    }),
+    offense: Object.freeze({
+        label: 'Offensive Strategy',
+        task: STAFF_WORK_TASKS.OFFENSE_PREP,
+        fitRole: 'offensePrep'
+    }),
+    defense: Object.freeze({
+        label: 'Defensive Strategy',
+        task: STAFF_WORK_TASKS.DEFENSE_PREP,
+        fitRole: 'defensePrep'
+    }),
+    development: Object.freeze({
+        label: 'Player Development',
+        task: STAFF_WORK_TASKS.TRAINING,
+        fitRole: 'training'
+    })
+});
 
 export const TEAM_PROGRAM_DIRECTIONS = Object.freeze([
     'balanced',
@@ -3413,7 +3482,442 @@ export function ensureTeamInstructions(team) {
         }
     );
 
+    // Department ownership is separate from weekly work-plan hours.
+    const staffAssignments = ensureInstructionObject(
+        instructions,
+        'staffAssignments'
+    );
+
+    Object.keys(STAFF_DEPARTMENT_DEFINITIONS).forEach(departmentKey => {
+        const assignment = ensureInstructionObject(
+            staffAssignments,
+            departmentKey
+        );
+
+        const leadId = assignment.leadCoachId;
+
+        assignment.leadCoachId =
+            leadId == null || String(leadId).trim() === ''
+                ? null
+                : String(leadId);
+
+        const supportIds = Array.isArray(assignment.supportCoachIds)
+            ? assignment.supportCoachIds
+            : [];
+
+        assignment.supportCoachIds = [
+            ...new Set(
+                supportIds
+                    .filter(id => id != null && String(id).trim() !== '')
+                    .map(id => String(id))
+            )
+        ].filter(id => id !== assignment.leadCoachId);
+    });
+
+    if (typeof instructions.staffAssignmentsInitialized !== 'boolean') {
+        instructions.staffAssignmentsInitialized = false;
+    }
+
     return instructions;
+}
+
+/**
+ * Returns the active staff department assignments.
+ *
+ * Assignment IDs are validated against the current coaching group.
+ * The first call automatically assigns leads for existing teams.
+ */
+export function ensureTeamStaffDepartmentAssignments(team) {
+    const instructions = ensureTeamInstructions(team);
+
+    if (!instructions) return null;
+
+    const coaches = ensureTeamCoachingStaff(team);
+
+    const activeCoachIds = new Set(
+        coaches
+            .filter(coach => coach?.id != null)
+            .map(coach => String(coach.id))
+    );
+
+    // Give existing saves a sensible initial staff structure once.
+    if (!instructions.staffAssignmentsInitialized) {
+        autoAssignTeamStaffDepartments(team);
+    }
+
+    const assignments = instructions.staffAssignments;
+
+    Object.keys(STAFF_DEPARTMENT_DEFINITIONS).forEach(departmentKey => {
+        const assignment = assignments[departmentKey];
+
+        if (
+            assignment.leadCoachId != null &&
+            !activeCoachIds.has(String(assignment.leadCoachId))
+        ) {
+            assignment.leadCoachId = null;
+        }
+
+        assignment.supportCoachIds = (
+            Array.isArray(assignment.supportCoachIds)
+                ? assignment.supportCoachIds
+                : []
+        ).filter(coachId =>
+            activeCoachIds.has(String(coachId)) &&
+            String(coachId) !== String(assignment.leadCoachId ?? '')
+        );
+    });
+
+    return assignments;
+}
+
+
+/**
+ * Automatically selects department leads using:
+ * - Existing role-specific coaching skills.
+ * - Relevant personality tendencies.
+ * - Coaching experience.
+ * - Weekly availability and reliability.
+ * - Existing workload and other department leadership duties.
+ *
+ * Support assignments are preserved. This function only recommends
+ * and assigns department leads.
+ */
+export function autoAssignTeamStaffDepartments(team) {
+    const instructions = ensureTeamInstructions(team);
+
+    if (!instructions) {
+        return {
+            success: false,
+            message: 'Team instructions are unavailable.'
+        };
+    }
+
+    const coaches = ensureTeamCoachingStaff(team)
+        .filter(coach => coach?.id != null);
+
+    if (coaches.length === 0) {
+        return {
+            success: false,
+            message: 'No active staff members are available.'
+        };
+    }
+
+    const plan = team.staffWorkPlan;
+
+    const existingAssignments = Array.isArray(plan?.assignments)
+        ? plan.assignments
+        : [];
+
+    const behaviorKeys = {
+        scouting: [
+            'patience',
+            'adaptability',
+            'discipline'
+        ],
+        recruiting: [
+            'relationshipOrientation',
+            'patience',
+            'adaptability'
+        ],
+        offense: [
+            'adaptability',
+            'riskTolerance',
+            'discipline'
+        ],
+        defense: [
+            'discipline',
+            'adaptability',
+            'riskTolerance'
+        ],
+        development: [
+            'developmentFocus',
+            'patience',
+            'relationshipOrientation'
+        ]
+    };
+
+    const coachProfiles = coaches.map(coach => {
+        const availability = ensureStaffAvailability(coach);
+
+        const capacity = getStaffWeeklyWorkCapacity(
+            team,
+            coach,
+            plan
+        );
+
+        const assignedHours = existingAssignments
+            .filter(assignment =>
+                String(assignment?.coachId) === String(coach.id)
+            )
+            .reduce(
+                (total, assignment) =>
+                    total + Math.max(
+                        0,
+                        Number(assignment?.hours) || 0
+                    ),
+                0
+            );
+
+        const rawReliability = Number(availability?.reliability);
+
+        const reliability = Number.isFinite(rawReliability)
+            ? Math.max(0, Math.min(100, rawReliability))
+            : 80;
+
+        return {
+            coach,
+            coachId: String(coach.id),
+            capacity,
+            assignedHours,
+            reliability,
+            experienceSeasons: Array.isArray(coach.careerHistory)
+                ? coach.careerHistory.length
+                : 0
+        };
+    });
+
+    // Build each coach's suitability score for every department.
+    const departmentCandidates = Object.entries(
+        STAFF_DEPARTMENT_DEFINITIONS
+    ).map(([departmentKey, definition]) => {
+        const candidates = coachProfiles.map(profile => {
+            const roleFit = calculateCoachRoleFit(
+                profile.coach,
+                definition.fitRole
+            );
+
+            const tendencies = behaviorKeys[departmentKey].map(key =>
+                getStaffBehaviorTendency(profile.coach, key)
+            );
+
+            const averageBehavior = tendencies.reduce(
+                (total, value) => total + value,
+                0
+            ) / Math.max(1, tendencies.length);
+
+            // Personality influences fit, but never overrides actual skill.
+            const personalityBonus =
+                (averageBehavior - 50) * 0.10;
+
+            const experienceBonus =
+                Math.min(5, profile.experienceSeasons) * 0.75;
+
+            const availabilityBonus =
+                Math.min(3, profile.capacity / 4) +
+                (profile.reliability - 80) * 0.05;
+
+            const workloadRatio = profile.capacity > 0
+                ? profile.assignedHours / profile.capacity
+                : 1.5;
+
+            const workloadPenalty = profile.capacity > 0
+                ? Math.min(7, Math.max(0, workloadRatio) * 4)
+                : 15;
+
+            const baseScore =
+                roleFit +
+                personalityBonus +
+                experienceBonus +
+                availabilityBonus -
+                workloadPenalty;
+
+            return {
+                ...profile,
+                baseScore
+            };
+        }).sort((a, b) => b.baseScore - a.baseScore);
+
+        const topScore = candidates[0]?.baseScore ?? 0;
+        const secondScore = candidates[1]?.baseScore ?? topScore;
+
+        return {
+            departmentKey,
+            candidates,
+            specializationGap: topScore - secondScore
+        };
+    });
+
+    // Assign highly specialized departments first. This reduces the
+    // chance that a generalist gets selected before a clear specialist.
+    departmentCandidates.sort(
+        (a, b) => b.specializationGap - a.specializationGap
+    );
+
+    const leadCounts = new Map();
+
+    departmentCandidates.forEach(department => {
+        const rankedCandidates = [...department.candidates].sort(
+            (a, b) => {
+                const aScore =
+                    a.baseScore -
+                    (leadCounts.get(a.coachId) || 0) * 8;
+
+                const bScore =
+                    b.baseScore -
+                    (leadCounts.get(b.coachId) || 0) * 8;
+
+                return bScore - aScore;
+            }
+        );
+
+        const selected = rankedCandidates[0];
+
+        if (!selected) return;
+
+        const assignment =
+            instructions.staffAssignments[department.departmentKey];
+
+        assignment.leadCoachId = selected.coachId;
+
+        // A department lead cannot also be listed as their own support.
+        assignment.supportCoachIds =
+            assignment.supportCoachIds.filter(
+                coachId => String(coachId) !== selected.coachId
+            );
+
+        leadCounts.set(
+            selected.coachId,
+            (leadCounts.get(selected.coachId) || 0) + 1
+        );
+    });
+
+    instructions.staffAssignmentsInitialized = true;
+
+    return {
+        success: true,
+        assignments: instructions.staffAssignments
+    };
+}
+
+
+/**
+ * Sets or clears the lead for one department.
+ * A coach may lead multiple departments.
+ */
+export function setTeamStaffDepartmentLead(
+    team,
+    departmentKey,
+    coachId
+) {
+    if (!STAFF_DEPARTMENT_DEFINITIONS[departmentKey]) {
+        return {
+            success: false,
+            message: 'Invalid staff department.'
+        };
+    }
+
+    const assignments = ensureTeamStaffDepartmentAssignments(team);
+
+    if (!assignments) {
+        return {
+            success: false,
+            message: 'Staff assignments are unavailable.'
+        };
+    }
+
+    const assignment = assignments[departmentKey];
+
+    if (coachId == null || String(coachId).trim() === '') {
+        assignment.leadCoachId = null;
+    } else {
+        const normalizedCoachId = String(coachId);
+
+        const activeCoach = ensureTeamCoachingStaff(team).find(coach =>
+            String(coach?.id) === normalizedCoachId
+        );
+
+        if (!activeCoach) {
+            return {
+                success: false,
+                message: 'That coach is not currently on this staff.'
+            };
+        }
+
+        assignment.leadCoachId = normalizedCoachId;
+
+        assignment.supportCoachIds =
+            assignment.supportCoachIds.filter(
+                id => String(id) !== normalizedCoachId
+            );
+    }
+
+    const instructions = ensureTeamInstructions(team);
+    instructions.staffAssignmentsInitialized = true;
+
+    return {
+        success: true,
+        assignment
+    };
+}
+
+
+/**
+ * Adds or removes optional support staff for one department.
+ */
+export function setTeamStaffDepartmentSupport(
+    team,
+    departmentKey,
+    coachId,
+    enabled = true
+) {
+    if (
+        !STAFF_DEPARTMENT_DEFINITIONS[departmentKey] ||
+        coachId == null
+    ) {
+        return {
+            success: false,
+            message: 'Invalid staff assignment.'
+        };
+    }
+
+    const assignments = ensureTeamStaffDepartmentAssignments(team);
+
+    if (!assignments) {
+        return {
+            success: false,
+            message: 'Staff assignments are unavailable.'
+        };
+    }
+
+    const normalizedCoachId = String(coachId);
+    const assignment = assignments[departmentKey];
+
+    const activeCoach = ensureTeamCoachingStaff(team).find(coach =>
+        String(coach?.id) === normalizedCoachId
+    );
+
+    if (!activeCoach) {
+        return {
+            success: false,
+            message: 'That coach is not currently on this staff.'
+        };
+    }
+
+    if (String(assignment.leadCoachId ?? '') === normalizedCoachId) {
+        return {
+            success: false,
+            message: 'The department lead cannot also be support staff.'
+        };
+    }
+
+    if (enabled) {
+        if (!assignment.supportCoachIds.includes(normalizedCoachId)) {
+            assignment.supportCoachIds.push(normalizedCoachId);
+        }
+    } else {
+        assignment.supportCoachIds =
+            assignment.supportCoachIds.filter(
+                id => String(id) !== normalizedCoachId
+            );
+    }
+
+    const instructions = ensureTeamInstructions(team);
+    instructions.staffAssignmentsInitialized = true;
+
+    return {
+        success: true,
+        assignment
+    };
 }
 
 /**
@@ -3429,6 +3933,9 @@ export function buildAutomatedStaffAssignmentsForTeam(
     if (!team) return [];
 
     const instructions = ensureTeamInstructions(team);
+
+    ensureTeamStaffDepartmentAssignments(team);
+
     const coaches = ensureTeamCoachingStaff(team);
 
     const assignments = buildDefaultAutomatedStaffAssignments(
@@ -3492,6 +3999,9 @@ export function ensureTeamStaffWorkPlan(
     });
 
     const coaches = ensureTeamCoachingStaff(team);
+
+    ensureTeamStaffDepartmentAssignments(team);
+
     let plan = team.staffWorkPlan;
 
     if (!plan || !Array.isArray(plan.assignments)) {
@@ -4030,6 +4540,48 @@ export function getRecruitingStaffHourBudget(team, gameState = null) {
         Array.isArray(assignments) ? assignments : []
     );
 
+    const staffDepartmentAssignments =
+        ensureTeamStaffDepartmentAssignments(team) ||
+        team.teamInstructions?.staffAssignments ||
+        {};
+
+    const recruitingDepartmentAssignment =
+        staffDepartmentAssignments.recruiting || {};
+
+    const recruitingLeadCoachId =
+        recruitingDepartmentAssignment.leadCoachId == null
+            ? null
+            : String(recruitingDepartmentAssignment.leadCoachId);
+
+    const recruitingSupportCoachIds = new Set(
+        (
+            Array.isArray(
+                recruitingDepartmentAssignment.supportCoachIds
+            )
+                ? recruitingDepartmentAssignment.supportCoachIds
+                : []
+        )
+            .filter(id => id != null)
+            .map(id => String(id))
+    );
+
+    const getRecruitingDepartmentPriority = coachId => {
+        const coachKey = String(coachId);
+
+        if (
+            recruitingLeadCoachId !== null &&
+            coachKey === recruitingLeadCoachId
+        ) {
+            return 0;
+        }
+
+        if (recruitingSupportCoachIds.has(coachKey)) {
+            return 1;
+        }
+
+        return 2;
+    };
+
     return ensureTeamCoachingStaff(team)
         .filter(coach => {
             if (coach?.id == null) return false;
@@ -4150,7 +4702,6 @@ export function getRecruitingStaffHourBudget(team, gameState = null) {
 
                 weeklyHours,
                 weeklyCapacity: weeklyHours,
-                availabilityHours,
 
                 assignedHours,
                 recruitingHours,
@@ -4168,6 +4719,14 @@ export function getRecruitingStaffHourBudget(team, gameState = null) {
                 effectiveRecruitingHours,
                 effectiveOtherHours
             };
+        })
+        .sort((a, b) => {
+            const priorityDifference =
+                getRecruitingDepartmentPriority(a.coachId) -
+                getRecruitingDepartmentPriority(b.coachId);
+
+            return priorityDifference ||
+                b.remainingHours - a.remainingHours;
         });
 }
 
@@ -9269,7 +9828,14 @@ export function calculateCoachRoleFit(coach, role) {
             ['gameplanInstinct', 1],
             ['inGameAdjustments', 1],
             ['teaching', 1]
+        ],
+                recruiting: [
+            ['teaching', 1],
+            ['evalCharacter', 1],
+            ['gameplanInstinct', 1],
+            ['conditioning', 1]
         ]
+
     };
 
     const skills = roleSkills[role] || roleSkills.general;
