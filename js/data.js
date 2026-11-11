@@ -510,7 +510,7 @@ export const offensivePlaybook = {
     'Uni_Stick': {
         name: 'Stick Quick Concept',
         type: 'pass', tags: ['pass', 'short', 'quick'],
-        readProgression: ['Y', 'H', 'RB'],
+        readProgression: ['Y', 'RB', 'X', 'Z'],
         assignments: {
             'QB': 'qb_setup', 'Y': 'QuickOut', 'H': 'Hitch', 'X': 'Fade',
             'Z': 'Fade', 'RB': 'Flat', 'OL': 'pass_block'

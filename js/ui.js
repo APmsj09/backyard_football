@@ -6098,11 +6098,12 @@ window.app_toggleRecruitingQuickSelection = function(playerId, checked) {
         recruitingQuickSelectedIds.delete(key);
     }
 
-    const button = document.getElementById('fa-quick-add-button');
+    const button = document.getElementById('fa-add-to-recruiting-list-button');
 
     if (button) {
+        button.disabled = recruitingQuickSelectedIds.size === 0;
         button.textContent =
-            `Add to Recruiting List (${recruitingQuickSelectedIds.size})`;
+            `Add to List (${recruitingQuickSelectedIds.size})`;
     }
 
     const count = document.getElementById(
@@ -6125,11 +6126,12 @@ window.app_selectVisibleRecruitingTargets = function() {
         recruitingQuickSelectedIds.add(String(checkbox.value));
     });
 
-    const button = document.getElementById('fa-quick-add-button');
+    const button = document.getElementById('fa-add-to-recruiting-list-button');
 
     if (button) {
+        button.disabled = recruitingQuickSelectedIds.size === 0;
         button.textContent =
-            `Add to Recruiting List (${recruitingQuickSelectedIds.size})`;
+            `Add to List (${recruitingQuickSelectedIds.size})`;
     }
 
     const count = document.getElementById(
@@ -6151,10 +6153,11 @@ window.app_clearRecruitingTargetSelection = function() {
         checkbox.checked = false;
     });
 
-    const button = document.getElementById('fa-quick-add-button');
+    const button = document.getElementById('fa-add-to-recruiting-list-button');
 
     if (button) {
-        button.textContent = 'Add to Recruiting List (0)';
+        button.disabled = recruitingQuickSelectedIds.size === 0;
+        button.textContent = 'Add to List (0)';
     }
 
     const count = document.getElementById(

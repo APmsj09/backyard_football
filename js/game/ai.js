@@ -874,29 +874,23 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
             score += 24 + (lateralShift * 4.0 * bounceIQ);
         }
 
-        // Discipline encourages commitment, while less reliable runners
-        // are more likely to change lanes unnecessarily.
-        const offsetDiffFromPrev = Math.abs(offset - prevOffset);
-        const laneStickiness =
-            25 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.25); // Increased stickiness!
+        // Evaluate lane stickiness relative to the established target corridor (lockedLaneX),
+        // not by comparing instantaneous relative offset to a stale historical offset.
+        const establishedLaneX = runner._lockedLaneX ?? runner.x;
+        const distFromEstablishedLane = Math.abs(testX - establishedLaneX);
+        const laneStickiness = 20 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.20);
 
-        // HEAVY REVERSAL PENALTY: Prevent erratic zig-zagging behind the line (e.g. flipping from -3 to +3)
-        const isReversingAcrossCenter = Math.sign(offset) !== 0 && Math.sign(prevOffset) !== 0 && Math.sign(offset) !== Math.sign(prevOffset);
-        if (isReversingAcrossCenter && isBehindLine) {
-            score -= 65; // Substantial penalty to prevent vacillating back and forth behind the line
+        if (distFromEstablishedLane < 1.2) {
+            // Staying in the established running corridor
+            score += laneStickiness;
+        } else if (!(centerThreatDetected && lateralShift >= 2.5)) {
+            // Penalty for lateral deviation away from the chosen corridor
+            score -= (distFromEstablishedLane * 6.5);
         }
 
-        if (offsetDiffFromPrev < 0.5) {
-            score += laneStickiness;
-        } else if (!(centerThreatDetected && lateralShift >= 3.0)) {
-            score -= offsetDiffFromPrev * (
-                8.0 + ((decisionProfile?.assignmentDiscipline ?? 50) * 0.08) // Increased change penalty
-            );
-
-            // Severe penalty for large lateral jumps
-            if (offsetDiffFromPrev >= 2.5) {
-                score -= 60;
-            }
+        // Momentum preservation: penalize sharp cuts against the runner's current horizontal momentum
+        if (Math.abs(currentVx) > 1.8 && Math.sign(offset) !== 0 && Math.sign(offset) !== Math.sign(currentVx)) {
+            score -= 35;
         }
         
         // LATE GAME CLOCK MANAGEMENT: Run out of bounds if trailing in the 4th quarter
@@ -1624,26 +1618,28 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 score += (distanceBeyondLOS >= 3) ? 6 : -3;
             }
 
-            // Penalize throws behind the line, except intentional screens.
+            // Penalize throws behind the line, except intentional screens or checkdowns under pressure
             if (distanceBeyondLOS < 0 && !isScreenRoute) {
                 const distanceToGoal =
                     110 - (playState.lineOfScrimmage || 60);
 
                 const yardsBehindLOS = Math.abs(distanceBeyondLOS);
 
-                const depthPenalty =
-                    25 + Math.min(35, yardsBehindLOS * 5);
-
-                const longYardagePenalty =
-                    yardsToGo >= 8 ? 10 : 0;
-
-                const negativePlayPenalty =
-                    depthPenalty + longYardagePenalty;
+                if (isPressured) {
+                    // Under pressure, an open checkdown behind the line is a high-value safety valve
+                    score += Math.max(8, 22 - (yardsBehindLOS * 2.5));
+                } else if (down >= 3) {
+                    // On 3rd/4th down, penalize throws short of the sticks
+                    const depthPenalty = 14 + Math.min(22, yardsBehindLOS * 3.5);
+                    score -= depthPenalty;
+                } else {
+                    // On 1st/2nd down, flat routes and checkdowns are productive; apply only a modest depth tax
+                    const depthPenalty = Math.min(10, yardsBehindLOS * 2.0);
+                    score -= depthPenalty;
+                }
 
                 if (distanceToGoal <= 10) {
-                    score -= Math.max(45, negativePlayPenalty);
-                } else {
-                    score -= negativePlayPenalty;
+                    score -= 15;
                 }
             }
         }
@@ -2022,6 +2018,28 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         }
 
+        // SCAN SECONDARY TARGETS HERE: If primary reads are done, scan secondary route runners
+        // BEFORE checking if anyone beat THROW_THRESHOLD so the QB can actually throw to them!
+        if (numReadsVisible >= progression.length) {
+            const secondaryReceivers = offenseStates.filter(r =>
+                r.slot !== 'QB1' &&
+                !r.slot.startsWith('OL') &&
+                !progression.includes(r.slot) &&
+                (r.action?.includes('route') || r.action === 'route_complete')
+            );
+
+            for (const secRec of secondaryReceivers) {
+                const evalResult = getTargetValue(secRec.slot);
+                if (evalResult) {
+                    readDebugLog.push(`${secRec.slot}:${evalResult.score.toFixed(0)}`);
+                    if (evalResult.score > highestScore) {
+                        highestScore = evalResult.score;
+                        bestTargetEval = evalResult;
+                    }
+                }
+            }
+        }
+
         let THROW_THRESHOLD = 32;
 
         // Early downs: stay patient.
@@ -2055,6 +2073,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         THROW_THRESHOLD = Math.max(2, Math.min(45, THROW_THRESHOLD));
 
+        // Now checks bestTargetEval across BOTH primary and secondary receivers!
         if (bestTargetEval && bestTargetEval.score > THROW_THRESHOLD) {
             targetPlayerState = bestTargetEval.info.state;
             actionTaken = isHotReadSituation ? "Hot Read Throw" : "Throw Value Target";
@@ -2082,8 +2101,6 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 gameLog.push(`[Tick ${playState.tick}] 🧠 QB Reads (${readProgress}): [${readDebugLog.join(', ')}] -> Selected: ${targetPlayerState.slot}`);
             }
         } else if (debugEnabled && bestTargetEval) {
-            // Log rejected targets when the visible reads change, then
-            // at most once every 10 ticks while the QB continues holding.
             const previousHoldTick = qbState._lastLoggedHoldTick ?? -Infinity;
             
             const shouldLogHold =
@@ -2114,15 +2131,14 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         }
 
         // POCKET EXHAUSTION RESOLUTION:
-        // If the QB has completed their dropback, has scanned all available reads,
-        // and every single target is blanketed (negative or below threshold),
-        // do NOT stand frozen in the pocket until tick 125!
+        // Only trigger early exhaustion if the QB is UNDER PRESSURE and reads are blanketed.
+        // In a clean pocket, the QB stays patient, steps up, and lets deeper concepts develop!
         const allReadsBlanketed = numReadsVisible >= progression.length && 
             (!bestTargetEval || bestTargetEval.score < (THROW_THRESHOLD - 15));
 
-        if (!decisionMade && (pocketTimeExpired || (playState.tick >= 65 && allReadsBlanketed))) {
+        if (!decisionMade && (pocketTimeExpired || (isPressured && playState.tick >= 55 && allReadsBlanketed))) {
             decisionMade = true;
-            reason = allReadsBlanketed ? "All Reads Blanketed" : "Time Expired";
+            reason = isPressured ? "Pressure Blanketed" : "Time Expired";
         }
 
         // NATURAL SCRAMBLE EVALUATION:
@@ -2271,16 +2287,19 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         }
 
         // EMERGENT QB RESOLUTION:
-        // The QB's skills and personality determine whether they throw away, force a throw, scramble, or take a sack.
         const decisionQuality = qbProfile?.decisionQuality ?? qbDecision;
         const riskTolerance = qbProfile?.riskTolerance ?? 1.0;
 
-        // 1. High-IQ / High-Discipline QBs throw it away to live for the next down
-        const throwAwaySkill = (decisionQuality * 0.7) + (qbIQ * 0.3);
-        const willThrowAway = (throwAwaySkill > 55) && (Math.random() < (throwAwaySkill / 100) / riskTolerance);
+        // Best available option across ALL targets (primary + secondary)
+        const secondaryReceivers = offenseStates.filter(r =>
+            r.slot !== 'QB1' &&
+            !r.slot.startsWith('OL') &&
+            !progression.includes(r.slot) &&
+            (r.action?.includes('route') || r.action === 'route_complete')
+        );
+        const allTargetSlots = [...progression, ...secondaryReceivers.map(r => r.slot)];
 
-        // 2. High-Risk / High-Ego QBs try to force a contested pass into coverage instead of throwing it away
-        const bestAvailableOption = progression
+        const bestAvailableOption = allTargetSlots
             .map(s => getTargetValue(s))
             .filter(v => v !== null)
             .sort((a, b) => b.score - a.score)[0];
@@ -2290,15 +2309,21 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             (down >= 3 && yardsToGo >= 6);
 
         const forcedThrowScore = bestAvailableOption?.score ?? -Infinity;
-        const forcedThrowChance = isDesperationTime ? 0.25 : 0.10;
+        const forcedThrowChance = isDesperationTime ? 0.35 : 0.12;
 
         const shouldForceThrow = Boolean(
             bestAvailableOption &&
-            forcedThrowScore >= 20 &&
-            riskTolerance >= 1.10 &&
-            isHighLeverageSituation &&
+            forcedThrowScore >= 18 &&
+            (riskTolerance >= 1.05 || isHighLeverageSituation) &&
             Math.random() < forcedThrowChance
         );
+
+        // Throw Away: ONLY allowed when under pressure or scrambling outside the pocket!
+        // A QB in a clean pocket NEVER throws the ball out of bounds.
+        const throwAwaySkill = (decisionQuality * 0.7) + (qbIQ * 0.3);
+        const willThrowAway = (isPressured || qbState.action === 'qb_scramble') &&
+            (throwAwaySkill > 45) &&
+            (Math.random() < (throwAwaySkill / 100) / riskTolerance);
 
         if (shouldForceThrow) {
             targetPlayerState = bestAvailableOption.info.state;
@@ -2327,24 +2352,30 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         } else if (willThrowAway) {
             actionTaken = "Throw Away";
         } else if (
-            qbAgility > 65 &&
-            (
-                imminentSackDefender ||
-                playState.tick >= MIN_DROPBACK_TICKS
-            ) &&
-            Math.random() < 0.50
+            qbAgility > 60 &&
+            (imminentSackDefender || pocketTimeExpired || isPressured) &&
+            Math.random() < 0.60
         ) {
-            // Athletic QBs can escape an imminent sack early.
-            // Otherwise, wait until the normal dropback window develops.
+            // Escape pressure or scramble when pocket time expires
             qbState.action = 'qb_scramble';
             qbState.isBallCarrier = true;
+            playState.qbIntent = 'scramble';
             return;
         } else {
             // Low-IQ, indecisive, or trapped QBs hesitate and take the sack
             if (reason === "Imminent Sack" || isPressured) {
-                return; // Takes the sack naturally
+                return; // Takes the sack naturally under real pressure
+            } else if (pocketTimeExpired) {
+                // Clean pocket expired: tuck and run forward rather than throwing into the stands
+                qbState.action = 'run_path';
+                qbState.isBallCarrier = true;
+                playState.qbIntent = 'scramble';
+                playState.qbRunCommitted = true;
+                return;
             } else {
-                actionTaken = "Throw Away";
+                // Clean pocket with time remaining: reset decision and continue scanning/stepping up!
+                decisionMade = false;
+                return;
             }
         }
     }

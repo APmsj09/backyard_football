@@ -177,7 +177,9 @@ export function checkBlockCollisions(playState, gameLog = null) {
 
             // 1. Speed Edge Dip: Fast rusher blows by the tackle on the outside arc
             const isEdgeAlignment = Math.abs(target.initialX - blocker.initialX) > 1.4;
-            if (isPassRush && isEdgeAlignment && targetSpd > blockerAgi + 14 && Math.random() < 0.28) {
+            const speedAdvantage = targetSpd - blockerAgi;
+            const speedDipChance = Math.max(0.05, Math.min(0.40, 0.08 + (speedAdvantage * 0.02)));
+            if (isPassRush && isEdgeAlignment && speedAdvantage >= 5 && Math.random() < speedDipChance) {
                 const awayX = blocker.x - target.x;
                 const awayY = blocker.y - target.y;
                 const awayDist = Math.max(0.1, Math.hypot(awayX, awayY));
@@ -902,29 +904,35 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             } else {
                 const qbState = offenseStates?.find(p => p.slot?.startsWith?.('QB'));
                 if (qbState) {
-                    const technique = (defender.blockShedding ?? 50) + (defender.playbookIQ ?? 50);
-                    const escapeScore = technique + getRandomInt(-30, 30);
+                    const defSkill = (defender.blockShedding ?? 50) + ((defender.playbookIQ ?? 50) * 0.5);
+                    const blkSkill = (blocker.blocking ?? 50) + ((blocker.playbookIQ ?? 50) * 0.5);
+                    const skillDelta = defSkill - blkSkill;
+                    const escapeScore = skillDelta + getRandomInt(-20, 20);
+
                     const dx = qbState.x - defender.x;
                     const dy = qbState.y - defender.y;
                     const dist = Math.max(0.1, Math.hypot(dx, dy));
                     const dirX = dx / dist;
                     const dirY = dy / dist;
 
-                    // Block sheds must engage for at least 8 ticks (0.32s) before a technique move can succeed
-                    const minEngagementTicks = 8;
-                    if (ticksInBlock >= minEngagementTicks && escapeScore > 120 && Math.random() < 0.005) {
-                        defender.x += dirX * 0.6;
-                        defender.y += dirY * 0.6;
+                    // Allow pass rush moves to trigger once the initial block set has settled (14 ticks = ~0.56s)
+                    const minEngagementTicks = 14;
+                    const ripMoveChance = Math.max(0.015, Math.min(0.08, 0.03 + (skillDelta * 0.002)));
+                    const swimMoveChance = Math.max(0.010, Math.min(0.06, 0.02 + (skillDelta * 0.002)));
+
+                    if (ticksInBlock >= minEngagementTicks && escapeScore > 5 && Math.random() < ripMoveChance) {
+                        defender.x += dirX * 0.75;
+                        defender.y += dirY * 0.75;
                         blocker.stunnedTicks = 6;
-                        defender.moveCooldown = 20;
+                        defender.moveCooldown = 22;
                         battle.status = 'win_B';
-                    } else if (ticksInBlock >= minEngagementTicks && escapeScore > 130 && Math.random() < 0.003) {
+                    } else if (ticksInBlock >= minEngagementTicks && escapeScore > 12 && Math.random() < swimMoveChance) {
                         const bx = blocker.x - defender.x;
                         const by = blocker.y - defender.y;
-                        defender.x += -by * 0.15;
-                        defender.y += bx * 0.15;
-                        blocker.stunnedTicks = 4;
-                        defender.moveCooldown = 20;
+                        defender.x += -by * 0.25;
+                        defender.y += bx * 0.25;
+                        blocker.stunnedTicks = 5;
+                        defender.moveCooldown = 22;
                         battle.status = 'win_B';
                     }
                 }

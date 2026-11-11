@@ -511,6 +511,14 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                                     return mapped || null;
                                 })
                                 .filter(Boolean);
+
+                            // Append any unlisted eligible receivers who are running routes as secondary reads
+                            initialOffenseStates.forEach(o => {
+                                const isEligible = o.slot.startsWith('WR') || o.slot.startsWith('TE') || o.slot.startsWith('RB');
+                                if (isEligible && !readProgression.includes(o.slot)) {
+                                    readProgression.push(o.slot);
+                                }
+                            });
                         }
 
                         dropbackPhase = 'dropping'; hasCompletedDropback = false;
@@ -1348,6 +1356,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
     const assignBlockerTarget = (blocker, threats) => {
         if (blocker.isEngaged) return;
+        // Do not vacuum a rusher back into an engagement if this blocker was just shed
+        if (blocker.reengageCooldown > 0) return;
 
         const isPostCatchBlock = Boolean(
             isPassCompleted &&
@@ -1446,7 +1456,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             }
         }
 
-        const VISION_RANGE = isPulling ? 2.0 : 10.0;
+        // Open-field blockers on run plays and RAC completions need a wider vision envelope (22y)
+        // to detect pursuing safeties and linebackers ahead of or behind the runner
+        const VISION_RANGE = isPulling ? 2.0 : ((playType === 'run' || isPostCatchBlock) ? 22.0 : 10.0);
         const validThreats = blockerThreats.filter(t =>
             !assignedThreats.has(t.id) &&
             getDistance(blocker, t) < VISION_RANGE &&
@@ -1720,17 +1732,23 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 });
             }
         } else {
-            // FIX 3: If no threat exists, advance with the play instead of freezing at pre-snap initialX!
+            // If no immediate threat exists, advance with the play as an active lead escort!
             if (
                 playType === 'run' ||
                 isPassCompleted ||
                 isScreenLeadBlocker
             ) {
-                // DEEPER FIX: Set the target far downfield so the blocker sprints instead of stutter-stepping
-                blocker.targetX = blocker.x;
-                blocker.targetY = Math.min(115, blocker.y + 15.0); // 15 yards ahead
+                if (ballCarrierState && ballCarrierState.id !== blocker.id) {
+                    // Angle diagonally into a lead blocking corridor ahead of the runner
+                    const escortOffsetX = blocker.x < ballCarrierState.x ? -2.2 : 2.2;
+                    blocker.targetX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, ballCarrierState.x + escortOffsetX));
+                    blocker.targetY = Math.min(115.0, ballCarrierState.y + 4.5);
+                } else {
+                    blocker.targetX = blocker.x;
+                    blocker.targetY = Math.min(115.0, blocker.y + 12.0);
+                }
                 blocker.action = 'run_block';
-                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.4);
+                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.45);
             } else {
                 // In pass pro with no rusher, anchor the pocket front
                 const qb = qbState;
@@ -2031,7 +2049,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 );
                 const isPerimeterRun = pState.role === 'WR' || (
                     playState.playKey?.includes('Sweep') ||
-                    playState.playKey?.includes('Reverse')
+                    playState.playKey?.includes('Reverse') ||
+                    playState.playKey?.includes('Stretch') ||
+                    playState.playKey?.includes('Toss')
                 );
 
                 const isRunHolePhase = playType === 'run' &&
@@ -3416,15 +3436,22 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             let perfectX = targetRec.x + cushionX;
             let perfectY = targetRec.y + cushionY;
 
-            // Transition to hip-to-hip trail coverage or drive on cuts so DBs don't backpedal into a 5-yard cushion on slants/curls.
+            // Transition to hip-to-hip coverage or drive on cuts.
+            // On vertical stems going downfield (vy > 2.0), the DB must stay OVER THE TOP (y >= targetRec.y).
             const isBreakingHorizontally = Math.abs(targetRec.vx || 0) > 3.0 && Math.abs(targetRec.vy || 0) < 2.5;
             const isSettled = targetRec.action === 'route_complete' || (Math.hypot(targetRec.vx || 0, targetRec.vy || 0) < 1.0);
+            const isVerticalStem = (targetRec.vy || 0) > 2.0;
             const isReceiverReleasing = targetRec.y >= (pState.y - 0.4);
             
-            // If the WR cuts hard laterally, stops, or blows past the DB, drop the cushion and close in!
             if ((isReceiverReleasing || pState.hasPressed || isBreakingHorizontally || isSettled) && !targetSlot.startsWith('RB')) {
-                perfectY = targetRec.y - (isBreakingHorizontally || isSettled ? 1.0 : 0.2); // Drive downhill on cuts, trail on go routes
-                perfectX = targetRec.x + (targetRec.x < CENTER_X ? 0.8 : -0.8); // Maintain inside/outside shoulder leverage
+                if (isBreakingHorizontally || isSettled) {
+                    perfectY = targetRec.y - 0.6; // Drive downhill aggressively on breaks and settled routes
+                } else if (isVerticalStem) {
+                    perfectY = targetRec.y + Math.max(0.4, cushionY * 0.4); // Maintain top leverage on go/post/seam routes
+                } else {
+                    perfectY = targetRec.y + 0.2;
+                }
+                perfectX = targetRec.x + (targetRec.x < CENTER_X ? 0.7 : -0.7); // Maintain inside shoulder leverage
             }
 
             // Keep RB coverage leverage consistent as the back crosses
@@ -3523,15 +3550,18 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             zoneCenter.y = Math.min(maxDropDepth, LOS + compressedDepth);
         }
         
-        // 1. "Hero Ball" Safety Creep: Impatient low-IQ deep safeties frequently creep downhill toward LOS.
-        // Higher IQ safeties might occasionally gamble, but rarely.
-        if (isDeep) {
-            const creepChance = Math.max(0.01, 0.60 - (iq * 0.007));
+        // 1. "Hero Ball" Safety Creep: Low-IQ safeties can cheat downhill, but this MUST be latched
+        // so it does NOT fire 25 times per second and drag deep safeties down into the box.
+        if (isDeep && !pState._heroCreepEvaluated && playState.tick >= 20) {
+            pState._heroCreepEvaluated = true;
+            const creepChance = Math.max(0.02, 0.35 - (iq * 0.004));
             if (Math.random() < creepChance) {
-                zoneCenter.y = Math.max(LOS + 7.0, zoneCenter.y - 3.5);
+                pState._heroCreepOffset = 3.5;
             }
         }
-
+        if (isDeep && pState._heroCreepOffset) {
+            zoneCenter.y = Math.max(LOS + 8.5, zoneCenter.y - pState._heroCreepOffset);
+        }
         // 2. Zone Breakdown / Pursuit Trigger
         // If a runner is in the red zone, abandon the zone assignment if the runner is within 8 yards
         if (ballCarrierState && ballCarrierState.isOffense && distanceToGoal < 25) {
@@ -3769,20 +3799,18 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             const qb = qbState;
             if (qb) {
                 const isEdgeRusher = Math.abs(pState.initialX - qb.initialX) >= 3.5;
-                if (isEdgeRusher) {
+                const hasReachedPocketDepth = pState.y <= qb.y + 1.2;
+
+                if (isEdgeRusher && !hasReachedPocketDepth) {
+                    // Bend arc around the offensive tackle
                     const escapeAngle = pState.initialX < qb.initialX ? -1 : 1;
-                    const rusherIQ = pState.playbookIQ || 50;
-
-                    if (pState._isDisciplinedRusher === undefined) {
-                        pState._isDisciplinedRusher = rusherIQ > 55 || (Math.random() < (rusherIQ / 100));
-                    }
-
-                    const rushWidth = pState._isDisciplinedRusher ? 4.0 : 0.8;
-                    const rushDepth = pState._isDisciplinedRusher ? Math.max(qb.y - 1.5, pState.y - 0.5) : (qb.y - 2.0);
+                    const rushWidth = 2.8;
+                    const rushDepth = Math.max(qb.y - 0.5, pState.y - 0.6);
 
                     setTrackIntent(pState, { id: qb.id, x: qb.x + (escapeAngle * rushWidth), y: rushDepth }, 0, 0.5);
                 } else {
-                    setPointIntent(pState, qb.x, qb.y + 0.5, 0.5);
+                    // Flatten angle and close directly on the QB
+                    setPointIntent(pState, qb.x, qb.y, 0.55);
                 }
             } else {
                 setPointIntent(pState, pState.x, LOS - 5, 0.5);

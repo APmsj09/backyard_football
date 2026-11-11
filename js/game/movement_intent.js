@@ -122,9 +122,11 @@ export function setLaneIntent(pState, targetX, targetY, lockDuration = 10) {
 
     const intent = pState._intent;
 
-    // Preserve the locked lateral lane only while LANE is still the
-    // active intent. Another movement intent must be allowed to interrupt it.
-    if (intent.mode === 'LANE' && intent.lockTicks > 0) {
+    // Allow intentional cuts, evasions, or hole shifts (> 1.2y lateral change) to update targetX,
+    // rather than locking the runner into stale X coordinates
+    const isIntentionalCut = intent.targetX !== undefined && Math.abs(targetX - intent.targetX) > 1.2;
+
+    if (intent.mode === 'LANE' && intent.lockTicks > 0 && !isIntentionalCut) {
         intent.mode = 'LANE';
         intent.lockTicks--;
         intent.targetY = targetY;
@@ -134,7 +136,7 @@ export function setLaneIntent(pState, targetX, targetY, lockDuration = 10) {
         return;
     }
 
-    // Start a fresh lane commitment after an interruption or expired lock.
+    // Start a fresh lane commitment after an interruption, cut, or expired lock.
     intent.mode = 'LANE';
     intent.targetX = targetX;
     intent.targetY = targetY;
