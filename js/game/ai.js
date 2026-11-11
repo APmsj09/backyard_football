@@ -860,18 +860,32 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                 score += 35; // Strongly reward breaking outside the tackles
             }
         }
-        // On designed outside stretch/toss plays, heavily penalize reversing back across the formation
+        // ONE-CUT & DOWNHILL RULE:
+        // On stretch/toss plays, once the runner has pressed the perimeter (widened by >= 5.5 yards)
+        // or the play has developed past 25-30 ticks, the lateral stretch phase is OVER.
+        // Heavily reward turning upfield (offset <= 1.5) and penalize running horizontally into the sideline!
         const isOutsideRun = playState.playKey?.includes('Stretch') || playState.playKey?.includes('Toss') || playState.playKey?.includes('Sweep');
         const runDirection = (playState.playKey?.endsWith('Left') || playState.playKey?.includes('_l')) ? -1 : 1;
-        if (isBehindLine && isOutsideRun) {
-            if (Math.sign(offset) !== 0 && Math.sign(offset) !== runDirection) {
-                score -= 80; // Do not bounce away from the designed perimeter stretch
-            }
-        }
+        const lateralStretchDistance = Math.abs(runner.x - (runner.initialX ?? runner.x));
+        const hasReachedPerimeterEdge = isOutsideRun && (lateralStretchDistance >= 5.5 || playState.tick >= 30);
 
-        if (centerThreatDetected && lateralShift >= 3.0) {
+        if (hasReachedPerimeterEdge) {
+            if (Math.abs(offset) <= 1.5) {
+                // Reward planting the foot and bursting north-south toward the end zone
+                score += 55;
+            } else if (Math.sign(offset) === runDirection && Math.abs(offset) >= 3.0) {
+                // Penalize continuing to run sideways toward the boundary
+                score -= (Math.abs(offset) * 12);
+            }
+        } else if (centerThreatDetected && lateralShift >= 3.0) {
             const bounceIQ = Math.max(0, (iq - 50) / 50);
             score += 24 + (lateralShift * 4.0 * bounceIQ);
+        }
+
+        if (isBehindLine && isOutsideRun && !hasReachedPerimeterEdge) {
+            if (Math.sign(offset) !== 0 && Math.sign(offset) !== runDirection) {
+                score -= 80; // Do not bounce away from the designed perimeter stretch early
+            }
         }
 
         // Evaluate lane stickiness relative to the established target corridor (lockedLaneX),

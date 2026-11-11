@@ -1395,13 +1395,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         ) {
             blocker.blockLaneX = runLaneX;
         }
-        const isScreenPlay = playState.playKey?.includes('Screen');
+        // SCREEN RELEASE DELAY:
+        // Linemen executing 'screen_block' or 'Wall' assignments must hold a pass set
+        // for the first 18-22 ticks to let defensive rushers clear before pulling outside.
+        const isScreenPlay = playState.playKey?.includes('Screen') || blocker.assignment?.includes('screen_block');
+        const isScreenWallAssignment = blocker.assignment?.includes('Wall') || blocker.assignment?.includes('screen_block');
 
-        if (isScreenPlay && blocker.assignment?.includes('Wall')) {
-            if (playState.tick < 25) {
+        if (isScreenPlay && isScreenWallAssignment) {
+            const releaseTick = blocker.assignment?.includes('screen_block') ? 18 : 25;
+            if (playState.tick < releaseTick) {
+                // Anchor in pass pro; do not pull laterally across adjacent linemen yet
                 blocker.targetX = blocker.initialX;
-                blocker.targetY = blocker.y - 1.5;
-                blocker.contactReduction = 0.5;
+                blocker.targetY = blocker.initialY - 0.5;
+                blocker.action = 'pass_block';
+                blocker.contactReduction = 0.6;
 
                 setPointIntent(
                     blocker,
@@ -1409,9 +1416,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     blocker.targetY,
                     0.35
                 );
-
                 return;
-            } else {
+            } else if (blocker.assignment?.includes('Wall')) {
                 const targetRec = playState.activePlayers.find(p => p.assignment === 'Screen_Wait');
                 if (targetRec) {
                     blocker.targetX = targetRec.x + (blocker.initialX > CENTER_X ? -3 : 3);
@@ -1425,7 +1431,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         blocker.targetY,
                         0.45
                     );
-
                     return;
                 }
             }
@@ -1739,9 +1744,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 isScreenLeadBlocker
             ) {
                 if (ballCarrierState && ballCarrierState.id !== blocker.id) {
-                    // Angle diagonally into a lead blocking corridor ahead of the runner
-                    const escortOffsetX = blocker.x < ballCarrierState.x ? -2.2 : 2.2;
-                    blocker.targetX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, ballCarrierState.x + escortOffsetX));
+                    // Maintain a stable lead block corridor: lock escort offset to avoid 25Hz side-swapping jitter
+                    if (blocker._escortSide === undefined) {
+                        blocker._escortSide = blocker.initialX <= ballCarrierState.x ? -2.2 : 2.2;
+                    }
+                    blocker.targetX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, ballCarrierState.x + blocker._escortSide));
                     blocker.targetY = Math.min(115.0, ballCarrierState.y + 4.5);
                 } else {
                     blocker.targetX = blocker.x;
