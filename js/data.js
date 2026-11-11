@@ -1482,7 +1482,7 @@ export const defensivePlaybook = {
         tags: ['zone', 'cover2', 'safeZone'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'zone_hook_curl_left', 'LB2': 'zone_hook_curl_right',
+            'LB1': 'zone_hook_curl_middle', 'LB2': 'zone_flat_right',
             'DB1': 'zone_flat_left', 'DB2': 'zone_deep_half_left', 'DB3': 'zone_deep_half_right'
         }
     },
@@ -1503,7 +1503,7 @@ export const defensivePlaybook = {
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
             'LB1': 'man_cover_RB',
-            'LB2': 'zone_short_middle',
+            'LB2': 'man_cover_Y',
             'DB1': 'man_cover_X',
             'DB2': 'man_cover_Z',
             'DB3': 'zone_deep_middle'
@@ -1515,10 +1515,10 @@ export const defensivePlaybook = {
         tags: ['man', 'blitz'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'blitz_gap', 'LB2': 'man_cover_RB',
+            'LB1': 'blitz_gap', 'LB2': 'man_cover_Y',
             'DB1': 'man_cover_X',
             'DB2': 'man_cover_Z',
-            'DB3': 'zone_deep_middle'
+            'DB3': 'man_cover_RB'
         }
     },
     'Base_Tampa_2_Drop': {
@@ -1527,8 +1527,8 @@ export const defensivePlaybook = {
         tags: ['zone', 'cover2'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'zone_flat_left', 'LB2': 'zone_deep_middle',
-            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right', 'DB3': 'zone_flat_right'
+            'LB1': 'zone_hook_curl_middle', 'LB2': 'zone_deep_middle',
+            'DB1': 'zone_flat_left', 'DB2': 'zone_deep_half_left', 'DB3': 'zone_deep_half_right'
         }
     },
     'Base_Cover_0_AllOut': {
@@ -1547,8 +1547,8 @@ export const defensivePlaybook = {
         tags: ['zone', 'cover2', 'spy'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',
-            'LB1': 'spy_QB', 'LB2': 'zone_short_middle',
-            'DB1': 'zone_deep_half_left', 'DB2': 'zone_deep_half_right', 'DB3': 'zone_hook_curl_middle'
+            'LB1': 'spy_QB', 'LB2': 'zone_flat_right',
+            'DB1': 'zone_flat_left', 'DB2': 'zone_deep_half_left', 'DB3': 'zone_deep_half_right'
         }
     },
 

@@ -827,8 +827,22 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                         targetY = startY;
                     }
                 } else if (assignment.startsWith('zone_')) {
+                    const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
+
+                    // Spatial sanity check: If the formation places a defender >6 yards on the
+                    // wrong side of the field from their assigned zone center, shift their pre-snap alignment
+                    // towards their zone so they don't have to sprint 25 yards across the field at the snap.
+                    if (zoneCenter && Number.isFinite(zoneCenter.x)) {
+                        const lateralOffset = zoneCenter.x - startX;
+                        if (Math.abs(lateralOffset) > 6.0) {
+                            startX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, startX + (lateralOffset * 0.70)));
+                        }
+                    }
+
                     if (assignment.includes('deep')) {
-                        startY = Math.max(startY, playState.lineOfScrimmage + 8);
+                        const distToGoal = 110 - playState.lineOfScrimmage;
+                        const cushion = distToGoal < 15.0 ? Math.max(2.5, distToGoal * 0.5) : 8.0;
+                        startY = Math.max(startY, playState.lineOfScrimmage + cushion);
                     }
                     targetX = startX;
                     targetY = startY;
@@ -3174,9 +3188,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                             const distToLanding = Math.hypot(pState.x - ballPos.targetX, pState.y - ballPos.targetY);
 
-                            // Deep safeties break on the ball if it's within a reasonable range (15y) 
-                            // to prevent them from standing still while a pass is completed in front of them.
-                            const breakThreshold = isDeepZoneDB ? 15.0 : 6.5;
+                            // Expanded break thresholds: Underneath defenders rally within 14y,
+                            // and deep zone DBs break within 24y so passes cannot land uncontested near them.
+                            const breakThreshold = isDeepZoneDB ? 24.0 : 14.0;
 
                             if (isAssignedToTarget || distToLanding < breakThreshold) {
                                 let trackTargetY = ballPos.targetY;
@@ -3480,8 +3494,14 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             }
         }
 
-        // Enforce hard floor: Zone coverage drop targets MUST stay on the defensive side of the ball
-        const minZoneDepth = isDeep ? (LOS + 8.0) : (LOS + 1.8);
+        // Enforce hard floor: Zone coverage drop targets stay on the defensive side of LOS,
+        // but compress smoothly inside the 15-yard line so safeties defend the goal line (110)
+        // instead of dropping out the back of the endzone.
+        const distToGoalLine = 110 - LOS;
+        const deepFloor = distToGoalLine < 15.0 
+            ? Math.min(109.5, LOS + Math.max(2.0, distToGoalLine * 0.5)) 
+            : (LOS + 8.0);
+        const minZoneDepth = isDeep ? deepFloor : (LOS + 1.8);
         zoneCenter.y = Math.max(minZoneDepth, zoneCenter.y);
 
         // --- RED ZONE COMPRESSION ---
@@ -3548,7 +3568,9 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         const maxY = Math.min(115.0, LOS + (zone?.maxY || 25.0) + 3.0);
 
         let zoneThreats = offenseStates.filter(o => {
-            if (!o.action.includes('route')) return false;
+            // Must recognize receivers actively running routes AND receivers tracking incoming passes
+            const isEligibleReceiver = o.action.includes('route') || o.action === 'tracking_ball';
+            if (!isEligibleReceiver) return false;
             return o.x >= minX && o.x <= maxX && o.y >= minY && o.y <= maxY;
         });
 
