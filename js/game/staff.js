@@ -803,15 +803,16 @@ function createStaffAvailability(role = 'coach') {
             scheduleLabel: 'Flexible schedule',
             availableDays: ['Flexible'],
             timeWindow: 'flexible',
-            reliability: 100
+            reliability: 100,
+            workCapacityVersion: 2
         };
     }
 
     const weeklyHourRanges = {
-        coach: [3, 12],
-        scout: [2, 8],
-        trainer: [2, 7],
-        gm: [1, 5]
+        coach: [6, 12],
+        scout: [6, 12],
+        trainer: [6, 12],
+        gm: [2, 6]
     };
 
     const [minHours, maxHours] =
@@ -825,7 +826,8 @@ function createStaffAvailability(role = 'coach') {
         scheduleLabel: schedule.label,
         availableDays: [...schedule.availableDays],
         timeWindow: schedule.timeWindow,
-        reliability: getRandomInt(55, 95)
+        reliability: getRandomInt(55, 95),
+        workCapacityVersion: 2
     };
 }
 
@@ -1046,13 +1048,97 @@ export function ensureStaffAvailability(staff) {
         );
     }
 
+    // One-time migration to the community-volunteer availability model.
+    // Preserve existing schedules and reliability ratings.
+    const workCapacityVersion = Number(
+        availability.workCapacityVersion
+    );
+
+    if (
+        staff.role !== 'user-coach' &&
+        (
+            !Number.isFinite(workCapacityVersion) ||
+            workCapacityVersion < 2
+        )
+    ) {
+        const minimumHours = staff.role === 'gm' ? 2 : 6;
+        const maximumHours = staff.role === 'gm' ? 6 : 12;
+
+        availability.weeklyHours = Math.max(
+            minimumHours,
+            Math.min(
+                maximumHours,
+                Math.round(Number(availability.weeklyHours))
+            )
+        );
+    }
+
+    availability.workCapacityVersion = 2;
+
     return availability;
+}
+
+function getStaffWeeklyHoursForWeek(
+    coach,
+    availability,
+    weekKey
+) {
+    const rawBaseline = Number(availability?.weeklyHours);
+
+    const minimumHours = coach?.role === 'gm' ? 2 : 6;
+    const maximumHours = coach?.role === 'gm' ? 6 : 12;
+
+    const baseline = Math.max(
+        minimumHours,
+        Math.min(
+            maximumHours,
+            Number.isFinite(rawBaseline)
+                ? Math.round(rawBaseline)
+                : 8
+        )
+    );
+
+    // The user's own coaching commitment remains fixed.
+    if (
+        coach?.role === 'user-coach' ||
+        coach?.isUserCoach === true
+    ) {
+        return baseline;
+    }
+
+    if (!weekKey || coach?.id == null) {
+        return baseline;
+    }
+
+    // Stable week-specific variation: -2 to +2 hours.
+    // The same coach receives the same result throughout this week,
+    // including after saving and reloading.
+    const seedKey =
+        `${coach.id}:${weekKey}:weekly-availability-v2`;
+
+    let hash = 2166136261;
+
+    for (let i = 0; i < seedKey.length; i++) {
+        hash ^= seedKey.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+
+    const variation = (hash >>> 0) % 5 - 2;
+
+    return Math.max(
+        minimumHours,
+        Math.min(
+            maximumHours,
+            baseline + variation
+        )
+    );
 }
 
 function getStaffWeeklyWorkCapacity(
     team,
     coach,
-    plan = team?.staffWorkPlan
+    plan = team?.staffWorkPlan,
+    weekKey = plan?.activeWeekKey || team?.staffWorkPlan?.activeWeekKey
 ) {
     if (!team || !coach) return 0;
 
@@ -1060,16 +1146,10 @@ function getStaffWeeklyWorkCapacity(
 
     if (!availability) return 0;
 
-    const rawAvailability = Number(availability.weeklyHours);
-
-    const availableHours = Math.max(
-        0,
-        Math.min(
-            WEEKLY_COACH_HOURS,
-            Number.isFinite(rawAvailability)
-                ? rawAvailability
-                : 8
-        )
+    const availableHours = getStaffWeeklyHoursForWeek(
+        coach,
+        availability,
+        weekKey
     );
 
     const availableDays = Array.isArray(availability.availableDays)
@@ -1082,8 +1162,7 @@ function getStaffWeeklyWorkCapacity(
         availability.scheduleType === 'flexible' ||
         availableDays.includes('Flexible');
 
-    const hoursPerDay =
-        availability.timeWindow === 'mixed' ? 6 : 4;
+    const hoursPerDay = 6;
 
     const scheduleCapacity =
         !isFlexibleSchedule && availableDays.length > 0
@@ -5412,22 +5491,22 @@ export function executeRecruitingAction(
     const profiles = {
         outreach: {
             label: 'Personal outreach',
-            pointsPerHour: 2.2,
+            pointsPerHour: 10,
             skills: ['teaching', 'evalCharacter']
         },
         teammateConnection: {
             label: 'Teammate connection',
-            pointsPerHour: 1.9,
+            pointsPerHour: 11,
             skills: ['evalCharacter', 'teaching']
         },
         roleDiscussion: {
             label: 'Role discussion',
-            pointsPerHour: 2.1,
+            pointsPerHour: 12,
             skills: ['gameplanInstinct', 'teaching']
         },
         practiceInvitation: {
             label: 'Pickup practice invitation',
-            pointsPerHour: 2.3,
+            pointsPerHour: 14,
             skills: ['teaching', 'conditioning']
         }
     };
@@ -5627,7 +5706,10 @@ export function executeRecruitingAction(
         entry.action === actionType
     ).length;
 
-    const repetitionMultiplier = Math.pow(0.75, repeatedActions);
+    const repetitionMultiplier = Math.max(
+        0.65,
+        1 - repeatedActions * 0.08
+    );
 
     // Each player responds differently to recruiting approaches.
     // These preferences remain private to the player; recruiting staff
@@ -5914,11 +5996,12 @@ export function executeRecruitingAction(
         contextBonus
     ) * playerResponseMultiplier;
 
-    // Interest is harder to move once a player is already strongly engaged.
+    // Interest becomes progressively harder to improve,
+    // but sustained recruiting effort should remain meaningful.
     if (currentInterest >= 90) {
-        interestGain *= 0.35;
+        interestGain *= 0.55;
     } else if (currentInterest >= 75) {
-        interestGain *= 0.65;
+        interestGain *= 0.80;
     }
 
     interestGain = Math.max(1, Math.round(interestGain));
@@ -6867,10 +6950,12 @@ export function applyRecruitingSweetener(
     let cashGiftInterestAccrued = null;
     let interestGain = baseGain;
 
+    // Interest becomes progressively harder to improve,
+    // but sustained recruiting effort should remain meaningful.
     if (currentInterest >= 90) {
-        interestGain *= 0.35;
+        interestGain *= 0.55;
     } else if (currentInterest >= 75) {
-        interestGain *= 0.65;
+        interestGain *= 0.80;
     }
 
     if (normalizedSweetenerType === 'gift') {
@@ -9365,7 +9450,8 @@ export function ensureAiStaffWorkPlan(
             ? getStaffWeeklyWorkCapacity(
                 team,
                 coach,
-                null
+                null,
+                weekKey
             )
             : WEEKLY_COACH_HOURS;
 
@@ -9485,8 +9571,8 @@ export function ensureAiStaffWorkPlan(
         // recruiting. These hours remain unassigned until the AI
         // actually performs a recruiting action.
         if (isRecruitingWeek) {
-            // Scale specialty work to the capacity remaining after
-            // accepted community-service commitments.
+            // Specialty hours are already based on actual weekly
+            // availability. Only adjust for accepted community commitments.
             specialtyHours = Math.max(
                 0,
                 Math.min(
@@ -9494,7 +9580,7 @@ export function ensureAiStaffWorkPlan(
                     Math.round(
                         specialtyHours *
                         availableWorkHours /
-                        WEEKLY_COACH_HOURS
+                        Math.max(1, coachWeeklyCapacity)
                     )
                 )
             );

@@ -12179,9 +12179,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             statusLabel = 'Lead needed';
             statusClass = 'border-amber-200 bg-amber-50 text-amber-800';
             needsAttention = true;
-        } else if (workloadRatio >= 1) {
+        } else if (workloadRatio > 1) {
             statusLabel = 'Over capacity';
             statusClass = 'border-rose-200 bg-rose-50 text-rose-800';
+            needsAttention = true;
+        } else if (workloadRatio >= 1) {
+            statusLabel = 'At capacity';
+            statusClass = 'border-amber-200 bg-amber-50 text-amber-800';
             needsAttention = true;
         } else if (departmentFit < 40) {
             statusLabel = 'Weak role fit';
@@ -12345,7 +12349,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     </span>
 
                                     <span>
-                                        Workload:
+                                        Lead's total workload:
                                         <b>${department.assignedHours}/${department.weeklyCapacity} hrs</b>
                                     </span>
                                 </div>
