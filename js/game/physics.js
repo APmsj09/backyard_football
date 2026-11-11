@@ -1305,8 +1305,21 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             const normalVelocity = (relVx * dx_norm) + (relVy * dy_norm);
 
             if (normalVelocity < 0) {
-                pState.vx -= dx_norm * normalVelocity * myMoveRatio * 0.5;
-                pState.vy -= dy_norm * normalVelocity * myMoveRatio * 0.5;
+                const isRouteRunner = pState.action === 'run_route' || pState.movementMode === 'ROUTE';
+
+                if (isRouteRunner && !other.isEngaged && !other.isBlocked) {
+                    // Tangential deflection: Glancing off an unengaged defender slides the receiver around them
+                    // rather than reflecting their momentum backward toward the line of scrimmage
+                    const tangentX = -dy_norm;
+                    const tangentY = dx_norm;
+                    const tangentSpeed = (pState.vx * tangentX) + (pState.vy * tangentY);
+
+                    pState.vx = (tangentX * tangentSpeed * 0.85) + (dx_norm * 0.2);
+                    pState.vy = Math.max(0.5, (tangentY * tangentSpeed * 0.85) + (dy_norm * 0.2));
+                } else {
+                    pState.vx -= dx_norm * normalVelocity * myMoveRatio * 0.5;
+                    pState.vy -= dy_norm * normalVelocity * myMoveRatio * 0.5;
+                }
             }
         }
     }

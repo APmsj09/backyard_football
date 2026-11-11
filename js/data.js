@@ -155,8 +155,9 @@ export const routeTree = {
     'run_iso_r': { path: [{ x: 1.5, y: 1 }, { x: 1.5, y: 5 }], mirror: false },
     'run_power_o_r': { path: [{ x: 1.0, y: 0.8 }, { x: 3.2, y: 4.5 }], mirror: false },
     'run_power_o_l': { path: [{ x: -1.0, y: 0.8 }, { x: -3.2, y: 4.5 }], mirror: false },
-    'run_stretch_r': { path: [{ x: 6, y: 0.5 }, { x: 10, y: 4 }], mirror: false },
-    'run_stretch_l': { path: [{ x: -6, y: 0.5 }, { x: -10, y: 4 }], mirror: false },
+    // Realistic outside-zone tracks: 45-degree angle toward the off-tackle seam, then downhill into the alley
+    'run_stretch_r': { path: [{ x: 3.5, y: 1.5 }, { x: 7.0, y: 4.2 }, { x: 8.5, y: 8.5 }], mirror: false },
+    'run_stretch_l': { path: [{ x: -3.5, y: 1.5 }, { x: -7.0, y: 4.2 }, { x: -8.5, y: 8.5 }], mirror: false },
     'run_counter_r': { path: [{ x: -1.5, y: 0.5 }, { x: 1.5, y: 2 }, { x: 5, y: 5 }], mirror: false },
     'run_counter_l': { path: [{ x: 1.5, y: 0.5 }, { x: -1.5, y: 2 }, { x: -5, y: 5 }], mirror: false },
     'run_toss_r': { path: [{ x: 6, y: 0.5 }, { x: 12, y: 4 }], mirror: false },

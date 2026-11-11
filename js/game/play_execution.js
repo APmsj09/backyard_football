@@ -552,7 +552,13 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     }
                     action = assignment;
 
-                    if (action === 'pass_block' || action === 'run_block') {
+                    // Screen plays: Linemen must pass block initially to sell the rush before releasing into screen paths
+                    const isScreenBlock = assignment?.includes('screen_block') || assignment?.includes('Wall');
+                    if (isScreenBlock && play.type === 'pass') {
+                        action = 'pass_block';
+                        targetY = startY - 0.5;
+                        pState._screenReleasePath = calculateRoutePath(assignment, startX, startY);
+                    } else if (action === 'pass_block' || action === 'run_block') {
                         targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
                     } else if (routeTree[assignment]) {
                         action = 'run_path';
@@ -1269,14 +1275,16 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     const linemen = offenseStates.filter(
         p => !p.isEngaged && p.slot.startsWith('OL')
     );
-    // Include designated blockers and screen-wall assignments, but do not
-    // pull ordinary receivers into blocker targeting just because they are
-    // escorting a live ball carrier.
-    const isScreenPlay = playState.playKey?.includes('Screen');
 
-    // The Trips Bubble Screen's H/Y receivers are lead blockers.
-    // They become eligible to block after finishing their route or once
-    // the intended screen pass has been completed.
+    // Detect screens by playKey, play tags, or screen-specific assignments
+    const isScreenPlay = Boolean(
+        playState.playKey?.includes('Screen') ||
+        playState.playKey?.includes('Bubble') ||
+        playState.play?.tags?.includes('screen')
+    );
+
+    // Lead blockers (e.g. WRs on Bubble/Tunnel screens) only engage blocks
+    // once they finish their lead route or after the screen pass is completed
     const isReadyScreenLeadBlocker = p => Boolean(
         isScreenPlay &&
         p &&
@@ -1293,7 +1301,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         )
     );
 
-    // Use the screen receiver's lane as the reference for lead blocking.
+    // Target receiver catching the screen (used to anchor the blocking wall)
     const screenReceiverForBlocking = isScreenPlay
         ? offenseStates.find(p =>
             p.id !== ballCarrierState?.id &&
@@ -1301,6 +1309,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 p.assignment === 'Bubble' ||
                 p.assignment?.includes('Tunnel_Screen_Catch') ||
                 p.assignment?.includes('WR_Screen_Catch') ||
+                p.assignment?.includes('Slip_Screen') ||
+                p.assignment === 'Screen' ||
                 p.assignment === 'Screen_Wait'
             )
         )
@@ -1313,7 +1323,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
              (
                  p.action?.includes('block') ||
                  (playType === 'run' && p.assignment?.startsWith('lead_')) ||
-                 (isScreenPlay && p.assignment?.includes('Wall')) ||
+                 (isScreenPlay && (p.assignment?.includes('Wall') || p.assignment?.includes('screen_block'))) ||
                  isReadyScreenLeadBlocker(p)
              )
     );
@@ -2483,35 +2493,38 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const pt = pState.routePath[pState.currentPathIndex];
                     const distToNode = getDistance(pState, pt);
                     const isFinalNode = pState.currentPathIndex === pState.routePath.length - 1;
-                    const isSettleRoute = ['Hitch', 'Curl', 'Dig', 'In', 'Drag', 'Slant'].some(r => pState.assignment?.includes(r));
+                    // ONLY stationary stop/break concepts throttle down in zone voids (Hitch, Curl, Button).
+                    // Moving cuts (Slants, Drags, Digs) must preserve forward momentum and never hook backward!
+                    const isSettleRoute = ['Hitch', 'Curl', 'Button', 'Stop'].some(r => pState.assignment?.includes(r));
                     const receiverProfile = getDecisionProfile(pState, playState.tick);
                     const recIQ = receiverProfile?.awareness ?? (pState.playbookIQ || pState.iq || 50);
                     
-                    // IQ & Instinct Layer: Smart receivers read zone voids and throttle down.
-                    // Lower IQ receivers usually run into coverage, but sometimes have a good feel for the soft spot.
                     const effectiveSettleIQ = recIQ + (Math.random() * 40 - 15);
                     
                     if (
                         isSettleRoute &&
-                        distToNode < 2.0 &&
+                        distToNode < 1.5 &&
                         effectiveSettleIQ > 60
                     ) {
                         const nearbyZoneDefenders = defenseStates.filter(d =>
-                            !d.isBlocked && d.y >= LOS + 2.0 && getDistance(pState, d) < 3.2
+                            !d.isBlocked && d.y >= LOS + 2.0 && getDistance(pState, d) < 3.0
                         );
 
                         if (nearbyZoneDefenders.length > 0) {
                             if (pState._hookDriftX === undefined) {
                                 const nearest = nearbyZoneDefenders.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
-                                const driftDirX = pState.x > nearest.x ? 1.0 : -1.0;
-                                const iqSettlingSpace = 0.8 + (Math.max(0, (effectiveSettleIQ - 50)) / 40) * 0.8;
-                                pState._hookDriftX = pState.x + (driftDirX * iqSettlingSpace);
-                                pState._hookDriftY = Math.max(LOS + 1.0, pState.y - 0.4);
+                                const driftDirX = pState.x > nearest.x ? 0.8 : -0.8;
+                                pState._hookDriftX = pState.x + driftDirX;
+                                pState._hookDriftY = pt.y; // Settle at the route landmark, never backward toward LOS
                             }
                             setPointIntent(pState, pState._hookDriftX, pState._hookDriftY, 0.3);
                             pState.contactReduction = 0.6;
                             break;
                         }
+                    } else {
+                        // Clear stale drift anchors if defender leaves or route advances
+                        pState._hookDriftX = undefined;
+                        pState._hookDriftY = undefined;
                     }
 
                     pState.contactReduction = distToNode < 1.0 ? 0.8 : 1.0;

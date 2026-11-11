@@ -869,10 +869,11 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         const maxCleanHoldTicks = isPerimeterBlock ? 25 : (blocker.role === 'OL' ? 45 : 30);
 
         if (ticksInBlock > maxCleanHoldTicks) {
-            const fatiguePenalty = 1.0 - ((ticksInBlock - maxCleanHoldTicks) * 0.04);
-            blockPower *= Math.max(0.15, fatiguePenalty);
-            // Defenders aggressively shed as time expires
-            shedPower *= (1.0 + ((ticksInBlock - maxCleanHoldTicks) * 0.035));
+            const fatiguePenalty = 1.0 - ((ticksInBlock - maxCleanHoldTicks) * 0.05);
+            blockPower *= Math.max(0.10, fatiguePenalty);
+            // After 3.5 seconds (85+ ticks), pass rushers aggressively collapse the pocket
+            const lateRushBoost = ticksInBlock > 85 ? 1.6 : 1.0;
+            shedPower *= (1.0 + ((ticksInBlock - maxCleanHoldTicks) * 0.045)) * lateRushBoost;
 
             // Force a natural disengagement if a perimeter block exceeds 45 ticks (~1.8 seconds)
             if (isPerimeterBlock && ticksInBlock > 45) {
