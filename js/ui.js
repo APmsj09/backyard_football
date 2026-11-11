@@ -2818,6 +2818,18 @@ export function renderFreeAgentsTab(gameState) {
 
     const teamsById = new Map((gameState.teams || []).map(t => [String(t.id), t]));
     const isOffseasonRecruiting = gameState.offseasonState?.phase === 'recruiting' && !gameState.offseasonState?.completed;
+
+    const recruitingProgress = gameState.offseasonState?.recruitingProgress;
+    const recruitingTeamKey = String(userTeam?.id ?? '');
+
+    const recruitingList = recruitingProgress
+        ?.teamRecruitingLists?.[recruitingTeamKey];
+
+    const recruitingListIds = new Set(
+        (Array.isArray(recruitingList) ? recruitingList : [])
+            .filter(entry => entry?.playerId != null)
+            .map(entry => String(entry.playerId))
+    );
     const isRegularSeason = Number(gameState.currentWeek) > 0 && gameState.currentWeek <= 9;
 
     // Check emergency roster shortage criteria (fewer than 8 healthy players)
@@ -2924,19 +2936,57 @@ export function renderFreeAgentsTab(gameState) {
                         : scouting.status;
 
                     // Action buttons by phase and context
+                    const isOnRecruitingList =
+                        recruitingListIds.has(String(p.id));
+
+                    const recruitingRecord =
+                        recruitingProgress?.recruits?.[String(p.id)];
+
+                    const canAddToRecruitingList =
+                        p.teamId == null &&
+                        isOffseasonRecruiting &&
+                        recruitingProgress?.initialized === true &&
+                        recruitingProgress.completed !== true &&
+                        Number(recruitingProgress.seasonYear) === Number(gameState.year) &&
+                        recruitingRecord?.status === 'available' &&
+                        recruitingRecord?.committedTeamId == null;
+
                     let actionButton = `
-                        <button class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider transition" onclick="app.openPlayerCard('${p.id}')">
+                        <button
+                            class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider transition"
+                            onclick="app.openPlayerCard('${p.id}')">
                             Dossier 📋
                         </button>
                     `;
 
-                    if (!p.teamId && isOffseasonRecruiting) {
-                        actionButton = `
-                            <button class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider shadow-sm transition" onclick="app.openBidModal('${p.id}')">
-                                Recruit 🤝
-                            </button>
-                        `;
-                    } else if (!p.teamId && isEmergencyNeed) {
+                    if (p.teamId == null && isOffseasonRecruiting) {
+                        actionButton = isOnRecruitingList
+                            ? `
+                                <button
+                                    type="button"
+                                    disabled
+                                    class="bg-slate-100 text-slate-500 font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider cursor-not-allowed">
+                                    On List
+                                </button>
+                            `
+                            : canAddToRecruitingList
+                                ? `
+                                    <button
+                                        type="button"
+                                        class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider shadow-sm transition"
+                                        onclick="window.app_addPlayerToRecruitingList('${p.id}')">
+                                        Add to List
+                                    </button>
+                                `
+                                : `
+                                    <button
+                                        type="button"
+                                        disabled
+                                        class="bg-slate-100 text-slate-400 font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider cursor-not-allowed">
+                                        Unavailable
+                                    </button>
+                                `;
+                    } else if (p.teamId == null && isEmergencyNeed) {
                         actionButton = `
                             <button class="bg-rose-700 hover:bg-rose-800 text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider shadow-sm transition animate-pulse" onclick="window.app_callEmergencyFriend('${p.id}')">
                                 Call Up 📞
@@ -6392,6 +6442,99 @@ function savePlayerRecruitingList(context) {
         getGameState() || context.gs
     );
 }
+
+window.app_addPlayerToRecruitingList = function(playerId) {
+    const context = getPlayerRecruitingListContext();
+
+    if (!context) {
+        showModal(
+            'Recruiting Unavailable',
+            '<p>The seven-day recruiting period is not currently active.</p>'
+        );
+        return;
+    }
+
+    const normalizedPlayerId = String(playerId ?? '');
+
+    const player = context.gs.players?.find(candidate =>
+        String(candidate?.id) === normalizedPlayerId
+    );
+
+    const record =
+        context.progress.recruits?.[normalizedPlayerId];
+
+    if (
+        !player ||
+        player.teamId != null ||
+        !record ||
+        record.status !== 'available' ||
+        record.committedTeamId != null
+    ) {
+        showModal(
+            'Recruit Unavailable',
+            '<p>This player is no longer available to add to your recruiting list.</p>'
+        );
+        return;
+    }
+
+    const alreadyListed = context.list.some(entry =>
+        String(entry?.playerId) === normalizedPlayerId
+    );
+
+    if (alreadyListed) {
+        showModal(
+            'Already on Recruiting List',
+            `<p>${player.name} is already on your recruiting list.</p>`
+        );
+        return;
+    }
+
+    const currentDay = Math.max(
+        1,
+        Math.floor(
+            Number(context.gs.offseasonState?.recruitingDay) || 1
+        )
+    );
+
+    context.list.push({
+        playerId: normalizedPlayerId,
+        assignedCoachId: null,
+        addedDay: currentDay,
+        lastWorkedDay: null,
+        lastCoachId: null,
+        lastAction: null
+    });
+
+    savePlayerRecruitingList(context);
+
+    const latestState = getGameState() || context.gs;
+    renderFreeAgentsTab(latestState);
+
+    const escapeHtml = value => String(value ?? '').replace(
+        /[&<>"']/g,
+        character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]
+    );
+
+    showModal(
+        'Added to Recruiting List',
+        `
+            <p>
+                <b>${escapeHtml(player.name)}</b> was added to your recruiting list on Day ${currentDay}.
+            </p>
+            <p class="mt-2 text-xs text-slate-500">
+                No staff hours, cash, or Favor Tokens were used. Your staff will work through the list as you advance recruiting days.
+            </p>
+        `,
+        null,
+        'Continue'
+    );
+};
 
 window.app_toggleRecruitingListCoachPicker = function(playerId) {
     const picker = document.getElementById(
