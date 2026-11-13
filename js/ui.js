@@ -51,6 +51,9 @@ let activeLiveGame = null;
 let lastRenderedFrame = null;
 let liveGameCallback = null;
 let liveGameInterval = null;
+let liveGameSessionId = 0;
+let liveGameStepTimeout = null;
+let liveGamePlaybackTimeout = null;
 let isSkipping = false;
 let isPaused = false;
 
@@ -18660,6 +18663,12 @@ window.app_selectDraftTeam = function(teamId) {
 };
 
 export function startLiveGameLoop(initialGameState, onComplete) {
+    liveGameSessionId++;
+    clearTimeout(liveGameStepTimeout);
+    clearTimeout(liveGamePlaybackTimeout);
+    liveGameStepTimeout = null;
+    liveGamePlaybackTimeout = null;
+
     activeLiveGame = initialGameState;
     currentLiveGameResult = { homeTeam: activeLiveGame.homeTeam, awayTeam: activeLiveGame.awayTeam };
     liveGameCallback = onComplete;
@@ -18975,8 +18984,8 @@ function updateLiveScoreboard() {
     }
 }
 
-function runLiveGameStep() {
-    if (!activeLiveGame) return;
+function runLiveGameStep(sessionId = liveGameSessionId) {
+    if (sessionId !== liveGameSessionId || !activeLiveGame) return;
     if (activeLiveGame.isGameOver) {
         updateLiveScoreboard();
         renderLiveBoxScore(activeLiveGame);
@@ -18990,13 +18999,18 @@ function runLiveGameStep() {
 
     if (stepResult.visualizationFrames?.length > 0) {
         playVisualization(stepResult.visualizationFrames, () => {
+            if (sessionId !== liveGameSessionId) return;
             flushLiveLogs();
             updateLiveScoreboard();
-            if (isSkipping) runLiveGameStep();
-            else setTimeout(runLiveGameStep, isPaused ? 100 : 1200);
-        });
+            if (isSkipping) runLiveGameStep(sessionId);
+            else {
+                clearTimeout(liveGameStepTimeout);
+                liveGameStepTimeout = setTimeout(() => runLiveGameStep(sessionId), isPaused ? 100 : 1200);
+            }
+        }, sessionId);
     } else {
-        setTimeout(runLiveGameStep, 400);
+        clearTimeout(liveGameStepTimeout);
+        liveGameStepTimeout = setTimeout(() => runLiveGameStep(sessionId), 400);
     }
 }
 
@@ -19173,11 +19187,13 @@ function drawLiveGameFieldFrame(frame) {
     );
 }
 
-function playVisualization(frames, onComplete) {
+function playVisualization(frames, onComplete, sessionId = liveGameSessionId) {
     let index = 0;
     const runNext = () => {
+        if (sessionId !== liveGameSessionId) return;
         if (isPaused) {
-            setTimeout(runNext, 100);
+            clearTimeout(liveGamePlaybackTimeout);
+            liveGamePlaybackTimeout = setTimeout(runNext, 100);
             return;
         }
         if (isSkipping) {
@@ -19209,7 +19225,8 @@ function playVisualization(frames, onComplete) {
             if (onComplete) onComplete();
             return;
         }
-        setTimeout(runNext, liveGameSpeed);
+        clearTimeout(liveGamePlaybackTimeout);
+        liveGamePlaybackTimeout = setTimeout(runNext, liveGameSpeed);
     };
     runNext();
 }
@@ -19340,6 +19357,12 @@ export function renderLiveBoxScore(activeGame) {
 }
 
 function finishLiveGame() {
+    liveGameSessionId++;
+    clearTimeout(liveGameStepTimeout);
+    clearTimeout(liveGamePlaybackTimeout);
+    liveGameStepTimeout = null;
+    liveGamePlaybackTimeout = null;
+
     if (liveGameCallback && activeLiveGame) {
         const res = activeLiveGame;
         activeLiveGame = null;

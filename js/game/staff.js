@@ -5694,22 +5694,45 @@ export function executeRecruitingAction(
         Number(assignmentResult.effectiveHours) || 0
     );
 
-    // Repeating the same tactic has diminishing returns. Teams benefit
-    // from varying their approach instead of spamming one action.
+
+    // General recruiting approaches share diminishing returns.
+    // Switching between outreach, role discussion, and practice invitations
+    // does not reset the prospect's familiarity with the recruiting pitch.
     const history = Array.isArray(recruitRecord.history)
         ? recruitRecord.history
         : [];
 
-    const repeatedActions = history.filter(entry =>
+    const generalContactActions = new Set([
+        'outreach',
+        'roleDiscussion',
+        'practiceInvitation'
+    ]);
+
+    const currentRecruitingYear = Number(progress.seasonYear);
+
+    const isCurrentRecruitingAction = entry =>
         entry?.type === 'recruiting_action' &&
         String(entry.teamId) === teamKey &&
-        entry.action === actionType
+        Number(entry.year) === currentRecruitingYear;
+
+    const generalContactCount = history.filter(entry =>
+        isCurrentRecruitingAction(entry) &&
+        generalContactActions.has(entry.action)
     ).length;
 
-    const repetitionMultiplier = Math.max(
-        0.65,
-        1 - repeatedActions * 0.08
-    );
+    const teammateConnectionCount = history.filter(entry =>
+        isCurrentRecruitingAction(entry) &&
+        entry.action === 'teammateConnection'
+    ).length;
+
+    // General pitches lose effectiveness exponentially.
+    // Teammate connections decay more gradually because social
+    // relationships can support more than one conversation.
+    const repetitionMultiplier =
+        actionType === 'teammateConnection'
+            ? Math.max(0.50, Math.pow(0.85, teammateConnectionCount))
+            : Math.max(0.25, Math.pow(0.75, generalContactCount));
+
 
     // Each player responds differently to recruiting approaches.
     // These preferences remain private to the player; recruiting staff
@@ -8495,6 +8518,37 @@ export function processAiRecruitingDay(gameState) {
                 .filter(Boolean)
                 .sort((a, b) => {
                     if (isPlayerControlledTeam) {
+                        const getLastWorkedDay = target => {
+                            const entry = userRecruitingTargets.get(
+                                String(target.player?.id)
+                            );
+
+                            const lastWorkedYear = Number(
+                                entry?.lastWorkedYear
+                            );
+
+                            const lastWorkedDay = Number(
+                                entry?.lastWorkedDay
+                            );
+
+                            return (
+                                lastWorkedYear === Number(gameState.year) &&
+                                Number.isFinite(lastWorkedDay) &&
+                                lastWorkedDay > 0
+                            )
+                                ? lastWorkedDay
+                                : 0;
+                        };
+
+                        const aLastWorkedDay = getLastWorkedDay(a);
+                        const bLastWorkedDay = getLastWorkedDay(b);
+
+                        // Work prospects who have received less attention first.
+                        // GM priority remains the tie-breaker.
+                        if (aLastWorkedDay !== bLastWorkedDay) {
+                            return aLastWorkedDay - bLastWorkedDay;
+                        }
+
                         const aRank =
                             userRecruitingPriorityIndices.get(
                                 String(a.player?.id)
@@ -8505,17 +8559,15 @@ export function processAiRecruitingDay(gameState) {
                                 String(b.player?.id)
                             ) ?? Number.MAX_SAFE_INTEGER;
 
-                        // The GM's ranked list is the primary source
-                        // of recruiting priority.
                         if (aRank !== bRank) {
                             return aRank - bRank;
                         }
                     }
 
                     // AI teams continue to rank prospects by evaluation.
-                    // This also provides a fallback for equal user ranks.
                     return b.score - a.score;
                 });
+
 
             if (evaluatedTargets.length === 0) continue;
 
@@ -8658,6 +8710,7 @@ export function processAiRecruitingDay(gameState) {
 
                 if (userListEntry) {
                     userListEntry.lastWorkedDay = day;
+                    userListEntry.lastWorkedYear = Number(gameState.year);
                     userListEntry.lastCoachId = String(coach.id);
                     userListEntry.lastAction = selectedAction.type;
                 }

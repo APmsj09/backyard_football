@@ -16,7 +16,7 @@ import {
     updateQBDecision, updateThrowoffDecision
 } from './ai.js';
 import {
-    initPlayTelemetry, finalizePlayTelemetry,logPlayDebug
+    initPlayTelemetry, finalizePlayTelemetry, logPlayDebug, logPlayEventSnapshot
 } from './telemetry.js';
 import {
     captureFrame
@@ -48,6 +48,7 @@ import {
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
 const WEEKS_IN_SEASON = 9;
+let nextPlayTelemetryCounter = 1;
 
 // Lightweight playcalling knowledge + aggregate tendency tracking.
 const PLAYCALL_POSITION_SLOTS = {
@@ -1183,7 +1184,8 @@ function initiateLateralToss(playState, thrower, receiver, purpose) {
             flightTicks,
             targetPlayerId: receiver.id
         },
-        playState.tick
+        playState.tick,
+        playState.playId
     );
 
     return true;
@@ -3365,7 +3367,20 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
     // Play-call tendencies are recorded once, after player setup succeeds,
     // in the guarded recording block below.
 
+    const telemetryEnabledForPlay = options?.enableTelemetry !== false;
+    const playId = context?.playId || `play_${Date.now()}_${nextPlayTelemetryCounter++}`;
+    const telemetryContext = {
+        ...context,
+        playId,
+        offenseTeam: offense?.name || offense?.id || null,
+        defenseTeam: defense?.name || defense?.id || null,
+        isLive,
+        fastSim: Boolean(options?.fastSim)
+    };
+    let telemetryInitialized = false;
+
     let playState = {
+        playId,
         playIsLive: true, tick: 0,
         visualizationFrames: isLive ? [] : null,
         maxTicks: 1000,
@@ -3388,8 +3403,6 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         blockBattles: [],
         resolvedDepth: null
     };
-
-    //initPlayTelemetry(context, playState, finalOffensivePlayKey, defensivePlayKey);
 
     try {
         setupInitialPlayerStates(
@@ -3490,37 +3503,50 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             );
         }
 
-        initPlayTelemetry(context, playState, finalOffensivePlayKey, defensivePlayKey);
-        // Record the actual starting state AFTER player setup.
-        logPlayDebug(
-            'PLAY_START',
-            'Play setup complete; simulation ready',
-            {
-                type: playState.type,
-                lineOfScrimmage: playState.lineOfScrimmage,
+        if (telemetryEnabledForPlay) {
+            initPlayTelemetry(telemetryContext, playState, finalOffensivePlayKey, defensivePlayKey);
+            telemetryInitialized = true;
 
-                ball: {
-                    x: playState.ballState?.x ?? null,
-                    y: playState.ballState?.y ?? null,
-                    z: playState.ballState?.z ?? null,
-                    inAir: playState.ballState?.inAir ?? null
+            logPlayEventSnapshot(
+                'Snap / Play Start',
+                playState.activePlayers,
+                playState.ballState,
+                playState.tick,
+                playState.playId
+            );
+
+            // Record the actual starting state AFTER player setup.
+            logPlayDebug(
+                'PLAY_START',
+                'Play setup complete; simulation ready',
+                {
+                    type: playState.type,
+                    lineOfScrimmage: playState.lineOfScrimmage,
+
+                    ball: {
+                        x: playState.ballState?.x ?? null,
+                        y: playState.ballState?.y ?? null,
+                        z: playState.ballState?.z ?? null,
+                        inAir: playState.ballState?.inAir ?? null
+                    },
+
+                    flaggedCarriers: playState.activePlayers
+                        .filter(p => p.hasBall || p.isBallCarrier)
+                        .map(p => ({
+                            id: p.id,
+                            name: p.name,
+                            slot: p.slot,
+                            x: p.x,
+                            y: p.y,
+                            isOffense: p.isOffense,
+                            hasBall: p.hasBall,
+                            isBallCarrier: p.isBallCarrier
+                        }))
                 },
-
-                flaggedCarriers: playState.activePlayers
-                    .filter(p => p.hasBall || p.isBallCarrier)
-                    .map(p => ({
-                        id: p.id,
-                        name: p.name,
-                        slot: p.slot,
-                        x: p.x,
-                        y: p.y,
-                        isOffense: p.isOffense,
-                        hasBall: p.hasBall,
-                        isBallCarrier: p.isBallCarrier
-                    }))
-            },
-            playState.tick
-        );
+                playState.tick,
+                playState.playId
+            );
+        }
 
         if (isLive && gameLog) {
             playState.visualizationFrames.push(
@@ -3531,16 +3557,24 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         playResult.outcome = 'turnover';
         playResult.possessionChange = true;
 
-        logPlayDebug(
-            'PLAY_SETUP_ERROR',
-            'Player setup failed; simulation did not start',
-            {
-                message: setupError?.message ?? String(setupError)
-            },
-            playState.tick
-        );
+        if (telemetryEnabledForPlay) {
+            if (!telemetryInitialized) {
+                initPlayTelemetry(telemetryContext, playState, finalOffensivePlayKey, defensivePlayKey);
+                telemetryInitialized = true;
+            }
 
-        finalizePlayTelemetry(playResult, ballOn, playState);
+            logPlayDebug(
+                'PLAY_SETUP_ERROR',
+                'Player setup failed; simulation did not start',
+                {
+                    message: setupError?.message ?? String(setupError)
+                },
+                playState.tick,
+                playState.playId
+            );
+
+            finalizePlayTelemetry(playResult, ballOn, playState, playState.playId);
+        }
 
         return {
             playResult,
@@ -3575,7 +3609,9 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
         while (playState.playIsLive && playState.tick < playState.maxTicks) {
             playState.tick++;
-            window.__CURRENT_TICK__ = playState.tick;
+            if (telemetryEnabledForPlay) {
+                globalThis.__CURRENT_TICK__ = playState.tick;
+            }
 
             playState.activePlayers.forEach(p => {
                 if (p.stunnedTicks > 0) p.stunnedTicks--;
@@ -3784,7 +3820,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
                         const readLog = !defenderActuallyBites ? " (misread!)" : "";
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ⚡ RPO: ${qb1.name} reads the defender${readLog}, pulls the ball, and looks to throw!`, playState);
-                        logPlayDebug('RPO_DECISION', `${qb1.name} pulled the ball on RPO`, { read: 'pull_pass', defender: conflictDefender?.name, wasCorrect: defenderActuallyBites });
+                        logPlayDebug('RPO_DECISION', `${qb1.name} pulled the ball on RPO`, { read: 'pull_pass', defender: conflictDefender?.name, wasCorrect: defenderActuallyBites }, playState.tick, playState.playId);
                     } else {
                         playState.rpoPhase = 'give';
                         playState.type = 'run';
@@ -3801,7 +3837,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
 
                         const readLog = defenderActuallyBites ? " (misread!)" : "";
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏈 RPO: ${qb1.name} hands off inside to ${rb1.name}${readLog}!`, playState);
-                        logPlayDebug('RPO_DECISION', `${qb1.name} gave to RB on RPO`, { read: 'give_run', defender: conflictDefender?.name, wasCorrect: !defenderActuallyBites });
+                        logPlayDebug('RPO_DECISION', `${qb1.name} gave to RB on RPO`, { read: 'give_run', defender: conflictDefender?.name, wasCorrect: !defenderActuallyBites }, playState.tick, playState.playId);
                     }
                 }
             }
@@ -3970,7 +4006,8 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                                             isBallCarrier: p.isBallCarrier
                                         }))
                                 },
-                                playState.tick
+                                playState.tick,
+                                playState.playId
                             );
                         }
                         // Reaching y <= 10 is reaching the returner's
@@ -4121,7 +4158,8 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                                     vz: ball.vz
                                 }
                             },
-                            playState.tick
+                            playState.tick,
+                            playState.playId
                         );
 
                         if (gameLog) gameLog.push(`🏈 ${recPlayer.name} recovers!`);
@@ -4154,18 +4192,21 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             }
         }
      } catch (e) {
-        logPlayDebug(
-            'PLAY_SIMULATION_ERROR',
-            'Simulation loop crashed',
-            {
-                message: e?.message ?? String(e),
-                name: e?.name ?? 'Error',
-                tick: playState.tick,
-                playType: playState.type,
-                playIsLive: playState.playIsLive
-            },
-            playState.tick
-        );
+        if (telemetryEnabledForPlay) {
+            logPlayDebug(
+                'PLAY_SIMULATION_ERROR',
+                'Simulation loop crashed',
+                {
+                    message: e?.message ?? String(e),
+                    name: e?.name ?? 'Error',
+                    tick: playState.tick,
+                    playType: playState.type,
+                    playIsLive: playState.playIsLive
+                },
+                playState.tick,
+                playState.playId
+            );
+        }
 
         console.error("Simulation Loop Crash:", e);
     }
@@ -4434,11 +4475,14 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         }
     }
 
-    finalizePlayTelemetry(
-        playResult,
-        playState.finalBallY,
-        playState
-    );
+    if (telemetryEnabledForPlay) {
+        finalizePlayTelemetry(
+            playResult,
+            playState.finalBallY,
+            playState,
+            playState.playId
+        );
+    }
     
     return {
         playResult,
@@ -4472,7 +4516,7 @@ function normalizeFormationLookupKey(formationMap, value, fallbackKey) {
     ) || fallbackKey;
 }
 
-export function simulateLivePlayStep(gameInstance, mode = 'live') {
+export function simulateLivePlayStep(gameInstance, mode = 'live', options = {}) {
     const isLive = mode === 'live';
     if (!gameInstance || !gameInstance.possession || !gameInstance.homeTeam || !gameInstance.awayTeam) {
         return { playResult: { outcome: 'error' }, finalBallY: 35, log: [], visualizationFrames: [] };
@@ -4698,7 +4742,10 @@ export function simulateLivePlayStep(gameInstance, mode = 'live') {
             offPlayKey,
             defPlayKey,
             context,
-            { fastSim: !isLive },
+            {
+                fastSim: !isLive,
+                enableTelemetry: options?.enableTelemetry !== false
+            },
             isLive
         );
     } finally {
@@ -5185,7 +5232,7 @@ export function recordTeamGamePlanningOutcome(
     );
 }
 
-export function simulateMatchFast(homeTeam, awayTeam) {
+export function simulateMatchFast(homeTeam, awayTeam, options = {}) {
     if (!homeTeam || !awayTeam) return null;
 
     // Youth games use ordered probabilistic matchups; main-league games stay on the full engine.
@@ -5213,7 +5260,7 @@ export function simulateMatchFast(homeTeam, awayTeam) {
     };
 
     while (!matchGame.isGameOver) {
-        simulateLivePlayStep(matchGame, 'fast');
+        simulateLivePlayStep(matchGame, 'fast', options);
     }
 
         finalizeGameResults(
@@ -5314,7 +5361,7 @@ export function simulateWeek(options = {}) {
     return weeklyGames.map(match => {
         try {
             if (!match?.home || !match?.away) return null;
-            const res = simulateMatchFast(match.home, match.away);
+            const res = simulateMatchFast(match.home, match.away, { enableTelemetry: false });
             if (res) {
                 match.homeScore = res.homeScore;
                 match.awayScore = res.awayScore;

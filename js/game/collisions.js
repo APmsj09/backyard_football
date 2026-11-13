@@ -78,7 +78,7 @@ export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) 
         playState.ballState.isLoose = true;
         playState.ballState.inAir = false;
 
-        logPlayEventSnapshot('Fumble Forced', playState.activePlayers, playState.ballState, playState.tick);
+        logPlayEventSnapshot('Fumble Forced', playState.activePlayers, playState.ballState, playState.tick, playState.playId);
 
         const dx = ballCarrierState.x - tacklerState.x;
         const dy = ballCarrierState.y - tacklerState.y;
@@ -200,7 +200,7 @@ export function checkBlockCollisions(playState, gameLog = null) {
                     rusherSpeed: targetSpd,
                     blockerAgility: blockerAgi,
                     speedDelta: targetSpd - blockerAgi
-                });
+                }, playState.tick, playState.playId);
 
                 if (gameLog && Math.random() < 0.25) {
                     pushGameLog(gameLog, `[Tick ${playState.tick}] ⚡ ${target.name} burns ${blocker.name} around the edge with pure speed!`, playState);
@@ -317,7 +317,8 @@ export function checkTackleCollisions(playState, gameLog) {
                             getDistance(p, carrier).toFixed(2)
                         )
                     },
-                    playState.tick
+                    playState.tick,
+                    playState.playId
                 );
             }
 
@@ -374,7 +375,8 @@ export function checkTackleCollisions(playState, gameLog) {
                             (1 - slowFactor) * 100
                         )
                     },
-                    playState.tick
+                    playState.tick,
+                    playState.playId
                 );
             }
 
@@ -573,7 +575,7 @@ export function checkTackleCollisions(playState, gameLog) {
             carrierBrokenTackles: carrier.tacklesBrokenThisPlay || 0,
             move: isTruckAttempt ? 'trucking' : 'standard',
             truckAdvantage: Number(truckAdvantage.toFixed(3))
-        });
+        }, playState.tick, playState.playId);
 
         if (Math.random() < successChance) {
             playState.playIsLive = false;
@@ -581,7 +583,7 @@ export function checkTackleCollisions(playState, gameLog) {
             playState.finalBallY = carrier.y;
             playState.statEvents.push({ type: 'tackle', playerId: defender.id });
             
-            logPlayEventSnapshot('Tackle / Play Dead', playState.activePlayers, playState.ballState, playState.tick);
+            logPlayEventSnapshot('Tackle / Play Dead', playState.activePlayers, playState.ballState, playState.tick, playState.playId);
 
             const inOwnEndzone = (carrier.isOffense && carrier.y <= 10.0) || (!carrier.isOffense && carrier.y >= 110.0);
             const caughtInEndzone = playState.returnStartY !== null && ((carrier.isOffense && playState.returnStartY <= 10.0) || (!carrier.isOffense && playState.returnStartY >= 110.0));
@@ -734,7 +736,7 @@ export function checkFumbleRecovery(playState, gameLog, tackleRange) {
         playState.returnStartY = bestPlayer.y;
     }
 
-    logPlayEventSnapshot('Fumble Recovered', playState.activePlayers, playState.ballState, playState.tick);
+    logPlayEventSnapshot('Fumble Recovered', playState.activePlayers, playState.ballState, playState.tick, playState.playId);
 
     return {
         playerState: bestPlayer,
@@ -962,7 +964,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     pushAmount = Math.max(0.2, pushAmount + 0.15);
 
                     if (!battle.loggedBullRush) {
-                        logPlayDebug('TRENCH_BULL_RUSH', `${defender.name} is walking ${blocker.name} back to the QB!`, { defStr, blkStr });
+                        logPlayDebug('TRENCH_BULL_RUSH', `${defender.name} is walking ${blocker.name} back to the QB!`, { defStr, blkStr }, playState.tick, playState.playId);
                         battle.loggedBullRush = true;
                     }
                 }
@@ -1150,7 +1152,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 battle.status = 'ongoing';
                 return;
             }
-            if (isPassRush) logPlayDebug('BLOCK_SHED', `${defender.name} defeated ${blocker.name}'s block`, { durationTicks: dur });
+            if (isPassRush) logPlayDebug('BLOCK_SHED', `${defender.name} defeated ${blocker.name}'s block`, { durationTicks: dur }, playState.tick, playState.playId);
 
             const blockerAwayX = blocker.x - defender.x;
             const blockerAwayY = blocker.y - defender.y;
@@ -1216,7 +1218,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, {
                         engagementDurationTicks: dur,
                         downedTicks: defender.downedTicks
-                    });
+                    }, playState.tick, playState.playId);
 
                     defender._pancakedThisPlay = true;
                     defender.action = 'pursuit';
@@ -1337,7 +1339,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 playState.finalBallY = playState.lineOfScrimmage;
                 if (gameLog && !ball.isThrowAway) pushGameLog(gameLog, `[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`, playState);
                 
-                logPlayEventSnapshot('Pass Incomplete', playState.activePlayers, ball, playState.tick);
+                logPlayEventSnapshot('Pass Incomplete', playState.activePlayers, ball, playState.tick, playState.playId);
             }
         }
         return;
@@ -1533,7 +1535,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 logPlayDebug('PUNT_CATCH_ATTEMPT', `${bestCandidate.name} fielding punt`, {
                     catchProbability: `${Math.round(catchScore)}%`,
                     hands: hndEff
-                });
+                }, playState.tick, playState.playId);
             } else {
                 // Realistic INT rate: Interceptions require exceptional hands and positioning.
                 // Normal defensive plays result in incomplete passes (swats/PBUs), not turnovers.
@@ -1549,7 +1551,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     rawIntProbability: `${Math.round(catchScore)}%`,
                     hands: hndEff,
                     attackersContesting: attackersNear
-                });
+                }, playState.tick, playState.playId);
             }
         } else {
             // Offensive Catch logic
@@ -1566,7 +1568,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 baseHands: hndEff,
                 defendersClosingIn: defendersNear,
                 isWideOpen: defendersNear === 0
-            });
+            }, playState.tick, playState.playId);
         }
 
         if (playState.type === 'punt') catchScore += 15;
@@ -1586,7 +1588,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 ballType: playState.type,
                 candidateIsDefense: !bestCandidate.isOffense,
                 ballHeight: Number((ball.z || 0).toFixed(2))
-            });
+            }, playState.tick, playState.playId);
 
                     if (Math.random() * 100 < catchScore) {
             const wasLateral = Boolean(ball.isLateral);
@@ -1753,7 +1755,8 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                             recoveredBy: bestCandidate.id,
                             throwerId: lateralThrowerId
                         },
-                        playState.tick
+                        playState.tick,
+                        playState.playId
                     );
 
                     if (gameLog) {
@@ -1795,7 +1798,8 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                             quarterbackId: bestCandidate.id,
                             tick: playState.tick
                         },
-                        playState.tick
+                        playState.tick,
+                        playState.playId
                     );
 
                     if (gameLog) {
@@ -1886,7 +1890,8 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                                 isBallCarrier: p.isBallCarrier
                             }))
                     },
-                    playState.tick
+                    playState.tick,
+                    playState.playId
                 );
 
                 // In this simulation, y >= 110 is the receiving team's
@@ -1908,7 +1913,8 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                             catchY: bestCandidate.y,
                             finalBallY: playState.finalBallY
                         },
-                        playState.tick
+                        playState.tick,
+                        playState.playId
                     );
 
                     if (gameLog) {
@@ -1943,21 +1949,21 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     interceptor: bestCandidate.name,
                     returnStartY: Number(bestCandidate.y.toFixed(1)),
                     tick: playState.tick
-                });
+                }, playState.tick, playState.playId);
                 playState.interceptionOccurred = true;
                 playState.possessionChanged = true;
                 playState.turnover = true;
                 playState.returnStartY = bestCandidate.y;
                 playState.statEvents.push({ type: 'interception', interceptorId: bestCandidate.id, throwerId: ball.throwerId });
                 
-                logPlayEventSnapshot('Interception', playState.activePlayers, ball, playState.tick);
+                logPlayEventSnapshot('Interception', playState.activePlayers, ball, playState.tick, playState.playId);
                 return;
             }
 
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👍 CATCH! ${bestCandidate.role} ${bestCandidate.name} at (${actionX}, ${actionY}, z:${actionZ})`, playState);
             playState.statEvents.push({ type: 'completion', receiverId: bestCandidate.id, qbId: ball.throwerId, yards: 0 });
             
-            logPlayEventSnapshot('Pass Caught', playState.activePlayers, ball, playState.tick);
+            logPlayEventSnapshot('Pass Caught', playState.activePlayers, ball, playState.tick, playState.playId);
             return;
 
         } else if (ball.isLateral) {
@@ -2112,7 +2118,8 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     ballX: Number(ball.x.toFixed(2)),
                     ballY: Number(ball.y.toFixed(2))
                 },
-                playState.tick
+                playState.tick,
+                playState.playId
             );
 
             if (gameLog) {
@@ -2190,7 +2197,7 @@ if (playState.type === 'punt') {
                 playState.finalBallY = playState.lineOfScrimmage;
                 if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`, playState);
                 
-                logPlayEventSnapshot('Pass Incomplete', playState.activePlayers, ball, playState.tick);
+                logPlayEventSnapshot('Pass Incomplete', playState.activePlayers, ball, playState.tick, playState.playId);
             } else if (wasCaught && playState.playIsLive) {
                 playState.playIsLive = false;
                 if (gameLog && !playState.fumbleOccurred) pushGameLog(gameLog, `[Tick ${playState.tick}] ⏱️ Ball hits the ground.`, playState);

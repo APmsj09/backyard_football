@@ -104,7 +104,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         if (debugEnabled && pState._lastLoggedGuess !== 'pass') {
             logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [PASS] (Ball In Air)`, {
                 confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
-            });
+            }, tick, playState?.playId);
             pState._lastLoggedGuess = 'pass';
         }
         return { guess: 'pass', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
@@ -120,7 +120,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         if (debugEnabled && pState._lastLoggedGuess !== 'run') {
             logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [RUN] (${observedRunCarrier ? 'Observed ball carrier' : 'QB scramble'})`, {
                 confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
-            });
+            }, tick, playState?.playId);
             pState._lastLoggedGuess = 'run';
         }
         return { guess: 'run', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
@@ -399,7 +399,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
                 x: observedCarrier.x,
                 y: observedCarrier.y
             } : null
-        }, tick);
+        }, tick, playState?.playId);
 
         pState._lastLoggedGuess = guess;
     }
@@ -591,7 +591,8 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
                     pressureScore: Number(maxPressure.toFixed(2)),
                     ballInAir: isBallInAir
                 },
-                playState.tick
+                playState.tick,
+                playState.playId
             );
             safetyState._lastLoggedHelpTargetId = helpTargetId;
         }
@@ -1064,7 +1065,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                 inTraffic,
                 nearestVisibleThreat: nearestVisibleDefender?.name || null,
                 topChoices: evaluatedLanesTracker.slice(0, 3)
-            }, playState.tick);
+            }, playState.tick, playState?.playId);
         }
     } else if (runner._lockedLaneX === undefined) {
         runner._lockedLaneX = bestTargetX;
@@ -1131,7 +1132,9 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                 logPlayDebug(
                     'CARRIER_DECISION',
                     `${runner.name} lowers shoulder to TRUCK`,
-                    { threat: immediateThreat.name }
+                    { threat: immediateThreat.name },
+                    playState.tick,
+                    playState?.playId
                 );
 
                 runner._lastLoggedAction = 'trucking';
@@ -1168,7 +1171,13 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                 runner._dodgeCooldown = 8;
 
                 if (debugEnabled) {
-                    logPlayDebug('CARRIER_DECISION', `${runner.name} EVADES ${dodgeDir === 1 ? 'right' : 'left'}`, { threat: immediateThreat.name });
+                    logPlayDebug(
+                        'CARRIER_DECISION',
+                        `${runner.name} EVADES ${dodgeDir === 1 ? 'right' : 'left'}`,
+                        { threat: immediateThreat.name },
+                        playState.tick,
+                        playState?.playId
+                    );
                     runner._lastLoggedAction = 'dodge';
                 }
             } else {
@@ -1221,7 +1230,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
                     .slice()
                     .sort((a, b) => b.score - a.score)
                     .slice(0, 3)
-            }, playState.tick);
+            }, playState.tick, playState?.playId);
 
             runner._lastLoggedTargetX = bestTargetX;
         }
@@ -1410,7 +1419,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             tick: playState.tick,
             targetSlot: progression[readIndex],
             readIndex: readIndex + 1
-        });
+        }, playState.tick, playState.playId);
         qbState._lastReadIndex = readIndex;
     }
 
@@ -1431,7 +1440,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                     logPlayDebug('QB_EYE_MANIPULATION', `${qbState.name} uses eyes to look safety off primary read (${progression[0]}) using decoy ${decoy.slot}`, {
                         trueRead: progression[0],
                         decoySlot: decoy.slot
-                    });
+                    }, playState.tick, playState.playId);
                     qbState._lastLoggedDecoy = decoy.slot;
                 }
                 if (gameLog && playState.tick === 25 && Math.random() < 0.1) {
@@ -1901,7 +1910,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 logPlayDebug('QB_SCRAMBLE', `${qbState.name} commits to run`, {
                     openRunningYards: Number(openRunningYards.toFixed(1)),
                     wouldGainFirstDown
-                });
+                }, playState.tick, playState.playId);
             }
             return;
         }
@@ -1921,7 +1930,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             if (debugEnabled) {
                 logPlayDebug('QB_THROW_AWAY', `${qbState.name} threw ball away to avoid sack`, {
                     threatDist: Number(getDistance(qbState, immediateThreat).toFixed(2))
-                });
+                }, playState.tick, playState.playId);
             }
             playState.ballState.inAir = true;
             playState.ballState.throwInitiated = true;
@@ -2107,7 +2116,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                         name: pressureDefender.name,
                         distance: Number(getDistance(qbState, pressureDefender).toFixed(2))
                     } : null
-                }, playState.tick);
+                }, playState.tick, playState.playId);
             }
 
             if (gameLog) {
@@ -2137,7 +2146,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                         distance: Number(getDistance(qbState, pressureDefender).toFixed(2))
                     } : null,
                     hasCompletedDropback: Boolean(qbState.hasCompletedDropback)
-                }, playState.tick);
+                }, playState.tick, playState.playId);
 
                 qbState._lastLoggedHoldReadCount = numReadsVisible;
                 qbState._lastLoggedHoldTick = playState.tick;
@@ -2256,7 +2265,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                                 scrambleChance.toFixed(4)
                             )
                         },
-                        playState.tick
+                        playState.tick,
+                        playState.playId
                     );
                 }
 
@@ -2360,7 +2370,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                         yardsToGo,
                         isDesperationTime
                     },
-                    playState.tick
+                    playState.tick,
+                    playState.playId
                 );
             }
         } else if (willThrowAway) {
@@ -2659,7 +2670,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
             airDistance: Number(finalDist.toFixed(1)),
             accuracyApplied: Math.round(accuracy),
             flightTimeSec: Number(t.toFixed(2))
-        });
+        }, playState.tick, playState.playId);
     }
 
     if (gameLog) {

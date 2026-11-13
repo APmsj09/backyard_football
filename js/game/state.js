@@ -589,6 +589,38 @@ export function getPublicPlayerInfo(player) {
     };
 }
 
+function normalizeScoutingNetworkEvidence(evidence) {
+    const source = evidence &&
+        typeof evidence === 'object' &&
+        !Array.isArray(evidence)
+        ? evidence
+        : {};
+
+    const normalizeIds = values => Array.isArray(values)
+        ? [...new Set(
+            values
+                .filter(id =>
+                    id != null &&
+                    String(id).trim() !== ''
+                )
+                .map(String)
+        )].slice(0, 32)
+        : [];
+
+    return {
+        version: 1,
+        knownTeammateFriendIds: normalizeIds(
+            source.knownTeammateFriendIds
+        ),
+        knownTeammateRivalIds: normalizeIds(
+            source.knownTeammateRivalIds
+        ),
+        knownTeammateSocialCircleIds: normalizeIds(
+            source.knownTeammateSocialCircleIds
+        )
+    };
+}
+
 /** Stores a compact, team-owned scouting report. */
 export function setTeamScoutingReport(team, playerId, report) {
     if (!team ||
@@ -680,6 +712,9 @@ export function setTeamScoutingReport(team, playerId, report) {
                 ? evaluation.summary.slice(0, 500)
                 : null
         },
+        networkEvidence: normalizeScoutingNetworkEvidence(
+            report.networkEvidence ?? existingReport?.networkEvidence
+        ),
         evaluatorId: typeof report.evaluatorId === 'string'
             ? report.evaluatorId
             : null,

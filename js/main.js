@@ -4,6 +4,10 @@ import * as UI from './ui.js';
 import {
     recordTeamGamePlanningOutcome
 } from './game/play_resolution.js';
+import {
+    clearPlayTelemetry,
+    downloadPlayDebugFile
+} from './game/telemetry.js';
 import { isDebugMode, setDebugMode, debugCollector } from './game.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall, calculateSlotSuitability } from './game/player.js';
 import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
@@ -3823,7 +3827,7 @@ async function startLiveGame(playerGameMatch) {
 
     for (const match of allGames) {
         if (match.home.id === playerGameMatch.home.id && match.away.id === playerGameMatch.away.id) continue;
-        const result = Game.simulateMatchFast(match.home, match.away);
+        const result = Game.simulateMatchFast(match.home, match.away, { enableTelemetry: false });
         if (result) {
             match.homeScore = result.homeScore;
             match.awayScore = result.awayScore;
@@ -3832,6 +3836,7 @@ async function startLiveGame(playerGameMatch) {
         }
     }
 
+    clearPlayTelemetry();
     Game.resetGameStats(playerGameMatch.home, playerGameMatch.away);
 
     const liveGameParams = {
@@ -8585,16 +8590,32 @@ function main() {
         const report = Game.generatePlayDebugReport();
         const modalHtml = `
             <div class="flex flex-col gap-3">
-                <div class="flex justify-between items-center text-xs text-slate-500">
+                <div class="flex flex-wrap justify-between items-center gap-2 text-xs text-slate-500">
                     <span>Recent play decisions, progression reads, and physics rolls.</span>
-                    <button id="copy-telemetry-btn" class="bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 font-mono px-3 py-1.5 rounded transition shadow-sm font-bold text-xs">
-                        📋 Copy to Clipboard
-                    </button>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <button id="download-telemetry-txt-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-600 font-mono px-2.5 py-1.5 rounded transition shadow-sm font-bold text-xs">
+                            💾 .TXT
+                        </button>
+                        <button id="download-telemetry-json-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-600 font-mono px-2.5 py-1.5 rounded transition shadow-sm font-bold text-xs">
+                            💾 .JSON
+                        </button>
+                        <button id="copy-telemetry-btn" class="bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 font-mono px-3 py-1.5 rounded transition shadow-sm font-bold text-xs">
+                            📋 Copy to Clipboard
+                        </button>
+                    </div>
                 </div>
-                <pre class="bg-slate-950 text-emerald-400 p-4 rounded text-[11px] font-mono overflow-auto max-h-[60vh] select-all whitespace-pre-wrap leading-relaxed border border-slate-800 shadow-inner">${report}</pre>
+                <pre class="bg-slate-950 text-emerald-400 p-4 rounded text-[11px] font-mono overflow-auto max-h-[60vh] select-all whitespace-pre-wrap leading-relaxed border border-slate-800 shadow-inner">${escapeHtml(report)}</pre>
             </div>
         `;
         UI.showModal("Play Telemetry & AI Debug", modalHtml);
+
+        document.getElementById('download-telemetry-txt-btn')?.addEventListener('click', () => {
+            downloadPlayDebugFile('txt');
+        });
+
+        document.getElementById('download-telemetry-json-btn')?.addEventListener('click', () => {
+            downloadPlayDebugFile('json');
+        });
 
         document.getElementById('copy-telemetry-btn')?.addEventListener('click', (e) => {
             navigator.clipboard.writeText(report).then(() => {

@@ -361,6 +361,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
             let assignedPlayerSlot = null;
             let routePath = null;
+            let screenReleasePath = null;
             let readProgression = [];
             let dropbackPhase = null;
             let hasCompletedDropback = true;
@@ -557,7 +558,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     if (isScreenBlock && play.type === 'pass') {
                         action = 'pass_block';
                         targetY = startY - 0.5;
-                        pState._screenReleasePath = calculateRoutePath(assignment, startX, startY);
+                        screenReleasePath = calculateRoutePath(assignment, startX, startY);
                     } else if (action === 'pass_block' || action === 'run_block') {
                         targetY = startY + (action === 'pass_block' ? -0.5 : 0.5);
                     } else if (routeTree[assignment]) {
@@ -967,6 +968,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 readProgression, currentReadTargetSlot: readProgression[0] || null,
                 ticksOnCurrentRead: 0, dropbackPhase, hasCompletedDropback, dropbackTargetY,
                 vx: 0, vy: 0, vz: 0,
+                _screenReleasePath: screenReleasePath,
                 isEngaged: false, engagedWith: null,
                 isBlocked: false, blockedBy: null,
                 hasBall: false, isBallCarrier: false,
@@ -1044,8 +1046,6 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
             snapTaker.routePath = calculateRoutePath(snapTaker.assignment || 'run_dive', snapTaker.x, snapTaker.y);
         }
     }
-    
-    logPlayEventSnapshot('Snap / Play Start', playState.activePlayers, playState.ballState, playState.tick);
 }
 
 export function updatePlayerTargets(playState, offenseStates, defenseStates, ballCarrierState, playType, offensivePlayKey, offensiveAssignments, defensivePlayKey, gameLog) {
@@ -2628,7 +2628,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                                     dbIQ,
                                     routeType: pState.assignment,
                                     stunDurationTicks: coverageDefender.stunnedTicks
-                                });
+                                }, playState.tick, playState.playId);
 
                                 if (gameLog && Math.random() < 0.35) {
                                     pushGameLog(gameLog, `[Tick ${playState.tick}] 🎣 ${coverageDefender.name} completely bites on ${pState.name}'s double move!`, playState);
