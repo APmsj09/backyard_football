@@ -108,10 +108,27 @@ export function getPerceptionContext(
 
     const speedSq = (vx * vx) + (vy * vy);
 
+    const isDefenderReadingBackfield =
+        observer.isOffense === false &&
+        observer.action !== 'pursuit' &&
+        observer.action !== 'tracking_ball' &&
+        !observer.isBallCarrier &&
+        (
+            observer.action?.startsWith('zone_') ||
+            observer.assignment?.startsWith('zone_') ||
+            observer.action === 'spy_QB' ||
+            observer.action === 'idle'
+        );
+
     let dirX = 0;
     let dirY = 1;
 
-    if (targetDistSq > 0.5625) {
+    if (isDefenderReadingBackfield) {
+        dirX = targetDistSq > 0.5625
+            ? Math.max(-0.45, Math.min(0.45, (targetDX / Math.sqrt(targetDistSq)) * 0.45))
+            : 0;
+        dirY = -Math.sqrt(Math.max(0.01, 1 - (dirX * dirX)));
+    } else if (targetDistSq > 0.5625) {
         const inverseTargetDist = 1 / Math.sqrt(targetDistSq);
 
         dirX = targetDX * inverseTargetDist;

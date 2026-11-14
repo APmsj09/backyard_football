@@ -238,7 +238,7 @@ export function checkTackleCollisions(playState, gameLog) {
     const tacklingTeam = playState.activePlayers.filter(p => p.isOffense !== carrier.isOffense);
 
     const defenders = tacklingTeam.filter(p => {
-        if (p.stunnedTicks > 0 || p.balanceState === 'downed') return false;
+        if (p.stunnedTicks > 0 || p.balanceState === 'downed' || (p.snapReactionTimer && p.snapReactionTimer > 0)) return false;
 
         // Refresh distance after movement; the cached value may be stale.
         const dist = getDistance(p, carrier);
@@ -432,9 +432,8 @@ export function checkTackleCollisions(playState, gameLog) {
             )
             : massAdvantage * 0.5; // Passive size advantage even on standard contact
 
-        // A truck has its own contact resolution below. Do not replace it
-        // with a random juke or stiff arm.
-        if (distance < TACKLE_CONTACT_RANGE && !isTruckAttempt) {
+        // Allow evasions across the full tackle range before contact closes
+        if (distance <= TACKLE_RANGE && !isTruckAttempt) {
             const canPerformMove = (!carrier.moveCooldown || carrier.moveCooldown <= 0) && carrier.action !== 'handoff_setup';
 
             if (canPerformMove) {
@@ -459,8 +458,6 @@ export function checkTackleCollisions(playState, gameLog) {
                     if (strDiff > agiDiff && strDiff > 10) {
                         carrier.action = 'stiff_arm';
                         
-                        // A stiff arm redirects the defender; impact severity and
-                        // balance attributes decide whether he stumbles or falls.
                         const impactDx = defender.x - carrier.x;
                         const impactDy = defender.y - carrier.y;
                         const impactDistance = Math.max(
@@ -474,8 +471,6 @@ export function checkTackleCollisions(playState, gameLog) {
                             (impactDy / impactDistance) * 2.5
                         );
                         
-                        // PHYSICS: Stiff arm absorbs momentum relative to the mass of the defender shoved away
-                        // Stronger carriers lose less momentum during the stiff arm
                         const strengthMitigation = Math.max(0.5, 1.0 - ((carrier.str || 50) / 200));
                         const speedPenalty = Math.min(0.4, (defWeight / (carWeight * 1.5)) * 0.25) * strengthMitigation;
                         carrier.vx *= (1 - speedPenalty);
@@ -491,7 +486,11 @@ export function checkTackleCollisions(playState, gameLog) {
                             );
                         }
                     } else {
-                        const dir = Math.random() > 0.5 ? 1 : -1;
+                        // Juke away from tackler and avoid juking out of bounds
+                        let dir = carrier.x >= defender.x ? 1 : -1;
+                        if (carrier.x > FIELD_WIDTH - 3.5) dir = -1;
+                        else if (carrier.x < 3.5) dir = 1;
+
                         carrier.action = dir === 1 ? 'juke_right' : 'juke_left';
                         
                         const agiFactor = (carrier.agi || 50) / 100;
@@ -541,6 +540,11 @@ export function checkTackleCollisions(playState, gameLog) {
         let successChance = 0.65;
         const momRatio = tMomentum / Math.max(1, rMomentum);
         successChance += (momRatio - 1.0) * 0.2;
+
+        // Distance falloff: lunging / diving tackles from distance (>1.2y) have reduced success
+        if (distance > 1.2) {
+            successChance -= (distance - 1.2) * 0.25;
+        }
 
         // BACKYARD GANG-TACKLE / SWARM RULE:
         // When the neighborhood big kid is carrying the ball, younger/smaller kids MUST swarm together to pull him down!
@@ -1274,7 +1278,8 @@ export function resolvePlayerCollisions(playState) {
             if (p1.ghostTicks > 0 || p2.ghostTicks > 0) continue;
             if (p1.engagedWith === p2) continue;
 
-            const isHandoffPair = (p1.role === 'QB' && p2.role === 'RB') || (p1.role === 'RB' && p2.role === 'QB');
+            const isTargetSlotPair = playState.handoffTargetSlot && (p1.slot === playState.handoffTargetSlot || p2.slot === playState.handoffTargetSlot);
+            const isHandoffPair = isTargetSlotPair || (p1.role === 'QB' && p2.role === 'RB') || (p1.role === 'RB' && p2.role === 'QB');
             if (isHandoffPair && (playState.handoffRequired || playState.isRPO) && !playState.handoffOccurred) {
                 continue;
             }

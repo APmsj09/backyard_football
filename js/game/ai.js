@@ -298,9 +298,8 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
             pState._diagPassEvidenceLastTick = tick;
         } else {
             // A score-margin swing alone is not enough to overturn a run read.
-            // The defender must actually perceive a settled QB and credible
-            // pass-protection evidence.
-            const hasCrediblePassEvidence = Boolean(
+            // On a flea-flicker or settled QB, recognize pass posture.
+            const hasCrediblePassEvidence = isTrickPass || Boolean(
                 qb &&
                 qb.hasBall &&
                 qb.action === 'qb_setup' &&
@@ -627,8 +626,8 @@ export function evaluateCoverageAlignment(defenseStates, playState) {
     const avgSafetyDepth = safetyDepths.length > 0 ?
         safetyDepths.reduce((a, b) => a + b) / safetyDepths.length : 15;
 
-    const isTwoHigh = safeties.length >= 2 && Math.max(...safetyDepths) - Math.min(...safetyDepths) < 5;
-    const isSingleHigh = safeties.length === 1 || (safeties.length >= 2 && avgSafetyDepth > 12);
+    const isTwoHigh = safeties.length >= 2 && (Math.max(...safetyDepths) - Math.min(...safetyDepths) < 6);
+    const isSingleHigh = safeties.length === 1 || (safeties.length >= 2 && !isTwoHigh);
 
     return {
         shallowCount: shallow.length,
@@ -1495,8 +1494,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         let currX = rec.x;
         let currY = rec.y;
-        let lastValidDirX = (rec.vx && Math.abs(rec.vx) > 0.5) ? rec.vx / recYPS : 0;
-        let lastValidDirY = (rec.vy && Math.abs(rec.vy) > 0.5) ? rec.vy / recYPS : 1;
+        const recSpeed = Math.hypot(rec.vx || 0, rec.vy || 0);
+        let lastValidDirX = recSpeed > 0.5 ? (rec.vx / recSpeed) : 0;
+        let lastValidDirY = recSpeed > 0.5 ? (rec.vy / recSpeed) : 1;
 
         if (rec.routePath && rec.currentPathIndex < rec.routePath.length) {
             for (let i = rec.currentPathIndex; i < rec.routePath.length; i++) {
@@ -2471,7 +2471,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         executeThrow(qbState, targetPlayerState, qbPower, adjustedAccuracy, playState, gameLog, actionTaken);
     }
 
-    if (isDesperationTime && !decisionMade && !targetPlayerState && playState.tick >= 35) {
+    if (isDesperationTime && !decisionMade && !targetPlayerState && (playState.tick >= 75 || (isPressured && playState.tick >= 45))) {
         const deepReceiver = offenseStates
             .filter(o => o.slot !== 'QB1' && !o.slot.startsWith('OL') && (o.action.includes('route') || o.action === 'route_complete'))
             .sort((a, b) => b.y - a.y)[0];
@@ -2583,8 +2583,9 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
             ].some(r => assignmentStr.includes(r));
             
             if (distanceToTravel > 0 && isContinuousRoute) {
-                const dirX = (target.vx && Math.abs(target.vx) > 0.5) ? target.vx / recYPS : lastValidDirX;
-                const dirY = (target.vy && Math.abs(target.vy) > 0.5) ? target.vy / recYPS : lastValidDirY;
+                const targetSpeed = Math.hypot(target.vx || 0, target.vy || 0);
+                const dirX = targetSpeed > 0.5 ? (target.vx / targetSpeed) : lastValidDirX;
+                const dirY = targetSpeed > 0.5 ? (target.vy / targetSpeed) : lastValidDirY;
 
                 aimX = currX + (dirX * distanceToTravel);
                 aimY = currY + (dirY * distanceToTravel);

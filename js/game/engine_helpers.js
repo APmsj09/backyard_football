@@ -117,10 +117,23 @@ export function resolveDepthForPlay(offense, defense) {
                 pId = team.depthChart[side]?.[slot];
             }
 
-            if (!pId || usedThisPlay.has(pId)) {
+            const assignedPlayer = pId ? getPlayer(pId) : null;
+            const isAssignedAvailable = Boolean(
+                assignedPlayer &&
+                !usedThisPlay.has(pId) &&
+                !['departed', 'retired'].includes(assignedPlayer.status?.type) &&
+                (!assignedPlayer.status || assignedPlayer.status.duration === 0 || assignedPlayer.status.type === 'temporary')
+            );
+
+            if (!isAssignedAvailable) {
                 const candidates = rosterIds
                     .map(id => getPlayer(id))
-                    .filter(p => p && !usedThisPlay.has(p.id) && (!p.status || p.status.duration === 0 || p.status.type === 'temporary'))
+                    .filter(p =>
+                        p &&
+                        !usedThisPlay.has(p.id) &&
+                        !['departed', 'retired'].includes(p.status?.type) &&
+                        (!p.status || p.status.duration === 0 || p.status.type === 'temporary')
+                    )
                     .sort((a, b) => calculateSlotSuitability(b, slot, side, team) - calculateSlotSuitability(a, slot, side, team));
 
                 pId = candidates[0]?.id || null;

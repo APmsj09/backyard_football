@@ -106,6 +106,11 @@ function getScoutedPlaycallAttributeValue(team, player, skill) {
 
     if (!team || player?.id == null || !path) return null;
 
+    // Coaches know their own roster players' true attributes directly
+    if (player.teamId === team.id || String(player.teamId) === String(team.id)) {
+        return getPlaycallAttributeValue(player, skill);
+    }
+
     const category = path[0];
     const attribute = path[1];
 
@@ -116,7 +121,7 @@ function getScoutedPlaycallAttributeValue(team, player, skill) {
     const report = getTeamScoutingReport(team, player.id);
     const range = report?.attributeRanges?.[category]?.[attribute];
 
-    if (!range) return null;
+    if (!range) return getPlaycallAttributeValue(player, skill);
 
     const low = Number(range.low);
     const high = Number(range.high);
@@ -158,14 +163,19 @@ function getScoutedPlaycallAttributeValue(team, player, skill) {
 function getScoutedPositionOverall(team, player, position) {
     if (!team || !player || !position) return 50;
 
+    // Coaches know their own players' true positional ratings directly
+    if (player.teamId === team.id || String(player.teamId) === String(team.id)) {
+        return calculateOverall(player, position) || 50;
+    }
+
     const report = getTeamScoutingReport(team, player.id);
     const rawConfidence = Number(report?.confidence);
     const confidence = Number.isFinite(rawConfidence) 
         ? Math.max(0, Math.min(1, rawConfidence > 1 ? rawConfidence / 100 : rawConfidence)) 
         : 0;
 
-    // If we don't have enough scouting info, return an average baseline
-    if (confidence < 0.25) return 50;
+    // If we don't have enough scouting info, fall back to true overall or average baseline
+    if (confidence < 0.25) return calculateOverall(player, position) || 50;
 
     const fit = [
         report?.evaluation?.offenseFit,
@@ -4093,10 +4103,8 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 resolveOngoingBlocks(playState, gameLog, activeOffense, activeDefense);
 
                 if (ballCarrierState && checkTackleCollisions(playState, gameLog)) {
-                    if (!playState.touchback && !playState.safety) {
-                        playState.finalBallY = ballCarrierState.y;
-                        playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
-                    }
+                    // checkTackleCollisions already sets finalBallY, yards, touchbacks,
+                    // safeties, and preserves fumble/turnover return yardage correctly.
                     playState.playIsLive = false;
                     break;
                 }
@@ -4528,6 +4536,7 @@ export function simulateLivePlayStep(gameInstance, mode = 'live', options = {}) 
 
     const offense = gameInstance.possession;
     const defense = (offense.id === gameInstance.homeTeam.id) ? gameInstance.awayTeam : gameInstance.homeTeam;
+    const wasConversionAttempt = Boolean(gameInstance.isConversionAttempt);
 
     if (gameInstance.liveGmAdjustments) {
         if (offense.isPlayerControlled) offense.liveGmAdjustments = gameInstance.liveGmAdjustments;
@@ -4950,11 +4959,11 @@ export function simulateLivePlayStep(gameInstance, mode = 'live', options = {}) 
     }
 
     gameInstance.playsTotal = (gameInstance.playsTotal || 0) + 1;
-    if (!gameInstance.isConversionAttempt) {
+    if (!wasConversionAttempt) {
         gameInstance.clock -= playResult.clockBurn || 15;
     }
 
-    if (gameInstance.clock <= 0) {
+    if (gameInstance.clock <= 0 && !gameInstance.isConversionAttempt) {
         gameInstance.quarter++;
         gameInstance.clock = 420;
         if (gameInstance.quarter === 3 && !gameInstance.halftimeProcessed) {

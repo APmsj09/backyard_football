@@ -880,6 +880,142 @@ export function advanceTeamScoutingReport(
         0.94
     );
 
+    // Discover relationships gradually as scouting improves.
+    // Only discovered information is stored in this team's report.
+    const rosterPlayers = getRosterObjects(team).filter(
+        teammate =>
+            teammate?.id != null &&
+            String(teammate.id) !== String(player.id)
+    );
+
+    const previousNetworkEvidence = previous?.networkEvidence || {};
+
+    const knownFriendIds = new Set(
+        Array.isArray(previousNetworkEvidence.knownTeammateFriendIds)
+            ? previousNetworkEvidence.knownTeammateFriendIds.map(String)
+            : []
+    );
+
+    const knownRivalIds = new Set(
+        Array.isArray(previousNetworkEvidence.knownTeammateRivalIds)
+            ? previousNetworkEvidence.knownTeammateRivalIds.map(String)
+            : []
+    );
+
+    const knownSocialCircleIds = new Set(
+        Array.isArray(previousNetworkEvidence.knownTeammateSocialCircleIds)
+            ? previousNetworkEvidence.knownTeammateSocialCircleIds.map(String)
+            : []
+    );
+
+    const getCloseFriendIds = candidate => {
+        const social = candidate?.social || {};
+
+        return new Set([
+            social.bestFriendId,
+            ...(Array.isArray(social.goodFriendIds)
+                ? social.goodFriendIds
+                : [])
+        ]
+            .filter(id => id != null)
+            .map(String));
+    };
+
+    const getRivalIds = candidate =>
+        new Set(
+            Array.isArray(candidate?.social?.rivalIds)
+                ? candidate.social.rivalIds
+                    .filter(id => id != null)
+                    .map(String)
+                : []
+        );
+
+    const recruitId = String(player.id);
+    const recruitFriends = getCloseFriendIds(player);
+    const recruitRivals = getRivalIds(player);
+
+    const rawCharacterSkill = Number(
+        evaluator?.ratings?.evalCharacter
+    );
+
+    const characterSkill = Number.isFinite(rawCharacterSkill)
+        ? Math.max(0, Math.min(100, rawCharacterSkill))
+        : 50;
+
+    // Higher scouting levels and stronger character evaluators improve
+    // the chance of identifying a real relationship.
+    // Missed relationships can be discovered at a later scouting level.
+    const relationshipDiscoveryChance = Math.max(
+        0.30,
+        Math.min(
+            0.85,
+            0.28 +
+                level * 0.12 +
+                (characterSkill - 50) / 500
+        )
+    );
+
+    for (const teammate of rosterPlayers) {
+        const teammateId = String(teammate.id);
+
+        const teammateFriends = getCloseFriendIds(teammate);
+        const teammateRivals = getRivalIds(teammate);
+
+        const hasRivalRelationship =
+            recruitRivals.has(teammateId) ||
+            teammateRivals.has(recruitId);
+
+        const hasFriendRelationship =
+            recruitFriends.has(teammateId) ||
+            teammateFriends.has(recruitId);
+
+        // A shared close friend is evidence that the recruit and
+        // teammate belong to overlapping social circles.
+        const sharedFriendCount = [...recruitFriends].filter(
+            friendId =>
+                friendId !== recruitId &&
+                friendId !== teammateId &&
+                teammateFriends.has(friendId)
+        ).length;
+
+        if (hasRivalRelationship) {
+            if (
+                !knownRivalIds.has(teammateId) &&
+                Math.random() < relationshipDiscoveryChance
+            ) {
+                knownRivalIds.add(teammateId);
+            }
+
+            continue;
+        }
+
+        if (hasFriendRelationship) {
+            if (
+                !knownFriendIds.has(teammateId) &&
+                Math.random() < relationshipDiscoveryChance
+            ) {
+                knownFriendIds.add(teammateId);
+            }
+
+            continue;
+        }
+
+        if (
+            sharedFriendCount > 0 &&
+            !knownSocialCircleIds.has(teammateId) &&
+            Math.random() < relationshipDiscoveryChance
+        ) {
+            knownSocialCircleIds.add(teammateId);
+        }
+    }
+
+    const networkEvidence = {
+        version: 1,
+        knownTeammateFriendIds: [...knownFriendIds],
+        knownTeammateRivalIds: [...knownRivalIds],
+        knownTeammateSocialCircleIds: [...knownSocialCircleIds]
+    };
+
     return setTeamScoutingReport(team, player.id, {
         level,
         progressPoints,
@@ -887,6 +1023,7 @@ export function advanceTeamScoutingReport(
         attributeRanges,
         potentialRange: report.potentialRange,
         evaluation: report.evaluation,
+        networkEvidence,
         evaluatorId: evaluator?.id || null,
         evaluatedYear,
         evaluatedWeek

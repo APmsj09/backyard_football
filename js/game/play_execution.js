@@ -984,19 +984,27 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
     setupSide(offense, 'offense', offenseFormationData, true);
     setupSide(defense, 'defense', defenseFormationData, false);
 
-    // Give the ball to the QB setup/punter, or fallback to the QB1 slot for direct snaps (Wildcat/QB Draws)
-    let snapTaker = playState.activePlayers.find(p => p.isOffense && (p.assignment?.includes('qb_') || p.assignment === 'punt'));
+    // 1. Prefer explicit QB setup / punt assignment, or mapped QB role actually in the backfield
+    let snapTaker = playState.activePlayers.find(p =>
+        p.isOffense &&
+        (
+            p.assignment?.includes('qb_') ||
+            p.assignment === 'punt' ||
+            (p.formationRole === 'QB' && p.initialY < playState.lineOfScrimmage - 1.5 && Math.abs(p.initialX - ballX) < 3.0)
+        )
+    );
 
-    // Ultimate Fallback for direct snaps (Wildcat, QB runs): 
-    // If no one is explicitly acting as a QB, snap the ball to the backfield player standing closest to the center.
+    // 2. Direct snap fallback (Wildcat / QB runs): pick backfield player behind the line closest to center/mesh
     if (!snapTaker) {
         snapTaker = playState.activePlayers
-            .filter(p => p.isOffense && !p.slot.startsWith('OL'))
+            .filter(p => p.isOffense && !p.slot.startsWith('OL') && p.initialY < playState.lineOfScrimmage - 1.5)
             .sort((a, b) => {
-                const distA = Math.hypot(a.initialX - ballX, a.initialY - playState.lineOfScrimmage);
-                const distB = Math.hypot(b.initialX - ballX, b.initialY - playState.lineOfScrimmage);
+                const distA = Math.hypot(a.initialX - ballX, a.initialY - (playState.lineOfScrimmage - 5.0));
+                const distB = Math.hypot(b.initialX - ballX, b.initialY - (playState.lineOfScrimmage - 5.0));
                 return distA - distB;
-            })[0];
+            })[0]
+            || playState.activePlayers.find(p => p.isOffense && p.slot === 'QB1')
+            || playState.activePlayers.find(p => p.isOffense && !p.slot.startsWith('OL'));
     }
 
     if (snapTaker) {
@@ -1419,41 +1427,52 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         // SCREEN RELEASE DELAY:
         // Linemen executing 'screen_block' or 'Wall' assignments must hold a pass set
         // for the first 18-22 ticks to let defensive rushers clear before pulling outside.
-        const isScreenPlay = playState.playKey?.includes('Screen') || blocker.assignment?.includes('screen_block');
+        const isScreenBlocker = playState.playKey?.includes('Screen') || blocker.assignment?.includes('screen_block');
         const isScreenWallAssignment = blocker.assignment?.includes('Wall') || blocker.assignment?.includes('screen_block');
 
-        if (isScreenPlay && isScreenWallAssignment) {
+        if (isScreenBlocker && isScreenWallAssignment) {
             const releaseTick = blocker.assignment?.includes('screen_block') ? 18 : 25;
             if (playState.tick < releaseTick) {
-                // Anchor in pass pro; do not pull laterally across adjacent linemen yet
+                // Anchor in pass pro briefly to invite rushers upfield before releasing
                 blocker.targetX = blocker.initialX;
                 blocker.targetY = blocker.initialY - 0.5;
                 blocker.action = 'pass_block';
                 blocker.contactReduction = 0.6;
 
-                setPointIntent(
-                    blocker,
-                    blocker.targetX,
-                    blocker.targetY,
-                    0.35
-                );
+                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.35);
                 return;
-            } else if (blocker.assignment?.includes('Wall')) {
-                const targetRec = playState.activePlayers.find(p => p.assignment === 'Screen_Wait');
-                if (targetRec) {
-                    blocker.targetX = targetRec.x + (blocker.initialX > CENTER_X ? -3 : 3);
-                    blocker.targetY = targetRec.y + 3.0;
-                    blocker.action = 'run_block';
-                    blocker.contactReduction = 1.4;
+            }
 
-                    setPointIntent(
-                        blocker,
-                        blocker.targetX,
-                        blocker.targetY,
-                        0.45
-                    );
+            if (blocker._screenReleasePath && blocker._screenReleasePath.length > 0 && !isPassCompleted) {
+                blocker.routePath = blocker._screenReleasePath;
+                blocker._screenReleasePath = null;
+                blocker.currentPathIndex = 0;
+                blocker.action = 'run_path';
+                blocker.dynamicTargetId = null;
+                setRouteIntent(blocker, blocker.routePath[0].x, blocker.routePath[0].y, 0.6);
+                return;
+            }
+
+            if (!isPassCompleted && screenReceiverForBlocking) {
+                const perimeterThreat = defenseStates
+                    .filter(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && !assignedThreats.has(d.id) && d.y >= LOS)
+                    .sort((a, b) => getDistance(screenReceiverForBlocking, a) - getDistance(screenReceiverForBlocking, b))[0];
+
+                if (perimeterThreat) {
+                    assignedThreats.add(perimeterThreat.id);
+                    blocker.dynamicTargetId = perimeterThreat.id;
+                    blocker.targetX = perimeterThreat.x;
+                    blocker.targetY = perimeterThreat.y;
+                    blocker.action = 'run_block';
+                    setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.5);
                     return;
                 }
+
+                blocker.targetX = screenReceiverForBlocking.x + (blocker.initialX > CENTER_X ? -2.5 : 2.5);
+                blocker.targetY = screenReceiverForBlocking.y + 3.0;
+                blocker.action = 'run_block';
+                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.45);
+                return;
             }
         }
 
@@ -1790,8 +1809,34 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         }
     };
 
-    linemen.forEach(ol => assignBlockerTarget(ol, allThreats));
-    otherBlockers.forEach(b => assignBlockerTarget(b, allThreats));
+    const reservedOwner = new Map();
+    [...linemen, ...otherBlockers].forEach(b => {
+        const isPullingNow = b.routePath && b.currentPathIndex < b.routePath.length;
+        const isWaitingScreen = (b.assignment?.includes('screen_block') || b.assignment?.includes('Wall')) && playState.tick < 25;
+        if (b.dynamicTargetId && !b.isEngaged && !(b.reengageCooldown > 0) && !isPullingNow && !isWaitingScreen) {
+            const lockedThreat = allThreats.find(t =>
+                t.id === b.dynamicTargetId &&
+                !t.isEngaged &&
+                !t.isBlocked &&
+                getDistance(b, t) < 12.0 &&
+                t.y > b.y - 1.5
+            );
+            if (lockedThreat && !reservedOwner.has(lockedThreat.id)) {
+                reservedOwner.set(lockedThreat.id, b.id);
+                assignedThreats.add(lockedThreat.id);
+            }
+        }
+    });
+
+    const assignWithLock = (blocker, threats) => {
+        if (blocker.dynamicTargetId && reservedOwner.get(blocker.dynamicTargetId) === blocker.id) {
+            assignedThreats.delete(blocker.dynamicTargetId);
+        }
+        assignBlockerTarget(blocker, threats);
+    };
+
+    linemen.forEach(ol => assignWithLock(ol, allThreats));
+    otherBlockers.forEach(b => assignWithLock(b, allThreats));
 
     playState.activePlayers.forEach(pState => {
         if (pState.stunnedTicks > 0) return;

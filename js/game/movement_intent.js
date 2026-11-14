@@ -122,9 +122,8 @@ export function setLaneIntent(pState, targetX, targetY, lockDuration = 10) {
 
     const intent = pState._intent;
 
-    // Allow intentional cuts, evasions, or hole shifts (> 1.2y lateral change) to update targetX,
-    // rather than locking the runner into stale X coordinates
-    const isIntentionalCut = intent.targetX !== undefined && Math.abs(targetX - intent.targetX) > 1.2;
+    // Preserve smooth lane interpolation from getSmartCarrierTarget without dropping small updates
+    const isIntentionalCut = intent.targetX !== undefined && Math.abs(targetX - intent.targetX) > 0.15;
 
     if (intent.mode === 'LANE' && intent.lockTicks > 0 && !isIntentionalCut) {
         intent.mode = 'LANE';

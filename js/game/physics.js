@@ -221,8 +221,6 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         pState.snapReactionTimer--;
         pState.vx = 0;
         pState.vy = 0;
-        pState.targetX = pState.x;
-        pState.targetY = pState.y;
         return;
     }
 
@@ -430,8 +428,12 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // DECISIVE BRAKING FOR FIXED TARGETS (HOLD & POINT)
-    // Pursuers and pass rushers must NEVER trigger arrival braking! They run through contact to make the tackle.
-    const isDynamicPursuer = pState.action === 'pursuit' || pState.action?.includes('rush') || pState.action?.includes('blitz');
+    // Pursuers, pass rushers, and man-coverage DBs must NEVER trigger arrival braking!
+    const isDynamicPursuer =
+        pState.action === 'pursuit' ||
+        pState.action?.includes('rush') ||
+        pState.action?.includes('blitz') ||
+        pState.action?.startsWith('man_cover_');
 
     if (
         !isOffBalanceThisTick &&
@@ -547,7 +549,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const isAggressiveAttackAction = [
         'run_path', 'run_route', 'tracking_ball', 'pursuit',
         'pass_rush', 'blitz', 'blitz_gap', 'blitz_edge', 'run_gap_A'
-    ].includes(pState.action);
+    ].includes(pState.action) || Boolean(pState.action?.startsWith('man_cover_'));
 
     const isStopping =
         distToTarget < 2.5 &&
@@ -1266,14 +1268,20 @@ function resolveNewtonianCollisions(pState, allPlayers) {
 
     for (const other of allPlayers) {
         if (other.id === pState.id) continue;
-        // Do not collide an engaged player with their own blocking partner
+        // Do not collide an engaged player with their own blocking partner or downed players on the turf
         if (pState.engagedWith === other || other.engagedWith === pState) continue;
+        if (other.balanceState === 'downed') continue;
 
         // Respect ghostTicks to prevent QB/RB collision snags after handoffs
         if (pState.ghostTicks > 0 || other.ghostTicks > 0) continue;
 
-        const isHandoffPair = (pState.role === 'QB' && other.role === 'RB') || (pState.role === 'RB' && other.role === 'QB');
-        // Exempt QB/RB from body bumping in the backfield during dropbacks, handoffs, and route releases
+        const isNonOLOffensePair = pState.isOffense && other.isOffense && !pState.slot?.startsWith('OL') && !other.slot?.startsWith('OL');
+        const isQBInHandoffMesh = isNonOLOffensePair && (
+            (pState.role === 'QB' && pState.action === 'handoff_setup') ||
+            (other.role === 'QB' && other.action === 'handoff_setup')
+        );
+        const isHandoffPair = isQBInHandoffMesh || (pState.role === 'QB' && other.role === 'RB') || (pState.role === 'RB' && other.role === 'QB');
+        // Exempt QB and handoff target (RB/WR/TE) from body bumping during handoffs and releases
         if (isHandoffPair && (pState.action === 'handoff_setup' || other.action === 'handoff_setup')) {
             continue;
         }
@@ -1325,8 +1333,10 @@ function resolveNewtonianCollisions(pState, allPlayers) {
                     const tangentY = dx_norm;
                     const tangentSpeed = (pState.vx * tangentX) + (pState.vy * tangentY);
 
+                    const isMovingUpfield = (pState.targetY ?? pState.y) >= pState.y;
                     pState.vx = (tangentX * tangentSpeed * 0.85) + (dx_norm * 0.2);
-                    pState.vy = Math.max(0.5, (tangentY * tangentSpeed * 0.85) + (dy_norm * 0.2));
+                    const nextVy = (tangentY * tangentSpeed * 0.85) + (dy_norm * 0.2);
+                    pState.vy = isMovingUpfield ? Math.max(0.5, nextVy) : nextVy;
                 } else {
                     pState.vx -= dx_norm * normalVelocity * myMoveRatio * 0.5;
                     pState.vy -= dy_norm * normalVelocity * myMoveRatio * 0.5;
