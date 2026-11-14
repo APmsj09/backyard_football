@@ -80,10 +80,23 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         (p.hasBall || p.isBallCarrier) &&
         getPerceptionWeight(visionContext, p) > 0
     );
-    const isLateralInAir = Boolean(playState?.ballState?.isLateral && playState?.ballState?.inAir);
+    const isLateralInAir = Boolean(
+        playState?.ballState?.isLateral &&
+        playState?.ballState?.inAir
+    );
+    const isBallInAir = Boolean(
+        !playState?.ballState?.isLateral &&
+        (playState?.ballState?.inAir || playState?.ballState?.throwInitiated)
+    );
+
     const carrierIsPasser = Boolean(
         observedCarrier &&
-        (observedCarrier.formationRole === 'QB' || observedCarrier.role === 'QB' || observedCarrier.action === 'qb_setup' || observedCarrier.action === 'qb_scramble')
+        (
+            observedCarrier.formationRole === 'QB' ||
+            observedCarrier.role === 'QB' ||
+            observedCarrier.action === 'qb_setup' ||
+            observedCarrier.action === 'qb_scramble'
+        )
     );
     const qbIsPassingPosture = qb && (qb.action === 'qb_setup' || qb.action === 'dropback');
     const qbIsRunning = qb && observedCarrier?.id === qb.id && !qbIsPassingPosture && (qb.action === 'run_path' || qb.y > (playState?.lineOfScrimmage || 0));
