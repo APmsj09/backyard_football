@@ -1,4 +1,4 @@
-import { getTeamScoutingReport, setTeamScoutingReport, } from './state.js';
+import { getTeamScoutingReport, setTeamScoutingReport, getRosterObjects } from './state.js';
 import { calculateOverall, positionOverallWeights } from './player.js';
 import { isPlayerViableForPosition } from './depth_chart.js';
 import {
