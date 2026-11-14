@@ -238,6 +238,11 @@ export function checkTackleCollisions(playState, gameLog) {
     const tacklingTeam = playState.activePlayers.filter(p => p.isOffense !== carrier.isOffense);
 
     const defenders = tacklingTeam.filter(p => {
+        if (p._carrierTackleCooldownTicks && p._carrierTackleCooldownTicks > 0) {
+            p._carrierTackleCooldownTicks--;
+            return false;
+        }
+
         if (p.stunnedTicks > 0 || p.balanceState === 'downed' || (p.snapReactionTimer && p.snapReactionTimer > 0)) return false;
 
         // Refresh distance after movement; the cached value may be stale.
@@ -245,12 +250,6 @@ export function checkTackleCollisions(playState, gameLog) {
         p._distToCarrier = dist;
 
         if (!Number.isFinite(dist) || dist > TACKLE_RANGE) return false;
-
-        // A defender who just whiffed or got shed by this carrier cannot immediately re-tackle them
-        if (p._carrierTackleCooldownTicks && p._carrierTackleCooldownTicks > 0) {
-            p._carrierTackleCooldownTicks--;
-            return false;
-        }
 
         // DEEPER FIX: Process engaged defenders BEFORE running environmental raycasts!
         // If a defender is locked in a block, they are not pathfinding. We only check

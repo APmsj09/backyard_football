@@ -80,9 +80,10 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         (p.hasBall || p.isBallCarrier) &&
         getPerceptionWeight(visionContext, p) > 0
     );
+    const isLateralInAir = Boolean(playState?.ballState?.isLateral && playState?.ballState?.inAir);
     const isBallInAir = Boolean(
-        playState?.ballState?.inAir ||
-        playState?.ballState?.throwInitiated
+        !playState?.ballState?.isLateral &&
+        (playState?.ballState?.inAir || playState?.ballState?.throwInitiated)
     );
 
     // A live runner is anyone advancing with the ball who is not in a passing posture (dropback/setup)
@@ -90,7 +91,8 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     const qbIsRunning = qb && observedCarrier?.id === qb.id && !qbIsPassingPosture && (qb.action === 'run_path' || qb.y > (playState?.lineOfScrimmage || 0));
 
     const observedRunCarrier = Boolean(
-        observedCarrier && (observedCarrier.role !== 'QB' || qbIsRunning)
+        (observedCarrier && (observedCarrier.role !== 'QB' || qbIsRunning)) ||
+        (isLateralInAir && playState?.ballState?.lateralPurpose !== 'flea_return')
     );
 
     const qbScramble = Boolean(
@@ -343,11 +345,8 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
                     : 'run';
         }
     } else if (currentGuess === 'pass') {
-        // Changing from a pass read back to a run read requires overwhelming evidence,
-        // because once the QB drops back, the play is almost certainly a pass.
-        // Prevent aggressive linemen from tricking DBs into abandoning deep coverage.
-        const requiresRunEvidence = qb && (qb.action === 'qb_setup' || qb.hasCompletedDropback);
-        const flipMargin = requiresRunEvidence ? 45 : 20;
+        // Never drop out of pass coverage just because the QB is outside the DB's cone.
+        const flipMargin = (qb && !qb.hasBall) ? 20 : 45;
 
         if (finalRunScore > finalPassScore + flipMargin) {
             guess = 'run';
