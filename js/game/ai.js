@@ -1088,16 +1088,13 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
 
     // BACKFIELD PATIENCE (High-IQ & Instinct Feature):
     // If behind or right at the line of scrimmage and traffic is clogged,
-    // a smart runner will throttle down their forward momentum to let blocks develop.
-    // Lower IQ runners might occasionally show patience based on random instinct.
+    // a smart runner will throttle down their forward target depth to let blocks develop.
     const effectivePoise = iq + (Math.random() * 40 - 15);
 
     if (isBehindLine && inTraffic && effectivePoise >= 65) {
         // Poise scales smoothly: 90+ effective IQ = excellent patience
         const poiseFactor = Math.max(0.35, 1.0 - ((effectivePoise - 50) / 50)); 
-        bestTargetY = runner.y + (visionDepth * poiseFactor); // Shorten target depth to stall forward rush
-        runner.vx *= 0.80; // Gentle velocity check to simulate setting feet behind the block
-        runner.vy *= 0.80;
+        bestTargetY = runner.y + (visionDepth * poiseFactor); // Shorten target depth without draining physical velocity directly
     }
 
     // Smooth lateral target interpolation to prevent instant hash-to-hash snapping

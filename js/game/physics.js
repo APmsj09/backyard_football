@@ -428,9 +428,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     }
 
     // DECISIVE BRAKING FOR FIXED TARGETS (HOLD & POINT)
-    // Pursuers, pass rushers, and man-coverage DBs must NEVER trigger arrival braking!
+    // Pursuers, pass rushers, man-coverage DBs, and active ball-trackers must NEVER trigger arrival braking!
     const isDynamicPursuer =
         pState.action === 'pursuit' ||
+        pState.action === 'tracking_ball' ||
         pState.action?.includes('rush') ||
         pState.action?.includes('blitz') ||
         pState.action?.startsWith('man_cover_');

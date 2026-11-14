@@ -1510,15 +1510,22 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         // Open-field blockers on run plays and RAC completions need a wider vision envelope (22y)
         // to detect pursuing safeties and linebackers ahead of or behind the runner
         const VISION_RANGE = isPulling ? 2.0 : ((playType === 'run' || isPostCatchBlock) ? 22.0 : 10.0);
-        const validThreats = blockerThreats.filter(t =>
-            !assignedThreats.has(t.id) &&
-            getDistance(blocker, t) < VISION_RANGE &&
-            t.y > blocker.y - 1.5 &&
-            (
-                !isPostCatchBlock ||
-                t.y >= ballCarrierState.y - 2.5
-            )
-        );
+        const validThreats = blockerThreats.filter(t => {
+            if (assignedThreats.has(t.id)) return false;
+            if (getDistance(blocker, t) >= VISION_RANGE) return false;
+
+            // In pass protection, any rusher threatening the pocket/QB (even if they crossed the OL line) is valid
+            if (isPassPlay) {
+                const qbY = qbState ? qbState.y : (LOS - 4.0);
+                return t.y > qbY - 0.5;
+            }
+
+            if (isPostCatchBlock) {
+                return t.y >= ballCarrierState.y - 4.5;
+            }
+
+            return t.y > blocker.y - 1.5;
+        });
 
         let target = null;
         const isPassPlay =
@@ -2040,9 +2047,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         if (pState.isOffense) {
             const isRunner = pState.isBallCarrier || (pState.slot === 'QB1' && pState.action === 'qb_scramble');
 
-            // Transition to run block if the pass is caught by someone else, making them a downfield escort
+            // Transition skill positions to run block on a catch, but keep the passing QB idle in the pocket
             if (isPassCompleted && ballCarrierState && ballCarrierState.id !== pState.id && !pState.slot.startsWith('OL')) {
-                pState.action = 'run_block';
+                if (pState.role === 'QB' || pState.formationRole === 'QB' || pState.slot?.startsWith('QB')) {
+                    pState.action = 'idle';
+                    setHoldIntent(pState, pState.x, pState.y);
+                } else {
+                    pState.action = 'run_block';
+                }
             }
 
             if (isRunner) {
