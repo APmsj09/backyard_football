@@ -61,7 +61,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
 
     // Players use only the opponents currently within their perceptual range.
     const qb = offenseStates.find(p =>
-        p.slot?.startsWith('QB') &&
+        (p.formationRole === 'QB' || p.slot?.startsWith('QB')) &&
         getPerceptionWeight(visionContext, p) > 0
     );
 
@@ -81,17 +81,15 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         getPerceptionWeight(visionContext, p) > 0
     );
     const isLateralInAir = Boolean(playState?.ballState?.isLateral && playState?.ballState?.inAir);
-    const isBallInAir = Boolean(
-        !playState?.ballState?.isLateral &&
-        (playState?.ballState?.inAir || playState?.ballState?.throwInitiated)
+    const carrierIsPasser = Boolean(
+        observedCarrier &&
+        (observedCarrier.formationRole === 'QB' || observedCarrier.role === 'QB' || observedCarrier.action === 'qb_setup' || observedCarrier.action === 'qb_scramble')
     );
-
-    // A live runner is anyone advancing with the ball who is not in a passing posture (dropback/setup)
     const qbIsPassingPosture = qb && (qb.action === 'qb_setup' || qb.action === 'dropback');
     const qbIsRunning = qb && observedCarrier?.id === qb.id && !qbIsPassingPosture && (qb.action === 'run_path' || qb.y > (playState?.lineOfScrimmage || 0));
 
     const observedRunCarrier = Boolean(
-        (observedCarrier && (observedCarrier.role !== 'QB' || qbIsRunning)) ||
+        (observedCarrier && (!carrierIsPasser || qbIsRunning)) ||
         (isLateralInAir && playState?.ballState?.lateralPurpose !== 'flea_return')
     );
 
@@ -1328,7 +1326,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (!qbState.readProgression || qbState.readProgression.length === 0) {
         qbState.readProgression = offenseStates
             .filter(p =>
-                p.slot !== 'QB1' &&
+                p.id !== qbState.id &&
                 !p.slot.startsWith('OL') &&
                 (p.action.includes('route') || p.action === 'idle')
             )

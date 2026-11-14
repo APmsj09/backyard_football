@@ -513,10 +513,10 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                                 })
                                 .filter(Boolean);
 
-                            // Append any unlisted eligible receivers who are running routes as secondary reads
+                            // Append any unlisted eligible receivers (excluding the mapped QB/passer) as secondary reads
                             initialOffenseStates.forEach(o => {
-                                const isEligible = o.slot.startsWith('WR') || o.slot.startsWith('TE') || o.slot.startsWith('RB');
-                                if (isEligible && !readProgression.includes(o.slot)) {
+                                const isEligible = o.slot.startsWith('WR') || o.slot.startsWith('TE') || o.slot.startsWith('RB') || o.slot.startsWith('QB');
+                                if (isEligible && o.slot !== slot && !readProgression.includes(o.slot)) {
                                     readProgression.push(o.slot);
                                 }
                             });
@@ -1086,10 +1086,16 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     const ballPos = playState.ballState;
     const LOS = playState.lineOfScrimmage;
 
-    // FIX: Detect if a pass was caught and the play has transitioned to Run-After-Catch
-    const isPassCompleted = playState.type === 'pass' && 
-        (playState.statEvents.some(e => e.type === 'completion') || 
-        (ballCarrierState && ballCarrierState.isOffense && ballCarrierState.role !== 'QB' && !playState.handoffOccurred));
+    const isCarrierActingQB = Boolean(
+        ballCarrierState && (
+            (qbState && ballCarrierState.id === qbState.id) ||
+            ballCarrierState.formationRole === 'QB' ||
+            ballCarrierState.role === 'QB'
+        )
+    );
+    const isPassCompleted = playState.type === 'pass' &&
+        (playState.statEvents.some(e => e.type === 'completion') ||
+        (ballCarrierState && ballCarrierState.isOffense && !isCarrierActingQB && !playState.handoffOccurred));
 
     const primaryRunTarget =
         offenseStates.find(p =>

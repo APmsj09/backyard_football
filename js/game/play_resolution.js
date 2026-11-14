@@ -4046,7 +4046,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         playState.finalBallY = ballCarrierState.y;
                         playState.outOfBounds = true;
                         if (gameLog) gameLog.push(`💨 ${ballCarrierState.name} steps out of bounds.`);
-                        if (ballCarrierState.role === 'QB' && playState.yards < 0 && playState.type === 'pass') {
+                        if ((ballCarrierState.formationRole === 'QB' || ballCarrierState.role === 'QB') && playState.yards < 0 && playState.type === 'pass') {
                             playState.sack = true;
                         }
                         break;
@@ -4289,8 +4289,9 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         const yardageLine = playState.fumbleOccurred ? playState.finalBallY : ballCarrierState.y;
         const rushYards = yardageLine - playState.lineOfScrimmage;
 
-        // Correctly classify Sacks vs QB Scrambles
-        if (playState.type === 'pass' && ballCarrierState.role === 'QB' && !caughtPassThisPlay) {
+        // Correctly classify Sacks vs QB Scrambles (including Wildcat passers)
+        const isPasserCarrier = ballCarrierState.formationRole === 'QB' || ballCarrierState.role === 'QB';
+        if (playState.type === 'pass' && isPasserCarrier && !caughtPassThisPlay) {
             if (rushYards < 0) {
                 playState.sack = true; // He didn't make it back to the line, it's a sack!
 

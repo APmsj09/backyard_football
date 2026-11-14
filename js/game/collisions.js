@@ -42,7 +42,7 @@ export function checkFumble(ballCarrierState, tacklerState, playState, gameLog) 
 
     let fumbleChance = FUMBLE_CHANCE_BASE * (tacklerMod / (carrierMod + 0.2)) * (1.0 + sizeDisparity * 0.6);
 
-    if (ballCarrierState.role === 'QB' && ballCarrierState.action === 'qb_setup') {
+    if ((ballCarrierState.formationRole === 'QB' || ballCarrierState.role === 'QB') && ballCarrierState.action === 'qb_setup') {
         fumbleChance *= 2.5;
     }
 
