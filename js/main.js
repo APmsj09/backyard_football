@@ -1750,6 +1750,7 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
             receptions: 0,
             targets: 0,
             drops: 0,
+            pancakes: 0,
             tackles: 0,
             sacks: 0,
             interceptions: 0,

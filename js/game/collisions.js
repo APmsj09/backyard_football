@@ -597,11 +597,12 @@ export function checkTackleCollisions(playState, gameLog) {
                     // If offense gets a touchback, they resume going towards 110.
                     // y = 30 represents their own 20-yard line.
                     playState.finalBallY = carrier.isOffense ? 30 : 90; 
-                    playState.yards = playState.finalBallY - playState.lineOfScrimmage; // Fix relative yardage
+                    playState.yards = playState.finalBallY - playState.lineOfScrimmage;
                 }
                 else { 
                     playState.safety = true; 
                     playState.finalBallY = carrier.isOffense ? 0 : 120; 
+                    playState.statEvents.push({ type: 'safety', playerId: defender.id });
                 }
             } else if (carrier.role === 'QB' && (playState.qbIntent === 'scramble' || playState.type === 'run')) {
                 playState.statEvents.push({ 
@@ -1200,6 +1201,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     !defender._pancakedThisPlay;
 
                 if (isPancake) {
+                    playState.statEvents.push({ type: 'pancake', playerId: blocker.id });
                     const pancakeDx = defender.x - blocker.x;
                     const pancakeDy = defender.y - blocker.y;
                     const pancakeDistance = Math.max(

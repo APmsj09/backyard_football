@@ -473,6 +473,7 @@ const PUBLIC_PERFORMANCE_STAT_FIELDS = [
     'recYards',
     'targets',
     'drops',
+    'pancakes',
     'tackles',
     'sacks',
     'interceptions',
@@ -858,9 +859,9 @@ export function ensureStats(player) {
         player.gameStats = {
             passAttempts: 0, passCompletions: 0, passYards: 0, interceptionsThrown: 0,
             rushAttempts: 0, rushYards: 0,
-            receptions: 0, recYards: 0, targets: 0, drops: 0,
+            receptions: 0, recYards: 0, targets: 0, drops: 0, pancakes: 0,
             tackles: 0, sacks: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0, returnYards: 0,
-            touchdowns: 0
+            touchdowns: 0, safeties: 0
         };
     }
 }
@@ -903,7 +904,7 @@ export function resetGameStats(teamA, teamB) {
             receptions: 0, recYards: 0, passYards: 0, rushYards: 0, touchdowns: 0,
             tackles: 0, sacks: 0, interceptions: 0, fumbles: 0, fumblesLost: 0, fumblesRecovered: 0,
             passAttempts: 0, passCompletions: 0, interceptionsThrown: 0,
-            rushAttempts: 0, targets: 0, returnYards: 0, drops: 0
+            rushAttempts: 0, targets: 0, returnYards: 0, drops: 0, pancakes: 0, safeties: 0
         };
     });
 }
@@ -993,6 +994,11 @@ export function applyStatEvents(statEvents) {
                 if (p) { ensureStats(p); p.gameStats.sacks = (p.gameStats.sacks || 0) + 1; }
                 break;
             }
+            case 'pancake': {
+                const p = getPlayer(evt.playerId);
+                if (p) { ensureStats(p); p.gameStats.pancakes = (p.gameStats.pancakes || 0) + 1; }
+                break;
+            }
         }
     });
 }
@@ -1028,7 +1034,7 @@ export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
         const statFields = [
             'passYards', 'passAttempts', 'passCompletions', 'interceptionsThrown',
             'rushYards', 'rushAttempts',
-            'recYards', 'receptions', 'targets', 'drops',
+            'recYards', 'receptions', 'targets', 'drops', 'pancakes',
             'tackles', 'sacks', 'interceptions', 'fumbles', 'fumblesLost', 'fumblesRecovered',
             'touchdowns', 'returnYards', 'safeties'
         ];

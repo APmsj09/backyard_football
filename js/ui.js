@@ -16347,6 +16347,11 @@ function renderHistoryLeagueReport(season, leagueKey, leagueLabel) {
                                     ${escapeHistoryHtml(player.teamName)}
                                     · ${escapeHistoryHtml(player.position)}
                                 </span>
+                                ${player.stats ? `
+                                    <div class="mt-1 flex flex-wrap gap-1 text-[10px]">
+                                        ${renderPublicStatSummary(player.stats, null)}
+                                    </div>
+                                ` : ''}
                             </div>
                             <span class="font-black text-slate-900 whitespace-nowrap">
                                 ${Number(player.value).toLocaleString()}

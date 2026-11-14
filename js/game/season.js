@@ -11916,13 +11916,8 @@ export function advanceToOffseason() {
             ovr: calculateOverall(player, estimateBestPosition(player)),
             improvements: devReport.improvements || [],
             stats: {
-                passYards: player.seasonStats?.passYards || 0,
-                rushYards: player.seasonStats?.rushYards || 0,
-                recYards: player.seasonStats?.recYards || 0,
-                touchdowns: player.seasonStats?.touchdowns || 0,
-                tackles: player.seasonStats?.tackles || 0,
-                sacks: player.seasonStats?.sacks || 0,
-                interceptions: player.seasonStats?.interceptions || 0
+                ...createEmptySeasonStats(),
+                ...(player.seasonStats || {})
             }
         });
 
