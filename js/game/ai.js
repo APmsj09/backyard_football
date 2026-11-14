@@ -2544,9 +2544,26 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
     if (isMovingTarget) {
         const recYPS = getReceiverProjectionSpeedYPS(target);
 
-        const recVy = target.vy || 0;
-        const effectiveBallSpeed = Math.max(8.0, ballSpeed - (recVy * 0.65));
-        const flightTime = throwDistance / effectiveBallSpeed;
+        // Calculate true arc-adjusted flight time so deep lobs account for high hang times
+        const preliminaryDist = Math.hypot(target.x - startX, target.y - startY);
+        let estimatedT = Math.max(0.1, preliminaryDist / ballSpeed);
+        const targetZ = 1.6;
+        const startZ = 2.2;
+        const deltaZ = targetZ - startZ;
+        let vzEst = (deltaZ + (4.9 * estimatedT * estimatedT)) / estimatedT;
+
+        if ((passType === 'touch' || passType === 'lob') && target.y > playState.lineOfScrimmage) {
+            const minApexZ = passType === 'lob' ? 4.5 : 3.0;
+            const minVz = Math.sqrt(2 * 9.8 * Math.max(0.2, minApexZ - startZ));
+            if (vzEst < minVz) {
+                vzEst = minVz;
+                const discriminant = (vzEst * vzEst) - (4 * 4.9 * deltaZ);
+                if (discriminant >= 0) {
+                    estimatedT = (vzEst + Math.sqrt(discriminant)) / 9.8;
+                }
+            }
+        }
+        const flightTime = estimatedT;
 
         const qbIQ = qbState.playbookIQ || 50;
         const qbCons = qbState.consistency || 50;

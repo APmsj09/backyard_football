@@ -1867,11 +1867,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         : ballPos.y;
 
                     if (pState.id === primaryReturner?.id) {
-                        // FIX: Returner tracks directly to the landing spot and settles directly under the ball
                         pState.targetX = landX;
                         pState.targetY = landY;
-                        pState.action = 'tracking_ball'; // Enables catch radius boost in collisions.js
-                        setPointIntent(pState, landX, landY, 0.25); // Smoothly glides to the exact spot without freezing 2 yards away
+                        pState.action = 'field_punt'; // Dedicated action so they settle and wait under the punt
+                        setPointIntent(pState, landX, landY, 0.25);
                     } else {
                         // Establish a staggered wall instead of crowding the catch.
                         const xOffset =

@@ -1415,7 +1415,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         const verticalLeap = (p.jumping || p.agi || p.agility || 50) / 100;
         const standingReach = (playerHeight / 36) + 0.6;
-        const isTracking = p.action === 'tracking_ball';
+        const isTracking = p.action === 'tracking_ball' || p.action === 'field_punt';
         const maxCatchHeight = isTracking 
             ? (playerHeight / 36) + 1.1 + (verticalLeap * 0.7)
             : standingReach;
