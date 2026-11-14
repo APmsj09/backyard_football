@@ -527,8 +527,8 @@ function getDraftEvaluationContext(player, team) {
 export function calculateDraftValue(player, team) {
     if (!player || !team) return 0;
 
-    const scout = team.staff?.scout;
-    const coach = team.staff?.coach || team.coach;
+    const scout = team.staff?.scout || team.coaches?.[1] || team.coach;
+    const coach = team.staff?.coach || team.coach || team.coaches?.[0];
 
     const {
         report,
@@ -543,8 +543,14 @@ export function calculateDraftValue(player, team) {
 
     // Both sides contribute to perceived player value.
     const ovr = Math.round((offOvr + defOvr) / 2);
-    const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
-    const coachPersonality = coach?.biases?.personality?.name;
+    const gmDirective =
+        team.aiGmProfile?.strategicDirective ||
+        team.gameplan?.gmDirective ||
+        'COACH_AUTONOMY';
+    const coachPersonalityId =
+        coach?.profileIds?.personality ||
+        coach?.biases?.personality?.id ||
+        coach?.biases?.personality?.name;
 
     // Dynamic Weights by GM Directive:
     // WIN_NOW values day-one ability (45%) over raw ceiling (15%)
@@ -567,17 +573,30 @@ export function calculateDraftValue(player, team) {
         abilityScore += ((publicProductionScore - 50) / 50) * 3;
     }
 
-    // Scout & Coach Personality Bias
-    const scoutBias = scout?.biases?.scouting?.name;
-    if (scoutBias === 'Speed Chaser') {
+    // Scout & Coach Personality Bias (using only this team's scouting report)
+    const scoutBiasId =
+        scout?.profileIds?.scouting ||
+        scout?.biases?.scouting?.id ||
+        scout?.biases?.scouting?.name;
+
+    if (scoutBiasId === 'athletic_bias_evaluator' || scoutBiasId === 'Speed Chaser') {
         const spd = estimatedPlayer.attributes?.physical?.speed || 50;
         if (spd > 68) abilityScore += (spd - 68) * 0.45;
+    } else if (scoutBiasId === 'technique_first_evaluator' || scoutBiasId === 'Technique Purist') {
+        const techValues = Object.values(estimatedPlayer.attributes?.technical || {}).filter(Number.isFinite);
+        const avgTech = techValues.length > 0
+            ? techValues.reduce((s, v) => s + v, 0) / techValues.length
+            : 50;
+        if (avgTech > 62) abilityScore += (avgTech - 62) * 0.35;
     } else if (
-        scoutBias === 'Character First' ||
-        coachPersonality === 'Old-School Disciplinarian'
+        scoutBiasId === 'character_focused_evaluator' ||
+        scoutBiasId === 'Character First' ||
+        coachPersonalityId === 'traditionalist' ||
+        coachPersonalityId === 'Old-School Disciplinarian'
     ) {
-        // Character-based adjustments wait for explicit scouting estimates.
-        // Never inspect hidden ego or work-ethic values for an external prospect.
+        const charSummary = String(report?.evaluation?.characterSummary || '').toLowerCase();
+        if (charSummary.includes('strong effort/reliability signals')) abilityScore += 3.5;
+        else if (charSummary.includes('effort/reliability need closer review')) abilityScore -= 3.5;
     }
 
     // 2. Potential / Ceiling
@@ -601,18 +620,19 @@ export function calculateDraftValue(player, team) {
     }
 
     // 3. Positional Need (25%)
-    // Evaluate offensive and defensive roster needs independently.
+    // Evaluate offensive and defensive roster needs independently, including starter quality and graduating seniors.
     const roster = getRosterObjects(team);
-
-    // Count every roster player who is viable at each position.
-    // A two-way player may contribute to both an offensive and
-    // a defensive position group.
     const positionCounts = {};
+    const returningCounts = {};
+    const topStarterOvrByPos = {};
 
     Object.keys(positionOverallWeights).forEach(position => {
-        positionCounts[position] = roster.filter(p =>
-            isPlayerViableForPosition(p, position)
-        ).length;
+        const viable = roster.filter(p => isPlayerViableForPosition(p, position));
+        positionCounts[position] = viable.length;
+        returningCounts[position] = viable.filter(p => (Number(p.age) || 14) < 18).length;
+        topStarterOvrByPos[position] = viable.length > 0
+            ? Math.max(...viable.map(p => calculateOverall(p, position)))
+            : 0;
     });
 
     const offensePersonnel =
@@ -624,24 +644,25 @@ export function calculateDraftValue(player, team) {
     function getPositionNeedMultiplier(position, personnel) {
         const formationTarget = Number(personnel[position]) || 0;
         const countAtPos = positionCounts[position] || 0;
+        const returningAtPos = returningCounts[position] || 0;
+        const topStarterOvr = topStarterOvrByPos[position] || 0;
 
         if (formationTarget <= 0) {
-            // The active formation does not use this position.
             return 0.75;
         }
 
-        const positionGap = formationTarget - countAtPos;
+        const effectiveDepth = (countAtPos * 0.65) + (returningAtPos * 0.35);
+        const positionGap = formationTarget - effectiveDepth;
+        let mult = positionGap > 0
+            ? 1.0 + Math.min(0.60, positionGap * 0.20)
+            : Math.max(0.70, 1.0 - Math.min(0.30, Math.abs(positionGap) * 0.10));
 
-        if (positionGap > 0) {
-            // A bigger shortage increases draft priority.
-            return 1.0 + Math.min(0.55, positionGap * 0.18);
+        // Boost urgency when the current best starter at that spot is weak (< 52 OVR).
+        if (topStarterOvr < 52) {
+            mult += position === 'QB' ? 0.22 : 0.10;
         }
 
-        // Reduce urgency as the position becomes adequately staffed.
-        return Math.max(
-            0.70,
-            1.0 - Math.min(0.30, Math.abs(positionGap) * 0.10)
-        );
+        return Math.min(1.75, mult);
     }
 
     const offNeedMultiplier = getPositionNeedMultiplier(
@@ -660,17 +681,35 @@ export function calculateDraftValue(player, team) {
         defOvr * defNeedMultiplier
     ) / 2;
 
-    // 4. Coach Scheme & Attribute Bias (10%)
+    // 4. Coach Tactical Philosophy & Attribute Fit (10%)
+    const tacticalId =
+        coach?.profileIds?.tactical ||
+        coach?.biases?.tactical?.id ||
+        coach?.biases?.tactical?.name ||
+        'adaptive_strategist';
+
+    const estPhys = estimatedPlayer.attributes?.physical || {};
+    const estMent = estimatedPlayer.attributes?.mental || {};
+    const estTech = estimatedPlayer.attributes?.technical || {};
     let coachFit = 0;
-    if (coach?.attributePreferences) {
-        for (const cat in estimatedPlayer.attributes) {
-            for (const attr in estimatedPlayer.attributes[cat]) {
-                const weight = coach.attributePreferences[cat]?.[attr] || 1.0;
-                coachFit += (estimatedPlayer.attributes[cat][attr] || 0) * (weight - 1.0);
-            }
-        }
+
+    if (tacticalId === 'power_run_specialist' || tacticalId === 'Smashmouth Zealot') {
+        if (['OL', 'RB', 'TE'].includes(fits.offense.position)) coachFit += 4;
+        if (fits.defense.position === 'DL') coachFit += 3;
+        coachFit += (((estPhys.strength || 50) + (estTech.blocking || 50)) / 2 - 50) * 0.15;
+    } else if (tacticalId === 'spread_passing_specialist' || tacticalId === 'Air Raid Purist') {
+        if (['QB', 'WR'].includes(fits.offense.position)) coachFit += 4;
+        coachFit += (((estPhys.speed || 50) + (estTech.throwingAccuracy || 50) + (estTech.catchingHands || 50)) / 3 - 50) * 0.15;
+    } else if (tacticalId === 'pressure_oriented_defender' || tacticalId === 'Blitz Addict') {
+        if (['DL', 'LB', 'DB'].includes(fits.defense.position)) coachFit += 3.5;
+        coachFit += (((estTech.blockShedding || 50) + (estPhys.speed || 50) + (estTech.coverage || 50)) / 3 - 50) * 0.15;
+    } else if (tacticalId === 'conservative_game_manager' || tacticalId === 'Conservative Turtler') {
+        coachFit += (((estMent.playbookIQ || 50) + (estMent.consistency || 50) + (estTech.carrying || 50)) / 3 - 50) * 0.15;
+    } else {
+        coachFit += (((estMent.playbookIQ || 50) + (estPhys.agility || 50)) / 2 - 50) * 0.08;
     }
-    const fitScore = Math.max(-10, Math.min(15, coachFit)) * 0.10;
+
+    const fitScore = Math.max(-10, Math.min(15, coachFit)) * 0.15;
 
     return abilityScore + potScore + needScore + fitScore;
 }

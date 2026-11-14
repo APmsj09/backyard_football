@@ -182,7 +182,8 @@ function chooseHistoricalPlayCall(
     ballOn,
     basePassChance,
     scoreDiff,
-    isLateGame
+    isLateGame,
+    recentPlays = []
 ) {
     const formationName =
         team?.formations?.offense ||
@@ -310,6 +311,10 @@ function chooseHistoricalPlayCall(
             weight *= 0.5;
         }
 
+        if (Array.isArray(recentPlays) && recentPlays.includes(key)) {
+            weight *= 0.45;
+        }
+
         return { key, weight };
     });
 
@@ -319,27 +324,43 @@ function chooseHistoricalPlayCall(
     );
 
     let ticket = Math.random() * totalWeight;
+    let selectedKey = weighted[weighted.length - 1].key;
 
     for (const entry of weighted) {
         ticket -= entry.weight;
 
         if (ticket <= 0) {
-            return entry.key;
+            selectedKey = entry.key;
+            break;
         }
     }
 
-    return weighted[weighted.length - 1].key;
+    if (Array.isArray(recentPlays)) {
+        recentPlays.push(selectedKey);
+        if (recentPlays.length > 4) recentPlays.shift();
+    }
+
+    return selectedKey;
 }
 
 function choosePlayer(team, side, slot, position, roster, used) {
+    const hasDesignatedQB = position === 'QB' && roster.some(candidate =>
+        candidate &&
+        !used.has(candidate.id) &&
+        (
+            candidate.pos === 'QB' ||
+            candidate.bestPosition === 'QB' ||
+            candidate.favoriteOffensivePosition === 'QB'
+        )
+    );
+
     const isEligible = candidate => {
         if (!candidate || used.has(candidate.id)) {
             return false;
         }
 
-        // Quarterback requires an explicit QB designation.
-        // Do not let permissive crossover eligibility create fake QBs.
-        if (position === 'QB') {
+        // Prefer designated QBs; only fall back to viable athletes when the team has no QB.
+        if (position === 'QB' && hasDesignatedQB) {
             return (
                 candidate.pos === 'QB' ||
                 candidate.bestPosition === 'QB' ||
@@ -654,9 +675,10 @@ function finishBallCarrier(carrier, defense, startingYards, maxGain = 100, playT
         }
     }
 
+    const carrierSecurity = carrier?.attributes?.technical?.carrying ?? getSkill(carrier, 'toughness');
     yards = clamp(yards, -8, Math.max(0, maxGain));
     if (contacted && carrier && yards < maxGain && Math.random() < clamp(
-        0.012 + (50 - getSkill(carrier, 'toughness')) * 0.00035 +
+        0.012 + (50 - carrierSecurity) * 0.00035 +
         (weightedSkill(tackler, TACKLE_SKILLS) - 50) * 0.00020,
         0.004,
         0.035
@@ -1473,6 +1495,7 @@ function resolvePassPlay(
     addStat(target, 'targets');
     const coverageIQPenalty = Math.max(0, (defenseIQ - 50) * 0.0008);
     const accuracy = getSkill(qb, 'throwingAccuracy');
+    const armPower = qb?.attributes?.technical?.throwPower ?? getSkill(qb, 'strength');
     const maxGain = Math.max(0, 100 - ballOn);
 
     // Estimate target depth from the type of pass being attempted.
@@ -1489,10 +1512,12 @@ function resolvePassPlay(
 
     const intendedAirYards = clamp(
         Math.round(
-            baseAirYards + (chosen.separation - 50) * 0.10
+            baseAirYards +
+            (chosen.separation - 50) * 0.10 +
+            (isDeep ? (armPower - 50) * 0.08 : 0)
         ),
         1,
-        isDeep ? 28 : 18
+        isDeep ? 30 : 18
     );
 
     const interceptionSpotYards = Math.min(
@@ -1508,7 +1533,7 @@ function resolvePassPlay(
         (pressured ? 0.09 : 0) -
         coverageIQPenalty +
         (isQuick ? 0.025 : 0) +
-        (isDeep ?  -0.04 : 0) +
+        (isDeep ? -0.04 + (armPower - 50) * 0.0012 : 0) +
         (isScreen ? 0.025 : 0),
         0.40,
         0.92
@@ -1719,6 +1744,8 @@ export function simulateYouthMatch(homeTeam, awayTeam) {
             ? scores.home - scores.away
             : scores.away - scores.home;
 
+        const isLateGame = quarter >= 4 && clockRemaining <= 150;
+
         const playKey = chooseHistoricalPlayCall(
             offenseTeam,
             down,
@@ -1726,7 +1753,7 @@ export function simulateYouthMatch(homeTeam, awayTeam) {
             ballOn,
             passChance,
             scoreDiff,
-            YOUTH_GAME_PLAYS - plays,
+            isLateGame,
             recentPlayHistory.get(offenseTeam.id)
         );
 

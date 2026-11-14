@@ -10649,10 +10649,30 @@ export function resolveCoachCarousel(
             )
         );
 
+        const existingStaffCoaches = getNpcCoaches(team);
+        let complementarityBonus = 0;
+        if (existingStaffCoaches.length > 0) {
+            const roles = ['scouting', 'training', 'offensePrep', 'defensePrep'];
+            const weakestTeamRole = roles
+                .map(r => ({
+                    role: r,
+                    best: Math.max(...existingStaffCoaches.map(c => calculateCoachRoleFit(c, r)))
+                }))
+                .sort((a, b) => a.best - b.best)[0];
+
+            if (weakestTeamRole) {
+                const candidateBestAtWeakest = calculateCoachRoleFit(estimatedCandidate, weakestTeamRole.role);
+                if (candidateBestAtWeakest > weakestTeamRole.best) {
+                    complementarityBonus = Math.min(8, (candidateBestAtWeakest - weakestTeamRole.best) * 0.35);
+                }
+            }
+        }
+
         let fitScore =
             rep * 0.45 +
             roleFit * 0.55 +
-            careerAdjustment;
+            careerAdjustment +
+            complementarityBonus;
 
         const tacticalId = getStaffProfileId(candidate, 'tactical');
         const offense = team.formations?.offense || '';
@@ -10965,6 +10985,8 @@ export function resolveCoachCarousel(
             }
 
             employedCoachIds.add(String(newHire.id));
+            team.aiStaffWorkPlanKey = null;
+            team.aiStaffWorkPlanPhaseKey = null;
 
             vacancies -= 1;
             team.coachingVacancies = vacancies;
@@ -11537,6 +11559,31 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
 
     const rosterFitCache = new Map();
 
+    // Scouted opponent tendencies (if available from prior games)
+    const oppTendencies = opponent?.id != null
+        ? team.playcallTendencies?.snapCounts?.opponents?.[String(opponent.id)]
+        : null;
+
+    let oppRunRate = null;
+    if ((oppTendencies?.offense?.totalCalls || 0) >= 6) {
+        let runCalls = 0;
+        for (const [k, count] of Object.entries(oppTendencies.offense.byPlay || {})) {
+            if (offensivePlaybook[k]?.type === 'run') runCalls += Number(count) || 0;
+        }
+        oppRunRate = runCalls / oppTendencies.offense.totalCalls;
+    }
+
+    let oppBlitzRate = null;
+    if ((oppTendencies?.defense?.totalCalls || 0) >= 6) {
+        let blitzCalls = 0;
+        for (const [k, count] of Object.entries(oppTendencies.defense.byPlay || {})) {
+            if (defensivePlaybook[k]?.blitz) blitzCalls += Number(count) || 0;
+        }
+        oppBlitzRate = blitzCalls / oppTendencies.defense.totalCalls;
+    }
+
+    const winNowFocus = gmDirective === 'WIN_NOW' ? 1.25 : 1.0;
+
     // ---------------------------------------------------------
     // 1. OFFENSE PLAYBOOK & FORMATION EVALUATION
     // ---------------------------------------------------------
@@ -11554,12 +11601,15 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         
         let score = (fitScore * 0.55) + (mastery * 0.45);
 
-        // Coach Tactical Preference (Soft limits)
+        // Coach Tactical Preference & Opponent Tendency Counter
         let prefBonus = 0;
         if (offenseTacticalId === 'spread_passing_specialist' && play.type === 'pass') prefBonus += 8;
         if (offenseTacticalId === 'power_run_specialist' && play.type === 'run') prefBonus += 8;
         if (play.tags?.includes('pa') || play.tags?.includes('trick')) {
             prefBonus += Math.max(-6, Math.min(6, ((offenseInstinct - 50) * 0.10) + ((offenseRiskTolerance - 50) * 0.08) - ((offenseDiscipline - 50) * 0.04)));
+        }
+        if (oppBlitzRate !== null && oppBlitzRate >= 0.45 && (play.tags?.includes('quick') || play.tags?.includes('screen'))) {
+            prefBonus += 6 * (offenseInstinct / 100) * winNowFocus;
         }
         score += prefBonus;
         
@@ -11577,6 +11627,7 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
     let bestOffForm = currentOffForm;
     let bestOffFormScore = -Infinity;
     let finalOffenseInstalls = [];
+    const preferredOffenseForm = offenseCoach?.preferredOffense || team.coach?.preferredOffense || null;
     
     for (const formKey of Object.keys(offenseFormations)) {
         if (formKey === 'Punt') continue;
@@ -11593,8 +11644,7 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         const top8 = compatiblePlays.slice(0, 8);
         
         let formScore = top8.reduce((sum, key) => sum + offPlayScores.get(key), 0);
-        
-        // Transition cost to prevent erratic weekly playbook shifts
+        if (preferredOffenseForm && formKey === preferredOffenseForm) formScore += 12;
         if (formKey !== currentOffForm) formScore -= 25;
         
         if (formScore > bestOffFormScore && top8.length >= 8) {
@@ -11604,7 +11654,6 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         }
     }
     
-    // Ensure fallback if no custom plays met requirements
     if (finalOffenseInstalls.length < 8) {
         finalOffenseInstalls = [...installedOffense].slice(0, 8);
     }
@@ -11649,14 +11698,21 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         
         let score = (fitScore * 0.55) + (mastery * 0.45);
 
-        // Coach Tactical Preference (Soft limits)
+        // Coach Tactical Preference & Opponent Tendency Counter
         let prefBonus = 0;
         if (defenseTacticalId === 'pressure_oriented_defender' && play.blitz) prefBonus += 8;
         if (defenseTacticalId === 'conservative_game_manager' && !play.blitz) prefBonus += 6;
         if (play.blitz) {
             prefBonus += ((defenseRiskTolerance - 50) * 0.10) - ((defenseDiscipline - 50) * 0.05);
         }
-        score += Math.max(-5, Math.min(10, prefBonus));
+        if (oppRunRate !== null) {
+            if (oppRunRate >= 0.58 && play.tags?.includes('runStop')) {
+                prefBonus += 6 * (defenseInstinct / 100) * winNowFocus;
+            } else if (oppRunRate <= 0.42 && (play.tags?.includes('cover2') || play.tags?.includes('cover3') || play.tags?.includes('safeZone'))) {
+                prefBonus += 6 * (defenseInstinct / 100) * winNowFocus;
+            }
+        }
+        score += Math.max(-5, Math.min(12, prefBonus));
         
         score += getInstalledPlayContinuityBonus(installedDefense, playKey);
         score += getInstructionEmphasisScore(defenseEmphasis, playKey, play);
@@ -11672,6 +11728,7 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
     let bestDefForm = currentDefForm;
     let bestDefFormScore = -Infinity;
     let finalDefenseInstalls = [];
+    const preferredDefenseForm = defenseCoach?.preferredDefense || team.coach?.preferredDefense || null;
     
     for (const formKey of Object.keys(defenseFormations)) {
         if (formKey === 'Punt_Return') continue;
@@ -11684,8 +11741,7 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
         const top8 = compatiblePlays.slice(0, 8);
         
         let formScore = top8.reduce((sum, key) => sum + defPlayScores.get(key), 0);
-        
-        // Transition cost to prevent erratic weekly playbook shifts
+        if (preferredDefenseForm && formKey === preferredDefenseForm) formScore += 12;
         if (formKey !== currentDefForm) formScore -= 25;
         
         if (formScore > bestDefFormScore && top8.length >= 8) {
@@ -11703,11 +11759,19 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
     // 3. APPLY FINDINGS TO TEAM GAMEPLAN
     // ---------------------------------------------------------
     team.formations = team.formations || {};
+    const formationChanged =
+        bestOffForm !== currentOffForm ||
+        bestDefForm !== currentDefForm;
+
     team.formations.offense = bestOffForm;
     team.formations.defense = bestDefForm;
     
     team.gameplan.installedOffense = finalOffenseInstalls;
     team.gameplan.installedDefense = finalDefenseInstalls;
+
+    if (formationChanged) {
+        rebuildDepthChartFromOrder(team);
+    }
 }
 
 export function processWeeklyStaffPreparation(

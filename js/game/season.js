@@ -2056,10 +2056,145 @@ export function getTeamOverall(team) {
     return Math.round(sum / top8.length);
 }
 
-export function generateHistoricalStats(team, score) {
-    const roster = getRosterObjects(team);
+function getHistoricalTeamProfile(team) {
+    const roster = getRosterObjects(team).filter(Boolean);
 
-    // Initialize all gameStats for active roster players
+    const attr = (player, cat, key, fallback = 50) => {
+        const val = Number(player?.attributes?.[cat]?.[key]);
+        return Number.isFinite(val) ? val : fallback;
+    };
+
+    const avg = (arr, fallback = 50) =>
+        arr.length > 0
+            ? arr.reduce((sum, v) => sum + v, 0) / arr.length
+            : fallback;
+
+    const isHealthy = p => !(Number(p?.status?.duration) > 0);
+
+    const resolveUnitStarters = (side, fallbackPositions) => {
+        const chart = team.depthChart?.[side] || {};
+        const seen = new Set();
+        const starters = [];
+
+        Object.entries(chart).forEach(([slot, playerId]) => {
+            if (!playerId) return;
+            let p = roster.find(c => String(c.id) === String(playerId));
+            let pos = slot.replace(/\d+/g, '');
+            if (['OT', 'OG', 'C'].includes(pos)) pos = 'OL';
+            if (['DE', 'DT', 'NT'].includes(pos)) pos = 'DL';
+            if (['CB', 'S', 'FS', 'SS'].includes(pos)) pos = 'DB';
+            if (pos === 'FB') pos = 'RB';
+
+            if (!p || !isHealthy(p)) {
+                const backup = roster.find(c =>
+                    isHealthy(c) &&
+                    !seen.has(String(c.id)) &&
+                    isPlayerViableForPosition(c, pos)
+                );
+                if (backup) p = backup;
+            }
+
+            if (p && !seen.has(String(p.id))) {
+                seen.add(String(p.id));
+                starters.push({
+                    slot,
+                    pos,
+                    player: p,
+                    ovr: calculateOverall(p, pos)
+                });
+            }
+        });
+
+        if (starters.length === 0) {
+            return roster.filter(isHealthy).slice(0, 8).map(p => {
+                const pos = fallbackPositions[0] || estimateBestPosition(p);
+                return { slot: pos, pos, player: p, ovr: calculateOverall(p, pos) };
+            });
+        }
+
+        return starters;
+    };
+
+    const offStarters = resolveUnitStarters('offense', ['QB', 'RB', 'WR', 'OL']);
+    const defStarters = resolveUnitStarters('defense', ['DL', 'LB', 'DB']);
+
+    const qbStarter = offStarters.find(s => s.pos === 'QB') || offStarters[0] || null;
+    const rbStarters = offStarters.filter(s => s.pos === 'RB');
+    const recStarters = offStarters.filter(s => s.pos === 'WR' || s.pos === 'TE');
+    const olStarters = offStarters.filter(s => s.pos === 'OL');
+    const dlStarters = defStarters.filter(s => s.pos === 'DL');
+    const lbStarters = defStarters.filter(s => s.pos === 'LB');
+    const dbStarters = defStarters.filter(s => s.pos === 'DB');
+
+    const offAvgOvr = avg(offStarters.map(s => s.ovr), 50);
+    const defAvgOvr = avg(defStarters.map(s => s.ovr), 50);
+
+    // A team without a viable healthy QB suffers a clear passing penalty.
+    const qbQuality = qbStarter ? qbStarter.ovr : 35;
+    const olQuality = avg(olStarters.map(s => s.ovr), 48);
+    const recQuality = avg(recStarters.map(s => s.ovr), 48);
+    const rbQuality = avg(rbStarters.map(s => s.ovr), 48);
+
+    const passOffense = (qbQuality * 0.45) + (recQuality * 0.35) + (olQuality * 0.20);
+    const runOffense = (rbQuality * 0.55) + (olQuality * 0.45);
+
+    const dlQuality = avg(dlStarters.map(s => s.ovr), 48);
+    const lbQuality = avg(lbStarters.map(s => s.ovr), 48);
+    const dbQuality = avg(dbStarters.map(s => s.ovr), 48);
+
+    const passDefense = (dbQuality * 0.55) + (dlQuality * 0.25) + (lbQuality * 0.20);
+    const runDefense = (dlQuality * 0.45) + (lbQuality * 0.40) + (dbQuality * 0.15);
+
+    const coach = team.staff?.coach || team.coach || {};
+    const coachRatings = coach.ratings || {};
+    const offCoachEdge = (((Number(coachRatings.offSchemeMastery) || 50) + (Number(coachRatings.gameplanInstinct) || 50)) / 2 - 50) * 0.08;
+    const defCoachEdge = (((Number(coachRatings.defSchemeMastery) || 50) + (Number(coachRatings.inGameAdjustments) || 50)) / 2 - 50) * 0.08;
+
+    const masteryValues = Object.values(team.gameplan?.mastery || {}).filter(Number.isFinite);
+    const avgMastery = masteryValues.length > 0 ? avg(masteryValues, 50) : 50;
+    const masteryEdge = (avgMastery - 50) * 0.05;
+
+    const starterPlayers = [...offStarters, ...defStarters].map(s => s.player);
+    const avgFatigue = avg(starterPlayers.map(p => Number(p.fatigue) || 0), 0);
+    const fatiguePenalty = Math.max(0, (avgFatigue - 25) * 0.06);
+
+    // Derive pass tendency from coach style, offensive formation, and clipboard settings.
+    const earlyRunTendency = Number(team.gameplan?.situational?.earlyDownTendency ?? 55);
+    let passShare = 1 - Math.max(0.25, Math.min(0.75, earlyRunTendency / 100));
+
+    const offForm = String(team.formations?.offense || coach.preferredOffense || '').toLowerCase();
+    const tacStyle = String(coach.biases?.tactical?.id || coach.biases?.tactical?.name || '').toLowerCase();
+
+    if (/spread|trips|air|shotgun|empty/.test(offForm) || /spread|air/.test(tacStyle)) passShare += 0.08;
+    else if (/power|jumbo|wing|heavy|wishbone/.test(offForm) || /power|smashmouth/.test(tacStyle)) passShare -= 0.08;
+
+    // Smart coaches lean into whichever unit is stronger (pass vs run).
+    const coachIQ = (Number(coachRatings.gameplanInstinct) || 50) / 100;
+    passShare += Math.max(-0.08, Math.min(0.08, (passOffense - runOffense) * 0.0025 * coachIQ));
+    passShare = Math.max(0.32, Math.min(0.72, passShare));
+
+    const defAggro = Number(team.gameplan?.situational?.defenseAggressiveness ?? 50);
+    let blitzTendency = Math.max(0.2, Math.min(0.8, defAggro / 100));
+    if (/blitz|pressure/.test(tacStyle)) blitzTendency = Math.min(0.85, blitzTendency + 0.12);
+
+    const olAvgBlock = avg(olStarters.map(s => attr(s.player, 'technical', 'blocking', 50)), 50);
+    const dlPassRush = avg([...dlStarters, ...lbStarters].map(s => (attr(s.player, 'technical', 'blockShedding', 50) + attr(s.player, 'physical', 'speed', 50)) / 2), 50);
+
+    return {
+        offenseRating: (offAvgOvr * 0.55 + passOffense * 0.25 + runOffense * 0.20) + offCoachEdge + masteryEdge - fatiguePenalty,
+        defenseRating: (defAvgOvr * 0.55 + passDefense * 0.25 + runDefense * 0.20) + defCoachEdge + masteryEdge - fatiguePenalty,
+        passOffense,
+        runOffense,
+        passDefense,
+        runDefense,
+        olAvgBlock,
+        dlPassRush,
+        passShare,
+        blitzTendency
+    };
+}
+
+function initializeHistoricalPlayerGameStats(roster) {
     roster.forEach(p => {
         if (p && !p.gameStats) {
             p.gameStats = {
@@ -2090,264 +2225,642 @@ export function generateHistoricalStats(team, score) {
             p.gameStats.pancakes = 0;
         }
     });
+}
 
-    // Helper: Gathers starters AND rotational backups so the entire roster gets realistic reps
-    const getRoleEntries = (side, positionPrefix) => {
-        const depth = team.depthChart?.[side] || {};
-        const depthPool = team.depthOrder?.[positionPrefix] || [];
-        const seenPlayerIds = new Set();
-        const entries = [];
+function getHistoricalRoleEntries(team, roster, side, positionPrefix) {
+    const depth = team.depthChart?.[side] || {};
+    const depthPool = team.depthOrder?.[positionPrefix] || [];
+    const seenPlayerIds = new Set();
+    const entries = [];
 
-        // 1. Primary starters from depth chart slots (includes FB mapping for RB)
-        Object.entries(depth).forEach(([slot, playerId]) => {
-            if (!playerId) return;
-            const isMatch = slot.startsWith(positionPrefix) || (positionPrefix === 'RB' && slot.startsWith('FB'));
-            if (isMatch && !seenPlayerIds.has(String(playerId))) {
-                const player = roster.find(p => p && String(p.id) === String(playerId));
-                if (player?.gameStats) {
-                    seenPlayerIds.add(String(playerId));
-                    const ovr = calculateOverall(player, positionPrefix);
-                    const stamina = player.attributes?.physical?.stamina || 50;
-                    entries.push({ slot, player, tier: 'starter', ovr, stamina });
-                }
-            }
-        });
+    const isHealthy = p => !(Number(p?.status?.duration) > 0);
 
-        // 2. Rotational backups & reserves from depth order and roster viability
-        depthPool.forEach((playerId, index) => {
-            if (!playerId || seenPlayerIds.has(String(playerId))) return;
+    // 1. Healthy starters on the depth chart
+    Object.entries(depth).forEach(([slot, playerId]) => {
+        if (!playerId) return;
+        const isMatch = slot.startsWith(positionPrefix) || (positionPrefix === 'RB' && slot.startsWith('FB'));
+        if (isMatch && !seenPlayerIds.has(String(playerId))) {
             const player = roster.find(p => p && String(p.id) === String(playerId));
-            if (player?.gameStats) {
+            if (player?.gameStats && isHealthy(player)) {
                 seenPlayerIds.add(String(playerId));
                 const ovr = calculateOverall(player, positionPrefix);
                 const stamina = player.attributes?.physical?.stamina || 50;
-                entries.push({
-                    slot: `${positionPrefix}_sub_${index + 1}`,
-                    player,
-                    tier: index === 0 ? 'rotation' : 'reserve',
-                    ovr,
-                    stamina
-                });
+                entries.push({ slot, player, tier: 'starter', ovr, stamina });
             }
-        });
+        }
+    });
 
-        // 3. Fallback: Catch any natural players at this position not yet placed
-        const favoritePositionKey = side === 'offense' ? 'favoriteOffensivePosition' : 'favoriteDefensivePosition';
-        roster.forEach(player => {
-            if (!player?.gameStats || seenPlayerIds.has(String(player.id))) return;
-            const natPos = player[favoritePositionKey] || player.pos;
-            if (natPos === positionPrefix || isPlayerViableForPosition(player, positionPrefix)) {
-                seenPlayerIds.add(String(player.id));
-                const ovr = calculateOverall(player, positionPrefix);
-                const stamina = player.attributes?.physical?.stamina || 50;
-                entries.push({
-                    slot: `${positionPrefix}_bench`,
-                    player,
-                    tier: 'reserve',
-                    ovr,
-                    stamina
-                });
+    // 2. Healthy rotational backups from depthOrder (first healthy backup promotes if starter is out)
+    const needsStarterFill = entries.length === 0;
+    depthPool.forEach((playerId, index) => {
+        if (!playerId || seenPlayerIds.has(String(playerId))) return;
+        const player = roster.find(p => p && String(p.id) === String(playerId));
+        if (player?.gameStats && isHealthy(player)) {
+            seenPlayerIds.add(String(playerId));
+            const ovr = calculateOverall(player, positionPrefix);
+            const stamina = player.attributes?.physical?.stamina || 50;
+            const tier = (needsStarterFill && entries.length === 0)
+                ? 'starter'
+                : (index === 0 || (needsStarterFill && entries.length === 1) ? 'rotation' : 'reserve');
+            entries.push({
+                slot: `${positionPrefix}_sub_${index + 1}`,
+                player,
+                tier,
+                ovr,
+                stamina
+            });
+        }
+    });
+
+    // 3. Fallback: healthy natural/viable players
+    const favoritePositionKey = side === 'offense' ? 'favoriteOffensivePosition' : 'favoriteDefensivePosition';
+    roster.forEach(player => {
+        if (!player?.gameStats || !isHealthy(player) || seenPlayerIds.has(String(player.id))) return;
+        const natPos = player[favoritePositionKey] || player.pos;
+        if (natPos === positionPrefix || isPlayerViableForPosition(player, positionPrefix)) {
+            seenPlayerIds.add(String(player.id));
+            const ovr = calculateOverall(player, positionPrefix);
+            const stamina = player.attributes?.physical?.stamina || 50;
+            entries.push({
+                slot: `${positionPrefix}_bench`,
+                player,
+                tier: entries.length === 0 ? 'starter' : 'reserve',
+                ovr,
+                stamina
+            });
+        }
+    });
+
+    const starterEntries = entries.filter(e => e.tier === 'starter');
+    const topStarterOvr = starterEntries.length > 0
+        ? Math.max(...starterEntries.map(s => s.ovr))
+        : (entries[0]?.ovr || 50);
+
+    const topStarterStamina = starterEntries.length > 0
+        ? Math.round(starterEntries.reduce((sum, s) => sum + s.stamina, 0) / starterEntries.length)
+        : 50;
+
+    entries.forEach(e => {
+        e.topStarterOvr = topStarterOvr;
+        e.topStarterStamina = topStarterStamina;
+    });
+
+    return entries;
+}
+
+function distributeWeightedInteger(total, entries, weightFn) {
+    if (!entries.length) return [];
+    const safeTotal = Math.max(0, Math.floor(Number(total) || 0));
+    if (safeTotal === 0) return entries.map(() => 0);
+
+    const weights = entries.map(e => Math.max(0.01, Number(weightFn(e)) || 0));
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+    if (totalWeight <= 0) return entries.map(() => 0);
+
+    // Multinomial-like stochastic allocation so single TDs/INTs don't deterministically go to index 0
+    const counts = entries.map(() => 0);
+    for (let i = 0; i < safeTotal; i++) {
+        let roll = Math.random() * totalWeight;
+        let chosen = weights.length - 1;
+        for (let j = 0; j < weights.length; j++) {
+            roll -= weights[j];
+            if (roll <= 0) {
+                chosen = j;
+                break;
             }
-        });
-
-        // Compute baseline benchmark from the top starter(s) in this room
-        const starterEntries = entries.filter(e => e.tier === 'starter');
-        const topStarterOvr = starterEntries.length > 0
-            ? Math.max(...starterEntries.map(s => s.ovr))
-            : (entries[0]?.ovr || 50);
-
-        const topStarterStamina = starterEntries.length > 0
-            ? Math.round(starterEntries.reduce((sum, s) => sum + s.stamina, 0) / starterEntries.length)
-            : 50;
-
-        entries.forEach(e => {
-            e.topStarterOvr = topStarterOvr;
-            e.topStarterStamina = topStarterStamina;
-        });
-
-        return entries;
-    };
-
-    // Role weights: Scaled by Base, Skill Gap vs. Starter, and Stamina
-    const getRoleWeight = entry => {
-        const position = entry.slot.split('_')[0].replace(/\d+$/, '');
-        const isStarter = entry.tier === 'starter' || !entry.tier;
-        const isRotation = entry.tier === 'rotation';
-
-        let baseWeight = 4;
-        if (position === 'WR') baseWeight = 5;
-        else if (position === 'TE') baseWeight = 4;
-        else if (position === 'RB' || position === 'FB') baseWeight = 6;
-        else if (position === 'QB') baseWeight = 14;
-        else if (position === 'DL' || position === 'LB' || position === 'DB') baseWeight = 5;
-
-        // 1. Stamina Factor: high stamina gives greater volume capacity without fatigue
-        const stamina = entry.stamina || 50;
-        const staminaFactor = Math.max(0.70, Math.min(1.30, 0.75 + (stamina / 200)));
-
-        if (isStarter) {
-            return Math.max(1, Math.round(baseWeight * staminaFactor * 10) / 10);
         }
+        counts[chosen]++;
+    }
+    return counts;
+}
 
-        // 2. Skill Gap: close skill creates a committee; wide gap creates a bellcow
-        const ovrGap = Math.max(0, (entry.topStarterOvr || 50) - (entry.ovr || 50));
-        const gapAdjustment = Math.max(-0.12, Math.min(0.16, (10 - ovrGap) * 0.01));
+function getHistoricalBaseRoleWeight(entry) {
+    const position = entry.slot.split('_')[0].replace(/\d+$/, '');
+    const isStarter = entry.tier === 'starter' || !entry.tier;
+    const isRotation = entry.tier === 'rotation';
 
-        // 3. Starter Stamina Need: low starter stamina forces more backup rotations
-        const starterStamina = entry.topStarterStamina || 50;
-        const starterFatigueNeed = (50 - starterStamina) * 0.003;
+    let baseWeight = 4;
+    if (position === 'WR') baseWeight = 5;
+    else if (position === 'TE') baseWeight = 4;
+    else if (position === 'RB' || position === 'FB') baseWeight = 6;
+    else if (position === 'QB') baseWeight = 14;
+    else if (position === 'DL' || position === 'LB' || position === 'DB') baseWeight = 5;
 
-        let shareRatio = isRotation ? 0.22 : 0.07;
-        shareRatio += gapAdjustment + starterFatigueNeed;
+    const stamina = entry.stamina || 50;
+    const staminaFactor = Math.max(0.70, Math.min(1.30, 0.75 + (stamina / 200)));
 
-        // Position-specific ratio guardrails
-        if (position === 'QB') {
-            // Backup QBs rarely take snaps unless blowout or starter gassed
-            shareRatio = Math.max(0.04, Math.min(0.18, shareRatio));
-        } else if (position === 'RB') {
-            // RBs frequently form 65/35 committees
-            shareRatio = Math.max(0.06, Math.min(0.42, shareRatio));
-        } else {
-            shareRatio = Math.max(0.05, Math.min(0.35, shareRatio));
-        }
+    if (isStarter) {
+        return Math.max(1, baseWeight * staminaFactor);
+    }
 
-        const finalWeight = baseWeight * shareRatio * staminaFactor;
-        return Math.max(0.5, Math.round(finalWeight * 10) / 10);
-    };
+    const ovrGap = Math.max(0, (entry.topStarterOvr || 50) - (entry.ovr || 50));
+    const gapAdjustment = Math.max(-0.12, Math.min(0.18, (10 - ovrGap) * 0.012));
+    const starterStamina = entry.topStarterStamina || 50;
+    const starterFatigueNeed = (50 - starterStamina) * 0.003;
 
-    const distributeTotal = (total, entries) => {
-        if (entries.length === 0) return [];
+    let shareRatio = isRotation ? 0.22 : 0.07;
+    shareRatio += gapAdjustment + starterFatigueNeed;
 
-        const safeTotal = Math.max(0, Math.floor(Number(total) || 0));
-        const weights = entries.map(getRoleWeight);
-        const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    if (position === 'QB') shareRatio = Math.max(0.02, Math.min(0.14, shareRatio));
+    else if (position === 'RB') shareRatio = Math.max(0.06, Math.min(0.42, shareRatio));
+    else shareRatio = Math.max(0.05, Math.min(0.35, shareRatio));
 
-        if (totalWeight <= 0) return entries.map(() => 0);
+    return Math.max(0.25, baseWeight * shareRatio * staminaFactor);
+}
 
-        let cumulativeWeight = 0;
-        return weights.map(weight => {
-            const before = Math.floor(safeTotal * cumulativeWeight / totalWeight);
-            cumulativeWeight += weight;
-            const after = Math.floor(safeTotal * cumulativeWeight / totalWeight);
-            return after - before;
-        });
+function generateHistoricalOffenseStats(team, totalOffensiveTDs, teamProfile, oppProfile) {
+    const roster = getRosterObjects(team);
+    initializeHistoricalPlayerGameStats(roster);
+
+    const attr = (p, cat, key, fallback = 50) => {
+        const val = Number(p?.attributes?.[cat]?.[key]);
+        return Number.isFinite(val) ? val : fallback;
     };
 
     const addStat = (entry, stat, amount) => {
         if (!entry?.player?.gameStats || !Number.isFinite(amount) || amount <= 0) return;
-        const stats = entry.player.gameStats;
-        stats[stat] = (Number(stats[stat]) || 0) + amount;
+        entry.player.gameStats[stat] = (Number(entry.player.gameStats[stat]) || 0) + amount;
     };
 
-    const qbs = getRoleEntries('offense', 'QB');
-    const runningBacks = getRoleEntries('offense', 'RB');
-    const wideReceivers = getRoleEntries('offense', 'WR');
-    const tightEnds = getRoleEntries('offense', 'TE');
-    const offensiveLine = getRoleEntries('offense', 'OL');
+    const qbs = getHistoricalRoleEntries(team, roster, 'offense', 'QB');
+    const runningBacks = getHistoricalRoleEntries(team, roster, 'offense', 'RB');
+    const wideReceivers = getHistoricalRoleEntries(team, roster, 'offense', 'WR');
+    const tightEnds = getHistoricalRoleEntries(team, roster, 'offense', 'TE');
+    const offensiveLine = getHistoricalRoleEntries(team, roster, 'offense', 'OL');
 
-    const defensiveLine = getRoleEntries('defense', 'DL');
-    const linebackers = getRoleEntries('defense', 'LB');
-    const defensiveBacks = getRoleEntries('defense', 'DB');
+    const totalPlays = getRandomInt(34, 44);
+    const passShare = teamProfile?.passShare ?? 0.52;
+    let totalPassAttempts = Math.max(8, Math.round(totalPlays * passShare + getRandomInt(-3, 3)));
+    let totalRushes = Math.max(8, totalPlays - totalPassAttempts);
 
-    const totalTouchdowns = Math.floor(Math.max(0, score) / 7);
-    const passTds = qbs.length > 0 ? Math.floor(totalTouchdowns * 0.6) : 0;
-    const rushTds = totalTouchdowns - passTds;
-
-    // --- 1. PASSING (Starter QB gets ~85%, backup gets ~15% in garbage time) ---
-    const totalPassAttempts = getRandomInt(16, 26);
-    const qbAttemptShares = distributeTotal(totalPassAttempts, qbs);
-    const qbTdShares = distributeTotal(passTds, qbs);
-
-    qbs.forEach((entry, idx) => {
-        const att = qbAttemptShares[idx] || 0;
-        if (att <= 0) return;
-        const comp = Math.floor(att * (0.52 + Math.random() * 0.18));
-        addStat(entry, 'passAttempts', att);
-        addStat(entry, 'passCompletions', comp);
-        addStat(entry, 'passYards', comp * getRandomInt(8, 12));
-        addStat(entry, 'touchdowns', qbTdShares[idx] || 0);
-        if (Math.random() < 0.35) addStat(entry, 'interceptionsThrown', 1);
-    });
-
-    // --- 2. RUSHING (RB1 takes lead, RB2 & backup take rotational carries) ---
-    const rushers = runningBacks.length > 0 ? runningBacks : qbs;
-    const totalRushes = getRandomInt(12, 22);
-    const rushAttemptShares = distributeTotal(totalRushes, rushers);
-    const rushTdShares = distributeTotal(rushTds, rushers);
-
-    rushers.forEach((entry, index) => {
-        const attempts = rushAttemptShares[index] || 0;
-        if (attempts <= 0) return;
-        addStat(entry, 'rushAttempts', attempts);
-        addStat(entry, 'rushYards', attempts * getRandomInt(3, 6));
-        addStat(entry, 'touchdowns', rushTdShares[index] || 0);
-    });
-
-    // --- 3. RECEIVING (All WRs, TEs, and RBs get realistic target distribution) ---
+    // Combine receiver pool (WR, TE, RB) without duplicates
     const receiverMap = new Map();
     [...wideReceivers, ...tightEnds, ...runningBacks].forEach(entry => {
         const playerId = String(entry.player.id);
         const existing = receiverMap.get(playerId);
-        if (!existing || getRoleWeight(entry) > getRoleWeight(existing)) {
+        if (!existing || getHistoricalBaseRoleWeight(entry) > getHistoricalBaseRoleWeight(existing)) {
             receiverMap.set(playerId, entry);
         }
     });
-
     const receivers = [...receiverMap.values()];
-    const totalCompletions = qbs.reduce((sum, qb) => sum + (qb.player.gameStats?.passCompletions || 0), 0);
-    const targetShares = distributeTotal(totalPassAttempts, receivers);
-    const receptionShares = distributeTotal(totalCompletions, receivers);
-    const receivingTdShares = distributeTotal(passTds, receivers);
 
-    receivers.forEach((entry, index) => {
-        const targets = targetShares[index] || 0;
-        const receptions = Math.min(targets, receptionShares[index] || 0);
-        if (targets <= 0) return;
+    // --- 1. PASSING ATTEMPTS & COMPLETIONS (Skill-based!) ---
+    const oppPassDef = oppProfile?.passDefense ?? 50;
+    const avgWrHands = receivers.length > 0
+        ? receivers.reduce((s, r) => s + attr(r.player, 'technical', 'catchingHands'), 0) / receivers.length
+        : 50;
+    const qbSnapPool = qbs.length > 0 ? qbs : (runningBacks.length > 0 ? [runningBacks[0]] : []);
+    const qbAttemptShares = distributeWeightedInteger(totalPassAttempts, qbSnapPool, getHistoricalBaseRoleWeight);
 
-        const isTightEnd = entry.slot.includes('TE');
-        const yardsPerCatch = getRandomInt(isTightEnd ? 8 : 9, isTightEnd ? 13 : 15);
+    let totalCompletions = 0;
+    let totalIntsThrown = 0;
+    let avgQbPower = 50;
+    let avgQbIQ = 50;
+
+    if (qbSnapPool.length > 0 && totalPassAttempts > 0) {
+        let weightedCompProbSum = 0;
+        qbSnapPool.forEach((entry, idx) => {
+            const att = qbAttemptShares[idx] || 0;
+            if (att <= 0) return;
+
+            const acc = attr(entry.player, 'technical', 'throwingAccuracy');
+            const pwr = attr(entry.player, 'technical', 'throwPower', attr(entry.player, 'physical', 'strength'));
+            const iq = attr(entry.player, 'mental', 'playbookIQ');
+            const dec = attr(entry.player, 'mental', 'decisionMaking', iq);
+            const cons = attr(entry.player, 'mental', 'consistency');
+
+            avgQbPower += pwr * (att / totalPassAttempts);
+            avgQbIQ += iq * (att / totalPassAttempts);
+
+            const variance = (Math.random() - 0.5) * (0.14 - (cons - 50) * 0.0008);
+            const compRate = Math.max(
+                0.30,
+                Math.min(
+                    0.79,
+                    0.46 +
+                    ((acc - 50) * 0.0038) +
+                    ((iq - 50) * 0.0012) +
+                    ((avgWrHands - 50) * 0.0014) -
+                    ((oppPassDef - 50) * 0.0022) +
+                    variance
+                )
+            );
+            const comp = Math.max(0, Math.min(att, Math.round(att * compRate)));
+            totalCompletions += comp;
+
+            // Interceptions thrown depend on decisionMaking, accuracy, and opponent pass defense
+            const intProbPerAtt = Math.max(
+                0.012,
+                Math.min(
+                    0.095,
+                    0.042 -
+                    ((dec - 50) * 0.00045) -
+                    ((acc - 50) * 0.00030) +
+                    ((oppPassDef - 50) * 0.00035)
+                )
+            );
+            let ints = 0;
+            for (let a = 0; a < att; a++) {
+                if (Math.random() < intProbPerAtt) ints++;
+            }
+            ints = Math.min(att - comp, ints);
+            totalIntsThrown += ints;
+
+            addStat(entry, 'passAttempts', att);
+            addStat(entry, 'passCompletions', comp);
+            addStat(entry, 'interceptionsThrown', ints);
+        });
+    } else {
+        avgQbPower = 50;
+        avgQbIQ = 50;
+        totalPassAttempts = 0;
+    }
+
+    // --- 2. TD SPLIT (Pass vs Rush, respecting actual completions) ---
+    let passTds = 0;
+    if (totalOffensiveTDs > 0 && totalCompletions > 0 && qbSnapPool.length > 0) {
+        const targetPassTdRatio = Math.max(0.25, Math.min(0.75, passShare + 0.05));
+        passTds = Math.min(totalCompletions, Math.round(totalOffensiveTDs * targetPassTdRatio));
+    }
+    const rushTds = Math.max(0, totalOffensiveTDs - passTds);
+
+    // Assign pass TDs to QBs proportionally to completions
+    const qbPassTdShares = distributeWeightedInteger(
+        passTds,
+        qbSnapPool,
+        e => Math.max(0, e.player.gameStats?.passCompletions || 0)
+    );
+    qbSnapPool.forEach((entry, idx) => addStat(entry, 'touchdowns', qbPassTdShares[idx] || 0));
+
+    // --- 3. RECEIVING (Targets, Catches, Drops & YAC scale with WR/TE skill!) ---
+    const targetShares = distributeWeightedInteger(totalPassAttempts, receivers, entry => {
+        const base = getHistoricalBaseRoleWeight(entry);
+        const pos = entry.slot.split('_')[0].replace(/\d+$/, '');
+        const posRoleBoost = pos === 'WR' ? 1.25 : (pos === 'TE' ? 1.0 : 0.60);
+        const sepSkill = (
+            attr(entry.player, 'physical', 'speed') * 0.35 +
+            attr(entry.player, 'physical', 'agility') * 0.25 +
+            attr(entry.player, 'technical', 'catchingHands') * 0.25 +
+            attr(entry.player, 'mental', 'playbookIQ') * 0.15
+        );
+        // Smarter QBs lock onto skilled receivers more reliably
+        const skillMultiplier = 0.60 + ((sepSkill / 100) * (0.65 + (avgQbIQ / 250)));
+        return base * posRoleBoost * skillMultiplier;
+    });
+
+    // Distribute actual completions across targeted receivers weighted by catchingHands
+    const targetedReceivers = receivers.filter((_, idx) => (targetShares[idx] || 0) > 0);
+    const targetedCounts = targetedReceivers.map(r => targetShares[receivers.indexOf(r)]);
+    const recCounts = targetedCounts.map(() => 0);
+
+    let remainingCompletions = totalCompletions;
+    while (remainingCompletions > 0) {
+        const openIndices = targetedReceivers
+            .map((r, i) => (recCounts[i] < targetedCounts[i] ? i : -1))
+            .filter(i => i >= 0);
+        if (openIndices.length === 0) break;
+
+        const weights = openIndices.map(i => {
+            const r = targetedReceivers[i];
+            const hands = attr(r.player, 'technical', 'catchingHands');
+            const agi = attr(r.player, 'physical', 'agility');
+            const openRem = targetedCounts[i] - recCounts[i];
+            return openRem * Math.max(0.25, 0.4 + ((hands * 0.7 + agi * 0.3) / 100));
+        });
+        const sumW = weights.reduce((a, b) => a + b, 0);
+        let roll = Math.random() * sumW;
+        let pick = openIndices[openIndices.length - 1];
+        for (let k = 0; k < openIndices.length; k++) {
+            roll -= weights[k];
+            if (roll <= 0) {
+                pick = openIndices[k];
+                break;
+            }
+        }
+        recCounts[pick]++;
+        remainingCompletions--;
+    }
+
+    let totalTeamPassYards = 0;
+    const recWithCatches = [];
+
+    targetedReceivers.forEach((entry, idx) => {
+        const targets = targetedCounts[idx];
+        const receptions = recCounts[idx];
+        const pos = entry.slot.split('_')[0].replace(/\d+$/, '');
+        const spd = attr(entry.player, 'physical', 'speed');
+        const exp = attr(entry.player, 'physical', 'explosiveness');
+        const agi = attr(entry.player, 'physical', 'agility');
+        const hands = attr(entry.player, 'technical', 'catchingHands');
+
+        const baseYpr = pos === 'WR' ? 12.2 : (pos === 'TE' ? 9.8 : 7.0);
+        const ypr = Math.max(
+            4.0,
+            baseYpr +
+            ((spd - 50) * 0.09) +
+            ((exp - 50) * 0.04) +
+            ((agi - 50) * 0.03) +
+            ((avgQbPower - 50) * 0.03) -
+            ((oppPassDef - 50) * 0.04) +
+            ((Math.random() - 0.5) * 4.5)
+        );
+        const recYards = Math.round(receptions * ypr);
+        totalTeamPassYards += recYards;
 
         addStat(entry, 'targets', targets);
         addStat(entry, 'receptions', receptions);
-        addStat(entry, 'recYards', receptions * yardsPerCatch);
+        addStat(entry, 'recYards', recYards);
 
-        if (targets > receptions && Math.random() < 0.12) {
-            addStat(entry, 'drops', 1);
+        // Drops scale inversely with catchingHands
+        const misses = Math.max(0, targets - receptions);
+        if (misses > 0) {
+            const dropRate = Math.max(0.02, 0.22 - (hands * 0.0020));
+            let drops = 0;
+            for (let m = 0; m < misses; m++) {
+                if (Math.random() < dropRate) drops++;
+            }
+            addStat(entry, 'drops', drops);
         }
-        addStat(entry, 'touchdowns', Math.min(receptions, receivingTdShares[index] || 0));
+
+        if (receptions > 0) recWithCatches.push(entry);
     });
 
-    // --- 4. OFFENSIVE LINE (All linemen log pancake blocks) ---
+    // Distribute receiving TDs strictly among receivers who actually caught passes
+    let remainingRecTds = passTds;
+    while (remainingRecTds > 0 && recWithCatches.length > 0) {
+        const eligible = recWithCatches.filter(e =>
+            (e.player.gameStats?.touchdowns || 0) < (e.player.gameStats?.receptions || 0)
+        );
+        if (eligible.length === 0) break;
+
+        const chosen = distributeWeightedInteger(1, eligible, e =>
+            (e.player.gameStats?.receptions || 1) * (0.6 + attr(e.player, 'physical', 'speed') / 100)
+        );
+        const winner = eligible[chosen.findIndex(c => c > 0)] || eligible[0];
+        addStat(winner, 'touchdowns', 1);
+        remainingRecTds--;
+    }
+
+    // Reconcile QB passing yards with total receiving yards
+    if (totalCompletions > 0 && totalTeamPassYards > 0) {
+        let assignedYards = 0;
+        qbSnapPool.forEach((entry, idx) => {
+            const comp = entry.player.gameStats?.passCompletions || 0;
+            if (comp <= 0) return;
+            const share = idx === qbSnapPool.length - 1
+                ? (totalTeamPassYards - assignedYards)
+                : Math.round(totalTeamPassYards * (comp / totalCompletions));
+            const finalYards = Math.max(0, share);
+            assignedYards += finalYards;
+            addStat(entry, 'passYards', finalYards);
+        });
+    }
+
+    // --- 4. RUSHING (RB skill + OL blocking + mobile QB scrambles vs opp run defense!) ---
+    const oppRunDef = oppProfile?.runDefense ?? 50;
+    const olBlocking = teamProfile?.olAvgBlock ?? 50;
+
+    // Mobile QBs take realistic scramble attempts
+    const starterQB = qbSnapPool[0];
+    const qbSpeed = starterQB ? attr(starterQB.player, 'physical', 'speed') : 40;
+    const scrambleRatio = qbSpeed >= 72 ? 0.22 : (qbSpeed >= 60 ? 0.12 : 0.04);
+    const qbScrambles = starterQB && runningBacks.length > 0
+        ? Math.min(Math.floor(totalRushes * 0.3), Math.round(totalRushes * scrambleRatio * (0.6 + Math.random() * 0.8)))
+        : 0;
+
+    const rbTotalRushes = Math.max(0, totalRushes - qbScrambles);
+    const rbPool = runningBacks.length > 0 ? runningBacks : qbSnapPool;
+
+    const rbAttemptShares = distributeWeightedInteger(rbTotalRushes, rbPool, entry => {
+        const base = getHistoricalBaseRoleWeight(entry);
+        const skill = (entry.ovr || 50) / 50;
+        return base * skill;
+    });
+
+    const allRushers = [];
+    rbPool.forEach((entry, idx) => {
+        const att = (rbAttemptShares[idx] || 0) + (entry === starterQB && runningBacks.length === 0 ? qbScrambles : 0);
+        if (att > 0) allRushers.push({ entry, att, isQBScramble: false });
+    });
+    if (qbScrambles > 0 && runningBacks.length > 0 && starterQB) {
+        const existing = allRushers.find(r => r.entry.player.id === starterQB.player.id);
+        if (existing) existing.att += qbScrambles;
+        else allRushers.push({ entry: starterQB, att: qbScrambles, isQBScramble: true });
+    }
+
+    let totalFumbles = 0;
+    let totalFumblesLost = 0;
+
+    allRushers.forEach(({ entry, att, isQBScramble }) => {
+        const spd = attr(entry.player, 'physical', 'speed');
+        const agi = attr(entry.player, 'physical', 'agility');
+        const exp = attr(entry.player, 'physical', 'explosiveness');
+        const str = attr(entry.player, 'physical', 'strength');
+        const carrying = attr(entry.player, 'technical', 'carrying', attr(entry.player, 'mental', 'toughness'));
+
+        const rbSkill = (spd * 0.35) + (agi * 0.25) + (exp * 0.20) + (str * 0.20);
+        const baseYpc = isQBScramble ? 5.2 : 3.8;
+        const ypc = Math.max(
+            1.6,
+            baseYpc +
+            ((rbSkill - 50) * 0.042) +
+            ((olBlocking - 50) * 0.026) -
+            ((oppRunDef - 50) * 0.026) +
+            ((Math.random() - 0.5) * 1.8)
+        );
+
+        const yards = Math.round(att * ypc);
+        addStat(entry, 'rushAttempts', att);
+        addStat(entry, 'rushYards', yards);
+
+        // Fumbles on carries scale inversely with carrying
+        const fumbleProb = Math.max(0.004, (105 - carrying) * 0.00045);
+        for (let c = 0; c < att; c++) {
+            if (Math.random() < fumbleProb) {
+                addStat(entry, 'fumbles', 1);
+                totalFumbles++;
+                if (Math.random() < 0.55) {
+                    addStat(entry, 'fumblesLost', 1);
+                    totalFumblesLost++;
+                } else {
+                    addStat(entry, 'fumblesRecovered', 1);
+                }
+            }
+        }
+    });
+
+    // Assign rushing TDs
+    if (rushTds > 0 && allRushers.length > 0) {
+        const rushTdShares = distributeWeightedInteger(rushTds, allRushers, r =>
+            r.att * (0.6 + attr(r.entry.player, 'physical', 'strength') / 140 + attr(r.entry.player, 'physical', 'speed') / 140)
+        );
+        allRushers.forEach((r, idx) => addStat(r.entry, 'touchdowns', rushTdShares[idx] || 0));
+    }
+
+    // --- 5. OFFENSIVE LINE (Pancakes reflect blocking & strength vs opp DL) ---
+    const oppDlQuality = oppProfile?.dlPassRush ?? 50;
     offensiveLine.forEach(entry => {
         const isStarter = entry.tier === 'starter';
-        addStat(entry, 'pancakes', isStarter ? getRandomInt(0, 3) : (Math.random() < 0.4 ? 1 : 0));
-    });
-
-    // --- 5. DEFENSE (Starters & rotational depth accumulate tackles & takeaways) ---
-    defensiveLine.forEach(entry => {
-        const isStarter = entry.tier === 'starter';
-        addStat(entry, 'tackles', isStarter ? getRandomInt(1, 4) : getRandomInt(0, 2));
-        if (Math.random() < (isStarter ? 0.22 : 0.08)) addStat(entry, 'sacks', 1);
-        if (Math.random() < 0.02) addStat(entry, 'fumblesRecovered', 1);
-    });
-
-    linebackers.forEach(entry => {
-        const isStarter = entry.tier === 'starter';
-        addStat(entry, 'tackles', isStarter ? getRandomInt(2, 5) : getRandomInt(1, 3));
-        if (Math.random() < (isStarter ? 0.12 : 0.04)) addStat(entry, 'sacks', 1);
-        if (Math.random() < (isStarter ? 0.04 : 0.01)) addStat(entry, 'interceptions', 1);
-        if (Math.random() < 0.02) addStat(entry, 'fumblesRecovered', 1);
-    });
-
-    defensiveBacks.forEach(entry => {
-        const isStarter = entry.tier === 'starter';
-        addStat(entry, 'tackles', isStarter ? getRandomInt(1, 4) : getRandomInt(0, 2));
-        if (Math.random() < (isStarter ? 0.06 : 0.02)) {
-            addStat(entry, 'interceptions', 1);
-            addStat(entry, 'returnYards', getRandomInt(5, 25));
+        const blk = attr(entry.player, 'technical', 'blocking');
+        const str = attr(entry.player, 'physical', 'strength');
+        const pancakeRate = Math.max(0.05, ((blk * 0.6 + str * 0.4) - oppDlQuality + 45) / 80) * (isStarter ? 1.8 : 0.4);
+        let pancakes = 0;
+        for (let p = 0; p < 3; p++) {
+            if (Math.random() < pancakeRate / 3) pancakes++;
         }
-        if (Math.random() < 0.015) addStat(entry, 'fumblesRecovered', 1);
+        addStat(entry, 'pancakes', pancakes);
     });
+
+    return {
+        passAttempts: totalPassAttempts,
+        passCompletions: totalCompletions,
+        rushAttempts: totalRushes,
+        intsThrown: totalIntsThrown,
+        fumbles: totalFumbles,
+        fumblesLost: totalFumblesLost
+    };
+}
+
+function generateHistoricalDefenseStats(team, teamProfile, oppOffStats, safetiesScored = 0, defTDsScored = 0) {
+    const roster = getRosterObjects(team);
+    initializeHistoricalPlayerGameStats(roster);
+
+    const attr = (p, cat, key, fallback = 50) => {
+        const val = Number(p?.attributes?.[cat]?.[key]);
+        return Number.isFinite(val) ? val : fallback;
+    };
+
+    const addStat = (entry, stat, amount) => {
+        if (!entry?.player?.gameStats || !Number.isFinite(amount) || amount <= 0) return;
+        entry.player.gameStats[stat] = (Number(entry.player.gameStats[stat]) || 0) + amount;
+    };
+
+    const defensiveLine = getHistoricalRoleEntries(team, roster, 'defense', 'DL');
+    const linebackers = getHistoricalRoleEntries(team, roster, 'defense', 'LB');
+    const defensiveBacks = getHistoricalRoleEntries(team, roster, 'defense', 'DB');
+    const allDefenders = [...defensiveLine, ...linebackers, ...defensiveBacks];
+
+    if (allDefenders.length === 0) return;
+
+    // 1. TACKLES: Tied to opponent completions + rushes (with ~90% tackles recorded vs OOB/TDs)
+    const oppPlaysToTackle = Math.max(
+        14,
+        Math.round(((oppOffStats?.passCompletions ?? 11) + (oppOffStats?.rushAttempts ?? 16)) * 0.92)
+    );
+
+    const tackleShares = distributeWeightedInteger(oppPlaysToTackle, allDefenders, entry => {
+        const pos = entry.slot.split('_')[0].replace(/\d+$/, '');
+        const posMult = pos === 'LB' ? 1.45 : (pos === 'DB' ? 0.95 : 0.90);
+        const tkl = attr(entry.player, 'technical', 'tackling');
+        const spd = attr(entry.player, 'physical', 'speed');
+        const iq = attr(entry.player, 'mental', 'playbookIQ');
+        const skillMult = 0.45 + ((tkl * 0.50 + spd * 0.30 + iq * 0.20) / 100);
+        return getHistoricalBaseRoleWeight(entry) * posMult * skillMult;
+    });
+    allDefenders.forEach((entry, idx) => addStat(entry, 'tackles', tackleShares[idx] || 0));
+
+    // 2. SACKS: Scaled by DL/LB rush vs opponent OL blocking & pass attempts
+    const oppPassAtt = oppOffStats?.passAttempts ?? 20;
+    const rushAdvantage = (teamProfile?.dlPassRush ?? 50) - 50;
+    const blitzBonus = ((teamProfile?.blitzTendency ?? 0.5) - 0.5) * 0.03;
+    const sackRatePerAtt = Math.max(0.025, Math.min(0.16, 0.065 + (rushAdvantage * 0.0012) + blitzBonus));
+    let totalSacks = 0;
+    for (let a = 0; a < oppPassAtt; a++) {
+        if (Math.random() < sackRatePerAtt) totalSacks++;
+    }
+
+    const rushers = [...defensiveLine, ...linebackers];
+    if (totalSacks > 0 && rushers.length > 0) {
+        const sackShares = distributeWeightedInteger(totalSacks, rushers, entry => {
+            const pos = entry.slot.split('_')[0].replace(/\d+$/, '');
+            const posMult = pos === 'DL' ? 1.4 : (0.55 + (teamProfile?.blitzTendency ?? 0.5));
+            const shed = attr(entry.player, 'technical', 'blockShedding');
+            const spd = attr(entry.player, 'physical', 'speed');
+            const str = attr(entry.player, 'physical', 'strength');
+            const rushSkill = (shed * 0.50 + spd * 0.30 + str * 0.20) / 100;
+            return getHistoricalBaseRoleWeight(entry) * posMult * Math.pow(Math.max(0.2, rushSkill), 1.5);
+        });
+        rushers.forEach((entry, idx) => addStat(entry, 'sacks', sackShares[idx] || 0));
+    }
+
+    // 3. INTERCEPTIONS: Reconciled exactly with opponent interceptionsThrown!
+    const totalInts = oppOffStats?.intsThrown ?? 0;
+    const coverageDefenders = [...defensiveBacks, ...linebackers];
+    let intScorers = [];
+    if (totalInts > 0 && coverageDefenders.length > 0) {
+        const intShares = distributeWeightedInteger(totalInts, coverageDefenders, entry => {
+            const pos = entry.slot.split('_')[0].replace(/\d+$/, '');
+            const posMult = pos === 'DB' ? 1.65 : 0.45;
+            const cov = attr(entry.player, 'technical', 'coverage');
+            const hands = attr(entry.player, 'technical', 'catchingHands');
+            const iq = attr(entry.player, 'mental', 'playbookIQ');
+            const ballhawk = (cov * 0.55 + hands * 0.30 + iq * 0.15) / 100;
+            return getHistoricalBaseRoleWeight(entry) * posMult * Math.pow(Math.max(0.2, ballhawk), 1.6);
+        });
+        coverageDefenders.forEach((entry, idx) => {
+            const count = intShares[idx] || 0;
+            if (count > 0) {
+                addStat(entry, 'interceptions', count);
+                const spd = attr(entry.player, 'physical', 'speed');
+                addStat(entry, 'returnYards', count * Math.max(2, Math.round(6 + (spd - 50) * 0.25 + getRandomInt(0, 14))));
+                intScorers.push(entry);
+            }
+        });
+    }
+
+    // 4. FUMBLE RECOVERIES: Reconciled exactly with opponent fumblesLost!
+    const totalFumRec = oppOffStats?.fumblesLost ?? 0;
+    let fumScorers = [];
+    if (totalFumRec > 0) {
+        const fumShares = distributeWeightedInteger(totalFumRec, allDefenders, entry => {
+            const agi = attr(entry.player, 'physical', 'agility');
+            const iq = attr(entry.player, 'mental', 'playbookIQ');
+            return getHistoricalBaseRoleWeight(entry) * (0.5 + (agi + iq) / 200);
+        });
+        allDefenders.forEach((entry, idx) => {
+            const count = fumShares[idx] || 0;
+            if (count > 0) {
+                addStat(entry, 'fumblesRecovered', count);
+                addStat(entry, 'returnYards', count * getRandomInt(0, 12));
+                fumScorers.push(entry);
+            }
+        });
+    }
+
+    // 5. DEFENSIVE TDs & SAFETIES
+    if (defTDsScored > 0) {
+        const tdPool = [...intScorers, ...fumScorers];
+        const fallbackPool = tdPool.length > 0 ? tdPool : allDefenders;
+        const tdShares = distributeWeightedInteger(defTDsScored, fallbackPool, e => attr(e.player, 'physical', 'speed'));
+        fallbackPool.forEach((entry, idx) => addStat(entry, 'touchdowns', tdShares[idx] || 0));
+    }
+
+    if (safetiesScored > 0 && rushers.length > 0) {
+        const safetyShares = distributeWeightedInteger(safetiesScored, rushers, e => attr(e.player, 'technical', 'blockShedding'));
+        rushers.forEach((entry, idx) => addStat(entry, 'safeties', safetyShares[idx] || 0));
+    }
+}
+
+export function generateHistoricalStats(team, score, context = null) {
+    const profile = context?.teamProfile || getHistoricalTeamProfile(team);
+    const oppProfile = context?.oppProfile || {
+        passDefense: 50,
+        runDefense: 50,
+        dlPassRush: 50,
+        blitzTendency: 0.5
+    };
+    const totalOffensiveTDs = context?.totalOffensiveTDs ?? Math.max(0, Math.round(Math.max(0, score) / 6.9));
+    const oppOffStats = context?.oppOffStats || {
+        passAttempts: 20,
+        passCompletions: 11,
+        rushAttempts: 16,
+        intsThrown: Math.random() < 0.35 ? 1 : 0,
+        fumblesLost: Math.random() < 0.15 ? 1 : 0
+    };
+
+    const offStats = generateHistoricalOffenseStats(team, totalOffensiveTDs, profile, oppProfile);
+    generateHistoricalDefenseStats(team, profile, oppOffStats, context?.safetiesScored || 0, context?.defTDsScored || 0);
+    return offStats;
 }
 
 export function simulateHistoricalMatch(homeTeam, awayTeam) {
@@ -2379,40 +2892,86 @@ export function simulateHistoricalMatch(homeTeam, awayTeam) {
         }
     }
 
-    // Main-League Franchises (Tier 1 & Tier 2) generate full box scores and player stats
-    const homeOvr = getTeamOverall(homeTeam);
-    const awayOvr = getTeamOverall(awayTeam);
+    // Main-League Franchises (Tier 1 & Tier 2) use unit matchups + Backyard scoring (6pt TDs, 2pt conv, 2pt safeties)
+    const homeProfile = getHistoricalTeamProfile(homeTeam);
+    const awayProfile = getHistoricalTeamProfile(awayTeam);
 
-    const homeAdvantage = 3;
-    let homeScore = Math.max(0, Math.floor(homeOvr / 5 + homeAdvantage + getRandomInt(-14, 14)));
-    let awayScore = Math.max(0, Math.floor(awayOvr / 5 + getRandomInt(-14, 14)));
+    const bellNoise = spread => (Math.random() + Math.random() - 1) * spread;
 
-    if (homeScore === awayScore) homeScore += Math.random() > 0.5 ? 3 : -3;
-    homeScore = Math.max(0, homeScore);
-    awayScore = Math.max(0, awayScore);
+    const homeOffEdge = homeProfile.offenseRating - awayProfile.defenseRating;
+    const awayOffEdge = awayProfile.offenseRating - homeProfile.defenseRating;
 
+    let homeOffTDs = Math.max(0, Math.min(7, Math.round(2.4 + (homeOffEdge * 0.055) + 0.25 + bellNoise(1.8))));
+    let awayOffTDs = Math.max(0, Math.min(7, Math.round(2.4 + (awayOffEdge * 0.055) + bellNoise(1.8))));
+
+    // Simulate offenses first so defensive tackles, INTs, and fumble recoveries reconcile cleanly!
     resetGameStats(homeTeam, awayTeam);
-    generateHistoricalStats(homeTeam, homeScore);
-    generateHistoricalStats(awayTeam, awayScore);
+    const homeOffStats = generateHistoricalOffenseStats(homeTeam, homeOffTDs, homeProfile, awayProfile);
+    const awayOffStats = generateHistoricalOffenseStats(awayTeam, awayOffTDs, awayProfile, homeProfile);
 
-        // Record realistic snap distribution across starters, rotation, and reserves with stamina influence
-        [homeTeam, awayTeam].forEach(team => {
-            const offStarters = new Set(Object.values(team.depthChart?.offense || {}).filter(Boolean));
-            const defStarters = new Set(Object.values(team.depthChart?.defense || {}).filter(Boolean));
+    // Defensive TDs only happen when the defense actually forced an INT or fumble recovery
+    const homeTurnoversForced = (awayOffStats.intsThrown || 0) + (awayOffStats.fumblesLost || 0);
+    const awayTurnoversForced = (homeOffStats.intsThrown || 0) + (homeOffStats.fumblesLost || 0);
 
-            getRosterObjects(team).forEach(p => {
-                if (!p.careerStats) p.careerStats = { seasonsPlayed: 0 };
-                const isStarter = offStarters.has(p.id) || defStarters.has(p.id);
-                const isTwoWay = offStarters.has(p.id) && defStarters.has(p.id);
+    const homeDefTDs = (homeTurnoversForced > 0 && Math.random() < Math.min(0.28, homeTurnoversForced * 0.11)) ? 1 : 0;
+    const awayDefTDs = (awayTurnoversForced > 0 && Math.random() < Math.min(0.28, awayTurnoversForced * 0.11)) ? 1 : 0;
 
-                const stm = p.attributes?.physical?.stamina || 50;
-                const stmOffset = Math.round((stm - 50) * 0.08); // -3 to +3 snaps based on conditioning
+    const homeSafeties = (awayOffEdge < -6 && Math.random() < 0.035) ? 1 : 0;
+    const awaySafeties = (homeOffEdge < -6 && Math.random() < 0.035) ? 1 : 0;
 
-                const baseSnaps = isTwoWay ? getRandomInt(42, 48) : (isStarter ? getRandomInt(30, 36) : getRandomInt(8, 16));
-                const finalSnaps = Math.max(4, baseSnaps + stmOffset);
-                p.careerStats.snapsThisSeason = (p.careerStats.snapsThisSeason || 0) + finalSnaps;
-            });
+    generateHistoricalDefenseStats(homeTeam, homeProfile, awayOffStats, homeSafeties, homeDefTDs);
+    generateHistoricalDefenseStats(awayTeam, awayProfile, homeOffStats, awaySafeties, awayDefTDs);
+
+    const scoreTouchdownsWithConversions = (tds, edge) => {
+        const convChance = Math.max(0.28, Math.min(0.74, 0.48 + (edge * 0.008)));
+        let pts = 0;
+        for (let i = 0; i < tds; i++) {
+            pts += 6 + (Math.random() < convChance ? 2 : 0);
+        }
+        return pts;
+    };
+
+    let homeScore = scoreTouchdownsWithConversions(homeOffTDs + homeDefTDs, homeOffEdge) + (homeSafeties * 2);
+    let awayScore = scoreTouchdownsWithConversions(awayOffTDs + awayDefTDs, awayOffEdge) + (awaySafeties * 2);
+
+    // Overtime resolution (most ties settle via an OT touchdown; rare regulation/OT stalemates stay ties)
+    if (homeScore === awayScore && Math.random() < 0.85) {
+        const homeAdvantageRatio = 0.52 + ((homeProfile.offenseRating + homeProfile.defenseRating) - (awayProfile.offenseRating + awayProfile.defenseRating)) * 0.01;
+        const homeWinsOT = Math.random() < Math.max(0.25, Math.min(0.75, homeAdvantageRatio));
+
+        if (homeWinsOT) {
+            homeScore += 6;
+            const otRoster = getRosterObjects(homeTeam);
+            const otScorer = otRoster.find(p => p.gameStats && (p.gameStats.rushAttempts > 0 || p.gameStats.receptions > 0));
+            if (otScorer) otScorer.gameStats.touchdowns += 1;
+        } else {
+            awayScore += 6;
+            const otRoster = getRosterObjects(awayTeam);
+            const otScorer = otRoster.find(p => p.gameStats && (p.gameStats.rushAttempts > 0 || p.gameStats.receptions > 0));
+            if (otScorer) otScorer.gameStats.touchdowns += 1;
+        }
+    }
+
+    // Record realistic snap distribution across starters, rotation, and reserves with stamina influence
+    [homeTeam, awayTeam].forEach(team => {
+        const offStarters = new Set(Object.values(team.depthChart?.offense || {}).filter(Boolean));
+        const defStarters = new Set(Object.values(team.depthChart?.defense || {}).filter(Boolean));
+
+        getRosterObjects(team).forEach(p => {
+            if (!p.careerStats) p.careerStats = { seasonsPlayed: 0 };
+            if (Number(p.status?.duration) > 0) return;
+
+            const isStarter = offStarters.has(p.id) || defStarters.has(p.id);
+            const isTwoWay = offStarters.has(p.id) && defStarters.has(p.id);
+
+            const stm = p.attributes?.physical?.stamina || 50;
+            const stmOffset = Math.round((stm - 50) * 0.08);
+
+            const baseSnaps = isTwoWay ? getRandomInt(42, 48) : (isStarter ? getRandomInt(30, 36) : getRandomInt(8, 16));
+            const finalSnaps = Math.max(4, baseSnaps + stmOffset);
+            p.careerStats.snapsThisSeason = (p.careerStats.snapsThisSeason || 0) + finalSnaps;
         });
+    });
 
     finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore);
 }
@@ -7676,6 +8235,22 @@ export function executeAICutDowns() {
 
             val += coachingBias;
 
+            // Two-way contributors are especially valuable in an 8v8 league.
+            if (report && confidence >= 0.50) {
+                const offFit = report.evaluation?.offenseFit;
+                const defFit = report.evaluation?.defenseFit;
+                const offEst = (offFit && Number.isFinite(Number(offFit.low)) && Number.isFinite(Number(offFit.high)))
+                    ? (Number(offFit.low) + Number(offFit.high)) / 2
+                    : 0;
+                const defEst = (defFit && Number.isFinite(Number(defFit.low)) && Number.isFinite(Number(defFit.high)))
+                    ? (Number(defFit.low) + Number(defFit.high)) / 2
+                    : 0;
+
+                if (offEst >= 55 && defEst >= 55) {
+                    val += 6;
+                }
+            }
+
             // Experience is observable; this is a roster philosophy choice.
             if (
                 gmDirective === 'WIN_NOW' &&
@@ -7688,12 +8263,42 @@ export function executeAICutDowns() {
             return val;
         };
 
-        // Sort by perceived value (highest value kept, lowest cut)
-        rosterObjs.sort((a, b) => getCutEvaluationScore(b) - getCutEvaluationScore(a));
+        // Sort by perceived value, then protect essential positional minimums before taking best available depth.
+        const evaluatedRoster = rosterObjs
+            .map(player => ({
+                player,
+                pos: getTrainingPlayerPosition(player, team) || 'ATH',
+                score: getCutEvaluationScore(player)
+            }))
+            .sort((a, b) => b.score - a.score);
 
-        // Identify who is getting cut
-        const playersToKeep = rosterObjs.slice(0, limit);
-        const playersToCut = rosterObjs.slice(limit);
+        const coreMinimums = { QB: 1, RB: 1, WR: 2, TE: 1, OL: 3, DL: 2, LB: 1, DB: 2 };
+        const keptIds = new Set();
+        const playersToKeep = [];
+
+        Object.entries(coreMinimums).forEach(([pos, minCount]) => {
+            let count = 0;
+            for (const entry of evaluatedRoster) {
+                if (count >= minCount || playersToKeep.length >= limit) break;
+                if (entry.pos === pos && !keptIds.has(String(entry.player.id))) {
+                    keptIds.add(String(entry.player.id));
+                    playersToKeep.push(entry.player);
+                    count++;
+                }
+            }
+        });
+
+        for (const entry of evaluatedRoster) {
+            if (playersToKeep.length >= limit) break;
+            if (!keptIds.has(String(entry.player.id))) {
+                keptIds.add(String(entry.player.id));
+                playersToKeep.push(entry.player);
+            }
+        }
+
+        const playersToCut = evaluatedRoster
+            .filter(entry => !keptIds.has(String(entry.player.id)))
+            .map(entry => entry.player);
 
         playersToCut.forEach(p => {
             p.teamId = null;
@@ -8707,15 +9312,30 @@ export function autoFillTeamWalkOns(team, targetSize = 14) {
         });
         if (unassigned.length === 0) break;
 
-        // Prefer candidates with stronger reported ability.
-        // When ability estimates are equal, prefer the more thoroughly
-        // scouted candidate before using a stable tie-breaker.
+        const currentPosCounts = {};
+        getRosterObjects(team).forEach(p => {
+            const pos = getTrainingPlayerPosition(p, team);
+            if (pos) currentPosCounts[pos] = (currentPosCounts[pos] || 0) + 1;
+        });
+
+        const idealMinimums = { QB: 1, RB: 1, WR: 2, TE: 1, OL: 3, DL: 2, LB: 1, DB: 2 };
+        const getNeedBonus = pos => {
+            if (!pos || !idealMinimums[pos]) return 0;
+            const have = currentPosCounts[pos] || 0;
+            if (have === 0) return pos === 'QB' ? 18 : 12;
+            if (have < idealMinimums[pos]) return 6;
+            return 0;
+        };
+
+        // Prefer candidates who fill open roster holes and have stronger reported ability.
         unassigned.sort((a, b) => {
             const assessmentA = evaluateWalkOn(a);
             const assessmentB = evaluateWalkOn(b);
+            const scoreA = assessmentA.overall + getNeedBonus(assessmentA.position);
+            const scoreB = assessmentB.overall + getNeedBonus(assessmentB.position);
 
             return (
-                assessmentB.overall - assessmentA.overall ||
+                scoreB - scoreA ||
                 assessmentB.confidence - assessmentA.confidence ||
                 String(a.id ?? a.name ?? '').localeCompare(
                     String(b.id ?? b.name ?? '')
