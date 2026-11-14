@@ -1402,6 +1402,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         const isScreenLeadBlocker =
             isReadyScreenLeadBlocker(blocker);
 
+        // INITIALIZE HERE before validThreats accesses it
+        const isPassPlay =
+            playType === 'pass' &&
+            !isPassCompleted &&
+            !isScreenLeadBlocker;
+
         // Lead blockers can identify downfield defenders once their screen
         // route is finished, even before the pass is caught.
         const blockerThreats =
@@ -1528,10 +1534,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         });
 
         let target = null;
-        const isPassPlay =
-            playType === 'pass' &&
-            !isPassCompleted &&
-            !isScreenLeadBlocker;
 
         const blockerProfile = getDecisionProfile(blocker, playState.tick);
         const blockerIQ = blockerProfile?.awareness ?? (blocker.playbookIQ || blocker.iq || 50);
