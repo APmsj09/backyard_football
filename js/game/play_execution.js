@@ -1031,10 +1031,13 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
                 if (isFleaFlicker) {
                     playState.fleaFlickerPhase = 'qb_mesh';
+                    snapTaker.action = 'handoff_setup';
                 } else if (isRPO) {
                     playState.isRPO = true;
                     playState.rpoPhase = 'mesh';
                     snapTaker.action = 'qb_rpo_read';
+                } else {
+                    snapTaker.action = 'handoff_setup';
                 }
             } else {
                 snapTaker.isBallCarrier = true;
@@ -2172,13 +2175,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             if (isBallInAir && !playState.ballState.isThrowAway) {
                 const isIntendedTarget = (playState.ballState.targetPlayerId === pState.id);
+                const isTippedBall = Boolean(playState.ballState.tipCount && playState.ballState.tipCount > 0);
                 const iq = pState.playbookIQ || 50;
                 const flightTime = playState.tick - (playState.ballState.throwTick || 0);
                 const reactionDelay = isIntendedTarget ? 2 : Math.max(5, 20 - Math.floor(iq / 5));
 
                 if (flightTime > reactionDelay) {
                     const distToLanding = Math.hypot(pState.x - playState.ballState.targetX, pState.y - playState.ballState.targetY);
-                    if (isIntendedTarget || (!pState.slot.startsWith('OL') && distToLanding < 8.0)) {
+                    // Only intended target tracks clean passes; teammates only react to tipped or loose balls
+                    if (isIntendedTarget || (isTippedBall && !pState.slot.startsWith('OL') && distToLanding < 8.0)) {
                         setPointIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.4);
                         pState.action = 'tracking_ball';
                         pState.contactReduction = 1.1 + ((pState.agility || 50) / 250);
@@ -3469,7 +3474,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 if (isBreakingHorizontally || isSettled) {
                     perfectY = targetRec.y - 0.6; // Drive downhill aggressively on breaks and settled routes
                 } else if (isVerticalStem) {
-                    perfectY = targetRec.y + Math.max(0.4, cushionY * 0.4); // Maintain top leverage on go/post/seam routes
+                    perfectY = targetRec.y + Math.max(1.2, cushionY * 0.5); // Maintain top leverage without clipping
                 } else {
                     perfectY = targetRec.y + 0.2;
                 }
