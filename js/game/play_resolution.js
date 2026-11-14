@@ -3649,6 +3649,15 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 if (p.ghostTicks > 0) p.ghostTicks--;
                 if (p.jamTicks > 0) p.jamTicks--;
                 if (p.moveCooldown > 0) p.moveCooldown--;
+
+                // Jump recovery & landing timer
+                if (p._catchCooldownTicks > 0) {
+                    p._catchCooldownTicks--;
+                    // After 4 ticks in the air, the player lands back on the turf
+                    if (p._catchCooldownTicks <= 4) {
+                        p.isJumping = false;
+                    }
+                }
             });
 
             const ballPos = playState.ballState;

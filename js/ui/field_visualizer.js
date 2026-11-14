@@ -297,14 +297,20 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
             const weightScale = 0.80 + ((p.wgt || 200) / 500);
             const heightScale = 0.85 + ((p.hgt || 70) / 150);
 
-            // JUMP ANIMATION: If jumping for a pass, scale sprite up slightly to pop off the turf
+            // DETECT ANIMATION STATES
+            const isJukeLeft = p.action === 'juke_left' || p.isJukingLeft;
+            const isJukeRight = p.action === 'juke_right' || p.isJukingRight;
+            const isTrucking = p.action === 'trucking' || p.isTrucking;
+            const isStiffArm = p.action === 'stiff_arm' || p.isStiffArm;
+
+            // JUMP ANIMATION: Scale sprite slightly when leaping
             const jumpScale = p.isJumping ? 1.20 : 1.0;
 
             ctx.save();
             let jitterX = p.isStunned ? (Math.random() - 0.5) * 2.5 : 0;
             let jitterY = p.isStunned ? (Math.random() - 0.5) * 2.5 : 0;
             
-            // Draw a grounded shadow slightly offset if the player is airborne/jumping
+            // Ground shadow offset when leaping
             if (p.isJumping) {
                 ctx.save();
                 ctx.fillStyle = "rgba(0,0,0,0.3)";
@@ -314,38 +320,103 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 ctx.restore();
             }
 
+            // GROUND CLEAT MARKS (Realistic turf kick-up)
+            if (isJukeLeft || isJukeRight) {
+                ctx.save();
+                ctx.translate(px, py);
+                ctx.rotate(p.angle);
+                // Fake-side plant foot: Juke Right plants hard on the left, Juke Left plants hard on the right
+                const plantSideY = isJukeRight ? -baseSize * 0.65 : baseSize * 0.65;
+                ctx.fillStyle = "rgba(15, 45, 20, 0.75)"; // Dark turf divot
+                ctx.fillRect(-baseSize * 0.4, plantSideY - 1.5, baseSize * 0.7, 3.0);
+                ctx.fillStyle = "rgba(255, 255, 255, 0.5)"; // Cleat chalk/grass blade scuff
+                ctx.fillRect(-baseSize * 0.2, plantSideY - 1, baseSize * 0.4, 2.0);
+                ctx.restore();
+            } else if (isTrucking || isStiffArm) {
+                ctx.save();
+                ctx.translate(px, py);
+                ctx.rotate(p.angle);
+                // Power drive cleat scuffs behind the runner
+                ctx.fillStyle = "rgba(15, 45, 20, 0.7)";
+                ctx.fillRect(-baseSize * 1.1, -baseSize * 0.35, baseSize * 0.6, 2.5);
+                ctx.fillRect(-baseSize * 1.3, baseSize * 0.35, baseSize * 0.6, 2.5);
+                ctx.restore();
+            }
+
             ctx.translate(px + jitterX, (p.isJumping ? py - 6 : py) + jitterY);
 
             ctx.save();
             ctx.scale(jumpScale, jumpScale);
             ctx.rotate(p.angle);
 
+            // REALISTIC BIOMECHANICAL MODIFIERS
+            let torsoAngle = 0;
+            let forwardLeanX = 0;
+            let lateralShiftY = 0;
+            let droppedShoulderOffset = 0;
+
+            if (isTrucking || isStiffArm) {
+                // LOWERED SHOULDER: Runner lowers center of gravity and drops right shoulder forward
+                forwardLeanX = baseSize * 0.28; // Forward surge into contact
+                torsoAngle = 0.28;             // Lead shoulder angles ~16 degrees forward into defender
+                droppedShoulderOffset = baseSize * 0.12; // Dipped shoulder cap reaches out
+            } else if (isJukeRight) {
+                // CUT RIGHT: Planted left, body banks right
+                torsoAngle = 0.35;             // Torso snaps into the cut direction
+                lateralShiftY = baseSize * 0.25;
+            } else if (isJukeLeft) {
+                // CUT LEFT: Planted right, body banks left
+                torsoAngle = -0.35;            // Torso snaps into the cut direction
+                lateralShiftY = -baseSize * 0.25;
+            }
+
+            ctx.translate(forwardLeanX, lateralShiftY);
+            ctx.rotate(torsoAngle);
+
             const jerseyColor = p.isStunned ? "#4b5563" : (p.primaryColor || "#333");
             const helmetColor = p.isStunned ? "#9ca3af" : (p.secondaryColor || "#fff");
 
-            // Proportionate shoulder pads (~3 feet wide in game-world)
+            // Proportionate shoulder pads
             ctx.fillStyle = jerseyColor;
             const padThickness = baseSize * 0.9 * heightScale;
             const padWidth = baseSize * 1.9 * weightScale;
 
-            ctx.beginPath();
-            ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 4.0);
-            ctx.fill();
-            ctx.strokeStyle = "rgba(0,0,0,0.65)";
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
+            if (isTrucking || isStiffArm) {
+                // Asymmetric shoulder profile: Lead shoulder drops forward like a battering ram
+                ctx.beginPath();
+                ctx.moveTo(-padThickness / 2, -padWidth / 2);
+                ctx.lineTo(padThickness / 2 + droppedShoulderOffset, -padWidth / 2); // Dropped shoulder leads forward
+                ctx.lineTo(padThickness / 2, padWidth / 2);
+                ctx.lineTo(-padThickness / 2, padWidth / 2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = "rgba(0,0,0,0.75)";
+                ctx.lineWidth = 1.4;
+                ctx.stroke();
+            } else {
+                ctx.beginPath();
+                ctx.roundRect(-padThickness / 2, -padWidth / 2, padThickness, padWidth, 4.0);
+                ctx.fill();
+                ctx.strokeStyle = "rgba(0,0,0,0.65)";
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+            }
 
-            // Proportional helmet
+            // Proportional helmet (tucks slightly forward and toward lead pad when trucking)
             ctx.fillStyle = helmetColor;
             const helmetRadius = baseSize * 0.45 * (0.9 + (p.hgt || 70) / 160);
+            const helmetOffsetX = isTrucking ? padThickness * 0.25 : padThickness * 0.15;
+            const helmetOffsetY = isTrucking ? -padWidth * 0.08 : 0;
+
             ctx.beginPath();
-            ctx.arc(padThickness * 0.15, 0, helmetRadius, 0, Math.PI * 2);
+            ctx.arc(helmetOffsetX, helmetOffsetY, helmetRadius, 0, Math.PI * 2);
             ctx.fill();
 
+            // Facemask
             ctx.strokeStyle = "#111";
             ctx.lineWidth = Math.max(1.5, ppY * 0.12);
             ctx.beginPath();
-            ctx.arc(padThickness * 0.15, 0, helmetRadius, -Math.PI / 3, Math.PI / 3);
+            ctx.arc(helmetOffsetX, helmetOffsetY, helmetRadius, -Math.PI / 3, Math.PI / 3);
             ctx.stroke();
 
             // Legible, proportionate jersey number

@@ -491,6 +491,7 @@ export function checkTackleCollisions(playState, gameLog) {
                         else if (carrier.x < 3.5) dir = 1;
 
                         carrier.action = dir === 1 ? 'juke_right' : 'juke_left';
+                        carrier.evasionTicks = 7; // Keeps the cut animation grounded and visible for ~0.28 seconds
                         
                         const agiFactor = (carrier.agi || 50) / 100;
                         const jukePower = 1.8 + (agiFactor * 2.0); // 2.0 to 3.8 lateral impulse
@@ -1388,9 +1389,13 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         if (p.id === ball.throwerId && ticksSinceKick < throwerCatchLock) {
             return false;
         }
+
+        // PHYSICAL COOLDOWN: Replaces permanent lockout. A player who jumped or swiped needs time to land
+        if (p._catchCooldownTicks && p._catchCooldownTicks > 0) {
+            return false;
+        }
         
         if (playState.type === 'punt' && p.isOffense && ball.z > 0.5) return false;
-        //if ((ball.droppedById === p.id) || (ball.lastDroppedById === p.id)) return false; // FIX: Mislabeled property
 
         // Ineligible receivers: Offensive linemen cannot catch forward passes unless tipped or loose
         if (p.isOffense && p.slot.startsWith('OL') && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
@@ -1431,17 +1436,46 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             ? (playerHeight / 36) + 1.1 + (verticalLeap * 0.7)
             : standingReach;
 
-        // Ball must be in the air and above the turf; never allow catches below ground level
+        // Ball must be in the air and above the turf
         if (ball.inAir && (ball.z > maxCatchHeight || ball.z <= 0.05)) return false;
 
-        // Pass rushers can only bat down balls near the line of scrimmage within the release window
-        const isPassRusher = !p.isOffense && (p.role === 'DL' || p.assignment?.includes('rush') || p.assignment?.includes('blitz'));
-        if (isPassRusher && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
-            const relX = ball.releaseX ?? ball.x;
-            const relY = ball.releaseY ?? (playState.lineOfScrimmage - 5.0);
-            const distFromRelease = Math.hypot(p.x - relX, p.y - relY);
-            if (ticksSinceKick > 10 || distFromRelease > 3.5 || ball.z > standingReach) {
-                return false;
+        const isTargetedPass = playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral;
+        if (isTargetedPass) {
+            const isPassRusher = !p.isOffense && (p.role === 'DL' || p.assignment?.includes('rush') || p.assignment?.includes('blitz'));
+
+            if (isPassRusher) {
+                // Line swats strictly within release window near LOS
+                const relX = ball.releaseX ?? ball.x;
+                const relY = ball.releaseY ?? (playState.lineOfScrimmage - 5.0);
+                const distFromRelease = Math.hypot(p.x - relX, p.y - relY);
+                if (ticksSinceKick > 10 || distFromRelease > 3.5 || ball.z > standingReach) {
+                    return false;
+                }
+            } else if (!p.isOffense) {
+                // DEFENSIVE PASS TIMING GATE
+                const distToLanding = (typeof ball.targetX === 'number' && typeof ball.targetY === 'number')
+                    ? Math.hypot(ball.targetX - ball.x, ball.targetY - ball.y)
+                    : 0;
+
+                const isNearLanding = distToLanding < 2.8;
+                const isDescending = (ball.vz || 0) <= 0.5;
+
+                // When pass is still high up on its arc (z > 2.5 yds / 7.5 ft):
+                if (!isNearLanding && ball.z > 2.5 && !isDescending) {
+                    // OCCASIONAL MISTIMED EARLY LEAP:
+                    // Low-IQ or aggressive defenders sometimes misjudge and bite early (~15-20% chance).
+                    // Disciplined DBs stay grounded and track the route.
+                    const defIQ = p.iq || p.playbookIQ || 50;
+                    const mistimedJumpChance = Math.max(0.04, 0.28 - (defIQ * 0.003));
+                    const willMistimeJump = Math.random() < mistimedJumpChance;
+
+                    if (!willMistimeJump) {
+                        return false; // Disciplined: stays on his feet, tracking to the catch point
+                    }
+
+                    // Flag the mistimed leap so they animate the jump and suffer the recovery penalty
+                    p._isMistimedLeap = true;
+                }
             }
         }
 
@@ -1485,8 +1519,24 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         if (!bestCandidate) return;
 
-        // Mark before resolving the catch so this player cannot roll again
-        // on the next tick while still inside the catch radius.
+        // JUMP ANIMATION & RECOVERY COOLDOWN
+        bestCandidate.isJumping = true;
+        bestCandidate._catchCooldownTicks = bestCandidate._isMistimedLeap ? 12 : 8;
+
+        // RESOLVE OCCASIONAL MISTIMED LEAP
+        if (bestCandidate._isMistimedLeap) {
+            bestCandidate._isMistimedLeap = false;
+            // The DB leaped early at a ball sailing 10 ft overhead and whiffs:
+            if (gameLog && Math.random() < 0.35) {
+                pushGameLog(gameLog, `[Tick ${playState.tick}] 💨 ${bestCandidate.name} mistimes the jump and whiffs on the high pass!`, playState);
+            }
+            // Landing penalty: lose forward momentum while recovering footing
+            bestCandidate.vx *= 0.45;
+            bestCandidate.vy *= 0.45;
+            return;
+        }
+
+        // Catch point attempt registration
         ball._attemptedCatchPlayerIds.add(bestCandidate.id);
 
         let catching = bestCandidate.ctch || bestCandidate.catchingHands;
