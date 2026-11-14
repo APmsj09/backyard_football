@@ -28,7 +28,7 @@ export const PLAYCALL_SITUATION_GROUPS = Object.freeze([
 const OFFENSE_PROFILES = {
     insideRun: {
         label: 'Inside run',
-        situations: { earlyDown: 2, shortYardage: 3, goalLine: 3, backedUp: 2 },
+        situations: { earlyDown: 2, shortYardage: 3, goalLine: 3, backedUp: 2, passingDown: 1, trailingLate: 1 },
         attacks: ['lightBox', 'spreadDefense'],
         vulnerableTo: ['heavyBox', 'disciplinedRunFit'],
         strengths: ['Gets downhill quickly', 'Useful for manageable yardage', 'Can punish light boxes'],
@@ -39,7 +39,7 @@ const OFFENSE_PROFILES = {
     },
     outsideRun: {
         label: 'Outside run',
-        situations: { earlyDown: 2, shortYardage: 1, backedUp: 1 },
+        situations: { earlyDown: 2, shortYardage: 1, backedUp: 1, passingDown: 1, trailingLate: 1 },
         attacks: ['interiorOverload', 'slowFront'],
         vulnerableTo: ['edgeContain', 'fastPursuit', 'disciplinedRunFit'],
         strengths: ['Stretches the defense horizontally', 'Can punish interior-heavy fronts'],
@@ -50,7 +50,7 @@ const OFFENSE_PROFILES = {
     },
     powerRun: {
         label: 'Power run',
-        situations: { shortYardage: 3, goalLine: 3, earlyDown: 2 },
+        situations: { shortYardage: 3, goalLine: 3, earlyDown: 2, passingDown: 1, trailingLate: 1 },
         attacks: ['lightBox', 'softEdge'],
         vulnerableTo: ['heavyBox', 'runBlitz', 'disciplinedRunFit'],
         strengths: ['Creates a defined point of attack', 'Fits short-yardage football', 'Benefits from extra blockers'],
@@ -185,9 +185,9 @@ const OFFENSE_PROFILES = {
 const DEFENSE_PROFILES = {
     zoneCover2: {
         label: 'Cover 2 zone',
-        situations: { earlyDown: 2, passingDown: 1, protectLead: 2 },
-        protectsAgainst: ['outsideDeepRoutes', 'balancedPass'],
-        vulnerableTo: ['seamPass', 'fourVerts', 'intermediateCross', 'run'],
+        situations: { earlyDown: 2, passingDown: 1, protectLead: 2, goalLine: 1 },
+        protectsAgainst: ['outsideDeepRoutes', 'balancedPass', 'outsideRun'],
+        vulnerableTo: ['verticalPass', 'crossingPass', 'insideRun', 'powerRun', 'counterRun'],
         strengths: ['Distributes deep responsibility', 'Can keep the play in front of defenders'],
         weaknesses: ['Seams and the space between zones require sound underneath distribution', 'May concede underneath completions'],
         keyPositions: ['DB', 'LB'],
@@ -197,8 +197,8 @@ const DEFENSE_PROFILES = {
     zoneCover3: {
         label: 'Cover 3 zone',
         situations: { earlyDown: 2, passingDown: 2, protectLead: 2 },
-        protectsAgainst: ['verticalPass', 'outsideDeepRoutes'],
-        vulnerableTo: ['seamPass', 'floodPass', 'intermediateCross', 'underneathPass'],
+        protectsAgainst: ['verticalPass', 'outsideDeepRoutes', 'balancedPass'],
+        vulnerableTo: ['floodPass', 'crossingPass', 'quickPass', 'screenPass'],
         strengths: ['Provides defined deep zones', 'Balances deep-field protection and underneath defenders'],
         weaknesses: ['Seams and layered routes can stress zone handoffs', 'Short completions may be available underneath'],
         keyPositions: ['DB', 'LB'],
@@ -207,9 +207,9 @@ const DEFENSE_PROFILES = {
     },
     quartersCoverage: {
         label: 'Quarters / deep coverage',
-        situations: { passingDown: 3, protectLead: 3, trailingLate: 1 },
-        protectsAgainst: ['verticalPass', 'fourVerts', 'deepShot'],
-        vulnerableTo: ['run', 'quickPass', 'underneathPass'],
+        situations: { passingDown: 3, protectLead: 3, trailingLate: 1, goalLine: 1, shortYardage: 1 },
+        protectsAgainst: ['verticalPass', 'deepShot', 'balancedPass'],
+        vulnerableTo: ['insideRun', 'powerRun', 'outsideRun', 'quickPass', 'screenPass'],
         strengths: ['Strong emphasis on limiting deep completions', 'Useful against vertical route combinations'],
         weaknesses: ['Can concede underneath space', 'A pass-first alignment may be vulnerable to a committed run game'],
         keyPositions: ['DB'],
@@ -220,7 +220,7 @@ const DEFENSE_PROFILES = {
         label: 'Split-field zone',
         situations: { earlyDown: 2, passingDown: 2, protectLead: 2 },
         protectsAgainst: ['balancedPass', 'verticalPass'],
-        vulnerableTo: ['horizontalStretch', 'formationOverload', 'run'],
+        vulnerableTo: ['floodPass', 'crossingPass', 'insideRun', 'powerRun'],
         strengths: ['Can tailor coverage to each side of the formation', 'Offers balanced answers to varied route threats'],
         weaknesses: ['Requires coordinated distribution', 'Can be stressed by overloads and horizontal movement'],
         keyPositions: ['DB', 'LB'],
@@ -262,8 +262,8 @@ const DEFENSE_PROFILES = {
     },
     runFit: {
         label: 'Run-focused front',
-        situations: { shortYardage: 3, goalLine: 3, earlyDown: 2 },
-        protectsAgainst: ['insideRun', 'powerRun', 'outsideRun'],
+        situations: { shortYardage: 3, goalLine: 3, earlyDown: 2, passingDown: 1, trailingLate: 1 },
+        protectsAgainst: ['insideRun', 'powerRun', 'outsideRun', 'counterRun'],
         vulnerableTo: ['playAction', 'verticalPass', 'floodPass'],
         strengths: ['Adds bodies and leverage against the run', 'Useful in short-yardage and goal-line situations'],
         weaknesses: ['Can sacrifice coverage depth', 'Play action and passing concepts can exploit run commitment'],
@@ -275,7 +275,7 @@ const DEFENSE_PROFILES = {
         label: 'Bracket / double coverage',
         situations: { passingDown: 2, redZone: 2 },
         protectsAgainst: ['mismatchTarget', 'primaryReceiver'],
-        vulnerableTo: ['secondaryTarget', 'run', 'formationOverload'],
+        vulnerableTo: ['insideRun', 'outsideRun', 'powerRun', 'floodPass'],
         strengths: ['Can reduce the impact of a dangerous primary target', 'Forces the offense to use secondary options'],
         weaknesses: ['Allocates extra attention to one threat', 'Can leave another eligible receiver with more space'],
         keyPositions: ['DB', 'LB'],
@@ -284,9 +284,9 @@ const DEFENSE_PROFILES = {
     },
     prevent: {
         label: 'Prevent / deep protection',
-        situations: { passingDown: 2, protectLead: 3, trailingLate: 1 },
+        situations: { passingDown: 2, protectLead: 3, trailingLate: 1, goalLine: 1, shortYardage: 1 },
         protectsAgainst: ['verticalPass', 'deepShot', 'fourVerts'],
-        vulnerableTo: ['insideRun', 'quickPass', 'underneathPass'],
+        vulnerableTo: ['insideRun', 'outsideRun', 'powerRun', 'quickPass', 'screenPass'],
         strengths: ['Prioritizes limiting explosive plays', 'Useful when protecting a lead late'],
         weaknesses: ['Can give up short completions and running room', 'May be too passive when a stop is needed quickly'],
         keyPositions: ['DB'],
@@ -354,8 +354,8 @@ const OFFENSE_OVERRIDES = {
 };
 
 const DEFENSE_OVERRIDES = {
-    Cover_2_Zone_Base: { archetype: 'zoneCover2', protectsAgainst: ['outsideDeepRoutes', 'balancedPass'], vulnerableTo: ['seamPass', 'fourVerts', 'intermediateCross', 'run'] },
-    Cover_3_Sky: { archetype: 'zoneCover3', protectsAgainst: ['verticalPass', 'outsideDeepRoutes'], vulnerableTo: ['seamPass', 'floodPass', 'underneathPass'] },
+    Cover_2_Zone_Base: { archetype: 'zoneCover2', protectsAgainst: ['outsideDeepRoutes', 'balancedPass', 'outsideRun'], vulnerableTo: ['verticalPass', 'crossingPass', 'insideRun', 'powerRun', 'counterRun'] },
+    Cover_3_Sky: { archetype: 'zoneCover3', protectsAgainst: ['verticalPass', 'outsideDeepRoutes'], vulnerableTo: ['floodPass', 'crossingPass', 'quickPass', 'screenPass'] },
     Cover_1_Robber: {
         archetype: 'manCoverage',
         protectsAgainst: ['staticZone', 'slowDevelopingRoutes'],
@@ -379,15 +379,15 @@ const DEFENSE_OVERRIDES = {
     Victory_Prevent: { archetype: 'prevent' },
     Overload_Blitz_Right: {
         archetype: 'manBlitz',
-        attacks: ['limitedProtection', 'slowDevelopingRoutes'],
-        vulnerableTo: ['quickPass', 'screenPass', 'verticalPass', 'seamPass', 'hotRead'],
+        protectsAgainst: ['slowDevelopingRoutes', 'limitedProtection'],
+        vulnerableTo: ['quickPass', 'screenPass', 'verticalPass', 'verticalPass', 'hotRead'],
         strengths: ['Concentrates pressure toward the right side of the protection'],
         weaknesses: ['Aggressive pressure can leave fewer defenders available for inside routes', 'The short-middle assignment may not be enough to carry a vertical TE release']
     },
     Overload_Blitz_Left: {
         archetype: 'manBlitz',
-        attacks: ['limitedProtection', 'slowDevelopingRoutes'],
-        vulnerableTo: ['quickPass', 'screenPass', 'verticalPass', 'seamPass', 'hotRead'],
+        protectsAgainst: ['slowDevelopingRoutes', 'limitedProtection'],
+        vulnerableTo: ['quickPass', 'screenPass', 'verticalPass', 'verticalPass', 'hotRead'],
         strengths: ['Concentrates pressure toward the left side of the protection'],
         weaknesses: ['Aggressive pressure can leave fewer defenders available for inside routes', 'The short-middle assignment may not be enough to carry a vertical TE release']
     }
@@ -569,7 +569,7 @@ function inferOffensiveArchetype(play = {}) {
     const tags = new Set(Array.isArray(play.tags) ? play.tags : []);
     if (play.type === 'run') {
         if (hasTag(tags, ['counter', 'misdirection', 'trap', 'draw'])) return 'counterRun';
-        if (hasTag(tags, ['outside', 'toss'])) return 'outsideRun';
+        if (hasTag(tags, ['outside', 'toss', 'stretch', 'sweep', 'pitch', 'perimeter'])) return 'outsideRun';
         if (hasTag(tags, ['power', 'lead', 'fb', 'goalline'])) return 'powerRun';
         return 'insideRun';
     }
@@ -577,8 +577,8 @@ function inferOffensiveArchetype(play = {}) {
     if (hasTag(tags, ['trick'])) return 'trickPass';
     if (hasTag(tags, ['rpo'])) return 'runPassOption';
     if (hasTag(tags, ['screen'])) return 'screenPass';
-    if (hasTag(tags, ['pa', 'rollout', 'leak', 'wheel'])) {
-        return hasTag(tags, ['rollout']) ? 'rolloutPass' : 'playAction';
+    if (hasTag(tags, ['pa', 'rollout', 'boot', 'bootleg', 'leak', 'wheel'])) {
+        return hasTag(tags, ['rollout', 'boot', 'bootleg']) ? 'rolloutPass' : 'playAction';
     }
     if (hasTag(tags, ['deep', 'vertical', 'shot', 'seam'])) return 'verticalPass';
     if (hasTag(tags, ['flood'])) return 'floodPass';

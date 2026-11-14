@@ -644,7 +644,7 @@ function getRelevantOpponentCounts(counter, situationKey, personnelGroup) {
     return counter?.byPlay || {};
 }
 
-function getOffenseVsDefenseEdge(offenseKnowledge, defenseKnowledge) {
+/*function getOffenseVsDefenseEdge(offenseKnowledge, defenseKnowledge) {
     const type = offenseKnowledge?.archetype;
     if (!type || !defenseKnowledge) return 0;
 
@@ -668,7 +668,7 @@ function getOffenseVsDefenseEdge(offenseKnowledge, defenseKnowledge) {
         ['zoneCover3', 'manCoverage'].includes(defType)) edge += 0.5;
 
     return Math.max(-1, Math.min(1, edge));
-}
+}*/
 
 function getOpponentMatchupAdjustment({
     team,
@@ -959,13 +959,23 @@ function getOpponentMatchupAdjustment({
                 'runFit',
                 'insideRun',
                 'outsideRun',
-                'powerRun'
+                'powerRun',
+                'counterRun'
             ].includes(defArchetype) ||
                 (candidateKnowledge.protectsAgainst || []).some(concept =>
-                    ['insideRun', 'outsideRun', 'powerRun'].includes(concept)
+                    ['insideRun', 'outsideRun', 'powerRun', 'counterRun'].includes(concept)
                 );
 
-            const protectsAgainstPass =
+            const protectsAgainstPass = [
+                'zoneCover2',
+                'zoneCover3',
+                'quartersCoverage',
+                'splitFieldZone',
+                'manCoverage',
+                'bracketCoverage',
+                'prevent',
+                'balancedZone'
+            ].includes(defArchetype) ||
                 (candidateKnowledge.protectsAgainst || []).some(concept =>
                     [
                         'verticalPass',
