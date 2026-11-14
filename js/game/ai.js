@@ -2654,6 +2654,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
 
     playState.ballState = {
         x: startX, y: startY, z: startZ, inAir: true, isLoose: false, throwTick: playState.tick, releaseTick: playState.tick,
+        releaseX: startX, releaseY: startY, releaseZ: startZ,
         vx: (aimX - startX) / t, vy: (aimY - startY) / t, vz: vz,
         targetX: aimX, targetY: aimY, targetPlayerId: target.id, throwerId: qbState.id, isThrowAway: false
     };

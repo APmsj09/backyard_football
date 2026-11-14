@@ -1291,8 +1291,19 @@ function resolveNewtonianCollisions(pState, allPlayers) {
 
         if (dist < combinedRadius && dist > 0.01) {
             const overlap = combinedRadius - dist;
-            const dx_norm = (pState.x - other.x) / dist;
-            const dy_norm = (pState.y - other.y) / dist;
+            let dx_norm = (pState.x - other.x) / dist;
+            let dy_norm = (pState.y - other.y) / dist;
+
+            // GLANCING COLLISION OFFSET: Prevent 1D vertical head-on stalls
+            if (Math.abs(dx_norm) < 0.35) {
+                dx_norm = pState.x >= other.x ? 1 : -1;
+                dy_norm *= 0.2;
+                const mag = Math.hypot(dx_norm, dy_norm);
+                if (mag > 0) {
+                    dx_norm /= mag;
+                    dy_norm /= mag;
+                }
+            }
 
             const totalW = myWeight + theirWeight;
             const myMoveRatio = theirWeight / totalW;

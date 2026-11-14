@@ -1154,28 +1154,33 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 // Use lane intent so they weave through traffic instead of running straight into a block
                 setLaneIntent(pState, pState.targetX, pState.targetY, 8);
             } else if (!pState.isOffense) {
-                // Latch onto an assigned escort target to prevent 25Hz flickering between defenders
+                // Latch onto an escort target with a timer to prevent 25Hz flickering
+                if (pState._escortLockTicks > 0) {
+                    pState._escortLockTicks--;
+                }
+
                 let targetThreat = null;
                 if (pState.escortTargetId) {
                     targetThreat = offenseStates.find(o => 
                         o.id === pState.escortTargetId && 
-                        !o.isEngaged && 
-                        getDistance(pState, o) < 12.0
+                        o.balanceState !== 'downed' &&
+                        getDistance(pState, o) < 15.0
                     );
                 }
 
-                if (!targetThreat) {
+                if (!targetThreat && pState._escortLockTicks <= 0) {
                     targetThreat = offenseStates
                         .filter(o =>
+                            o.balanceState !== 'downed' &&
                             !o.isEngaged &&
-                            !o.isBlocked &&
                             o.y < pState.y + 5 &&
-                            o.y > pState.y - 15
+                            o.y > pState.y - 18
                         )
                         .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
                     if (targetThreat) {
                         pState.escortTargetId = targetThreat.id;
+                        pState._escortLockTicks = 14;
                     }
                 }
 
@@ -1185,8 +1190,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     pState.action = 'run_block';
                 } else {
                     pState.escortTargetId = null;
-                    pState.targetX = ballCarrierState.x + (pState.x < ballCarrierState.x ? -3 : 3);
-                    pState.targetY = ballCarrierState.y - 4; // Stay slightly ahead to lead block
+                    if (pState._escortLeadSide === undefined) {
+                        pState._escortLeadSide = pState.x < ballCarrierState.x ? -2.5 : 2.5;
+                    }
+                    pState.targetX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, ballCarrierState.x + pState._escortLeadSide));
+                    pState.targetY = Math.max(-5.0, ballCarrierState.y - 4.0);
                     pState.action = 'run_block';
                 }
                 setPointIntent(pState, pState.targetX, pState.targetY, 0.45);
@@ -1551,15 +1559,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 if (interiorThreatB) pocketPriorityB -= 3.0;
             }
 
-            // On runs, favor defenders who can threaten the designed lane,
-            // while still accounting for each lineman's starting alignment.
+            // On runs, protect your gap/cylinder first (weight 3.0) to prevent
+            // linemen from crossing over adjacent teammates.
             let lanePriorityA = 0;
             let lanePriorityB = 0;
             const priorityLaneX = blocker.blockLaneX ?? runLaneX;
 
             if (!isPassPlay && Number.isFinite(priorityLaneX)) {
-                lanePriorityA = Math.abs(a.x - priorityLaneX) * 0.75;
-                lanePriorityB = Math.abs(b.x - priorityLaneX) * 0.75;
+                lanePriorityA = Math.abs(a.x - priorityLaneX) * 0.20;
+                lanePriorityB = Math.abs(b.x - priorityLaneX) * 0.20;
             }
 
             const avoidsUnneededDoubleTeam =
@@ -1568,21 +1576,24 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 blockerProfile.assignmentDiscipline > 55;
 
             const doubleTeamPenaltyA = assignedThreats.has(a.id)
-                ? (avoidsUnneededDoubleTeam ? 25 : 12)
+                ? (avoidsUnneededDoubleTeam ? 30 : 18)
                 : 0;
 
             const doubleTeamPenaltyB = assignedThreats.has(b.id)
-                ? (avoidsUnneededDoubleTeam ? 25 : 12)
+                ? (avoidsUnneededDoubleTeam ? 30 : 18)
                 : 0;
 
+            const gapResponsibilityA = isPassPlay ? laneDiffA : (laneDiffA * 3.0);
+            const gapResponsibilityB = isPassPlay ? laneDiffB : (laneDiffB * 3.0);
+
             return (
-                laneDiffA +
+                gapResponsibilityA +
                 dangerPriorityA +
                 pocketPriorityA +
                 lanePriorityA +
                 doubleTeamPenaltyA
             ) - (
-                laneDiffB +
+                gapResponsibilityB +
                 dangerPriorityB +
                 pocketPriorityB +
                 lanePriorityB +
@@ -3224,26 +3235,30 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         setHoldIntent(pState, pState.x, pState.y);
                         pState.action = 'idle';
                     } else {
+                        const isPassRusher = pState.role === 'DL' || 
+                            pState.assignment?.includes('rush') || 
+                            pState.assignment?.includes('blitz');
+
                         const interceptionPoint = getReachablePassInterceptionPoint(pState, ballPos);
 
-                        if (interceptionPoint) {
+                        if (interceptionPoint && !isPassRusher) {
                             setPointIntent(pState, interceptionPoint.x, interceptionPoint.y, 0.5);
                             pState.action = 'tracking_ball';
+                        } else if (isPassRusher) {
+                            // Defensive linemen rally to the landing spot to tackle, not to catch the pass
+                            setPointIntent(pState, ballPos.targetX, ballPos.targetY, 0.5);
+                            pState.action = 'pursuit';
                         } else {
                             const isAssignedToTarget = assignment?.includes(ballPos.targetPlayerId) ||
                                 (ballPos.targetPlayerId && pState.assignedPlayerSlot === offenseStates.find(o => o.id === ballPos.targetPlayerId)?.slot);
 
                             const distToLanding = Math.hypot(pState.x - ballPos.targetX, pState.y - ballPos.targetY);
-
-                            // Expanded break thresholds: Underneath defenders rally within 14y,
-                            // and deep zone DBs break within 24y so passes cannot land uncontested near them.
                             const breakThreshold = isDeepZoneDB ? 24.0 : 14.0;
 
                             if (isAssignedToTarget || distToLanding < breakThreshold) {
                                 let trackTargetY = ballPos.targetY;
                                 
                                 if (isDeepZoneDB && distToLanding > 6.0) {
-                                    // Deep safeties take a conservative angle to keep the ball in front of them
                                     trackTargetY = Math.max(LOS + 6.0, trackTargetY + 2.5);
                                 }
                                 
@@ -3750,26 +3765,26 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 pState.dynamicTargetX = driftX;
             }
 
-            let baselineDepth = isDeep ? LOS + 12.0 : zoneCenter.y;
+            let baselineDepth = zoneCenter.y;
             
             // Re-evaluate read steps more continuously while in the read window
             if (pState._readWindowTicks === undefined) {
                 const instinctRoll = Math.floor(Math.random() * 15);
-                pState._readWindowTicks = 12 + Math.floor(iq / 3) + instinctRoll; // ~20 to 60 ticks depending on IQ and variance
+                pState._readWindowTicks = 12 + Math.floor(iq / 3) + instinctRoll;
             }
             
             if (isDeep && playState.tick < pState._readWindowTicks) {
                 if (pState._backpedalSpeed === undefined) {
                     pState._backpedalSpeed = 0.22 - (iq * 0.0012) + (Math.random() * 0.05); 
                 }
-                // Backpedal smoothly from initial alignment
-                baselineDepth = pState.initialY + (playState.tick * Math.max(0.07, pState._backpedalSpeed));
+                const backpedalDepth = pState.initialY + (playState.tick * Math.max(0.07, pState._backpedalSpeed));
+                baselineDepth = Math.min(zoneCenter.y, backpedalDepth);
             } else if (!isDeep && playState.tick < pState._readWindowTicks * 0.5) {
-                // Short zones also hold/read before bailing
-                baselineDepth = pState.initialY + (playState.tick * 0.15);
+                const readDepth = pState.initialY + (playState.tick * 0.15);
+                baselineDepth = Math.min(zoneCenter.y, readDepth);
             }
 
-            pState.dynamicTargetY = Math.min(zoneCenter.y, baselineDepth);
+            pState.dynamicTargetY = baselineDepth;
 
             pState.targetX = pState.dynamicTargetX;
             pState.targetY = pState.dynamicTargetY;
@@ -3810,8 +3825,8 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 pState.targetY,
                 0.5
             );
-        } else if (isBallInAir) {
-            // FIX: The ball is gone! Stop rushing the empty-handed QB and turn to pursue the pass
+        } else if (isBallInAir && !playState.ballState?.isThrowAway) {
+            // The ball is gone; pursue the valid pass landing spot
             pState.targetX = playState.ballState.targetX || playState.ballState.x;
             pState.targetY = playState.ballState.targetY || playState.ballState.y;
             pState.action = 'pursuit';
@@ -3822,6 +3837,9 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 pState.targetY,
                 0.4
             );
+        } else if (isBallInAir && playState.ballState?.isThrowAway) {
+            setHoldIntent(pState, pState.x, pState.y);
+            pState.action = 'idle';
         } else {
             const qb = qbState;
             if (qb) {

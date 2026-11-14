@@ -583,7 +583,11 @@ export function checkTackleCollisions(playState, gameLog) {
 
         if (Math.random() < successChance) {
             playState.playIsLive = false;
-            playState.yards = carrier.y - playState.lineOfScrimmage;
+            if (carrier.isOffense) {
+                playState.yards = carrier.y - playState.lineOfScrimmage;
+            } else if (playState.fumbleOccurred && playState.fumbleYards !== undefined) {
+                playState.yards = playState.fumbleYards;
+            }
             playState.finalBallY = carrier.y;
             playState.statEvents.push({ type: 'tackle', playerId: defender.id });
             
@@ -1426,11 +1430,13 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         // Ball must be in the air and above the turf; never allow catches below ground level
         if (ball.inAir && (ball.z > maxCatchHeight || ball.z <= 0.05)) return false;
 
-        // Pass rushers (DL/blitzers) can only bat down balls right at the line within 2.5y of release
+        // Pass rushers can only bat down balls near the line of scrimmage within the release window
         const isPassRusher = !p.isOffense && (p.role === 'DL' || p.assignment?.includes('rush') || p.assignment?.includes('blitz'));
-        if (isPassRusher && playState.type === 'pass' && !ball.isLoose && !ball.tipCount) {
-            const distFromRelease = Math.hypot(p.x - (ball.prevX || ball.x), p.y - (ball.prevY || ball.y));
-            if (ticksSinceKick > 8 || distFromRelease > 2.5 || ball.z > standingReach) {
+        if (isPassRusher && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
+            const relX = ball.releaseX ?? ball.x;
+            const relY = ball.releaseY ?? (playState.lineOfScrimmage - 5.0);
+            const distFromRelease = Math.hypot(p.x - relX, p.y - relY);
+            if (ticksSinceKick > 10 || distFromRelease > 3.5 || ball.z > standingReach) {
                 return false;
             }
         }

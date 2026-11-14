@@ -4370,7 +4370,11 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             deadBall.isLoose = false;
         }
     } else if (playState.touchdown) {
-        playResult.outcome = playState.type === 'run' ? 'rush_td' : 'complete';
+        if (playState.defensiveTD) {
+            playResult.outcome = 'defensive_td';
+        } else {
+            playResult.outcome = playState.type === 'run' ? 'rush_td' : 'complete';
+        }
         playResult.score = 'TD';
         playResult.defensiveTD = playState.defensiveTD || false;
     } else if (playState.safety) {
