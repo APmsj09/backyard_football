@@ -2841,139 +2841,36 @@ function generateHistoricalDefenseStats(team, teamProfile, oppOffStats, safeties
     }
 }
 
-export function generateHistoricalStats(team, score, context = null) {
-    const profile = context?.teamProfile || getHistoricalTeamProfile(team);
-    const oppProfile = context?.oppProfile || {
-        passDefense: 50,
-        runDefense: 50,
-        dlPassRush: 50,
-        blitzTendency: 0.5
-    };
-    const totalOffensiveTDs = context?.totalOffensiveTDs ?? Math.max(0, Math.round(Math.max(0, score) / 6.9));
-    const oppOffStats = context?.oppOffStats || {
-        passAttempts: 20,
-        passCompletions: 11,
-        rushAttempts: 16,
-        intsThrown: Math.random() < 0.35 ? 1 : 0,
-        fumblesLost: Math.random() < 0.15 ? 1 : 0
-    };
-
-    const offStats = generateHistoricalOffenseStats(team, totalOffensiveTDs, profile, oppProfile);
-    generateHistoricalDefenseStats(team, profile, oppOffStats, context?.safetiesScored || 0, context?.defTDsScored || 0);
-    return offStats;
+export function generateHistoricalStats(team) {
+    // Compatibility export; historical matches now generate stats play-by-play via simulateYouthMatch.
+    return getRosterObjects(team);
 }
 
 export function simulateHistoricalMatch(homeTeam, awayTeam) {
-    // Only youth league matchups use the probabilistic youth simulator
-    if (homeTeam?.leagueType === 'youth' && awayTeam?.leagueType === 'youth') {
-        try {
-            const result = simulateYouthMatch(homeTeam, awayTeam);
+    try {
+        const result = simulateYouthMatch(homeTeam, awayTeam);
 
-            if (
-                !result ||
-                !Number.isFinite(result.homeScore) ||
-                !Number.isFinite(result.awayScore)
-            ) {
-                throw new Error('Historical simulator returned an invalid result.');
-            }
-
-            return result;
-        } catch (error) {
-            console.error(
-                `[Historical Sim] Failed: ${
-                    homeTeam.name || homeTeam.id || 'Home'
-                } vs ${
-                    awayTeam.name || awayTeam.id || 'Away'
-                }`,
-                error
-            );
-
-            throw error;
+        if (
+            !result ||
+            !Number.isFinite(result.homeScore) ||
+            !Number.isFinite(result.awayScore)
+        ) {
+            throw new Error('Historical simulator returned an invalid result.');
         }
+
+        return result;
+    } catch (error) {
+        console.error(
+            `[Historical Sim] Failed: ${
+                homeTeam?.name || homeTeam?.id || 'Home'
+            } vs ${
+                awayTeam?.name || awayTeam?.id || 'Away'
+            }`,
+            error
+        );
+
+        throw error;
     }
-
-    // Main-League Franchises (Tier 1 & Tier 2) use unit matchups + Backyard scoring (6pt TDs, 2pt conv, 2pt safeties)
-    const homeProfile = getHistoricalTeamProfile(homeTeam);
-    const awayProfile = getHistoricalTeamProfile(awayTeam);
-
-    const bellNoise = spread => (Math.random() + Math.random() - 1) * spread;
-
-    const homeOffEdge = homeProfile.offenseRating - awayProfile.defenseRating;
-    const awayOffEdge = awayProfile.offenseRating - homeProfile.defenseRating;
-
-    let homeOffTDs = Math.max(0, Math.min(7, Math.round(2.4 + (homeOffEdge * 0.055) + 0.25 + bellNoise(1.8))));
-    let awayOffTDs = Math.max(0, Math.min(7, Math.round(2.4 + (awayOffEdge * 0.055) + bellNoise(1.8))));
-
-    // Simulate offenses first so defensive tackles, INTs, and fumble recoveries reconcile cleanly!
-    resetGameStats(homeTeam, awayTeam);
-    const homeOffStats = generateHistoricalOffenseStats(homeTeam, homeOffTDs, homeProfile, awayProfile);
-    const awayOffStats = generateHistoricalOffenseStats(awayTeam, awayOffTDs, awayProfile, homeProfile);
-
-    // Defensive TDs only happen when the defense actually forced an INT or fumble recovery
-    const homeTurnoversForced = (awayOffStats.intsThrown || 0) + (awayOffStats.fumblesLost || 0);
-    const awayTurnoversForced = (homeOffStats.intsThrown || 0) + (homeOffStats.fumblesLost || 0);
-
-    const homeDefTDs = (homeTurnoversForced > 0 && Math.random() < Math.min(0.28, homeTurnoversForced * 0.11)) ? 1 : 0;
-    const awayDefTDs = (awayTurnoversForced > 0 && Math.random() < Math.min(0.28, awayTurnoversForced * 0.11)) ? 1 : 0;
-
-    const homeSafeties = (awayOffEdge < -6 && Math.random() < 0.035) ? 1 : 0;
-    const awaySafeties = (homeOffEdge < -6 && Math.random() < 0.035) ? 1 : 0;
-
-    generateHistoricalDefenseStats(homeTeam, homeProfile, awayOffStats, homeSafeties, homeDefTDs);
-    generateHistoricalDefenseStats(awayTeam, awayProfile, homeOffStats, awaySafeties, awayDefTDs);
-
-    const scoreTouchdownsWithConversions = (tds, edge) => {
-        const convChance = Math.max(0.28, Math.min(0.74, 0.48 + (edge * 0.008)));
-        let pts = 0;
-        for (let i = 0; i < tds; i++) {
-            pts += 6 + (Math.random() < convChance ? 2 : 0);
-        }
-        return pts;
-    };
-
-    let homeScore = scoreTouchdownsWithConversions(homeOffTDs + homeDefTDs, homeOffEdge) + (homeSafeties * 2);
-    let awayScore = scoreTouchdownsWithConversions(awayOffTDs + awayDefTDs, awayOffEdge) + (awaySafeties * 2);
-
-    // Overtime resolution (most ties settle via an OT touchdown; rare regulation/OT stalemates stay ties)
-    if (homeScore === awayScore && Math.random() < 0.85) {
-        const homeAdvantageRatio = 0.52 + ((homeProfile.offenseRating + homeProfile.defenseRating) - (awayProfile.offenseRating + awayProfile.defenseRating)) * 0.01;
-        const homeWinsOT = Math.random() < Math.max(0.25, Math.min(0.75, homeAdvantageRatio));
-
-        if (homeWinsOT) {
-            homeScore += 6;
-            const otRoster = getRosterObjects(homeTeam);
-            const otScorer = otRoster.find(p => p.gameStats && (p.gameStats.rushAttempts > 0 || p.gameStats.receptions > 0));
-            if (otScorer) otScorer.gameStats.touchdowns += 1;
-        } else {
-            awayScore += 6;
-            const otRoster = getRosterObjects(awayTeam);
-            const otScorer = otRoster.find(p => p.gameStats && (p.gameStats.rushAttempts > 0 || p.gameStats.receptions > 0));
-            if (otScorer) otScorer.gameStats.touchdowns += 1;
-        }
-    }
-
-    // Record realistic snap distribution across starters, rotation, and reserves with stamina influence
-    [homeTeam, awayTeam].forEach(team => {
-        const offStarters = new Set(Object.values(team.depthChart?.offense || {}).filter(Boolean));
-        const defStarters = new Set(Object.values(team.depthChart?.defense || {}).filter(Boolean));
-
-        getRosterObjects(team).forEach(p => {
-            if (!p.careerStats) p.careerStats = { seasonsPlayed: 0 };
-            if (Number(p.status?.duration) > 0) return;
-
-            const isStarter = offStarters.has(p.id) || defStarters.has(p.id);
-            const isTwoWay = offStarters.has(p.id) && defStarters.has(p.id);
-
-            const stm = p.attributes?.physical?.stamina || 50;
-            const stmOffset = Math.round((stm - 50) * 0.08);
-
-            const baseSnaps = isTwoWay ? getRandomInt(42, 48) : (isStarter ? getRandomInt(30, 36) : getRandomInt(8, 16));
-            const finalSnaps = Math.max(4, baseSnaps + stmOffset);
-            p.careerStats.snapsThisSeason = (p.careerStats.snapsThisSeason || 0) + finalSnaps;
-        });
-    });
-
-    finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore);
 }
 
 export function simulateHistoricalSeason(yearNum, gameInstance) {
