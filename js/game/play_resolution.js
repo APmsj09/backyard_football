@@ -1550,6 +1550,12 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
     if (isChewClock) runProbability += 0.40;
     if (isDesperation) runProbability = 0.05;
 
+    // 4th Down situational run suppression
+    if (down === 4) {
+        if (yardsToGo <= 1.5) runProbability += 0.35;
+        else if (yardsToGo >= 3) runProbability = 0.02;
+    }
+
     // First Down Tendency: Teams should try to establish the run on 1st down
     if (down === 1 && !isDesperation && !isChewClock) runProbability += 0.15;
 
@@ -2005,6 +2011,11 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
             } else {
                 score -= down === 4 ? 10 : 6;
             }
+        }
+
+        // Heavy penalty against running on 4th & medium/long
+        if (down === 4 && yardsToGo >= 3 && play.type === 'run' && !tags.includes('draw')) {
+            score -= 80;
         }
 
         // Tactical knowledge: situation and key personnel.

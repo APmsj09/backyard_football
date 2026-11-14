@@ -326,7 +326,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
                 hasCrediblePassEvidence &&
                 (
                     finalPassScore > finalRunScore + 25 ||
-                    (qb.hasCompletedDropback === true && finalPassScore > finalRunScore - 15)
+                    (qb?.hasCompletedDropback === true && finalPassScore > finalRunScore - 15)
                 );
 
             // Count consecutive simulation ticks with sustained evidence.
@@ -1895,12 +1895,18 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         allReceivers.forEach(rec => {
             const info = getTargetValue(rec.slot);
-            if (info && info.separation > 1.2) {
+            const distFromQB = getDistance(qbState, rec);
+            if (info && info.separation > 1.2 && distFromQB >= 2.5) {
                 const onSameSide = Math.sign(rec.x - CENTER_X) === Math.sign(qbState.x - CENTER_X);
                 const recDepth = rec.y - LOS;
 
                 let passValue = (info.separation * 4.0) + (onSameSide ? 10 : -5);
-                if (recDepth >= distToFirstDown) passValue += 20;
+                if (recDepth >= distToFirstDown) {
+                    passValue += 20;
+                } else if (down >= 3) {
+                    const yardsShort = distToFirstDown - recDepth;
+                    passValue -= Math.min(35, yardsShort * 3.5);
+                }
                 if (!onSameSide) passValue -= (qbIQ / 5);
 
                 if (passValue > bestPassScore) {
@@ -1929,8 +1935,12 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             return;
         }
 
-        if (bestTarget && bestPassScore > 15) {
-            const onTheRunMod = (qbAgility / 100) * 0.85;
+        const isBootleg = /boot|rollout/i.test(playState.playKey || '');
+        const minScrambleThrowTicks = isBootleg ? 45 : 30;
+        const immediateThreatToQB = defenseStates.some(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(qbState, d) < 2.5);
+
+        if (bestTarget && bestPassScore > 30 && (playState.tick >= minScrambleThrowTicks || immediateThreatToQB)) {
+            const onTheRunMod = Math.max(0.45, (qbAgility / 100) * 0.85);
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃‍♂️🎯 ${qbState.name} keeps his eyes downfield and throws on the run!`, playState);
             executeThrow(qbState, bestTarget, qbPower, qbAcc * onTheRunMod, playState, gameLog, "Throw on Run");
             return;
