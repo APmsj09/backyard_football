@@ -4005,7 +4005,7 @@ function buildPlayerCardScoutingContext(sourcePlayer, gameState) {
             statusLabel: isTemporaryTeammate
                 ? 'Temporary teammate'
                 : 'Your player',
-            isTemporaryTeammate: false,
+            isTemporaryTeammate,
         };
     }
 
@@ -5638,6 +5638,7 @@ export function openPlayerCard(playerId) {
         { key: 'receptions', label: 'Receptions' },
         { key: 'targets', label: 'Targets' },
         { key: 'drops', label: 'Drops' },
+        { key: 'pancakes', label: 'Pancakes' },
         { key: 'touchdowns', label: 'TDs' },
         { key: 'tackles', label: 'Tackles' },
         { key: 'sacks', label: 'Sacks' },
@@ -5649,10 +5650,14 @@ export function openPlayerCard(playerId) {
         { key: 'safeties', label: 'Safeties' }
     ];
 
-    const careerTotalsHtml = `
-        <div class="border border-slate-200 rounded p-3">
+    const youthCareerStats = sourcePlayer.youthCareerStats || {};
+    const hasYouthTotals = (Array.isArray(sourcePlayer.youthSeasonHistory) && sourcePlayer.youthSeasonHistory.length > 0) ||
+        Object.values(youthCareerStats).some(v => Number(v) > 0);
+
+    const renderTotalsBlock = (title, statsObj, seasonsCount, accentClass = 'border-slate-200') => `
+        <div class="border ${accentClass} rounded p-3">
             <h5 class="font-bold text-xs uppercase tracking-wider text-slate-600 mb-2">
-                Career Totals
+                ${title}
             </h5>
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
                 ${careerStatColumns.map(stat => `
@@ -5661,7 +5666,7 @@ export function openPlayerCard(playerId) {
                             ${stat.label}
                         </span>
                         <span class="block text-sm font-black font-mono text-slate-900">
-                            ${Number(careerStats[stat.key]) || 0}
+                            ${Number(statsObj[stat.key]) || 0}
                         </span>
                     </div>
                 `).join('')}
@@ -5670,10 +5675,16 @@ export function openPlayerCard(playerId) {
                         Seasons
                     </span>
                     <span class="block text-sm font-black font-mono text-slate-900">
-                        ${Number(careerStats.seasonsPlayed) || 0}
+                        ${seasonsCount}
                     </span>
                 </div>
             </div>
+        </div>`;
+
+    const careerTotalsHtml = `
+        <div class="space-y-3">
+            ${renderTotalsBlock('Main League Career Totals', careerStats, Number(careerStats.seasonsPlayed) || 0)}
+            ${hasYouthTotals ? renderTotalsBlock('Pee Wee Career Totals', youthCareerStats, Number(sourcePlayer.youthSeasonsPlayed) || sourcePlayer.youthSeasonHistory?.length || 0, 'border-amber-200') : ''}
         </div>`;
 
     const youthSeasons = Array.isArray(player.youthSeasonHistory)
@@ -5710,10 +5721,15 @@ export function openPlayerCard(playerId) {
                             <tr>
                                 <th class="p-1.5 text-left">Yr</th>
                                 <th class="p-1.5 text-left">Team</th>
+                                <th class="p-1.5 text-center">C/A</th>
                                 <th class="p-1.5 text-center">Pass Yds</th>
+                                <th class="p-1.5 text-center">INT Thrown</th>
+                                <th class="p-1.5 text-center">Rush Att</th>
                                 <th class="p-1.5 text-center">Rush Yds</th>
+                                <th class="p-1.5 text-center">Rec/Tgt</th>
                                 <th class="p-1.5 text-center">Rec Yds</th>
                                 <th class="p-1.5 text-center">TDs</th>
+                                <th class="p-1.5 text-center">Pnk</th>
                                 <th class="p-1.5 text-center">Tkls</th>
                                 <th class="p-1.5 text-center">Sacks</th>
                                 <th class="p-1.5 text-center">INTs</th>
@@ -5729,12 +5745,17 @@ export function openPlayerCard(playerId) {
                                         <td class="p-1.5 font-sans truncate max-w-[100px]" title="${pr.teamName || '—'}">
                                             ${pr.teamName || '—'}
                                         </td>
+                                        <td class="p-1.5 text-center">${Number(st.passCompletions) || 0}/${Number(st.passAttempts) || 0}</td>
                                         <td class="p-1.5 text-center">${Number(st.passYards) || 0}</td>
+                                        <td class="p-1.5 text-center">${Number(st.interceptionsThrown) || 0}</td>
+                                        <td class="p-1.5 text-center">${Number(st.rushAttempts) || 0}</td>
                                         <td class="p-1.5 text-center">${Number(st.rushYards) || 0}</td>
+                                        <td class="p-1.5 text-center">${Number(st.receptions) || 0}/${Number(st.targets) || 0}</td>
                                         <td class="p-1.5 text-center">${Number(st.recYards) || 0}</td>
                                         <td class="p-1.5 text-center font-bold text-amber-600">
                                             ${Number(st.touchdowns) || 0}
                                         </td>
+                                        <td class="p-1.5 text-center">${Number(st.pancakes) || 0}</td>
                                         <td class="p-1.5 text-center">${Number(st.tackles) || 0}</td>
                                         <td class="p-1.5 text-center">${Number(st.sacks) || 0}</td>
                                         <td class="p-1.5 text-center">${Number(st.interceptions) || 0}</td>
@@ -5871,6 +5892,7 @@ export function openPlayerCard(playerId) {
                     ${renderAttrBar('Strength', phys.strength)}
                     ${renderAttrBar('Agility', phys.agility)}
                     ${renderAttrBar('Explosiveness', phys.explosiveness)}
+                    ${renderAttrBar('Jumping', phys.jumping)}
                     ${renderAttrBar('Stamina', phys.stamina)}
                 </div>
                 <div class="bg-white p-3 rounded border border-slate-200">
@@ -5884,7 +5906,9 @@ export function openPlayerCard(playerId) {
                 <div class="bg-white p-3 rounded border border-slate-200">
                     <h5 class="font-bold text-xs uppercase text-slate-400 tracking-wider mb-2 border-b pb-1">Technicals</h5>
                     ${renderAttrBar('Throwing Acc', tech.throwingAccuracy)}
+                    ${renderAttrBar('Throw Power', tech.throwPower)}
                     ${renderAttrBar('Catching Hands', tech.catchingHands)}
+                    ${renderAttrBar('Ball Security', tech.carrying)}
                     ${renderAttrBar('Blocking', tech.blocking)}
                     ${renderAttrBar('Tackling', tech.tackling)}
                     ${renderAttrBar(

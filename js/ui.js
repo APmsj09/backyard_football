@@ -198,6 +198,7 @@ const PUBLIC_STAT_LABELS = {
     recYards: 'Rec Yds',
     targets: 'Targets',
     drops: 'Drops',
+    pancakes: 'Pancakes',
     tackles: 'Tackles',
     sacks: 'Sacks',
     interceptions: 'INT',
@@ -214,7 +215,7 @@ const PUBLIC_STATS_BY_POSITION = {
     RB: ['rushYards', 'rushAttempts', 'receptions', 'recYards', 'touchdowns'],
     WR: ['receptions', 'recYards', 'targets', 'touchdowns', 'drops', 'returnYards'],
     TE: ['receptions', 'recYards', 'targets', 'touchdowns', 'drops'],
-    OL: ['touchdowns', 'rushYards'],
+    OL: ['pancakes', 'touchdowns', 'rushYards'],
     DL: ['tackles', 'sacks', 'interceptions', 'fumblesRecovered', 'touchdowns'],
     LB: ['tackles', 'sacks', 'interceptions', 'fumblesRecovered', 'touchdowns'],
     DB: ['tackles', 'interceptions', 'returnYards', 'touchdowns']
@@ -225,18 +226,30 @@ function renderPublicStatSummary(stats, position) {
         return '<span class="text-slate-400 italic">No recorded statistics</span>';
     }
 
-    const fields = PUBLIC_STATS_BY_POSITION[position] ||
-        Object.keys(PUBLIC_STAT_LABELS);
+    const primaryFields = PUBLIC_STATS_BY_POSITION[position] || [];
+    const primarySet = new Set(primaryFields);
+
+    // Show the player's primary position stats plus any non-zero two-way production.
+    const fields = primaryFields.length > 0
+        ? [
+            ...primaryFields,
+            ...Object.keys(PUBLIC_STAT_LABELS).filter(
+                key => !primarySet.has(key) && Number(stats[key]) !== 0 && Number.isFinite(Number(stats[key]))
+            )
+        ]
+        : Object.keys(PUBLIC_STAT_LABELS).filter(
+            key => Number.isFinite(Number(stats[key])) && Number(stats[key]) !== 0
+        );
 
     const entries = fields
-        .filter(field => Number.isFinite(stats[field]))
+        .filter(field => Number.isFinite(Number(stats[field])))
         .map(field => ({
             label: PUBLIC_STAT_LABELS[field],
-            value: stats[field]
+            value: Number(stats[field])
         }));
 
     if (entries.length === 0) {
-        return '<span class="text-slate-400 italic">No tracked statistics for this position</span>';
+        return '<span class="text-slate-400 italic">No recorded statistics</span>';
     }
 
     return entries.map(entry => `
@@ -420,7 +433,7 @@ function renderPeeWeeHistory(player) {
         : '<p class="text-slate-400 italic">No season-by-season Pee Wee stats recorded.</p>';
 
     const careerHtml = hasCareerStats
-        ? renderPublicStatSummary(careerStats, null)
+        ? renderPublicStatSummary(careerStats, position)
         : '<span class="text-slate-400 italic">No Pee Wee career totals recorded.</span>';
 
     return `
@@ -952,16 +965,19 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
     // rookie draft restricted to eligible, unassigned prospects.
     const isYouthStatsView = activeDraftView === 'youthStats';
 
+    const draftClassIds = new Set(
+        (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
+            .filter(p => p?.id != null)
+            .map(p => String(p.id))
+    );
+
     const poolSource = isYouthStatsView
         ? (gameState.players || []).filter(player => {
             if (!player) return false;
 
-            // Retain graduates and former Pee Wee players in the history view.
-            const hasYouthHistory =
-                Array.isArray(player.youthSeasonHistory) &&
-                player.youthSeasonHistory.length > 0;
-
-            if (hasYouthHistory) return true;
+            // Show current draft-eligible prospects and active Pee Wee players;
+            // exclude pro players already drafted onto main-league rosters.
+            if (draftClassIds.has(String(player.id))) return true;
 
             if (!player.teamId) return false;
 
@@ -990,7 +1006,6 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             return false;
         }
 
-        // Youth Stats is a scouting/research view, not a draft-eligibility list.
         if (isYouthStatsView) {
             const age = Number(player.age);
 
@@ -1001,11 +1016,11 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 age >= 8 &&
                 age <= 11;
 
-            const hasYouthHistory =
-                Array.isArray(player.youthSeasonHistory) &&
-                player.youthSeasonHistory.length > 0;
+            const isDraftPoolProspect =
+                draftClassIds.has(String(player.id)) &&
+                player.teamId == null;
 
-            return isActiveYouth || hasYouthHistory;
+            return isActiveYouth || isDraftPoolProspect;
         }
 
         // The actual draft must only show unassigned eligible prospects.
@@ -1128,8 +1143,9 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             thead.innerHTML = `
                 <tr>
                     <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-2 text-center">Pos</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
                     <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th class="py-2 px-2 text-center">Status</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthSeasons">Seasons</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthPassYards">Pass Yds</th>
@@ -1137,6 +1153,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthRecYards">Rec Yds</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthTouchdowns">TD</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthTackles">Tackles</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthSacks">Sacks</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthInterceptions">INT</th>
                 </tr>`;
         } else {
@@ -1230,12 +1247,12 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         youthRecYards: 'recYards',
         youthTouchdowns: 'touchdowns',
         youthTackles: 'tackles',
+        youthSacks: 'sacks',
         youthInterceptions: 'interceptions'
     };
 
-    // Read recorded youth career totals, rebuilding from season history
-    // when an aggregate field is missing in an older or partially migrated save.
-        const getYouthStatTotal = (player, statKey) => {
+    // Read recorded youth career totals (plus live mid-season youth stats if in-season).
+    const getYouthStatTotal = (player, statKey) => {
         const history = Array.isArray(player?.youthSeasonHistory)
             ? player.youthSeasonHistory
             : [];
@@ -1259,10 +1276,19 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             foundRecordedValue = true;
         });
 
-        // Per-season history is the source of truth when it contains this stat.
-        if (foundRecordedValue) return total;
+        const inProgressYouthVal = (
+            player?.lifecycle === 'youth' &&
+            Number(gameState?.currentWeek) > 0 &&
+            player?.seasonStats?.[statKey] != null &&
+            Number.isFinite(Number(player.seasonStats[statKey]))
+        )
+            ? Number(player.seasonStats[statKey])
+            : null;
 
-        // Fall back to the aggregate for players with no recorded stat history.
+        if (foundRecordedValue || inProgressYouthVal !== null) {
+            return total + (inProgressYouthVal || 0);
+        }
+
         const careerValue = player?.youthCareerStats?.[statKey];
 
         if (
@@ -1273,7 +1299,6 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             return Number(careerValue);
         }
 
-        // Missing historical data stays missing rather than becoming a fake zero.
         return null;
     };
 
@@ -1375,7 +1400,9 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 : (!hasEligibleClass && Number(gameState.year) !== 1
                     ? 'No eligible Pee Wee graduates are available in this draft class.'
                     : 'No prospects match filters.');
-        const emptyColspan = activeDraftView === 'youthStats' ? 11 : 9;
+        const emptyColspan = activeDraftView === 'youthStats'
+            ? 13
+            : (activeDraftView === 'watchlist' ? 8 : 9);
         elements.draftPoolTbody.innerHTML = `<tr><td colspan="${emptyColspan}" class="p-6 text-center text-slate-400 font-sans italic">${msg}</td></tr>`;
         return;
     }
@@ -1451,7 +1478,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     <span class="block text-[10px] text-slate-500 truncate leading-tight">${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Role projection developing' : 'Unscouted prospect')}</span>
                 </td>
                 <td class="text-center py-2 px-2 text-slate-600 font-mono">${scouted.age}</td>
-                <td class="text-center py-2 px-2 font-bold ${scouted.potential === 'A' ? 'text-amber-600' : (scouted.potential === 'B' ? 'text-blue-600' : 'text-slate-500')}">${scouted.potential}</td>
+                <td class="text-center py-2 px-2 font-bold ${String(scouted.potential).startsWith('A') ? 'text-amber-600' : (String(scouted.potential).startsWith('B') ? 'text-blue-600' : 'text-slate-500')}">${scouted.potential}</td>
                  <td class="text-center py-2 px-2">${scoutingStatusHtml}</td>
                 <td class="text-center py-2 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
                 <td class="text-center py-2 px-3 whitespace-nowrap">${sigSkillsHtml}</td>
@@ -1489,11 +1516,13 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             const youthSeasons = youthHistory.length ||
                 (Number(player.youthSeasonsPlayed) || 0);
 
+            const isDraftProspect = draftClassIds.has(String(player.id)) && player.teamId == null;
+            const statusBadge = isDraftProspect
+                ? '<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded text-[9px] font-bold">Draft</span>'
+                : '<span class="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded text-[9px] font-bold">Pee Wee</span>';
+
             const youthStatDisplay = statKey => {
-                if (youthHistory.length === 0) return '—';
-
                 const value = getYouthStatTotal(player, statKey);
-
                 return value === null ? '—' : value.toLocaleString();
             };
 
@@ -1501,6 +1530,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <td class="py-2 px-2 text-center">${starBtn}</td>
                 <td class="py-2 px-2 text-center">${posBadge}</td>
                 <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
+                <td class="text-center py-2 px-2 font-sans">${statusBadge}</td>
                 <td class="text-center py-2 px-2">${scouted.age}</td>
                 <td class="text-center py-2 px-2">${youthSeasons > 0 ? youthSeasons : '—'}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('passYards')}</td>
@@ -1508,6 +1538,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <td class="text-center py-2 px-2">${youthStatDisplay('recYards')}</td>
                 <td class="text-center py-2 px-2 font-bold">${youthStatDisplay('touchdowns')}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('tackles')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('sacks')}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('interceptions')}</td>
             `;
         } else {
@@ -14581,6 +14612,7 @@ const PLAYER_STAT_COLUMNS = [
     { key: 'receptions', label: 'Receptions' },
     { key: 'targets', label: 'Targets' },
     { key: 'drops', label: 'Drops' },
+    { key: 'pancakes', label: 'Pancakes' },
     { key: 'tackles', label: 'Tackles' },
     { key: 'sacks', label: 'Sacks' },
     { key: 'interceptions', label: 'INT' },
@@ -15531,7 +15563,17 @@ export function renderStandingsTab(gameState) {
     };
 
     const activeTier = tierConfig[activeStandingsLeague] || tierConfig.tier1;
+    const getWinPct = t => {
+        const w = Number(t.wins) || 0;
+        const l = Number(t.losses) || 0;
+        const ties = Number(t.ties) || 0;
+        const g = w + l + ties;
+        return g > 0 ? (w + ties * 0.5) / g : 0;
+    };
+
     const sortedTeams = [...activeTier.teams].sort((a, b) => {
+        const pctDiff = getWinPct(b) - getWinPct(a);
+        if (Math.abs(pctDiff) > 0.0001) return pctDiff;
         const winsDiff = (b.wins || 0) - (a.wins || 0);
         if (winsDiff !== 0) return winsDiff;
         return (a.losses || 0) - (b.losses || 0);
@@ -15633,6 +15675,7 @@ export function renderStandingsTab(gameState) {
                             <th class="py-2 px-3 text-left">Team</th>
                             <th class="py-2 px-2 text-center">W</th>
                             <th class="py-2 px-2 text-center">L</th>
+                            <th class="py-2 px-2 text-center">T</th>
                             <th class="py-2 px-2 text-center">PCT</th>
                             <th class="py-2 px-2 text-center text-slate-800 font-sans">Power (OVR)</th>
                             <th class="py-2 px-2 text-center text-slate-800 font-sans">Cred</th>
@@ -15642,8 +15685,8 @@ export function renderStandingsTab(gameState) {
                     <tbody class="divide-y divide-slate-100">
                         ${sortedTeams.map((t, i) => {
         const isMe = t.id === gameState.playerTeam?.id;
-        const total = (t.wins || 0) + (t.losses || 0);
-        const pct = total > 0 ? ((t.wins || 0) / total).toFixed(3).replace(/^0+/, '') : '.000';
+        const total = (t.wins || 0) + (t.losses || 0) + (t.ties || 0);
+        const pct = total > 0 ? getWinPct(t).toFixed(3).replace(/^0+/, '') : '.000';
         const teamOvr = Game.getTeamOverall(t);
 
         let borderIndicator = '';
@@ -15669,6 +15712,7 @@ export function renderStandingsTab(gameState) {
                                 </td>
                                 <td class="py-2 px-2 text-center font-black ${t.wins > 0 ? 'text-slate-900' : 'text-slate-400'}">${t.wins || 0}</td>
                                 <td class="py-2 px-2 text-center text-slate-500">${t.losses || 0}</td>
+                                <td class="py-2 px-2 text-center text-slate-500">${t.ties || 0}</td>
                                 <td class="py-2 px-2 text-center font-bold text-slate-700">${pct}</td>
                                 <td class="py-2 px-2 text-center font-bold text-slate-800">${teamOvr}</td>
                                 <td class="py-2 px-2 text-center text-slate-600">${t.socialProfile?.streetCred || 50}</td>
@@ -15915,6 +15959,7 @@ export function renderPlayerStatsTab(gameState) {
         'receptions',
         'targets',
         'drops',
+        'pancakes',
         'touchdowns',
         'fumbles',
         'fumblesLost',
@@ -19264,9 +19309,11 @@ export function renderLiveBoxScore(activeGame) {
             (p.gameStats?.targets || 0) > 0 ||
             (p.gameStats?.drops || 0) > 0
         );
+        const blockers = players.filter(p => (p.gameStats?.pancakes || 0) > 0);
         const tacklers = players.filter(p =>
             (p.gameStats?.tackles || 0) > 0 ||
-            (p.gameStats?.sacks || 0) > 0
+            (p.gameStats?.sacks || 0) > 0 ||
+            (p.gameStats?.safeties || 0) > 0
         );
         const turnoverPlayers = players.filter(p =>
             (p.gameStats?.interceptions || 0) > 0 ||
@@ -19313,10 +19360,19 @@ export function renderLiveBoxScore(activeGame) {
             html += `</div>`;
         }
 
+        if (blockers.length > 0) {
+            html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Offensive Line</span>`;
+            blockers.forEach(p => {
+                html += `<div class="flex justify-between gap-2"><span>${getPlayerLastNameForStats(p)}</span><span>${p.gameStats.pancakes || 0} pancakes</span></div>`;
+            });
+            html += `</div>`;
+        }
+
         if (tacklers.length > 0) {
             html += `<div><span class="text-slate-400 font-sans font-bold text-[10px] uppercase block">Defense</span>`;
             tacklers.forEach(p => {
-                html += `<div class="flex justify-between gap-2"><span>${getPlayerLastNameForStats(p)}</span><span>${p.gameStats.tackles || 0} tkl, ${p.gameStats.sacks || 0} sck</span></div>`;
+                const safetyStr = (p.gameStats.safeties || 0) > 0 ? `, ${p.gameStats.safeties} sft` : '';
+                html += `<div class="flex justify-between gap-2"><span>${getPlayerLastNameForStats(p)}</span><span>${p.gameStats.tackles || 0} tkl, ${p.gameStats.sacks || 0} sck${safetyStr}</span></div>`;
             });
             html += `</div>`;
         }
