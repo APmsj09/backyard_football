@@ -1402,7 +1402,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         const isScreenLeadBlocker =
             isReadyScreenLeadBlocker(blocker);
 
-        // INITIALIZE HERE before validThreats accesses it
+        // INITIALIZE HERE: Prevents Temporal Dead Zone ReferenceError
         const isPassPlay =
             playType === 'pass' &&
             !isPassCompleted &&
@@ -1419,73 +1419,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 )
                 : threats;
 
-        // Clear the old pass-protection assignment once on the
-        // transition to post-catch blocking. Preserve target locking
-        // after the new blocking assignment has been selected.
-        if (
-            isPostCatchBlock &&
-            !blocker._postCatchBlockingStarted
-        ) {
-            blocker.dynamicTargetId = null;
-            blocker._postCatchBlockingStarted = true;
-        }
-
         if (
             (playType === 'run' || isPostCatchBlock) &&
             Number.isFinite(runLaneX)
         ) {
             blocker.blockLaneX = runLaneX;
-        }
-        // SCREEN RELEASE DELAY:
-        // Linemen executing 'screen_block' or 'Wall' assignments must hold a pass set
-        // for the first 18-22 ticks to let defensive rushers clear before pulling outside.
-        const isScreenBlocker = playState.playKey?.includes('Screen') || blocker.assignment?.includes('screen_block');
-        const isScreenWallAssignment = blocker.assignment?.includes('Wall') || blocker.assignment?.includes('screen_block');
-
-        if (isScreenBlocker && isScreenWallAssignment) {
-            const releaseTick = blocker.assignment?.includes('screen_block') ? 18 : 25;
-            if (playState.tick < releaseTick) {
-                // Anchor in pass pro briefly to invite rushers upfield before releasing
-                blocker.targetX = blocker.initialX;
-                blocker.targetY = blocker.initialY - 0.5;
-                blocker.action = 'pass_block';
-                blocker.contactReduction = 0.6;
-
-                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.35);
-                return;
-            }
-
-            if (blocker._screenReleasePath && blocker._screenReleasePath.length > 0 && !isPassCompleted) {
-                blocker.routePath = blocker._screenReleasePath;
-                blocker._screenReleasePath = null;
-                blocker.currentPathIndex = 0;
-                blocker.action = 'run_path';
-                blocker.dynamicTargetId = null;
-                setRouteIntent(blocker, blocker.routePath[0].x, blocker.routePath[0].y, 0.6);
-                return;
-            }
-
-            if (!isPassCompleted && screenReceiverForBlocking) {
-                const perimeterThreat = defenseStates
-                    .filter(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && !assignedThreats.has(d.id) && d.y >= LOS)
-                    .sort((a, b) => getDistance(screenReceiverForBlocking, a) - getDistance(screenReceiverForBlocking, b))[0];
-
-                if (perimeterThreat) {
-                    assignedThreats.add(perimeterThreat.id);
-                    blocker.dynamicTargetId = perimeterThreat.id;
-                    blocker.targetX = perimeterThreat.x;
-                    blocker.targetY = perimeterThreat.y;
-                    blocker.action = 'run_block';
-                    setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.5);
-                    return;
-                }
-
-                blocker.targetX = screenReceiverForBlocking.x + (blocker.initialX > CENTER_X ? -2.5 : 2.5);
-                blocker.targetY = screenReceiverForBlocking.y + 3.0;
-                blocker.action = 'run_block';
-                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.45);
-                return;
-            }
         }
 
         const isPulling = Boolean(
@@ -1493,34 +1431,24 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             blocker.currentPathIndex < blocker.routePath.length
         );
 
-        // A pulling lineman must complete the designed path before
-        // choosing a defender to block.
         if (playType === 'run' && isPulling) {
             const pullPoint = blocker.routePath[blocker.currentPathIndex];
-
             if (pullPoint) {
                 blocker.action = 'run_path';
                 blocker.targetX = pullPoint.x;
                 blocker.targetY = pullPoint.y;
-
-                setRouteIntent(
-                    blocker,
-                    pullPoint.x,
-                    pullPoint.y,
-                    0.6
-                );
+                setRouteIntent(blocker, pullPoint.x, pullPoint.y, 0.6);
                 return;
             }
         }
 
-        // Open-field blockers on run plays and RAC completions need a wider vision envelope (22y)
-        // to detect pursuing safeties and linebackers ahead of or behind the runner
         const VISION_RANGE = isPulling ? 2.0 : ((playType === 'run' || isPostCatchBlock) ? 22.0 : 10.0);
+        
+        // VALID THREATS FILTER: Allows OL to block rushers penetrating past their forward line
         const validThreats = blockerThreats.filter(t => {
             if (assignedThreats.has(t.id)) return false;
             if (getDistance(blocker, t) >= VISION_RANGE) return false;
 
-            // In pass protection, any rusher threatening the pocket/QB (even if they crossed the OL line) is valid
             if (isPassPlay) {
                 const qbY = qbState ? qbState.y : (LOS - 4.0);
                 return t.y > qbY - 0.5;
@@ -1534,6 +1462,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         });
 
         let target = null;
+        // Note: isPassPlay redundant declaration removed here
 
         const blockerProfile = getDecisionProfile(blocker, playState.tick);
         const blockerIQ = blockerProfile?.awareness ?? (blocker.playbookIQ || blocker.iq || 50);

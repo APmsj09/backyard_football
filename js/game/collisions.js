@@ -491,7 +491,7 @@ export function checkTackleCollisions(playState, gameLog) {
                         else if (carrier.x < 3.5) dir = 1;
 
                         carrier.action = dir === 1 ? 'juke_right' : 'juke_left';
-                        carrier.evasionTicks = 7; // Keeps the cut animation grounded and visible for ~0.28 seconds
+                        carrier.evasionTicks = 7; // Keeps the cut animation grounded and visible for ~0.28s
                         
                         const agiFactor = (carrier.agi || 50) / 100;
                         const jukePower = 1.8 + (agiFactor * 2.0); // 2.0 to 3.8 lateral impulse
@@ -1337,23 +1337,19 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
     const ball = playState.ballState;
     if (!ball.inAir && !ball.isLoose) return;
 
-    // A player gets one catch attempt per ball-contact phase.
-     // A tip, bobble, or muff creates a new phase.
-     if (!(ball._attemptedCatchPlayerIds instanceof Set)) {
-         ball._attemptedCatchPlayerIds = new Set();
+    if (!(ball._attemptedCatchPlayerIds instanceof Set)) {
+        ball._attemptedCatchPlayerIds = new Set();
     }
 
     if (ball.isSwatted) {
         if (ball.z <= 0) {
             ball.z = 0;
             ball.vz = 0;
-
             if (playState.type === 'pass' && !ball.isLoose && playState.playIsLive) {
                 playState.playIsLive = false;
                 playState.incomplete = true;
                 playState.finalBallY = playState.lineOfScrimmage;
                 if (gameLog && !ball.isThrowAway) pushGameLog(gameLog, `[Tick ${playState.tick}] ⏱️ Pass hits the turf. Incomplete.`, playState);
-                
                 logPlayEventSnapshot('Pass Incomplete', playState.activePlayers, ball, playState.tick, playState.playId);
             }
         }
@@ -1372,11 +1368,10 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
     const BASE_CATCH_RADIUS = 0.45;
 
     const playersInRange = playState.activePlayers.filter(p => {
-        // Engaged/blocked defenders or stunned players cannot catch or swat passes mid-flight
         if (p.isBlocked || p.isEngaged || p.stunnedTicks > 0) return false;
 
-        // Do not roll another catch attempt for a player who already attempted this phase
-        if (ball._attemptedCatchPlayerIds.has(p.id)) return false;
+        // PHYSICAL COOLDOWN: Replaces permanent lockout. A player who jumped or swiped needs time to land
+        if (p._catchCooldownTicks && p._catchCooldownTicks > 0) return false;
 
         if (ball.isLoose && p.id === ball.lastDroppedById) {
             const ticksSinceDrop = playState.tick - (ball.droppedTick || 0);
@@ -1390,7 +1385,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             return false;
         }
 
-        // PHYSICAL COOLDOWN: Replaces permanent lockout. A player who jumped or swiped needs time to land
+        // PHYSICAL COOLDOWN: Replaces permanent lockout. A player who leaped or swiped needs time to land
         if (p._catchCooldownTicks && p._catchCooldownTicks > 0) {
             return false;
         }
@@ -1402,35 +1397,24 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             return false;
         }
 
-        // On forward passes, any eligible receiver running a route or tracking the ball can attempt a catch,
-        // but non-intended receivers must be actively looking/tracking and close to the landing point.
         if (p.isOffense && playState.type === 'pass' && !ball.isLoose && !ball.tipCount && !ball.isLateral) {
             const isIntendedTarget = p.id === ball.targetPlayerId;
             const isTracking = p.action === 'tracking_ball' || p.action.includes('route');
-            if (!isIntendedTarget && !isTracking) {
-                return false;
-            }
+            if (!isIntendedTarget && !isTracking) return false;
         }
 
-        // Do not let lead blockers or other offensive teammates steal a designed lateral pitch out of the air!
         if (ball.isLateral && !ball.isLoose && p.isOffense && p.id !== ball.targetPlayerId) {
             return false;
         }
 
         let playerHeight = p.hgt || p.height || 70;
         if (!p.hgt && !p.height) {
-            if (p.attributes?.physical?.height) {
-                playerHeight = p.attributes.physical.height;
-            } else {
-                const pObj = getPlayer(p.id);
-                if (pObj?.attributes?.physical?.height) playerHeight = pObj.attributes.physical.height;
-            }
+            const pObj = getPlayer(p.id);
+            if (pObj?.attributes?.physical?.height) playerHeight = pObj.attributes.physical.height;
         }
 
         const verticalLeap = (p.jumping || p.agi || p.agility || 50) / 100;
-        const standingReach = (playerHeight / 36) + 0.6; // ~2.5 yards
-
-        // Only active ball-trackers can leap for high passes; others are limited to standing reach
+        const standingReach = (playerHeight / 36) + 0.6;
         const isTracking = p.action === 'tracking_ball';
         const maxCatchHeight = isTracking 
             ? (playerHeight / 36) + 1.1 + (verticalLeap * 0.7)
@@ -1463,7 +1447,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 // When pass is still high up on its arc (z > 2.5 yds / 7.5 ft):
                 if (!isNearLanding && ball.z > 2.5 && !isDescending) {
                     // OCCASIONAL MISTIMED EARLY LEAP:
-                    // Low-IQ or aggressive defenders sometimes misjudge and bite early (~15-20% chance).
+                    // Low-IQ or aggressive defenders sometimes misjudge and bite early (~15% chance).
                     // Disciplined DBs stay grounded and track the route.
                     const defIQ = p.iq || p.playbookIQ || 50;
                     const mistimedJumpChance = Math.max(0.04, 0.28 - (defIQ * 0.003));
@@ -1503,7 +1487,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             let posScore = ((p.ctch || p.catchingHands || 50) * 0.4) + ((p.agi || p.agility || 50) * 0.2);
 
             if (p.id === ball.targetPlayerId) {
-                posScore += 22; // Balanced target priority so defenders in position can contest
+                posScore += 22;
             } else if (!p.isOffense) {
                 posScore += ((p.cov || p.coverage || 50) * 0.45) + ((p.iq || p.playbookIQ || 50) * 0.25);
             }

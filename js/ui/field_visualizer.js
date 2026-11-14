@@ -320,16 +320,16 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
                 ctx.restore();
             }
 
-            // GROUND CLEAT MARKS (Realistic turf kick-up)
+            // GROUND CLEAT SCUFFS (Realistic turf divots, no glowing auras)
             if (isJukeLeft || isJukeRight) {
                 ctx.save();
                 ctx.translate(px, py);
                 ctx.rotate(p.angle);
                 // Fake-side plant foot: Juke Right plants hard on the left, Juke Left plants hard on the right
                 const plantSideY = isJukeRight ? -baseSize * 0.65 : baseSize * 0.65;
-                ctx.fillStyle = "rgba(15, 45, 20, 0.75)"; // Dark turf divot
+                ctx.fillStyle = "rgba(15, 45, 20, 0.75)"; // Dark displaced turf divot
                 ctx.fillRect(-baseSize * 0.4, plantSideY - 1.5, baseSize * 0.7, 3.0);
-                ctx.fillStyle = "rgba(255, 255, 255, 0.5)"; // Cleat chalk/grass blade scuff
+                ctx.fillStyle = "rgba(255, 255, 255, 0.5)"; // Cleat chalk mark
                 ctx.fillRect(-baseSize * 0.2, plantSideY - 1, baseSize * 0.4, 2.0);
                 ctx.restore();
             } else if (isTrucking || isStiffArm) {
@@ -356,17 +356,17 @@ export function drawFieldVisualization(canvas, ctx, frameData, homeColor = '#000
             let droppedShoulderOffset = 0;
 
             if (isTrucking || isStiffArm) {
-                // LOWERED SHOULDER: Runner lowers center of gravity and drops right shoulder forward
+                // LOWERED SHOULDER: Runner lowers center of gravity, drops right shoulder forward
                 forwardLeanX = baseSize * 0.28; // Forward surge into contact
-                torsoAngle = 0.28;             // Lead shoulder angles ~16 degrees forward into defender
-                droppedShoulderOffset = baseSize * 0.12; // Dipped shoulder cap reaches out
+                torsoAngle = 0.28;             // Lead shoulder angles ~16 degrees forward into contact
+                droppedShoulderOffset = baseSize * 0.14; // Dipped shoulder cap reaches out
             } else if (isJukeRight) {
-                // CUT RIGHT: Planted left, body banks right
-                torsoAngle = 0.35;             // Torso snaps into the cut direction
+                // CUT RIGHT: Planted left, hips and shoulders snap right
+                torsoAngle = 0.35;
                 lateralShiftY = baseSize * 0.25;
             } else if (isJukeLeft) {
-                // CUT LEFT: Planted right, body banks left
-                torsoAngle = -0.35;            // Torso snaps into the cut direction
+                // CUT LEFT: Planted right, hips and shoulders snap left
+                torsoAngle = -0.35;
                 lateralShiftY = -baseSize * 0.25;
             }
 

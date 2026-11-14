@@ -3650,6 +3650,14 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 if (p.jamTicks > 0) p.jamTicks--;
                 if (p.moveCooldown > 0) p.moveCooldown--;
 
+                // Evasion action timer (resets cut/truck to run_path after ~0.28s)
+                if (p.evasionTicks > 0) {
+                    p.evasionTicks--;
+                    if (p.evasionTicks === 0 && (p.action === 'juke_right' || p.action === 'juke_left' || p.action === 'trucking')) {
+                        p.action = 'run_path';
+                    }
+                }
+
                 // Jump recovery & landing timer
                 if (p._catchCooldownTicks > 0) {
                     p._catchCooldownTicks--;
@@ -4976,7 +4984,7 @@ export function simulateLivePlayStep(gameInstance, mode = 'live', options = {}) 
         } else {
             if (gameInstance.down >= 4) {
                 gameInstance.possession = defense;
-                gameInstance.ballOn = 110 - gameInstance.ballOn;
+                gameInstance.ballOn = 100 - gameInstance.ballOn; // Correct 100-yard field flip
                 if (!gameInstance.possession.isPlayerControlled) {
                     gameInstance.possession.formations.offense = gameInstance.possession.coach?.preferredOffense || 'Balanced';
                 }
