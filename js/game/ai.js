@@ -111,8 +111,12 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     }
 
     if (observedRunCarrier || qbScramble) {
+        // Deep safeties maintain coverage depth early; they do not crash the line within 0.5s of the snap
+        const isDeepSafety = pState.role === 'DB' && pState.assignment?.includes('deep') && pState.y > (playState?.lineOfScrimmage || 60) + 12.0;
+        const confidenceLevel = (isDeepSafety && tick < 25) ? 0.40 : 1.0;
+
         pState._diagnosedGuess = 'run';
-        pState._diagnosedConfidence = 1.0;
+        pState._diagnosedConfidence = confidenceLevel;
         pState._sawLiveRunnerTick = tick; // Remember that we saw a live runner
         pState._diagPassEvidenceTicks = 0;
         pState._diagPassEvidenceLastTick = tick;

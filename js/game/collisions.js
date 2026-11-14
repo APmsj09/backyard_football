@@ -137,6 +137,10 @@ export function checkBlockCollisions(playState, gameLog = null) {
             return;
         }
 
+        // Pulling linemen running their path must reach their landmark before engaging
+        const isPulling = blocker.routePath && blocker.currentPathIndex < blocker.routePath.length && blocker.action === 'run_path';
+        if (isPulling) return;
+
         const isBlockingDuty = blocker.action.includes('block') ||
             (blocker.assignment && (blocker.assignment.includes('pull') || blocker.assignment.includes('lead') || blocker.assignment.includes('screen_block')));
 

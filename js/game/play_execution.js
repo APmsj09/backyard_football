@@ -2071,12 +2071,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     playState.playKey?.includes('Toss')
                 );
 
+                // Allow designed run paths 60 ticks (~2.4s) to develop or until crossing LOS
                 const isRunHolePhase = playType === 'run' &&
                     (pState.role === 'RB' || isDesignedQBRun || isPerimeterRun) &&
                     pt !== null &&
                     pState.y < LOS + 0.8 &&
                     !holeClogged &&
-                    playState.tick < (pState._handoffTick || 16) + 24 &&
+                    playState.tick < (pState._handoffTick || 16) + 60 &&
                     pState.action !== 'trucking';
 
                 if (isRunHolePhase) {
@@ -3170,8 +3171,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         predY = Math.max(chaseTarget.y + 0.5, predY);
                     }
 
-                    // Downfield cutoff angle: cut off the sideline and meet the runner downhill
-                    const isDownfield = pState.y > chaseTarget.y + 1.2;
+                    // Downfield cutoff angle: only apply to open-field runners, NEVER a pocket QB
+                    const isPocketQB = chaseTarget.role === 'QB' && !qbScrambling && chaseTarget.y <= LOS + 0.5;
+                    const isDownfield = !isPocketQB && (pState.y > chaseTarget.y + 1.2);
                     if (isDownfield) {
                         const yardsAhead = Math.min(6.0, (pState.y - chaseTarget.y) * 0.45);
                         predY = Math.max(predY, chaseTarget.y + yardsAhead);
