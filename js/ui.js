@@ -94,6 +94,100 @@ function getUIRosterObjects(team) {
         }).filter(Boolean);
 }
 
+export function parseNumericOrRange(val) {
+    if (val === null || val === undefined || val === '?' || val === '—' || val === '--') {
+        return null;
+    }
+    if (typeof val === 'number') {
+        return Number.isFinite(val) ? val : null;
+    }
+    const str = String(val).trim();
+    const rangeMatch = str.match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/);
+    if (rangeMatch) {
+        return (Number(rangeMatch[1]) + Number(rangeMatch[2])) / 2;
+    }
+    const approxMatch = str.match(/^~?(\d+(?:\.\d+)?)$/);
+    if (approxMatch) {
+        return Number(approxMatch[1]);
+    }
+    return null;
+}
+
+export function getRatingTierStyle(val, isCell = true) {
+    const num = parseNumericOrRange(val);
+    if (num === null) {
+        return isCell
+            ? 'text-slate-300'
+            : 'bg-slate-50 text-slate-400 border border-slate-200';
+    }
+    if (num >= 75) {
+        return isCell
+            ? 'bg-emerald-50/80 text-emerald-900 font-bold'
+            : 'bg-emerald-50 text-emerald-900 border border-emerald-200 font-bold';
+    }
+    if (num >= 62) {
+        return isCell
+            ? 'bg-blue-50/60 text-blue-900 font-semibold'
+            : 'bg-blue-50 text-blue-900 border border-blue-200 font-semibold';
+    }
+    if (num >= 48) {
+        return isCell
+            ? 'text-slate-700 font-medium'
+            : 'bg-slate-50 text-slate-700 border border-slate-200 font-medium';
+    }
+    if (num >= 35) {
+        return isCell
+            ? 'text-slate-400'
+            : 'bg-slate-50 text-slate-500 border border-slate-200';
+    }
+    return isCell
+        ? 'bg-rose-50/40 text-rose-700'
+        : 'bg-rose-50 text-rose-800 border border-rose-200';
+}
+
+export function getPotentialTierStyle(pot) {
+    const str = String(pot || '').trim().toUpperCase();
+    if (!str || str === '?') return 'text-slate-300';
+    if (str.startsWith('A')) return 'bg-emerald-50 text-emerald-900 border border-emerald-200 font-bold';
+    if (str.startsWith('B')) return 'bg-blue-50 text-blue-900 border border-blue-200 font-semibold';
+    if (str.startsWith('C')) return 'bg-slate-100 text-slate-700 border border-slate-200 font-medium';
+    return 'bg-rose-50 text-rose-800 border border-rose-200';
+}
+
+export function getStatCellStyle(val, statKey, isSortedCol = false) {
+    const num = Number(val);
+    if (!Number.isFinite(num) || num === 0) {
+        return isSortedCol ? 'bg-amber-50/30 text-slate-300' : 'text-slate-300';
+    }
+
+    const negativeStats = new Set(['interceptionsThrown', 'drops', 'fumbles', 'fumblesLost']);
+    if (negativeStats.has(statKey)) {
+        return 'bg-rose-50/50 text-rose-800 font-semibold';
+    }
+
+    const impactStats = new Set(['touchdowns', 'sacks', 'interceptions', 'fumblesRecovered', 'safeties', 'pancakes']);
+    if (impactStats.has(statKey)) {
+        if (num >= 3) return 'bg-emerald-50/80 text-emerald-900 font-bold';
+        return 'bg-emerald-50/40 text-emerald-800 font-semibold';
+    }
+
+    if (statKey === 'passYards' && num >= 200) return 'bg-blue-50/60 text-blue-900 font-bold';
+    if ((statKey === 'rushYards' || statKey === 'recYards') && num >= 100) return 'bg-blue-50/60 text-blue-900 font-bold';
+    if (statKey === 'tackles' && num >= 10) return 'bg-blue-50/60 text-blue-900 font-bold';
+
+    return isSortedCol
+        ? 'bg-amber-50/50 text-slate-900 font-bold'
+        : 'text-slate-700 font-medium';
+}
+
+export function getEnergyBadgeStyle(energy) {
+    const num = Number(energy);
+    if (!Number.isFinite(num)) return 'text-slate-400';
+    if (num >= 75) return 'bg-emerald-50 text-emerald-800 border border-emerald-200';
+    if (num >= 50) return 'bg-amber-50 text-amber-800 border border-amber-200';
+    return 'bg-rose-50 text-rose-800 border border-rose-200 font-bold';
+}
+
 const SCOUTING_LEVEL_LABELS = [
     'Unscouted',
     'Initial',
@@ -1450,11 +1544,12 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         const isStarred = draftWatchlist.has(player.id);
 
         const row = document.createElement('tr');
-        row.className = `cursor-pointer hover:bg-amber-50 draft-player-row transition ${scouted.id === selectedPlayerId ? 'bg-amber-100 font-bold' : ''}`;
+        row.className = `cursor-pointer hover:bg-slate-50 draft-player-row transition ${scouted.id === selectedPlayerId ? 'bg-amber-50/80 font-bold' : ''}`;
         row.dataset.playerId = scouted.id;
 
         const starBtn = `<button class="star-btn text-base leading-none ${isStarred ? 'text-amber-500 font-bold' : 'text-slate-300 hover:text-amber-400'}" onclick="event.stopPropagation(); window.app_toggleWatchlist('${player.id}')">${isStarred ? '★' : '☆'}</button>`;
         const posBadge = `<span class="bg-slate-100 text-slate-800 font-bold text-[10px] px-1.5 py-0.5 rounded border border-slate-300">${pos}</span>`;
+        const potPill = `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] ${getPotentialTierStyle(scouted.potential)}">${scouted.potential}</span>`;
 
         if (activeDraftView === 'overview') {
             const sigSkills = scoutingLevel > 0
@@ -1464,49 +1559,62 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             const sigSkillsHtml = scoutingLevel === 0
                 ? '<span class="text-[10px] text-slate-400 italic">Scout to reveal skill estimates</span>'
                 : sigSkills.map(s =>
-                    `<span class="inline-block bg-slate-100 text-slate-800 text-[10px] px-1.5 py-0.5 rounded font-mono mr-1 border border-slate-200">
-                        <span class="text-slate-500 font-normal">${s.label}:</span> <b>~${s.val}</b>
+                    `<span class="inline-block text-[10px] px-1.5 py-0.5 rounded font-mono mr-1 ${getRatingTierStyle(s.val, false)}">
+                        <span class="opacity-70 font-normal">${s.label}:</span> <b>~${s.val}</b>
                     </span>`
                 ).join('');
 
             row.innerHTML = `
-                <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${offFitHtml}</td>
-                <td class="text-center py-2 px-2">${defFitHtml}</td>
-                <td class="py-2 px-3 font-sans truncate max-w-[150px]">
+                <td class="py-1.5 px-2 text-center">${starBtn}</td>
+                <td class="py-1.5 px-2 text-center">${offFitHtml}</td>
+                <td class="text-center py-1.5 px-2">${defFitHtml}</td>
+                <td class="py-1.5 px-3 font-sans truncate max-w-[150px]">
                     <span class="block font-semibold text-slate-900 truncate leading-tight">${scouted.name}</span>
                     <span class="block text-[10px] text-slate-500 truncate leading-tight">${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Role projection developing' : 'Unscouted prospect')}</span>
                 </td>
-                <td class="text-center py-2 px-2 text-slate-600 font-mono">${scouted.age}</td>
-                <td class="text-center py-2 px-2 font-bold ${String(scouted.potential).startsWith('A') ? 'text-amber-600' : (String(scouted.potential).startsWith('B') ? 'text-blue-600' : 'text-slate-500')}">${scouted.potential}</td>
-                 <td class="text-center py-2 px-2">${scoutingStatusHtml}</td>
-                <td class="text-center py-2 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
-                <td class="text-center py-2 px-3 whitespace-nowrap">${sigSkillsHtml}</td>
+                <td class="text-center py-1.5 px-2 text-slate-600 font-mono">${scouted.age}</td>
+                <td class="text-center py-1.5 px-2">${potPill}</td>
+                <td class="text-center py-1.5 px-2">${scoutingStatusHtml}</td>
+                <td class="text-center py-1.5 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
+                <td class="text-center py-1.5 px-3 whitespace-nowrap">${sigSkillsHtml}</td>
             `;
         } else if (activeDraftView === 'physicals') {
+            const spd = scouted.attributes?.physical?.speed ?? '?';
+            const str = scouted.attributes?.physical?.strength ?? '?';
+            const agi = scouted.attributes?.physical?.agility ?? '?';
+            const stm = scouted.attributes?.physical?.stamina ?? '?';
+
             row.innerHTML = `
-                <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${bothFitsHtml}</td>
-                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
-                <td class="text-center py-2 px-2">${formatHeight(scouted.attributes?.physical?.height)}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.weight}#</td>
-                <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.strength ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.agility ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.stamina ?? '?'}</td>
+                <td class="py-1.5 px-2 text-center">${starBtn}</td>
+                <td class="py-1.5 px-2 text-center">${bothFitsHtml}</td>
+                <td class="py-1.5 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
+                <td class="text-center py-1.5 px-2 text-slate-600">${formatHeight(scouted.attributes?.physical?.height)}</td>
+                <td class="text-center py-1.5 px-2 text-slate-600">${scouted.attributes?.physical?.weight}#</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(spd, true)}">${spd}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(str, true)}">${str}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(agi, true)}">${agi}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(stm, true)}">${stm}</td>
             `;
         } else if (activeDraftView === 'skills') {
+            const acc = scouted.attributes?.technical?.throwingAccuracy ?? '?';
+            const pow = scouted.attributes?.technical?.throwPower ?? scouted.attributes?.physical?.strength ?? '?';
+            const hnd = scouted.attributes?.technical?.catchingHands ?? '?';
+            const blk = scouted.attributes?.technical?.blocking ?? '?';
+            const tkl = scouted.attributes?.technical?.tackling ?? '?';
+            const bsh = scouted.attributes?.technical?.blockShedding ?? '?';
+            const iq = scouted.attributes?.mental?.playbookIQ ?? '?';
+
             row.innerHTML = `
-                <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${bothFitsHtml}</td>
-                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.throwingAccuracy ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.throwPower ?? scouted.attributes?.physical?.strength ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.blocking ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.tackling ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.blockShedding ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.mental?.playbookIQ ?? '?'}</td>
+                <td class="py-1.5 px-2 text-center">${starBtn}</td>
+                <td class="py-1.5 px-2 text-center">${bothFitsHtml}</td>
+                <td class="py-1.5 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(acc, true)}">${acc}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(pow, true)}">${pow}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(hnd, true)}">${hnd}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(blk, true)}">${blk}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(tkl, true)}">${tkl}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(bsh, true)}">${bsh}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(iq, true)}">${iq}</td>
             `;
         } else if (activeDraftView === 'youthStats') {
             const youthHistory = Array.isArray(player.youthSeasonHistory)
@@ -1518,39 +1626,45 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
             const isDraftProspect = draftClassIds.has(String(player.id)) && player.teamId == null;
             const statusBadge = isDraftProspect
-                ? '<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded text-[9px] font-bold">Draft</span>'
+                ? '<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[9px] font-bold">Draft</span>'
                 : '<span class="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded text-[9px] font-bold">Pee Wee</span>';
 
-            const youthStatDisplay = statKey => {
-                const value = getYouthStatTotal(player, statKey);
-                return value === null ? '—' : value.toLocaleString();
+            const youthStatCell = (statKey) => {
+                const rawVal = getYouthStatTotal(player, statKey);
+                if (rawVal === null) {
+                    return `<td class="text-center py-1.5 px-2 text-slate-300">—</td>`;
+                }
+                return `<td class="text-center py-1.5 px-2 ${getStatCellStyle(rawVal, statKey)}">${rawVal.toLocaleString()}</td>`;
             };
 
             row.innerHTML = `
-                <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${posBadge}</td>
-                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
-                <td class="text-center py-2 px-2 font-sans">${statusBadge}</td>
-                <td class="text-center py-2 px-2">${scouted.age}</td>
-                <td class="text-center py-2 px-2">${youthSeasons > 0 ? youthSeasons : '—'}</td>
-                <td class="text-center py-2 px-2">${youthStatDisplay('passYards')}</td>
-                <td class="text-center py-2 px-2">${youthStatDisplay('rushYards')}</td>
-                <td class="text-center py-2 px-2">${youthStatDisplay('recYards')}</td>
-                <td class="text-center py-2 px-2 font-bold">${youthStatDisplay('touchdowns')}</td>
-                <td class="text-center py-2 px-2">${youthStatDisplay('tackles')}</td>
-                <td class="text-center py-2 px-2">${youthStatDisplay('sacks')}</td>
-                <td class="text-center py-2 px-2">${youthStatDisplay('interceptions')}</td>
+                <td class="py-1.5 px-2 text-center">${starBtn}</td>
+                <td class="py-1.5 px-2 text-center">${posBadge}</td>
+                <td class="py-1.5 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
+                <td class="text-center py-1.5 px-2 font-sans">${statusBadge}</td>
+                <td class="text-center py-1.5 px-2 text-slate-600">${scouted.age}</td>
+                <td class="text-center py-1.5 px-2 text-slate-700">${youthSeasons > 0 ? youthSeasons : '—'}</td>
+                ${youthStatCell('passYards')}
+                ${youthStatCell('rushYards')}
+                ${youthStatCell('recYards')}
+                ${youthStatCell('touchdowns')}
+                ${youthStatCell('tackles')}
+                ${youthStatCell('sacks')}
+                ${youthStatCell('interceptions')}
             `;
         } else {
+            const spd = scouted.attributes?.physical?.speed ?? '?';
+            const hnd = scouted.attributes?.technical?.catchingHands ?? '?';
+
             row.innerHTML = `
-                <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${bothFitsHtml}</td>
-                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
-                <td class="text-center py-2 px-2">${scouted.age}</td>
-                <td class="text-center py-2 px-2 font-bold text-amber-600">${scouted.potential}</td>
-                <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
-                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
-                <td class="text-center py-2 px-2 font-black text-slate-900">${ovrDisplay}</td>
+                <td class="py-1.5 px-2 text-center">${starBtn}</td>
+                <td class="py-1.5 px-2 text-center">${bothFitsHtml}</td>
+                <td class="py-1.5 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
+                <td class="text-center py-1.5 px-2 text-slate-600">${scouted.age}</td>
+                <td class="text-center py-1.5 px-2">${potPill}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(spd, true)}">${spd}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(hnd, true)}">${hnd}</td>
+                <td class="text-center py-1.5 px-2 ${ovr !== null ? getRatingTierStyle(ovr, true) : 'text-slate-400'}">${ovrDisplay}</td>
             `;
         }
 
@@ -2014,10 +2128,42 @@ export function renderDashboard(gameState) {
     const { playerTeam, year, currentWeek, messages } = gameState;
     const currentW = currentWeek < 9 ? `Week ${currentWeek + 1}` : 'Offseason';
 
-    if (elements.dashboardTeamName) elements.dashboardTeamName.innerHTML = `${playerTeam.name}`;
+    if (elements.dashboardTeamName) elements.dashboardTeamName.textContent = playerTeam.name;
     if (elements.dashboardRecord) elements.dashboardRecord.textContent = `${playerTeam.wins || 0} - ${playerTeam.losses || 0}${playerTeam.ties ? ` - ${playerTeam.ties}` : ''}`;
     if (elements.dashboardYear) elements.dashboardYear.textContent = year || '1';
     if (elements.dashboardWeek) elements.dashboardWeek.textContent = currentW;
+
+    // Update real-time operational telemetry in dashboard header
+    const credEl = document.getElementById('dashboard-cred');
+    if (credEl) credEl.textContent = playerTeam.socialProfile?.streetCred ?? 50;
+
+    const favorsEl = document.getElementById('dashboard-favors');
+    if (favorsEl) favorsEl.textContent = playerTeam.socialProfile?.favorTokens ?? 3;
+
+    const fundsEl = document.getElementById('dashboard-funds');
+    if (fundsEl) fundsEl.textContent = `$${(Number(playerTeam.finances?.balance) || 0).toFixed(2)}`;
+
+    const matchupEl = document.getElementById('dashboard-matchup');
+    if (matchupEl) {
+        if (Array.isArray(gameState.schedule) && currentWeek < 9) {
+            const gamesPerWeek = (gameState.teams?.length || 20) / 2;
+            const weekGames = gameState.schedule.slice(
+                currentWeek * gamesPerWeek,
+                (currentWeek + 1) * gamesPerWeek
+            );
+            const myGame = weekGames.find(g => g && (g.home?.id === playerTeam.id || g.away?.id === playerTeam.id));
+            if (myGame) {
+                const isHome = myGame.home?.id === playerTeam.id;
+                const opp = isHome ? myGame.away : myGame.home;
+                matchupEl.textContent = `${isHome ? 'vs' : '@'} ${opp?.name || 'Opponent'}`;
+                matchupEl.title = `Next Game: ${isHome ? 'Home vs' : 'Away @'} ${opp?.name || 'Opponent'}`;
+            } else {
+                matchupEl.textContent = 'Next: Bye Week';
+            }
+        } else {
+            matchupEl.textContent = 'Next: Offseason';
+        }
+    }
 
     // Update the button appearance based on current phase and roster limit
     if (elements.advanceWeekBtn) {
@@ -2081,17 +2227,13 @@ export function switchTab(tabId, gameState) {
 
             if (foSub === 'staff') {
                 renderStaffTab(gameState);
-            }
-
-            if (foSub === 'staff-market') {
+            } else if (foSub === 'staff-market' || foSub === 'staff-carousel') {
                 renderStaffCarouselTab(gameState);
-            }
-
-            if (foSub === 'finances') {
+            } else if (foSub === 'finances') {
+                window.app?.renderFinancesTab?.(gameState);
+            } else if (foSub === 'store') {
                 window.app?.renderStoreTab?.(gameState);
-            }
-
-            if (foSub === 'social') {
+            } else if (foSub === 'social') {
                 window.app?.renderSocialNetworkTab?.(gameState);
             }
 
@@ -3102,6 +3244,83 @@ export function startOffseasonFAMinigame(gameState) {
     renderOffseasonFAScreen(gameState);
 }
 
+export function renderRecruitingWirePanel(gameState) {
+    const dailyWire = document.getElementById('fa-daily-wire-list');
+    if (!dailyWire || !gameState) return;
+
+    const state = gameState.offseasonState || {};
+    const progress = state.recruitingProgress || {};
+    const teamId = String(gameState.playerTeam?.id ?? '');
+
+    const resolvedDays = Array.isArray(progress.resolvedDays) ? progress.resolvedDays : [];
+    const lastResolvedDay = resolvedDays.length > 0 ? Math.max(...resolvedDays) : 0;
+
+    if (lastResolvedDay === 0) {
+        dailyWire.innerHTML = `
+            <div class="p-6 text-center text-slate-400 italic text-[11px]">
+                Free Agency commences on Day 1. Offers and commitments will appear here as each day resolves.
+            </div>
+        `;
+        return;
+    }
+
+    const dailyActivity = (Array.isArray(progress.dailyActivity) ? progress.dailyActivity : [])
+        .filter(act => Number(act.day) === lastResolvedDay);
+
+    const yourActivity = dailyActivity.filter(act => String(act.teamId) === teamId);
+    const leagueActivity = dailyActivity.filter(act => String(act.teamId) !== teamId);
+
+    const dayCommitments = (Array.isArray(progress.commitments) ? progress.commitments : [])
+        .filter(c => Number(c.day) === lastResolvedDay);
+
+    const escapeWireHtml = val => String(val ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+
+    const renderActRow = act => {
+        const teamName = escapeWireHtml(act.teamName || 'Team');
+        const pName = escapeWireHtml(act.playerName || 'Recruit');
+        const label = escapeWireHtml(act.label || act.action || act.type || 'Recruiting activity');
+        return `
+            <div class="rounded border border-slate-200 bg-white p-2 text-[11px]">
+                <div class="font-bold text-slate-800">${teamName} · ${pName}</div>
+                <div class="mt-0.5 text-slate-600">${label}</div>
+            </div>
+        `;
+    };
+
+    dailyWire.innerHTML = `
+        <div class="mb-3 border-b border-slate-200 pb-2">
+            <div class="font-black text-[10px] uppercase tracking-wider text-slate-800">
+                Day ${lastResolvedDay} Wire Summary
+            </div>
+            <div class="mt-0.5 text-[10px] text-slate-500">
+                Your actions: ${yourActivity.length} · League actions: ${leagueActivity.length} · Commitments: ${dayCommitments.length}
+            </div>
+        </div>
+
+        ${dayCommitments.length > 0 ? `
+            <div class="mb-3 space-y-1">
+                <div class="text-[10px] font-black uppercase tracking-wide text-emerald-800 border-b border-emerald-200 pb-0.5">
+                    Commitments
+                </div>
+                ${dayCommitments.map(c => `
+                    <div class="rounded border border-emerald-200 bg-emerald-50 p-2 text-[11px]">
+                        <b>${escapeWireHtml(c.playerName)}</b> committed to <b>${escapeWireHtml(c.teamName)}</b>.
+                    </div>
+                `).join('')}
+            </div>
+        ` : ''}
+
+        <div class="space-y-1.5">
+            <div class="text-[10px] font-black uppercase tracking-wide text-slate-700 border-b border-slate-200 pb-0.5">
+                Recent Activity
+            </div>
+            ${dailyActivity.length > 0 ? dailyActivity.slice(-8).reverse().map(renderActRow).join('') : '<p class="text-[10px] text-slate-400 italic">No actions recorded on Day ' + lastResolvedDay + '.</p>'}
+        </div>
+    `;
+}
+
 export function renderOffseasonFAScreen(gameState) {
     if (!gameState?.playerTeam) return;
 
@@ -3308,6 +3527,7 @@ export function renderOffseasonFAScreen(gameState) {
 
     renderOffseasonFAPool(gameState);
     renderRecruitingActivityPanel(gameState);
+    renderRecruitingWirePanel(gameState);
 }
 
 function renderRecruitingActivityPanel(gameState) {
@@ -5208,6 +5428,11 @@ export function renderOffseasonFAPool(gameState) {
     `;
 
 
+    const activeEl = document.activeElement;
+    const isSearchFocused = activeEl && activeEl.id === 'fa-minigame-search';
+    const selStart = isSearchFocused ? activeEl.selectionStart : null;
+    const selEnd = isSearchFocused ? activeEl.selectionEnd : null;
+
     container.innerHTML = `
         <div class="mb-3 flex items-center gap-2 border-b border-slate-200 pb-2">
             <button
@@ -5628,6 +5853,17 @@ export function renderOffseasonFAPool(gameState) {
             ${battleBoardHtml}
         </div>
     `;
+
+    // Restore search bar focus and cursor position so continuous typing never drops focus
+    if (isSearchFocused) {
+        const restoredSearchInput = document.getElementById('fa-minigame-search');
+        if (restoredSearchInput) {
+            restoredSearchInput.focus();
+            if (selStart !== null && selEnd !== null) {
+                restoredSearchInput.setSelectionRange(selStart, selEnd);
+            }
+        }
+    }
 }
 
 export function renderPendingBidsList(gameState) {
@@ -14728,14 +14964,14 @@ function renderMyTeamTab(gameState) {
     }
 
         const viewTabs = `
-        <div class="space-y-3 bg-white border-b border-slate-200 p-3">
+        <div class="space-y-2.5 bg-white border-b border-slate-200 p-3">
 
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-1.5">
                     <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                         Rostered
                     </span>
-                    <span class="block text-xl font-black tabular-nums text-slate-900">
+                    <span class="block text-lg font-black tabular-nums text-slate-900">
                         ${roster.length}
                     </span>
                     <span class="text-[9px] text-slate-500">
@@ -14743,11 +14979,11 @@ function renderMyTeamTab(gameState) {
                     </span>
                 </div>
 
-                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-1.5">
                     <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                         Available
                     </span>
-                    <span class="block text-xl font-black tabular-nums ${
+                    <span class="block text-lg font-black tabular-nums ${
                         readyCount >= 14 ? 'text-emerald-700' : 'text-amber-700'
                     }">
                         ${readyCount}
@@ -14757,11 +14993,11 @@ function renderMyTeamTab(gameState) {
                     </span>
                 </div>
 
-                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-1.5">
                     <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                         Two-Way Starters
                     </span>
-                    <span class="block text-xl font-black tabular-nums text-amber-700">
+                    <span class="block text-lg font-black tabular-nums text-amber-700">
                         ${twoWayStarterCount}
                     </span>
                     <span class="text-[9px] text-slate-500">
@@ -14769,11 +15005,11 @@ function renderMyTeamTab(gameState) {
                     </span>
                 </div>
 
-                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-1.5">
                     <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                         Average Energy
                     </span>
-                    <span class="block text-xl font-black tabular-nums text-slate-900">
+                    <span class="block text-lg font-black tabular-nums text-slate-900">
                         ${averageRosterEnergy !== null
                             ? `${averageRosterEnergy}%`
                             : '—'}
@@ -14787,17 +15023,17 @@ function renderMyTeamTab(gameState) {
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div class="flex flex-wrap gap-1 rounded border border-slate-300 bg-slate-100 p-1 text-[11px] font-bold">
                     <button
-                        class="px-3 py-1.5 rounded transition ${myRosterView === 'skills' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                        class="px-3 py-1 rounded transition ${myRosterView === 'skills' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
                         onclick="app_setMyRosterView('skills')">
                         Skills
                     </button>
                     <button
-                        class="px-3 py-1.5 rounded transition ${myRosterView === 'season' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                        class="px-3 py-1 rounded transition ${myRosterView === 'season' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
                         onclick="app_setMyRosterView('season')">
                         Season Stats
                     </button>
                     <button
-                        class="px-3 py-1.5 rounded transition ${myRosterView === 'career' ? 'bg-blue-700 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                        class="px-3 py-1 rounded transition ${myRosterView === 'career' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
                         onclick="app_setMyRosterView('career')">
                         Career Stats
                     </button>
@@ -14826,27 +15062,28 @@ function renderMyTeamTab(gameState) {
                 const stats = p[statsKey] || {};
                 const pos = p.pos || estimateBestPosition(p);
 
-                const statCells = PLAYER_STAT_COLUMNS.map(stat =>
-                    `<td class="py-2 px-2 text-center text-slate-700">${Number(stats[stat.key]) || 0}</td>`
-                ).join('');
+                const statCells = PLAYER_STAT_COLUMNS.map(stat => {
+                    const val = Number(stats[stat.key]) || 0;
+                    return `<td class="py-1.5 px-2 text-center ${getStatCellStyle(val, stat.key)}">${val}</td>`;
+                }).join('');
 
                 const seasonsCell = isCareer
-                    ? `<td class="py-2 px-2 text-center font-bold text-slate-700">${Number(stats.seasonsPlayed) || 0}</td>`
+                    ? `<td class="py-1.5 px-2 text-center font-bold text-slate-700">${Number(stats.seasonsPlayed) || 0}</td>`
                     : '';
 
                 return `
                     <tr class="hover:bg-slate-50 transition cursor-pointer"
                         onclick="app.openPlayerCard('${p.id}')">
-                        <td class="py-2 px-3 font-semibold text-slate-900 whitespace-nowrap">
+                        <td class="py-1.5 px-3 font-semibold text-slate-900 whitespace-nowrap font-sans">
                             <span class="font-mono text-[10px] text-slate-400 mr-1">#${p.number || '--'}</span>
                             ${p.name}
                         </td>
-                        <td class="py-2 px-2 text-center">
-                            <span class="font-bold text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                        <td class="py-1.5 px-2 text-center">
+                            <span class="font-bold text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
                                 ${pos}
                             </span>
                         </td>
-                        <td class="py-2 px-2 text-center text-slate-600">${p.age ?? '--'}</td>
+                        <td class="py-1.5 px-2 text-center text-slate-600">${p.age ?? '--'}</td>
                         ${statCells}
                         ${seasonsCell}
                     </tr>`;
@@ -14884,21 +15121,21 @@ function renderMyTeamTab(gameState) {
         <table class="min-w-full bg-white text-xs">
             <thead class="bg-slate-900 text-white sticky top-0 z-10 select-none uppercase tracking-wider text-[11px]">
                 <tr>
-                    <th class="py-2.5 px-3 text-left sticky left-0 bg-slate-900 z-20 cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('name')">Player${getIndicator('name')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('ovr')">OFF / DEF FIT${getIndicator('ovr')}</th>
-                    <th class="py-2.5 px-2 text-center" title="Team Captain">Cap</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('age')">Age${getIndicator('age')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('pot')">Pot${getIndicator('pot')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('energy')">Energy${getIndicator('energy')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800 text-blue-400" onclick="app_setRosterSort('speed')">SPD${getIndicator('speed')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('strength')">STR${getIndicator('strength')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('agility')">AGI${getIndicator('agility')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('playbookIQ')">IQ${getIndicator('playbookIQ')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('throwingAccuracy')">ACC${getIndicator('throwingAccuracy')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('throwPower')">POW${getIndicator('throwPower')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('catchingHands')">HND${getIndicator('catchingHands')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('blocking')">BLK${getIndicator('blocking')}</th>
-                    <th class="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('tackling')">TKL${getIndicator('tackling')}</th>
+                    <th class="py-2 px-3 text-left sticky left-0 bg-slate-900 z-20 cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('name')">Player${getIndicator('name')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('ovr')">OFF / DEF FIT${getIndicator('ovr')}</th>
+                    <th class="py-2 px-2 text-center" title="Team Captain">Cap</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('age')">Age${getIndicator('age')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('pot')">Pot${getIndicator('pot')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('energy')">Energy${getIndicator('energy')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800 text-blue-300" onclick="app_setRosterSort('speed')">SPD${getIndicator('speed')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('strength')">STR${getIndicator('strength')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('agility')">AGI${getIndicator('agility')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('playbookIQ')">IQ${getIndicator('playbookIQ')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('throwingAccuracy')">ACC${getIndicator('throwingAccuracy')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('throwPower')">POW${getIndicator('throwPower')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('catchingHands')">HND${getIndicator('catchingHands')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('blocking')">BLK${getIndicator('blocking')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('tackling')">TKL${getIndicator('tackling')}</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 font-mono">`;
@@ -14910,40 +15147,55 @@ function renderMyTeamTab(gameState) {
             const isCap = gameState.playerTeam.captainId === p.id;
             const fits = getBestTwoWayFits(p);
             const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
-            const energyColor = energy > 75 ? 'bg-emerald-500' : (energy > 50 ? 'bg-amber-500' : 'bg-rose-500');
+            const energyColor = energy >= 75 ? 'bg-emerald-500' : (energy >= 50 ? 'bg-amber-500' : 'bg-rose-500');
+
+            const spd = p.attributes?.physical?.speed || 0;
+            const str = p.attributes?.physical?.strength || 0;
+            const agi = p.attributes?.physical?.agility || 0;
+            const iq = p.attributes?.mental?.playbookIQ || 0;
+            const acc = p.attributes?.technical?.throwingAccuracy || 0;
+            const pow = p.attributes?.technical?.throwPower ?? p.attributes?.physical?.strength ?? 0;
+            const hnd = p.attributes?.technical?.catchingHands || 0;
+            const blk = p.attributes?.technical?.blocking || 0;
+            const tkl = p.attributes?.technical?.tackling || 0;
 
             html += `
             <tr data-player-id="${p.id}" class="hover:bg-slate-50 transition cursor-pointer group">
-                <td class="py-2 px-3 font-semibold text-slate-900 sticky left-0 bg-white group-hover:bg-slate-50 z-10 flex items-center gap-2 truncate font-sans">
+                <td class="py-1.5 px-3 font-semibold text-slate-900 sticky left-0 bg-white group-hover:bg-slate-50 z-10 flex items-center gap-2 truncate font-sans">
                     <span class="text-slate-400 font-mono text-[10px] w-4">#${p.number || '--'}</span>
                     <span class="truncate group-hover:text-amber-600 transition">${p.name}</span>
-                    ${p.status?.duration > 0 ? `<span class="text-[9px] bg-rose-100 text-rose-700 px-1 py-0.5 rounded font-bold" title="${p.status.description}">🩹 ${p.status.duration}w</span>` : ''}
+                    ${p.status?.duration > 0 ? `<span class="text-[9px] bg-rose-50 text-rose-800 border border-rose-200 px-1 py-0.5 rounded font-bold" title="${p.status.description}">🩹 ${p.status.duration}w</span>` : ''}
                 </td>
-                <td class="text-center py-2 px-2">
+                <td class="text-center py-1.5 px-2">
                     <div class="flex flex-col items-center gap-0.5 text-[10px] leading-tight">
                         ${renderPositionFit(fits.offense, 'offense', true)}
                         ${renderPositionFit(fits.defense, 'defense', true)}
                     </div>
                 </td>
-                <td class="text-center py-2 px-2" onclick="event.stopPropagation(); app.setCaptain('${p.id}');" title="Toggle Captain">
+                <td class="text-center py-1.5 px-2" onclick="event.stopPropagation(); app.setCaptain('${p.id}');" title="Toggle Captain">
                     <button class="text-base font-bold ${isCap ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'} transition leading-none">${isCap ? '★' : '☆'}</button>
                 </td>
-                <td class="text-center py-2 px-2 text-slate-600">${p.age}</td>
-                <td class="text-center py-2 px-2 font-bold ${p.potential === 'A' ? 'text-amber-600' : (p.potential === 'B' ? 'text-blue-600' : 'text-slate-500')}">${p.potential || '?'}</td>
-                <td class="text-center py-2 px-2" title="${energy}% Stamina">
-                    <div class="w-12 bg-slate-200 rounded-full h-1.5 mx-auto overflow-hidden">
-                        <div class="${energyColor} h-full" style="width: ${energy}%"></div>
+                <td class="text-center py-1.5 px-2 text-slate-600">${p.age}</td>
+                <td class="text-center py-1.5 px-2">
+                    <span class="inline-block px-1.5 py-0.5 rounded text-[10px] ${getPotentialTierStyle(p.potential)}">${p.potential || '?'}</span>
+                </td>
+                <td class="text-center py-1.5 px-2" title="${energy}% Energy">
+                    <div class="flex items-center justify-center gap-1.5">
+                        <div class="w-8 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                            <div class="${energyColor} h-full" style="width: ${energy}%"></div>
+                        </div>
+                        <span class="text-[10px] px-1 rounded ${getEnergyBadgeStyle(energy)}">${energy}%</span>
                     </div>
                 </td>
-                <td class="text-center py-2 px-2 font-bold text-blue-600">${p.attributes?.physical?.speed || 0}</td>
-                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.physical?.strength || 0}</td>
-                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.physical?.agility || 0}</td>
-                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.mental?.playbookIQ || 0}</td>
-                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.throwingAccuracy || 0}</td>
-                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.throwPower ?? p.attributes?.physical?.strength ?? 0}</td>
-                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.catchingHands || 0}</td>
-                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.blocking || 0}</td>
-                <td class="text-center py-2 px-2 text-slate-700">${p.attributes?.technical?.tackling || 0}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(spd, true)}">${spd}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(str, true)}">${str}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(agi, true)}">${agi}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(iq, true)}">${iq}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(acc, true)}">${acc}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(pow, true)}">${pow}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(hnd, true)}">${hnd}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(blk, true)}">${blk}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(tkl, true)}">${tkl}</td>
             </tr>`;
         });
     }
@@ -15385,19 +15637,34 @@ function renderDepthChartSide(side, gameState) {
     const defSlotsCount = Object.values(depthChart.defense || {}).filter(Boolean).length;
     const ironmanCount = roster.filter(p => Object.values(depthChart.offense || {}).includes(p.id) && Object.values(depthChart.defense || {}).includes(p.id)).length;
     const injuredCount = roster.filter(p => p.status?.duration > 0).length;
+    const subTendency = gameState.playerTeam.autoSubTendency || 'balanced';
 
     let tableHtml = `
     <!-- Top Telemetry Bar -->
     <div class="mb-3 flex flex-wrap items-center justify-between gap-2 bg-slate-900 text-white p-2.5 rounded-sm border border-slate-800 text-xs shrink-0">
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
             <span class="font-bold text-[11px] uppercase tracking-wider text-slate-400">Roster Telemetry:</span>
             <span class="bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded font-mono font-bold text-[10px]">🏈 Off: ${offSlotsCount}/8</span>
             <span class="bg-red-950 text-red-300 border border-red-800 px-2 py-0.5 rounded font-mono font-bold text-[10px]">🛡️ Def: ${defSlotsCount}/8</span>
             <span class="bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded font-mono font-bold text-[10px]" title="Players starting both Offense and Defense">⚡ Ironmen: ${ironmanCount}</span>
             ${injuredCount > 0 ? `<span class="bg-rose-950 text-rose-300 border border-rose-800 px-2 py-0.5 rounded font-mono font-bold text-[10px]">🩹 Unavailable: ${injuredCount}</span>` : ''}
         </div>
-        <div class="text-[10px] text-slate-400">
-            Click any field position or player row to adjust assignments.
+        <div class="flex items-center gap-2">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sub Tendency:</span>
+            <div class="flex rounded border border-slate-700 bg-slate-950 p-0.5" role="group" aria-label="Auto-Sub Tendency Policy">
+                <button type="button" onclick="window.app_setPersistentAutoSubTendency('ironman')"
+                    class="px-2 py-0.5 rounded text-[9px] font-bold transition ${subTendency === 'ironman' ? 'bg-purple-700 text-white' : 'text-slate-400 hover:text-white'}">
+                    Ironman (&lt;20%)
+                </button>
+                <button type="button" onclick="window.app_setPersistentAutoSubTendency('balanced')"
+                    class="px-2 py-0.5 rounded text-[9px] font-bold transition ${subTendency === 'balanced' ? 'bg-purple-700 text-white' : 'text-slate-400 hover:text-white'}">
+                    Balanced (&lt;40%)
+                </button>
+                <button type="button" onclick="window.app_setPersistentAutoSubTendency('frequent')"
+                    class="px-2 py-0.5 rounded text-[9px] font-bold transition ${subTendency === 'frequent' ? 'bg-purple-700 text-white' : 'text-slate-400 hover:text-white'}">
+                    Frequent (&lt;60%)
+                </button>
+            </div>
         </div>
     </div>
 
@@ -16087,7 +16354,7 @@ export function renderPlayerStatsTab(gameState) {
         : 'text-slate-600 hover:bg-white';
 
     const statHeaders = activeStatColumns.map(stat =>
-        `<th class="py-2 px-2 text-center whitespace-nowrap">${stat.label}</th>`
+        `<th class="py-2 px-2 text-center whitespace-nowrap ${stat.key === sortStat ? 'text-amber-300' : ''}">${stat.label}${stat.key === sortStat ? ' ▼' : ''}</th>`
     ).join('');
 
     const playerRows = players.length > 0
@@ -16099,33 +16366,37 @@ export function renderPlayerStatsTab(gameState) {
             const leagueName = !team
                 ? '—'
                 : team.leagueType === 'youth'
-                    ? 'Pee-Wee League'
+                    ? 'Pee-Wee'
                     : team.tier === 1
-                        ? 'Premier Parks'
+                        ? 'Premier'
                         : team.tier === 2
-                            ? 'Sandlot Circuit'
+                            ? 'Sandlot'
                             : '—';
 
-            const statCells = activeStatColumns.map(stat =>
-                `<td class="py-1.5 px-2 text-center whitespace-nowrap">
-                    ${Number(stats[stat.key]) || 0}
-                </td>`
-            ).join('');
+            const statCells = activeStatColumns.map(stat => {
+                const val = Number(stats[stat.key]) || 0;
+                const cellClass = getStatCellStyle(val, stat.key, stat.key === sortStat);
+                return `<td class="py-1.5 px-2 text-center whitespace-nowrap font-mono ${cellClass}">
+                    ${val}
+                </td>`;
+            }).join('');
 
             return `
-                <tr class="hover:bg-gray-50 cursor-pointer transition"
+                <tr class="hover:bg-slate-50 cursor-pointer transition"
                     onclick="app.openPlayerCard('${player.id}')">
-                    <td class="py-1.5 px-3 font-semibold text-gray-800 whitespace-nowrap">
+                    <td class="py-1.5 px-3 font-semibold text-slate-900 whitespace-nowrap">
                         ${player.name}
                     </td>
-                    <td class="py-1.5 px-3 text-gray-700 whitespace-nowrap">
+                    <td class="py-1.5 px-3 text-slate-700 whitespace-nowrap">
                         ${team?.name || '—'}
                     </td>
-                    <td class="py-1.5 px-3 text-gray-600 whitespace-nowrap">
+                    <td class="py-1.5 px-3 text-slate-500 whitespace-nowrap text-[11px]">
                         ${leagueName}
                     </td>
-                    <td class="py-1.5 px-2 text-center">${player.age ?? '—'}</td>
-                    <td class="py-1.5 px-2 text-center font-bold">${pos}</td>
+                    <td class="py-1.5 px-2 text-center text-slate-600 font-mono">${player.age ?? '—'}</td>
+                    <td class="py-1.5 px-2 text-center">
+                        <span class="bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-0.5 rounded font-bold text-[10px]">${pos}</span>
+                    </td>
                     ${statCells}
                 </tr>`;
         }).join('')
@@ -16142,17 +16413,17 @@ export function renderPlayerStatsTab(gameState) {
             <div class="flex flex-wrap gap-1 rounded border border-slate-300
                         bg-slate-200 p-1 text-xs font-bold">
                 <button
-                    class="px-3 py-1.5 rounded transition ${tabClass('all')}"
+                    class="px-3 py-1 rounded transition ${tabClass('all')}"
                     onclick="app_setLeagueStatsView('all')">
                     All Stats
                 </button>
                 <button
-                    class="px-3 py-1.5 rounded transition ${tabClass('offense')}"
+                    class="px-3 py-1 rounded transition ${tabClass('offense')}"
                     onclick="app_setLeagueStatsView('offense')">
                     🏈 Offense
                 </button>
                 <button
-                    class="px-3 py-1.5 rounded transition ${tabClass('defense')}"
+                    class="px-3 py-1 rounded transition ${tabClass('defense')}"
                     onclick="app_setLeagueStatsView('defense')">
                     🛡️ Defense
                 </button>
@@ -16164,7 +16435,7 @@ export function renderPlayerStatsTab(gameState) {
 
         <div class="overflow-x-auto">
             <table class="min-w-full bg-white text-xs">
-                <thead class="bg-gray-800 text-white uppercase text-[10px] tracking-wider">
+                <thead class="bg-slate-900 text-white uppercase text-[10px] tracking-wider">
                     <tr>
                         <th class="py-2 px-3 text-left whitespace-nowrap">Player</th>
                         <th class="py-2 px-3 text-left whitespace-nowrap">Team</th>
@@ -17358,53 +17629,38 @@ export function renderOffseasonScreen(report, year) {
 
 export function setupDragAndDrop(onDrop) { }
 
+window.app_setPersistentAutoSubTendency = function (value) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team) return;
+
+    const thresholdMap = {
+        ironman: 80,   // sub when fatigue > 80 (energy < 20%)
+        balanced: 60,  // sub when fatigue > 60 (energy < 40%)
+        frequent: 40   // sub when fatigue > 40 (energy < 60%)
+    };
+
+    team.autoSubTendency = value;
+    team.autoSubThreshold = thresholdMap[value] ?? 60;
+    if (team.liveGmAdjustments) {
+        team.liveGmAdjustments.autoSubTendency = value;
+    }
+
+    saveGameState();
+    renderDepthChartTab(gs);
+};
+
 export function setupDepthChartTabs() {
     const subTabs = document.querySelectorAll(".depth-chart-tab");
 
-    const legacyTabClasses = [
-        "bg-blue-50",
-        "text-blue-900",
-        "border-blue-200",
-        "bg-emerald-50",
-        "text-emerald-900",
-        "border-emerald-200",
-        "text-amber-700",
-        "bg-amber-50",
-        "border-amber-200",
-        "text-amber-600",
-        "border-amber-500",
-        "bg-slate-900",
-        "text-white",
-        "border-slate-900",
-        "bg-white",
-        "text-slate-600",
-        "border-transparent",
-        "shadow-sm",
-        "border"
-    ];
-
     const setActiveTabStyle = (activeSubTab) => {
         subTabs.forEach(t => {
-            t.classList.remove(...legacyTabClasses);
-
-            if (t.dataset.subTab === activeSubTab) {
-                t.classList.add(
-                    "active",
-                    "bg-slate-900",
-                    "text-white",
-                    "border",
-                    "border-slate-900",
-                    "shadow-sm"
-                );
-            } else {
-                t.classList.remove("active");
-                t.classList.add(
-                    "bg-white",
-                    "text-slate-600",
-                    "border",
-                    "border-transparent"
-                );
-            }
+            const isMatch = t.dataset.subTab === activeSubTab;
+            t.classList.toggle("active", isMatch);
+            t.classList.toggle("bg-slate-900", isMatch);
+            t.classList.toggle("text-white", isMatch);
+            t.classList.toggle("shadow-sm", isMatch);
+            t.classList.toggle("text-slate-600", !isMatch);
         });
     };
 

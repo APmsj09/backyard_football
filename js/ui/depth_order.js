@@ -8,7 +8,7 @@ import {
 } from '../game/player.js';
 
 import { offenseFormations, defenseFormations } from '../data.js';
-import { showModal, hideModal } from '../ui.js';
+import { showModal, hideModal, getRatingTierStyle, getEnergyBadgeStyle, getPotentialTierStyle } from '../ui.js';
 import { formatHeight } from '../utils.js';
 
 let activeDepthChartTab = 'offense';
@@ -170,6 +170,29 @@ export function renderDepthOrderPane(gameState) {
             ? 'bg-blue-950 text-blue-200'
             : 'bg-rose-950 text-rose-200';
 
+        // Helper to get 2-3 key attributes to preview in compact rows with subtle color highlights (ratings tab model)
+        const getCompactKeyAttributes = (player, p) => {
+            const getAttr = (group, attr) => Number(player.attributes?.[group]?.[attr]) || 50;
+            const corePos = ['DE', 'DT', 'CB', 'S'].includes(p) ? p : p;
+            
+            let keys = [];
+            if (corePos === 'QB') keys = [{l: 'ACC', v: getAttr('technical', 'throwingAccuracy')}, {l: 'POW', v: getAttr('technical', 'throwPower')}, {l: 'IQ', v: getAttr('mental', 'playbookIQ')}];
+            else if (corePos === 'RB') keys = [{l: 'SPD', v: getAttr('physical', 'speed')}, {l: 'AGI', v: getAttr('physical', 'agility')}, {l: 'STR', v: getAttr('physical', 'strength')}];
+            else if (corePos === 'WR' || corePos === 'SLOT') keys = [{l: 'SPD', v: getAttr('physical', 'speed')}, {l: 'HND', v: getAttr('technical', 'catchingHands')}, {l: 'AGI', v: getAttr('physical', 'agility')}];
+            else if (corePos === 'TE') keys = [{l: 'HND', v: getAttr('technical', 'catchingHands')}, {l: 'BLK', v: getAttr('technical', 'blocking')}, {l: 'STR', v: getAttr('physical', 'strength')}];
+            else if (corePos === 'OL') keys = [{l: 'STR', v: getAttr('physical', 'strength')}, {l: 'BLK', v: getAttr('technical', 'blocking')}, {l: 'IQ', v: getAttr('mental', 'playbookIQ')}];
+            else if (corePos === 'DL' || corePos === 'DE' || corePos === 'DT') keys = [{l: 'STR', v: getAttr('physical', 'strength')}, {l: 'BSH', v: getAttr('technical', 'blockShedding')}, {l: 'TKL', v: getAttr('technical', 'tackling')}];
+            else if (corePos === 'LB') keys = [{l: 'TKL', v: getAttr('technical', 'tackling')}, {l: 'SPD', v: getAttr('physical', 'speed')}, {l: 'IQ', v: getAttr('mental', 'playbookIQ')}];
+            else keys = [{l: 'COV', v: getAttr('technical', 'coverage') || getAttr('technical', 'passCoverage')}, {l: 'SPD', v: getAttr('physical', 'speed')}, {l: 'TKL', v: getAttr('technical', 'tackling')}];
+
+            return keys.map(k => {
+                let badgeStyle = 'bg-slate-100 text-slate-700 border-slate-200';
+                if (k.v >= 80) badgeStyle = 'bg-emerald-50 text-emerald-800 border-emerald-200 font-bold';
+                else if (k.v >= 70) badgeStyle = 'bg-blue-50 text-blue-800 border-blue-200 font-semibold';
+                return `<span class="${badgeStyle} border px-1 rounded text-[9px] font-mono"><span class="opacity-75">${k.l}</span> ${k.v}</span>`;
+            }).join('');
+        };
+
         return `
             <section class="min-w-0 bg-white border border-slate-200 rounded shadow-sm overflow-hidden flex flex-col">
                 <div class="flex items-center justify-between px-3 py-2 ${headerColor}">
@@ -180,7 +203,7 @@ export function renderDepthOrderPane(gameState) {
                     <span class="text-[10px] font-mono">${players.length} Players</span>
                 </div>
 
-                <div class="max-h-[360px] overflow-y-auto divide-y divide-slate-100">
+                <div class="max-h-[380px] overflow-y-auto divide-y divide-slate-100">
                     ${players.length ? players.map((player, index) => {
                         const starterSlot = starterSlotsByPosition[pos]?.get(
                             String(player.id)
@@ -225,7 +248,7 @@ export function renderDepthOrderPane(gameState) {
                             );
                         const multiStartBadge = otherStarterSlots.length > 0
                             ? `
-                                <span class="text-[9px] bg-slate-100 text-slate-700 border border-slate-200 rounded px-1 py-0.5 font-bold shrink-0"
+                                <span class="text-[9px] bg-slate-100 text-slate-700 border border-slate-200 rounded px-1.5 py-0.5 font-bold shrink-0"
                                       title="Currently assigned to another starting position">
                                     STARTER ELSEWHERE · ${otherStarterSlots.join(', ')}
                                 </span>
@@ -244,20 +267,22 @@ export function renderDepthOrderPane(gameState) {
                             .replace(/\\/g, '\\\\')
                             .replace(/'/g, "\\'");
 
+                        const skillPills = getCompactKeyAttributes(player, pos);
+
                         return `
-                            <div class="grid grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-2 hover:bg-slate-50">
-                                <span class="text-xs font-black text-slate-400 text-center">
+                            <div class="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-2 hover:bg-slate-50 transition-colors">
+                                <span class="text-xs font-black text-slate-400 text-center font-mono">
                                     ${index + 1}
                                 </span>
 
-                                <div class="min-w-0">
+                                <div class="min-w-0 space-y-1">
                                     <div class="flex items-center gap-1.5 flex-wrap min-w-0">
                                         <span class="font-bold text-xs text-slate-900 truncate">
                                             ${player.name}
                                         </span>
 
                                         ${starterSlot ? `
-                                            <span class="text-[9px] ${starterBadgeClass} rounded px-1 py-0.5 font-black shrink-0">
+                                            <span class="text-[9px] ${starterBadgeClass} rounded px-1.5 py-0.5 font-black shrink-0">
                                                 STARTER · ${starterDisplaySlot}
                                             </span>
                                         ` : ''}
@@ -267,20 +292,19 @@ export function renderDepthOrderPane(gameState) {
                                         <span class="text-[9px] text-slate-400 font-mono shrink-0">
                                             #${player.number || '--'}
                                         </span>
-                                        <span class="text-[9px] bg-slate-100 text-slate-500 rounded px-1 shrink-0">
-                                            ${player.pos || 'ATH'}
-                                        </span>
                                     </div>
 
-                                    <div class="text-[10px] text-slate-500 font-mono mt-0.5">
-                                        Age ${player.age} ·
-                                        <span class="${energy < 60 ? 'text-rose-600 font-bold' : ''}">
-                                            Energy ${energy}%
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="text-[10px] text-slate-500 font-mono">
+                                            Age ${player.age} · <span class="${energy < 60 ? 'text-rose-600 font-bold' : ''}">NRG ${energy}%</span>
                                         </span>
+                                        <div class="flex items-center gap-1">
+                                            ${skillPills}
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div class="flex items-center gap-1.5 shrink-0">
+                                <div class="flex items-center gap-2 shrink-0">
                                     <div class="text-right">
                                         <span class="text-base font-black ${ovr >= 70 ? 'text-emerald-700' : 'text-slate-800'}">
                                             ${ovr}
@@ -302,7 +326,7 @@ export function renderDepthOrderPane(gameState) {
 
                                         <button
                                             type="button"
-                                            class="w-6 h-5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-200 disabled:opacity-25 disabled:cursor-not-allowed text-[10px] font-black"
+                                            class="w-6 h-5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 disabled:opacity-25 disabled:cursor-not-allowed text-[10px] font-black"
                                             ${index === players.length - 1 ? 'disabled' : ''}
                                             onclick="event.stopPropagation(); window.movePositionDepthOrder('${pos}', '${playerIdArg}', 1)"
                                             title="Move down">
