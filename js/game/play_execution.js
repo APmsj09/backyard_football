@@ -2188,10 +2188,19 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const distToLanding = Math.hypot(pState.x - playState.ballState.targetX, pState.y - playState.ballState.targetY);
                     if (isIntendedTarget || (isTippedBall && !pState.slot.startsWith('OL') && distToLanding < 8.0)) {
                         if (playState.ballState.isLateral && isIntendedTarget) {
-                            // Keep running through the toss pitch instead of braking to a stop
                             setRouteIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.6);
                         } else {
-                            setPointIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.4);
+                            // MOMENTUM-AWARE DEEP PASS TRACKING: Prevent overrunning the landing spot
+                            const isDeepPass = (playState.type === 'pass' && (playState.ballState.targetY - playState.lineOfScrimmage) > 14);
+                            let trackX = playState.ballState.targetX;
+                            let trackY = playState.ballState.targetY;
+
+                            if (isDeepPass && (pState.vy || 0) > 1.5) {
+                                // Counteract forward inertia so the receiver arrives in stride right as the ball descends
+                                trackY = Math.max(playState.lineOfScrimmage + 1.0, trackY - ((pState.vy || 0) * 0.18));
+                            }
+
+                            setPointIntent(pState, trackX, trackY, 0.4);
                         }
                         pState.action = 'tracking_ball';
                         pState.contactReduction = 1.1 + ((pState.agility || 50) / 250);
