@@ -1830,7 +1830,7 @@ export const defensivePlaybook = {
     'Cover_4_Quarters': {
         name: 'Cover 4 Quarters (Anti-Deep)',
         concept: 'Zone', blitz: false,
-        compatibleFormations: ['3-1-4', '3-0-5', '2-3-3'],
+        compatibleFormations: ['3-1-4', '3-0-5'],
         tags: ['zone', 'cover4', 'anti-deep'],
         assignments: {
             'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'pass_rush',

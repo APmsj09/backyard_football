@@ -3656,14 +3656,35 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             }
         }
 
-        // Enforce hard floor: Zone coverage drop targets stay on the defensive side of LOS,
-        // but compress smoothly inside the 15-yard line so safeties defend the goal line (110)
-        // instead of dropping out the back of the endzone.
+        const defPlayKey = playState.defensivePlayKey || '';
+        const defPlayData = defensivePlaybook[defPlayKey] || {};
+        const defTags = defPlayData.tags || [];
+        const isCover4Scheme = defTags.includes('cover4') || defPlayKey.includes('Quarters');
+        const isPreventScheme = defTags.includes('prevent') || defPlayKey.includes('Prevent');
+        const isCover2Scheme = !defTags.includes('cover1') && (defTags.includes('cover2') || defPlayKey.includes('Cover_2') || defPlayKey.includes('Tampa_2'));
+        const isTampa2LB = pState.role === 'LB' && assignment === 'zone_deep_middle';
+
+        // Enforce hard floor: Deep safeties stay on top of routes outside the red zone,
+        // and compress into the end zone (110-118) near the goal line.
         const distToGoalLine = 110 - LOS;
-        const deepFloor = distToGoalLine < 15.0 
-            ? Math.min(109.5, LOS + Math.max(2.0, distToGoalLine * 0.5)) 
-            : (LOS + 8.0);
+        const deepFloor = distToGoalLine < 15.0
+            ? Math.min(116.5, LOS + Math.max(4.0, distToGoalLine + 3.5))
+            : (LOS + (isPreventScheme ? 17.0 : (isTampa2LB ? 10.5 : 12.0)));
         const minZoneDepth = isDeep ? deepFloor : (LOS + 1.8);
+
+        // Replace generic 26-yard zone center with realistic shell drop depths outside the red zone
+        if (isDeep && distToGoalLine >= 20.0) {
+            const shellDepth = isPreventScheme
+                ? 22.0
+                : isTampa2LB
+                    ? 13.0
+                    : isCover2Scheme
+                        ? 14.5
+                        : isCover4Scheme
+                            ? 13.5
+                            : 16.0;
+            zoneCenter.y = Math.min(116.5, LOS + shellDepth);
+        }
         zoneCenter.y = Math.max(minZoneDepth, zoneCenter.y);
 
         // --- RED ZONE COMPRESSION ---
@@ -3677,11 +3698,11 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         const compressionIQ = (iq / 100); 
         const cushionShrink = 1.0 - (compressionIQ * 0.5 * (1.0 - redZoneMultiplier));
 
-        // FIX: Compress zoneCenter.y so deep DBs do not set waypoints past the goal line
+        // Compress zoneCenter.y inside the red zone without locking safeties out of the end zone (110-118)
         if (distanceToGoal < 25 && isDeep) {
             const rawDepth = Math.max(0, zoneCenter.y - LOS);
             const compressedDepth = rawDepth * cushionShrink;
-            const maxDropDepth = Math.min(109.0, LOS + (distanceToGoal * 0.75));
+            const maxDropDepth = Math.min(116.5, LOS + Math.max(8.0, distanceToGoal + 4.5));
             zoneCenter.y = Math.min(maxDropDepth, LOS + compressedDepth);
         }
         
@@ -3729,17 +3750,35 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             }
         }
 
-        const minX = (zone?.minX || 0) - 3.0;
-        const maxX = (zone?.maxX || FIELD_WIDTH) + 3.0;
-        // Allow deep defenders to see intermediate crossing routes even outside the red zone
-        const effectiveZoneMinY = isDeep ? Math.min(zone?.minY || 0, 4.0) : (zone?.minY || 0);
-        const minY = LOS + effectiveZoneMinY - 2.0;
-        const maxY = Math.min(115.0, LOS + (zone?.maxY || 25.0) + 3.0);
+        let minX = (zone?.minX || 0) - 3.0;
+        let maxX = (zone?.maxX || FIELD_WIDTH) + 3.0;
+
+        // In Cover 4 Quarters, split #1 (outside third) from #2 (inner half) so both DBs don't chase WR1
+        if (isCover4Scheme && assignment === 'zone_deep_half_left') {
+            minX = 16.0;
+            maxX = CENTER_X + 2.5;
+        } else if (isCover4Scheme && assignment === 'zone_deep_half_right') {
+            minX = CENTER_X - 2.5;
+            maxX = 37.3;
+        }
+
+        // Deep safeties must not bite downhill on 2-yard routes; keep deep detection deep outside red zone
+        const effectiveZoneMinY = isDeep
+            ? (distanceToGoal < 20 ? Math.min(zone?.minY || 0, 3.0) : Math.max(7.5, Math.min(zone?.minY || 8.0, 9.5)))
+            : (zone?.minY || 0);
+        const minY = LOS + effectiveZoneMinY - 1.5;
+        const maxY = Math.min(118.0, LOS + (zone?.maxY || 25.0) + 4.0);
 
         let zoneThreats = offenseStates.filter(o => {
-            // Must recognize receivers actively running routes AND receivers tracking incoming passes
             const isEligibleReceiver = o.action.includes('route') || o.action === 'tracking_ball';
             if (!isEligibleReceiver) return false;
+            // In Cover 3 / Cover 1, deep middle also picks up inward-breaking posts from outside thirds
+            if (isDeep && assignment === 'zone_deep_middle' && !isTampa2LB) {
+                const breakingInward = (o.vy || 0) > 2.5 &&
+                    Math.sign(o.vx || 0) === Math.sign(CENTER_X - o.x) &&
+                    Math.abs(o.x - CENTER_X) < 16.0;
+                if (breakingInward && o.y >= minY && o.y <= maxY) return true;
+            }
             return o.x >= minX && o.x <= maxX && o.y >= minY && o.y <= maxY;
         });
 
@@ -3775,51 +3814,52 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                         )
                         : null;
 
-                // High-IQ safeties (>= 75) can subtly bait shallow throws by sagging slightly.
-                // Sag by ~5.5 yards (2 yards deeper than normal 3.5y cushion), NOT by retreating 25 yards to zoneCenter.y!
-                const shouldBaitThrow = iq >= 75 && !isBallInAir && playState.tick > 25 && (primaryThreat.y - LOS) < 12.0;
+                const shouldBaitThrow = !isPreventScheme && iq >= 78 && !isBallInAir && playState.tick > 35 && (primaryThreat.y - LOS) < 12.0;
 
                 if (shouldBaitThrow) {
                     pState.targetX = primaryThreat.x + (insideLeverageX * 2.0);
-                    pState.targetY = Math.min(109.0, primaryThreat.y + 5.5);
+                    pState.targetY = Math.min(116.5, primaryThreat.y + 5.5);
                 } else if (interceptionPoint) {
-                    // Break on the ball only when a physical contest is plausible.
                     pState.targetX = interceptionPoint.x;
                     pState.targetY = interceptionPoint.y;
                     pState.action = 'tracking_ball';
                     pState.contactReduction = 1.3;
                 } else {
-                    // Cap leverage tight to the receiver rather than blindly pushing deep into empty space
-                    pState.targetX = primaryThreat.x + insideLeverageX;
-                    
-                    let dynamicSafeDepth = LOS + (isDeep ? 10.0 : 0.0);
-                    
-                    // Smooth IQ & Instinct scaling: 
-                    // High-IQ defenders consistently clamp down when there's no deep threat.
-                    // Low-IQ defenders mostly drop deep, but might occasionally bite on a shallow route (gambling).
-                    if (isDeep) {
-                        const anyDeepThreat = offenseStates.some(o => o.action?.includes('route') && (o.y - LOS) > 12.0);
-                        if (!anyDeepThreat) {
-                            if (pState._zoneDeepInstinctBias === undefined) {
-                                pState._zoneDeepInstinctBias = (Math.random() * 40 - 10); // -10 to +30 variance
-                            }
-                            const effectiveAwareness = iq + pState._zoneDeepInstinctBias;
-                            if (effectiveAwareness > 55) {
-                                // Scales from 9.0 (at 60 awareness) down to 5.0 (at 90+ awareness)
-                                const sinkReduction = Math.min(5.0, (effectiveAwareness - 50) * 0.12);
-                                dynamicSafeDepth = LOS + (10.0 - sinkReduction);
-                            }
+                    // Project receiver's stride vertically and split multiple vertical threats instead of 1-on-1 trailing
+                    const secondDeepest = zoneThreats.length >= 2
+                        ? zoneThreats.slice().sort((a, b) => b.y - a.y)[1]
+                        : null;
+
+                    pState.targetX = secondDeepest
+                        ? (primaryThreat.x * 0.65) + (secondDeepest.x * 0.35)
+                        : (primaryThreat.x + insideLeverageX + ((primaryThreat.vx || 0) * 0.25));
+
+                    let dynamicSafeDepth = LOS + (isPreventScheme ? 17.0 : (isTampa2LB ? 10.5 : 12.0));
+
+                    const anyDeepThreat = offenseStates.some(o =>
+                        o.action?.includes('route') &&
+                        ((o.y - LOS) > 10.0 || (o.vy || 0) > 3.5)
+                    );
+                    if (!anyDeepThreat && !isPreventScheme && !isCover2Scheme && playState.tick >= 38) {
+                        if (pState._zoneDeepInstinctBias === undefined) {
+                            pState._zoneDeepInstinctBias = (Math.random() * 40 - 10);
+                        }
+                        const effectiveAwareness = iq + pState._zoneDeepInstinctBias;
+                        if (effectiveAwareness > 55) {
+                            const sinkReduction = Math.min(4.5, (effectiveAwareness - 50) * 0.10);
+                            dynamicSafeDepth = LOS + (12.0 - sinkReduction);
                         }
                     }
-                    
+
+                    const projectedThreatY = primaryThreat.y + (Math.max(0, primaryThreat.vy || 0) * 0.38);
                     const minSafeDepth = dynamicSafeDepth;
-                    const desiredDepth = primaryThreat.y + (isDeep ? 3.5 : 1.5);
-                    
-                    const leverageDepth = distanceToGoal < 25
-                        ? Math.min(zoneCenter.y, primaryThreat.y + 1.8)
+                    const desiredDepth = projectedThreatY + 3.5;
+
+                    const leverageDepth = distanceToGoal < 20
+                        ? Math.max(Math.min(116.5, projectedThreatY + 2.5), Math.min(zoneCenter.y, primaryThreat.y + 2.0))
                         : Math.max(minSafeDepth, desiredDepth);
-                        
-                    pState.targetY = Math.min(110.5, leverageDepth);
+
+                    pState.targetY = Math.min(118.0, leverageDepth);
                 }
             } else {
                 // Short Zone
@@ -3828,7 +3868,6 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 }
                 const shortTrapAwareness = iq + pState._zoneShortInstinctBias;
                 if (shortTrapAwareness > 80 && !isBallInAir) {
-                    // Bait shallow crossers by drifting slightly away (smart DBs or lucky guesses)
                     pState.targetX = primaryThreat.x + (primaryThreat.vx > 0 ? -2.0 : 2.0);
                     pState.targetY = primaryThreat.y - 2.5;
                 } else {
@@ -3843,8 +3882,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
 
             if (!isDeep) {
                 const maxSinkDepth = LOS + (zone?.maxY || 15.0);
-                const minDropDepth = Math.max(LOS + 1.0, zoneCenter.y - 4.0); // Maintain zone integrity; do not cross LOS
-                
+                const minDropDepth = Math.max(LOS + 1.0, zoneCenter.y - 4.0);
                 pState.targetY = Math.max(minDropDepth, Math.min(maxSinkDepth, pState.targetY));
             }
             pState.zoneDriftTick = playState.tick;
@@ -3859,12 +3897,17 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 pState.zoneDriftTick = playState.tick;
                 let driftX = zoneCenter.x;
                 const qb = qbState;
-                
-                // Zone defenders cleanly track the side of the field the QB is standing on
-                if (qb) {
+
+                if (isDeep && qb?.currentReadTargetSlot) {
+                    const readRec = offenseStates.find(o => o.slot === qb.currentReadTargetSlot);
+                    if (readRec) {
+                        const lean = Math.max(-3.5, Math.min(3.5, (readRec.x - zoneCenter.x) * 0.25));
+                        driftX = zoneCenter.x + lean;
+                    }
+                } else if (qb) {
                     driftX += (qb.x < CENTER_X ? -2.5 : 2.5);
                 }
-                
+
                 pState.dynamicTargetX = driftX;
             }
 

@@ -1,5 +1,6 @@
 import { getDistance } from './physics.js';
 import { getPlayer } from './state.js';
+import { defensivePlaybook } from '../data.js';
 import { pushGameLog } from './collisions.js';
 import { logPlayDebug } from './telemetry.js';
 import { getDecisionProfile } from './decision_model.js';
@@ -1079,108 +1080,187 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
         safetyState._qbReadFocusTicks = 0;
     }
 
-    // 2. PRE-THROW ZONE MATCHING / MAN HELP
+    // 2. PRE-THROW ZONE MATCHING / MAN HELP (Play-Specific Over-the-Top Logic)
     const LOS = playState.lineOfScrimmage;
     const defensiveCall = playState.defensiveCall || {};
     const defPlayKey = playState.defensivePlayKey || '';
+    const defPlayData = defensivePlaybook[defPlayKey] || {};
+    const defTags = defPlayData.tags || [];
 
-    const isCover2 = defPlayKey.includes('Cover_2') || defensiveCall.isCover2 || false;
-    const isCover3 = defPlayKey.includes('Cover_3') || defensiveCall.isCover3 || false;
-    const isCover1 = defPlayKey.includes('Cover_1') || defPlayKey.includes('Man_Free') || defensiveCall.isCover1 || false;
-
+    const deepDBs = defenseStates.filter(d => d.role === 'DB' && d.assignment?.includes('zone_deep'));
     const corners = defenseStates.filter(d => d.role === 'DB' && d.id !== safetyState.id);
     const inManCoverage = corners.filter(d => d.assignment && d.assignment.startsWith('man_cover_'));
+
+    const isPrevent = defTags.includes('prevent') || defPlayKey.includes('Prevent');
+    const isCover4 = defTags.includes('cover4') || defPlayKey.includes('Quarters');
+    const isCover6 = defTags.includes('cover6') || defPlayKey.includes('Cover_6');
+    const isSingleHighMan =
+        (deepDBs.length === 1 && inManCoverage.length >= 2) ||
+        defTags.includes('cover1') ||
+        defPlayKey.includes('Cover_1') ||
+        defPlayKey.includes('Man_Free') ||
+        defPlayKey.includes('Cover_2_Man') ||
+        defPlayKey.includes('Lockdown') ||
+        defPlayKey.includes('Blitz') ||
+        defPlayKey.includes('Mug') ||
+        Boolean(defensiveCall.isCover1);
+    const isCover2 = !isSingleHighMan && (
+        defTags.includes('cover2') ||
+        defPlayKey.includes('Cover_2') ||
+        defPlayKey.includes('Tampa_2') ||
+        Boolean(defensiveCall.isCover2)
+    );
+    const isCover3 = !isCover4 && !isPrevent && (
+        defTags.includes('cover3') ||
+        defTags.includes('firezone') ||
+        defPlayKey.includes('Cover_3') ||
+        defPlayKey.includes('Fire_Zone_3') ||
+        Boolean(defensiveCall.isCover3)
+    );
+
+    const distanceToGoal = 110 - LOS;
+    const isRedZone = distanceToGoal <= 20;
+    const safetyAssign = safetyState.assignment || '';
 
     let helpTarget = null;
     let maxPressure = 0;
 
-    // A. Man Coverage Help Priority
-    inManCoverage.forEach(corner => {
-        const targetSlot = corner.assignment.replace('man_cover_', '');
-        const receiver = offenseStates.find(r => r.slot === targetSlot);
+    // A. Man Coverage Help Priority (Over-the-top post/roof protection)
+    // Only single-high / hybrid safeties leave their drop to bracket man corners; pure Prevent stays deep.
+    if (!isPrevent && inManCoverage.length > 0) {
+        inManCoverage.forEach(corner => {
+            const targetSlot = corner.assignment.replace('man_cover_', '');
+            const receiver = offenseStates.find(r => r.slot === targetSlot);
 
-        const receiverAwareness = receiver
-            ? getSafetyThreatAwareness(receiver)
-            : 0;
+            const receiverAwareness = receiver
+                ? getSafetyThreatAwareness(receiver)
+                : 0;
 
-        if (
-            receiverAwareness > 0 &&
-            receiver.y >= LOS + 0.5 &&
-            receiver.action?.includes('route')
-        ) {
-            const separationDist = getDistance(corner, receiver);
-            const distFromSafety = getDistance(safetyState, receiver);
-
-            let pressureScore =
-                (separationDist - (distFromSafety * 0.15)) *
-                (0.70 + receiverAwareness * 0.30);
-
-            if (pressureScore > maxPressure) {
-                maxPressure = pressureScore;
-                helpTarget = { corner, receiver, type: 'man_help' };
-            }
-        }
-    });
-
-    // B. Zone Coverage Pattern Match (Stop DBs from sitting at an empty waypoint)
-    if (safetyState.assignment && safetyState.assignment.includes('zone_deep')) {
-        offenseStates.forEach(receiver => {
             if (
-                receiver.role === 'QB' ||
-                !receiver.action?.includes('route')
+                receiverAwareness > 0 &&
+                receiver.y >= LOS + 0.5 &&
+                receiver.action?.includes('route')
             ) {
-                return;
+                const recDepth = receiver.y - LOS;
+                const isVerticalThreat = (receiver.vy || 0) > 3.5;
+
+                // Do not abandon center field to chase shallow underneath slants/drags
+                if (!isRedZone && recDepth < 7.5 && !isVerticalThreat) return;
+
+                const separationDist = getDistance(corner, receiver);
+                const distFromSafety = getDistance(safetyState, receiver);
+
+                // Detect over-the-top danger BEFORE the WR gets 5 yards behind the CB
+                const cbTrailingOrEven = corner.y <= receiver.y + 0.8 && (recDepth >= 6.0 || isVerticalThreat);
+                const speedMismatch = Math.max(0, (receiver.speed || 50) - (corner.speed || 50));
+                const overTopRisk =
+                    (cbTrailingOrEven ? 2.4 : 0) +
+                    (isVerticalThreat ? Math.min(2.2, speedMismatch * 0.16) : 0) +
+                    (recDepth >= 10.0 ? 1.2 : 0) +
+                    (isVerticalThreat ? 1.0 : 0);
+
+                const pressureScore =
+                    (separationDist + overTopRisk - (distFromSafety * 0.10)) *
+                    (0.70 + receiverAwareness * 0.30);
+
+                if (pressureScore > maxPressure) {
+                    maxPressure = pressureScore;
+                    helpTarget = { corner, receiver, type: 'man_help' };
+                }
             }
+        });
+    }
 
-            const receiverAwareness =
-                getSafetyThreatAwareness(receiver);
+    // B. Zone Coverage Pattern Match (Shut down balls over the top, split multi-threats)
+    const zoneMatchCandidates = [];
+    const hasTampaMiddleLB = isCover2 && defenseStates.some(d => d.role === 'LB' && d.assignment === 'zone_deep_middle');
 
+    if (safetyAssign.includes('zone_deep')) {
+        const isHalfLeft = safetyAssign === 'zone_deep_half_left';
+        const isHalfRight = safetyAssign === 'zone_deep_half_right';
+        const isThirdLeft = safetyAssign === 'zone_deep_third_left';
+        const isThirdRight = safetyAssign === 'zone_deep_third_right';
+        const isDeepMiddle = safetyAssign === 'zone_deep_middle';
+
+        offenseStates.forEach(receiver => {
+            if (receiver.role === 'QB' || !receiver.action?.includes('route')) return;
+
+            const receiverAwareness = getSafetyThreatAwareness(receiver);
             if (receiverAwareness <= 0) return;
 
             const recDepth = receiver.y - LOS;
-            const distanceToGoal = 110 - LOS;
             const safetyIQ = safetyState.playbookIQ || 50;
-            
-            let minMatchDepth = distanceToGoal <= 20 ? 3.0 : 8.0;
+            const isVerticalStem = (receiver.vy || 0) > 3.5;
 
-            // IQ & Instinct Check: Better safeties consistently realize when there are no deep threats.
-            // But even a low-IQ safety might have a good instinctual feel for the play (random variance).
+            // Cover 2 / Prevent / Cover 4 safeties protect the deep roof and don't bite shallow
+            let minMatchDepth = isRedZone
+                ? 3.0
+                : (isPrevent ? 13.0 : (isCover2 || isCover6 || isCover4 ? 9.5 : 8.5));
+
             const anyDeepThreat = offenseStates.some(o =>
                 o.action?.includes('route') &&
-                (o.y - LOS) > 12.0 &&
+                ((o.y - LOS) > 10.0 || (o.vy || 0) > 3.5) &&
                 getSafetyThreatAwareness(o) > 0
             );
-            
-            if (!anyDeepThreat) {
-                // Evaluate awareness deterministically to avoid 25Hz threshold flickering
-                const effectiveAwareness = safetyIQ; 
-                    
-                if (effectiveAwareness > 60) {
-                    // Smoothly scale the bite depth. 90+ = 4.5 yards, 65 = 7.0 yards.
-                    minMatchDepth = Math.max(4.5, 8.0 - ((effectiveAwareness - 50) / 12)); 
+
+            // Only compress shallow in single-high Cover 3/1 if routes are past tick 38 with no verticals
+            if (!anyDeepThreat && !isCover2 && !isPrevent && !isCover4 && playState.tick >= 38) {
+                if (safetyIQ > 60) {
+                    minMatchDepth = Math.max(6.0, 8.5 - ((safetyIQ - 50) / 14));
                 }
             }
-            
-            if (recDepth < minMatchDepth) return;
+
+            if (recDepth < minMatchDepth && !(isVerticalStem && recDepth >= 6.0)) return;
 
             const distFromSafety = getDistance(safetyState, receiver);
-            if (distFromSafety > 18) return; // Ignore threats all the way across the field
+            if (distFromSafety > 22) return;
 
-            const isMiddle = Math.abs(receiver.x - CENTER_X) < 12;
-            const isMySide = Math.sign(receiver.x - CENTER_X) === Math.sign(safetyState.x - CENTER_X);
+            // Zone ownership check so safeties don't double-cover one guy and leave their roof empty
+            let inMyZone = false;
+            if (isHalfLeft) {
+                if (isCover4) {
+                    // Cover 4 inner left safety prioritizes #2/inside seam unless no inside vertical exists
+                    inMyZone = receiver.x >= HASH_LEFT_X - 2.0 && receiver.x <= CENTER_X + 2.0;
+                } else {
+                    inMyZone = receiver.x <= CENTER_X + 3.0;
+                }
+            } else if (isHalfRight) {
+                if (isCover4) {
+                    inMyZone = receiver.x >= CENTER_X - 2.0 && receiver.x <= HASH_RIGHT_X + 2.0;
+                } else {
+                    inMyZone = receiver.x >= CENTER_X - 3.0;
+                }
+            } else if (isThirdLeft) {
+                inMyZone = receiver.x <= HASH_LEFT_X + 3.5;
+            } else if (isThirdRight) {
+                inMyZone = receiver.x >= HASH_RIGHT_X - 3.5;
+            } else if (isDeepMiddle) {
+                const breakingTowardMiddle =
+                    (receiver.vy || 0) > 2.5 &&
+                    Math.sign(receiver.vx || 0) === Math.sign(CENTER_X - receiver.x) &&
+                    Math.abs(receiver.x - CENTER_X) < 16.0;
+                inMyZone = Math.abs(receiver.x - CENTER_X) < 11.5 || breakingTowardMiddle;
+            }
+
+            if (!inMyZone) return;
 
             let pressureScore = (
-                (recDepth * 0.2) - (distFromSafety * 0.15)
+                (recDepth * 0.24) + (isVerticalStem ? 2.0 : 0) - (distFromSafety * 0.10)
             ) * (0.70 + receiverAwareness * 0.30);
 
-            if (safetyState.assignment.includes('middle') && isMiddle) pressureScore += 3;
-            else if (!safetyState.assignment.includes('middle') && isMySide) pressureScore += 3;
+            pressureScore += 3.0; // In assigned deep slice
 
-            // Extra priority if the receiver is uncovered
+            // In Tampa 2, MLB already caps the inside middle seam; half safeties prioritize outside verticals
+            if (hasTampaMiddleLB && (isHalfLeft || isHalfRight) && Math.abs(receiver.x - CENTER_X) < 8.5) {
+                pressureScore -= 2.0;
+            }
+
             const closestDefenderDist = Math.min(
                 ...defenseStates.filter(d => d.id !== safetyState.id).map(d => getDistance(d, receiver))
             );
-            if (closestDefenderDist > 3.5) pressureScore += 2;
+            if (closestDefenderDist > 3.5) pressureScore += 2.0;
+
+            zoneMatchCandidates.push({ receiver, pressureScore });
 
             if (pressureScore > maxPressure) {
                 maxPressure = pressureScore;
@@ -1192,52 +1272,68 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
     let shouldHelp = false;
 
     if (helpTarget?.type === 'man_help') {
-        if (isCover2) {
+        if (isSingleHighMan) {
+            const isAlreadyHelping = safetyState._isHelpingWithMan;
+            shouldHelp = maxPressure > (isAlreadyHelping ? 1.8 : 2.6);
+            safetyState._isHelpingWithMan = shouldHelp;
+        } else if (isCover2) {
             const helperHalf = safetyState.x < CENTER_X ? 'left' : 'right';
             const cornerHalf = helpTarget.corner.x < CENTER_X ? 'left' : 'right';
-            shouldHelp = (helperHalf === cornerHalf) && (maxPressure > 6.0);
+            shouldHelp = (helperHalf === cornerHalf) && (maxPressure > 5.0);
         } else if (isCover3) {
-            if (safetyState.x < HASH_LEFT_X || safetyState.x > HASH_RIGHT_X) {
-                shouldHelp = maxPressure > 5.0;
-            } else {
-                shouldHelp = maxPressure > 4.0;
-            }
-        } else if (isCover1) {
-            shouldHelp = maxPressure > 3.0;
+            shouldHelp = maxPressure > (safetyState.x < HASH_LEFT_X || safetyState.x > HASH_RIGHT_X ? 4.5 : 3.5);
         } else {
-            shouldHelp = maxPressure > 4.0;
+            shouldHelp = maxPressure > 3.5;
         }
     } else if (helpTarget?.type === 'zone_match') {
-        // In Cover 2, deep-half safeties must protect the deep boundary.
-        // Never allow them to bite on underneath routes shallower than 10 yards!
-        if (isCover2 && helpTarget.receiver && (helpTarget.receiver.y - LOS) < 10.0) {
-            shouldHelp = false;
-        } else {
-            // Hysteresis latch: Require a decisive threshold to bite,
-            // and maintain the help assignment to prevent 25Hz target flickering.
-            const isAlreadyHelping = safetyState._isHelpingWithZoneMatch;
-            const threshold = isAlreadyHelping ? 1.4 : 2.6;
-
-            shouldHelp = maxPressure > threshold;
-            safetyState._isHelpingWithZoneMatch = shouldHelp;
-        }
+        safetyState._isHelpingWithMan = false;
+        const threshold = safetyState._isHelpingWithZoneMatch ? 1.4 : 2.4;
+        shouldHelp = maxPressure > threshold;
+        safetyState._isHelpingWithZoneMatch = shouldHelp;
     }
 
     if (!shouldHelp) {
+        safetyState._isHelpingWithMan = false;
         safetyState._isHelpingWithZoneMatch = false;
         return null;
     }
 
     if (helpTarget && helpTarget.receiver) {
-        let helpX = helpTarget.receiver.x;
-        let helpY = Math.max(helpTarget.receiver.y + 1.5, LOS + 10);
+        const rec = helpTarget.receiver;
+        const projectedY = rec.y + (Math.max(0, rec.vy || 0) * 0.40);
+        const minRoofOffset = isPrevent ? 17.0 : (isSingleHighMan || isCover3 ? 13.0 : 12.0);
+        const roofFloor = isRedZone
+            ? Math.min(116.5, LOS + Math.max(3.5, distanceToGoal * 0.65))
+            : (LOS + minRoofOffset);
+
+        let helpX = rec.x;
+        let helpY = Math.max(projectedY + 3.0, roofFloor);
 
         if (helpTarget.type === 'man_help') {
-            helpX = (helpTarget.corner.x * 0.3) + (helpTarget.receiver.x * 0.7);
+            // Stay over the top of the receiver and lean into the deep throwing window
+            helpX = (helpTarget.corner.x * 0.15) + (rec.x * 0.85) + ((rec.vx || 0) * 0.25);
+            helpY = Math.max(projectedY + 3.5, roofFloor);
         } else {
-            // Zone match: Sit slightly deeper than the receiver to cap the route
-            helpY = helpTarget.receiver.y + 3.0; 
+            // Zone match: Always cap the deepest projected threat in the zone,
+            // and split horizontal leverage if multiple receivers stretch the zone.
+            const sortedZoneThreats = zoneMatchCandidates
+                .slice()
+                .sort((a, b) => b.receiver.y - a.receiver.y);
+
+            if (sortedZoneThreats.length >= 2) {
+                const deepest = sortedZoneThreats[0].receiver;
+                const second = sortedZoneThreats[1].receiver;
+                const deepestProjY = deepest.y + (Math.max(0, deepest.vy || 0) * 0.40);
+                helpX = (deepest.x * 0.65) + (second.x * 0.35);
+                helpY = Math.max(deepestProjY + 3.5, roofFloor);
+            } else {
+                helpX = rec.x + ((rec.vx || 0) * 0.25);
+                helpY = Math.max(projectedY + 3.5, roofFloor);
+            }
         }
+
+        helpX = Math.max(1.5, Math.min(FIELD_WIDTH - 1.5, helpX));
+        helpY = Math.min(118.0, helpY);
 
         const helpTargetId = helpTarget.receiver.id;
 
