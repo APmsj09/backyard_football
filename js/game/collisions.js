@@ -528,26 +528,71 @@ export function checkTackleCollisions(playState, gameLog) {
             return false;
         }
 
+
         const runnerVel = Math.max(1.0, Math.hypot(carrier.vx || 0, carrier.vy || 0));
         const tacklerVel = Math.max(1.0, Math.hypot(defender.vx || 0, defender.vy || 0));
 
-        const rMomentum = (carrier.wgt || 200) * runnerVel;
-        const tMomentum = (defender.wgt || 200) * tacklerVel;
+        // Use the same weight values for mass advantage and momentum.
+        const rMomentum = carrierWeight * runnerVel;
+        const tMomentum = defenderWeight * tacklerVel;
 
-        const tPower = ((defender.tkl || 50) * 0.6) + ((defender.str || 50) * 0.4);
-        const rPower = ((carrier.agi || 50) * 0.5) + ((carrier.str || 50) * 0.5);
+        const tPower = ((defender.tkl || defender.tackling || 50) * 0.6) +
+            ((defender.str || defender.strength || 50) * 0.4);
 
+        const rPower = ((carrier.agi || 50) * 0.5) +
+            ((carrier.str || 50) * 0.5);
+
+        // ANGLE AND POSITIONING:
+        // Evaluate whether the defender is approaching from in front,
+        // closing from the side, or pursuing from behind.
+        const carrierToDefenderX = (defender.x - carrier.x) / Math.max(0.1, distance);
+        const carrierToDefenderY = (defender.y - carrier.y) / Math.max(0.1, distance);
+
+        const carrierDirectionDot = carrierSpeed > 0.25
+            ? Math.max(-1, Math.min(1,
+                ((carrier.vx || 0) * carrierToDefenderX +
+                 (carrier.vy || 0) * carrierToDefenderY) / carrierSpeed
+            ))
+            : 0;
+
+        // Positive means the defender is moving toward the carrier.
+        const defenderDirectionDot = defenderSpeed > 0.25
+            ? Math.max(-1, Math.min(1,
+                ((defender.vx || 0) * -carrierToDefenderX +
+                 (defender.vy || 0) * -carrierToDefenderY) / defenderSpeed
+            ))
+            : 0;
+
+        const angleQuality = Math.max(
+            0,
+            Math.min(
+                1,
+                0.5 +
+                    carrierDirectionDot * 0.25 +
+                    defenderDirectionDot * 0.25
+            )
+        );
+
+        // Good positioning helps; poor positioning hurts.
+        // Maximum adjustment is +/- 8 percentage points.
+        const angleAdjustment = (angleQuality - 0.5) * 0.16;
+
+        // BASE TACKLE CALCULATION
         let successChance = 0.65;
+
         const momRatio = tMomentum / Math.max(1, rMomentum);
         successChance += (momRatio - 1.0) * 0.2;
 
-        // Distance falloff: lunging / diving tackles from distance (>1.2y) have reduced success
+        successChance += angleAdjustment;
+
+        // Distance falloff: lunging / diving tackles from distance (>1.2y)
+        // have reduced success.
         if (distance > 1.2) {
             successChance -= (distance - 1.2) * 0.25;
         }
 
-        // BACKYARD GANG-TACKLE / SWARM RULE:
-        // When the neighborhood big kid is carrying the ball, younger/smaller kids MUST swarm together to pull him down!
+        // GANG-TACKLING:
+        // Additional nearby defenders improve the odds of finishing the tackle.
         const defendersInRange = defenders.filter(d =>
             d.stunnedTicks === 0 &&
             !d.isBlocked &&
@@ -556,15 +601,13 @@ export function checkTackleCollisions(playState, gameLog) {
         );
 
         if (defendersInRange.length > 1) {
-            // High-school big runner vs middle-school swarm: each additional kid adds +12% tackle odds
             const swarmStrength = (defendersInRange.length - 1) * 0.12;
             successChance += Math.min(0.32, swarmStrength);
         }
 
+        // Tackling and strength versus the carrier's agility and strength.
         successChance += (tPower - rPower) * 0.005;
 
-        // A truck makes the runner harder to stop when the power contest
-        // favors them, but a strong tackler can still win the contact.
         if (isTruckAttempt) {
             successChance -= truckAdvantage;
         }
@@ -573,9 +616,11 @@ export function checkTackleCollisions(playState, gameLog) {
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
         successChance += Math.min(0.18, brokenCount * 0.08);
 
-        // Solid floor for open-field tackles (prevents 20% auto-breakaways)
+        // Preserve the existing probability bounds.
         successChance = Math.max(0.32, Math.min(0.95, successChance));
+
         if (!Number.isFinite(successChance)) successChance = 0.65;
+
 
         logPlayDebug('TACKLE_CALC', `${defender.name} vs ${carrier.name}`, {
             distance: Number(distance.toFixed(2)),
