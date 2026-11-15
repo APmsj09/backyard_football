@@ -431,8 +431,8 @@ export function checkTackleCollisions(playState, gameLog) {
             )
             : massAdvantage * 0.5; // Passive size advantage even on standard contact
 
-        // Allow evasions across the full tackle range before contact closes
-        if (distance <= TACKLE_RANGE && !isTruckAttempt) {
+        // Evasions trigger only when the defender is within true contact range.
+        if (distance <= TACKLE_CONTACT_RANGE && !isTruckAttempt) {
             const canPerformMove = (!carrier.moveCooldown || carrier.moveCooldown <= 0) && carrier.action !== 'handoff_setup';
 
             if (canPerformMove) {
@@ -443,9 +443,19 @@ export function checkTackleCollisions(playState, gameLog) {
                 const strDiff = (carrier.str || 50) - (defender.str || 50);
                 const iqDiff = carrierIQ - defenderIQ;
 
-                // IQ Layer: High IQ carriers set up defenders; High IQ defenders take sound tackling angles
-                const iqModifier = (iqDiff / 300);
-                const evadeChance = Math.max(0.05, Math.min(0.40, 0.16 + (Math.max(agiDiff, strDiff) / 250) + iqModifier));
+                // Use the relevant skill for the move being attempted.
+                const isStiffArmMove = strDiff > agiDiff && strDiff > 10;
+                const moveSkillDiff = isStiffArmMove ? strDiff : agiDiff;
+
+                const iqModifier = iqDiff / 500;
+
+                const evadeChance = Math.max(
+                    0.04,
+                    Math.min(
+                        0.28,
+                        0.10 + (moveSkillDiff / 400) + iqModifier
+                    )
+                );
 
                 if (Math.random() < evadeChance) {
                     carrier.moveCooldown = 25; // Prevents spamming evasions
@@ -454,7 +464,7 @@ export function checkTackleCollisions(playState, gameLog) {
                     const defWeight = defender.wgt || defender.weight || 200;
                     const carWeight = carrier.wgt || carrier.weight || 200;
 
-                    if (strDiff > agiDiff && strDiff > 10) {
+                    if (isStiffArmMove) {
                         carrier.action = 'stiff_arm';
                         
                         const impactDx = defender.x - carrier.x;
@@ -529,18 +539,17 @@ export function checkTackleCollisions(playState, gameLog) {
         }
 
 
-        const runnerVel = Math.max(1.0, Math.hypot(carrier.vx || 0, carrier.vy || 0));
-        const tacklerVel = Math.max(1.0, Math.hypot(defender.vx || 0, defender.vy || 0));
-
-        // Use the same weight values for mass advantage and momentum.
-        const rMomentum = carrierWeight * runnerVel;
-        const tMomentum = defenderWeight * tacklerVel;
+        // Actual momentum requires actual movement.
+        // A player's weight alone must never create momentum.
+        // carrierSpeed and defenderSpeed were calculated earlier.
+        const rMomentum = carrierWeight * carrierSpeed;
+        const tMomentum = defenderWeight * defenderSpeed;
 
         const tPower = ((defender.tkl || defender.tackling || 50) * 0.6) +
             ((defender.str || defender.strength || 50) * 0.4);
 
         const rPower = ((carrier.agi || 50) * 0.5) +
-            ((carrier.str || 50) * 0.5);
+            ((carrier.str || carrier.strength || 50) * 0.5);
 
         // ANGLE AND POSITIONING:
         // Evaluate whether the defender is approaching from in front,
@@ -580,15 +589,24 @@ export function checkTackleCollisions(playState, gameLog) {
         // BASE TACKLE CALCULATION
         let successChance = 0.65;
 
-        const momRatio = tMomentum / Math.max(1, rMomentum);
-        successChance += (momRatio - 1.0) * 0.2;
+        // Momentum difference: movement and mass both matter.
+        // A stationary player has zero momentum.
+        // Cap the influence so momentum cannot dominate tackling skill.
+        const momentumAdjustment = Math.max(
+            -0.12,
+            Math.min(
+                0.12,
+                (tMomentum - rMomentum) * 0.00025
+            )
+        );
 
+        successChance += momentumAdjustment;
         successChance += angleAdjustment;
 
         // Distance falloff: lunging / diving tackles from distance (>1.2y)
         // have reduced success.
         if (distance > 1.2) {
-            successChance -= (distance - 1.2) * 0.25;
+            successChance -= (distance - 1.2) * 0.18;
         }
 
         // GANG-TACKLING:
@@ -625,6 +643,12 @@ export function checkTackleCollisions(playState, gameLog) {
         logPlayDebug('TACKLE_CALC', `${defender.name} vs ${carrier.name}`, {
             distance: Number(distance.toFixed(2)),
             successChance: `${Math.round(successChance * 100)}%`,
+            carrierSpeed: Number(carrierSpeed.toFixed(2)),
+            defenderSpeed: Number(defenderSpeed.toFixed(2)),
+            runnerMomentum: Number(rMomentum.toFixed(1)),
+            tacklerMomentum: Number(tMomentum.toFixed(1)),
+            momentumAdjustment: Number(momentumAdjustment.toFixed(3)),
+            angleAdjustment: Number(angleAdjustment.toFixed(3)),
             carrierBrokenTackles: carrier.tacklesBrokenThisPlay || 0,
             move: isTruckAttempt ? 'trucking' : 'standard',
             truckAdvantage: Number(truckAdvantage.toFixed(3))
