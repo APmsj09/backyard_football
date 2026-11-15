@@ -151,7 +151,7 @@ export function checkBlockCollisions(playState, gameLog = null) {
         // Do NOT let OL block defenders who are running in man/zone coverage!
         const isPassBlock = blocker.action === 'pass_block';
 
-        if (isPassBlock && playState.ballState?.inAir) return;
+        if (isPassBlock && (playState.ballState?.inAir || playState.ballState?.throwTick)) return;
 
         const eligibleDefenders = isPassBlock
             ? defenders.filter(d => d.role === 'DL' || d.assignment?.includes('rush') || d.assignment?.includes('blitz'))
@@ -228,6 +228,12 @@ export function checkBlockCollisions(playState, gameLog = null) {
             target.isEngaged = true;
             target.isBlocked = true;
             target.blockedBy = blocker;
+
+            // Kill forward momentum on lock-up so players don't slide on ice
+            blocker.vx *= 0.15;
+            blocker.vy *= 0.15;
+            target.vx *= 0.15;
+            target.vy *= 0.15;
 
             playState.blockBattles.push({
                 blocker: blocker,
@@ -1048,13 +1054,21 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     return;
                 }
             } else {
-                // Preserve the existing carrier-pressure shed behavior
-                // for pass plays and other non-run situations.
-                const shouldAttemptShed =
-                    distToCarrier < 5.0 ||
-                    (carrierPastLOS && distToCarrier < 20.0) ||
-                    carrierIsPastDefender ||
-                    (isPassRusher && distToCarrier < 15.0);
+                const isQBInPocket =
+                    (ballCarrier.formationRole === 'QB' || ballCarrier.role === 'QB') &&
+                    ballCarrier.action === 'qb_setup' &&
+                    !carrierPastLOS &&
+                    !carrierIsPastDefender;
+
+                // Pocket pass rushers must win their pass-protection battle (or rip/swim)
+                // instead of auto-shedding from 15 yards away on Tick 1.
+                const shouldAttemptShed = isQBInPocket
+                    ? distToCarrier < 2.2
+                    : (
+                        distToCarrier < 5.0 ||
+                        (carrierPastLOS && distToCarrier < 20.0) ||
+                        (carrierIsPastDefender && distToCarrier <= 6.0)
+                    );
 
                 if (shouldAttemptShed) {
                     const reactionScore =
@@ -1588,22 +1602,27 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 const defStr = defender.strength || defender.str || 50;
 
                 // A pancake requires at least 20 ticks (0.8s) of sustained drive
-                const hasSustainedDrive = dur >= 20;
+                // and can only be rolled once per 15-tick drive window.
+                const canRollPancake =
+                    dur >= 20 &&
+                    (playState.tick - (battle._lastPancakeRollTick ?? -Infinity)) >= 15;
                 const strAdvantage = Math.max(0, blkStr - defStr);
                 const techniqueEdge = (blocker.blocking || 50) - (defender.blockShedding || 50);
 
                 // Base chance scales with strength gap and technique; never automatic 100%
                 const pancakeChance = Math.max(
                     0.02,
-                    Math.min(0.25, 0.04 + (strAdvantage * 0.006) + (techniqueEdge * 0.002))
+                    Math.min(0.20, 0.03 + (strAdvantage * 0.004) + (techniqueEdge * 0.002))
                 );
 
-                const pancakeRoll = hasSustainedDrive
-                    ? Math.random()
-                    : null;
+                let pancakeRoll = null;
+                if (canRollPancake) {
+                    battle._lastPancakeRollTick = playState.tick;
+                    pancakeRoll = Math.random();
+                }
 
                 const isPancake =
-                    hasSustainedDrive &&
+                    canRollPancake &&
                     pancakeRoll < pancakeChance &&
                     !defender._pancakedThisPlay;
 
@@ -1650,11 +1669,12 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     defender._pancakedThisPlay = true;
                     defender.action = 'pursuit';
 
-                    // A pancake finishes this engagement. The OL is now free
-                    // to choose a new assignment on the next target update.
+                    // A pancake finishes this engagement. Blocker gathers balance
+                    // before seeking another assignment rather than instantly snapping to the next defender.
                     blocker.engagedWith = null;
                     blocker.isEngaged = false;
                     blocker.dynamicTargetId = null;
+                    blocker.reengageCooldown = 18;
 
                     defender.isBlocked = false;
                     defender.blockedBy = null;

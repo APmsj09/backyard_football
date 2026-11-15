@@ -648,6 +648,13 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                         routePath = calculateRoutePath(assignment, startX, startY);
                         targetX = startX;
                         targetY = startY;
+                    } else if (assignment.startsWith('lead_')) {
+                        action = 'run_path';
+                        routePath = calculateRoutePath(assignment, startX, startY);
+                        if (routePath && routePath.length) {
+                            targetX = routePath[0].x;
+                            targetY = routePath[0].y;
+                        }
                     } else if (routeTree[assignment]) {
                         action = 'run_route';
                         routePath = calculateRoutePath(assignment, startX, startY);
@@ -1332,6 +1339,38 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         });
     }
 
+    // Ensure all offensive skill players cleanly transition roles immediately upon a completion
+    if (isPassCompleted && ballCarrierState && ballCarrierState.isOffense) {
+        offenseStates.forEach(pState => {
+            if (pState.id !== ballCarrierState.id && !pState.slot.startsWith('OL')) {
+                if (pState.role === 'QB' || pState.formationRole === 'QB' || pState.slot?.startsWith('QB')) {
+                    pState.action = 'idle';
+                    setHoldIntent(pState, pState.x, pState.y);
+                } else if (pState.action !== 'run_block') {
+                    pState.action = 'run_block';
+                    pState.dynamicTargetId = null;
+                }
+            }
+        });
+    }
+
+    // Transition skill positions immediately upon catch before blocker assignments run
+    if (isPassCompleted && ballCarrierState && ballCarrierState.isOffense) {
+        offenseStates.forEach(pState => {
+            if (pState.id !== ballCarrierState.id && !pState.slot.startsWith('OL')) {
+                if (pState.role === 'QB' || pState.formationRole === 'QB' || pState.slot?.startsWith('QB')) {
+                    pState.action = 'idle';
+                    setHoldIntent(pState, pState.x, pState.y);
+                } else if (pState.action !== 'run_block') {
+                    pState.action = 'run_block';
+                    pState.dynamicTargetId = null;
+                    delete pState._settleTargetX;
+                    delete pState._settleTargetY;
+                }
+            }
+        });
+    }
+
     const linemen = offenseStates.filter(
         p => !p.isEngaged && p.slot.startsWith('OL')
     );
@@ -1442,6 +1481,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             !isPassCompleted &&
             !isScreenLeadBlocker &&
             !isScreenReleasedOL;
+
+        if (isPassPlay && (playState.ballState?.inAir || playState.ballState?.throwTick)) {
+            blocker.dynamicTargetId = null;
+            setHoldIntent(blocker, blocker.x, blocker.y);
+            return;
+        }
 
         // Lead blockers and released screen linemen can identify downfield defenders
         // before the screen pass is caught.
@@ -1739,32 +1784,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 blocker.targetY,
                 isPassPlay ? 0.45 : 0.5
             );
-
-            const canEngageAtSnap = !(blocker.snapReactionTimer > 0) &&
-                !(target.snapReactionTimer > 0 && playState.tick < 3 && getDistance(blocker, target) >= 1.45);
-            if (canEngageAtSnap && getDistance(blocker, target) < 1.8 && !target.isEngaged) {
-                const strDiff = (blocker.str || 50) - (target.str || 50);
-                blocker.isEngaged = true;
-                blocker.engagedWith = target;
-                target.isEngaged = true;
-                target.isBlocked = true;
-                target.blockedBy = blocker;
-
-                // PHYSICS FIX: When two players collide and lock up, their forward momentum 
-                // must violently crash so they don't slide 3 yards downfield together on ice.
-                blocker.vx *= 0.15;
-                blocker.vy *= 0.15;
-                target.vx *= 0.15;
-                target.vy *= 0.15;
-
-                playState.blockBattles.push({
-                    blocker, defender: target,
-                    status: 'ongoing',
-                    battleScore: strDiff / 10,
-                    startTick: playState.tick,
-                    isPassProtection: isPassPlay && !isPassCompleted
-                });
-            }
         } else {
             // If no immediate threat exists, advance with the play as an active lead escort!
             if (
@@ -2019,15 +2038,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         if (pState.isOffense) {
             const isRunner = pState.isBallCarrier || ((pState.formationRole === 'QB' || pState.slot === 'QB1') && pState.action === 'qb_scramble');
 
-            // Transition skill positions to run block on a catch, but keep the passing QB idle in the pocket
-            if (isPassCompleted && ballCarrierState && ballCarrierState.id !== pState.id && !pState.slot.startsWith('OL')) {
-                if (pState.role === 'QB' || pState.formationRole === 'QB' || pState.slot?.startsWith('QB')) {
-                    pState.action = 'idle';
-                    setHoldIntent(pState, pState.x, pState.y);
-                } else {
-                    pState.action = 'run_block';
-                }
-            }
+            // Catch transitions are handled prior to blocker assignment in updatePlayerTargets.
 
             if (isRunner) {
                 pState.isBallCarrier = true;
@@ -2379,9 +2390,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                         if (nextPt) {
                             setRouteIntent(pState, nextPt.x, nextPt.y, 0.6);
-                        } else if (pState.slot?.startsWith('OL')) {
-                            // Puller has reached his designed path and can engage
-                            // the blocker target assigned earlier this tick.
+                        } else if (pState.slot?.startsWith('OL') || pState.assignment?.startsWith('lead_')) {
+                            // Puller or lead blocker has reached his designed path and transitions to blocking.
+                            if (pState.assignment?.startsWith('lead_')) {
+                                pState.action = 'run_block';
+                            }
                             setPointIntent(
                                 pState,
                                 pState.targetX ?? pState.x,
@@ -2504,10 +2517,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     }
 
                     // ACTIVE POCKET FOOTWORK & SLIDING:
-                    // Step up when edge rushers loop deep, or slide horizontally away from pressure.
-                    const edgePressureLeft = defenseStates.some(d => d.x < pState.x - 2.0 && getDistance(pState, d) < 5.0);
-                    const edgePressureRight = defenseStates.some(d => d.x > pState.x + 2.0 && getDistance(pState, d) < 5.0);
-                    const interiorPressure = defenseStates.some(d => Math.abs(d.x - pState.x) <= 2.2 && d.y > pState.y && d.y < LOS + 1.0);
+                    // Step up when edge rushers loop deep, or slide horizontally away from actual pocket pressure.
+                    const edgePressureLeft = defenseStates.some(d => d.y < LOS && d.x < pState.x - 2.0 && getDistance(pState, d) < 5.0);
+                    const edgePressureRight = defenseStates.some(d => d.y < LOS && d.x > pState.x + 2.0 && getDistance(pState, d) < 5.0);
+                    const interiorThreat = defenseStates.find(d => d.y < LOS - 0.5 && Math.abs(d.x - pState.x) <= 2.2 && d.y > pState.y && getDistance(pState, d) < 5.0);
+                    const interiorPressure = Boolean(interiorThreat);
 
                     let slideX = idealX;
                     let slideY = idealY;
@@ -2524,11 +2538,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         slideX = Math.max(pState.initialX - 3.0, pState.x - 1.8);
                     }
 
-                    // 3. Step back or give ground if interior DTs push the middle
-                    if (interiorPressure) {
+                    // 3. Step back or give ground if interior DTs actually penetrate into the pocket
+                    if (interiorThreat) {
                         slideY = Math.max(LOS - 10.0, pState.y - 1.5);
-                        // Escape to the side with more room
-                        slideX += (pState.x < CENTER_X ? -2.0 : 2.0);
+                        const awayDir = pState.x >= interiorThreat.x ? 1 : -1;
+                        slideX = Math.max(
+                            pState.initialX - 3.0,
+                            Math.min(pState.initialX + 3.0, idealX + (awayDir * 2.0))
+                        );
                     }
 
                     const hasMovedPocket = Math.hypot(slideX - pState.x, slideY - pState.y) > 0.4;

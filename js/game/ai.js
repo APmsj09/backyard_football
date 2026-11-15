@@ -2750,9 +2750,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     let maxDecisionTimeTicks = Math.round((85 + (qbAgility / 3) - (clockAwareness * 15)) * riskFactor);
     if (qbState.loggedRollout) maxDecisionTimeTicks += 35;
 
-    // A clean pocket gives deeper concepts more time to develop.
-    // 75 ticks = 3 seconds at 25 Hz.
-    if (!isPressured) maxDecisionTimeTicks += 75;
+    // A clean pocket gives deeper concepts extra time without stalling the play indefinitely.
+    if (!isPressured) maxDecisionTimeTicks += 25;
 
     const pocketTimeExpired = playState.tick >= maxDecisionTimeTicks;
     const isRPOThrow = playState.isRPO && playState.rpoPhase === 'pass';
@@ -3047,27 +3046,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         }
 
-        if (!decisionMade && playState.tick > 115) {
-            const desperation = progression
-                .map(s => getTargetValue(s))
-                .filter(v => v !== null)
-                .sort((a, b) => b.score - a.score)[0];
-
-            if (desperation && desperation.score > -20) {
-                targetPlayerState = desperation.info.state;
-                actionTaken = "Desperation Throw";
-                decisionMade = true;
-            } else {
-                qbState.action = 'run_path'; // BREAK OUT OF QB_SCRAMBLE LOCK
-                playState.qbIntent = 'scramble';
-                playState.qbRunCommitted = true;
-                qbState.isBallCarrier = true;
-                if (gameLog && !qbState.hasLoggedPanic) {
-                    gameLog.push(`🏃 ${qbState.name} can't find anyone and takes off!`);
-                    qbState.hasLoggedPanic = true;
-                }
-                return;
-            }
+        if (!decisionMade && pocketTimeExpired) {
+            decisionMade = true;
+            reason = "Time Expired";
         }
     }
 
@@ -3207,6 +3188,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
     if (targetPlayerState && actionTaken.includes("Throw")) {
         let adjustedAccuracy = Number(qbAcc) || 50;
+        if (actionTaken === "Forced Throw" || actionTaken === "Desperation Throw") {
+            adjustedAccuracy = Math.max(25, adjustedAccuracy * 0.70);
+        }
         let pPenalty = 0;
 
         // Hook up Clutch: Boosts or hurts late-game / 4th-quarter crunch time

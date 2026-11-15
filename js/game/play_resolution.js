@@ -4079,13 +4079,17 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     }
                     if (ballCarrierState.x <= 0.8 || ballCarrierState.x >= 52.5) {
                         playState.playIsLive = false;
-                        playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                        if (ballCarrierState.isOffense && !playState.possessionChanged) {
+                            playState.yards = ballCarrierState.y - playState.lineOfScrimmage;
+                            if ((ballCarrierState.formationRole === 'QB' || ballCarrierState.role === 'QB') && playState.yards < 0 && playState.type === 'pass') {
+                                playState.sack = true;
+                            }
+                        } else if (playState.fumbleOccurred && playState.fumbleYards !== undefined) {
+                            playState.yards = playState.fumbleYards;
+                        }
                         playState.finalBallY = ballCarrierState.y;
                         playState.outOfBounds = true;
                         if (gameLog) gameLog.push(`💨 ${ballCarrierState.name} steps out of bounds.`);
-                        if ((ballCarrierState.formationRole === 'QB' || ballCarrierState.role === 'QB') && playState.yards < 0 && playState.type === 'pass') {
-                            playState.sack = true;
-                        }
                         break;
                     }
                 }
