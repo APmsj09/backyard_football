@@ -36,6 +36,7 @@ const PASS_INTERCEPT_MARGIN = 0.45;
 function getReachablePassInterceptionPoint(pState, ballState) {
     if (
         !pState ||
+        pState._catchCooldownTicks > 0 ||
         !ballState ||
         !Number.isFinite(pState.x) ||
         !Number.isFinite(pState.y) ||
@@ -99,11 +100,14 @@ function getReachablePassInterceptionPoint(pState, ballState) {
     const verticalLeap =
         (pState.jumping || pState.agi || pState.agility || 50) / 100;
 
+    const standingReach = (playerHeight / 36) + 0.6;
+    const cleanInterceptHeight = standingReach + 0.25;
     const maxVerticalReach =
         (playerHeight / 36) + 1.2 + (verticalLeap * 0.7);
 
     const startZ = Number.isFinite(ballState.z) ? ballState.z : 2.0;
     const ballVZ = Number.isFinite(ballState.vz) ? ballState.vz : 0;
+    let fallbackHighPoint = null;
 
     // Start at step = 1 (ignore step 0 directly at QB's hand)
     for (let step = 1; step <= PASS_INTERCEPT_STEPS; step++) {
@@ -151,14 +155,20 @@ function getReachablePassInterceptionPoint(pState, ballState) {
             PASS_INTERCEPT_MARGIN;
 
         if (distanceToPoint <= reachableDistance) {
-            return {
-                x: pointX,
-                y: pointY
-            };
+            // Prefer a point low enough to contest/swat cleanly; don't stop 4 yards short on a high lob
+            if (ballZAtPoint <= cleanInterceptHeight || step >= PASS_INTERCEPT_STEPS - 2) {
+                return {
+                    x: pointX,
+                    y: pointY
+                };
+            }
+            if (!fallbackHighPoint) {
+                fallbackHighPoint = { x: pointX, y: pointY };
+            }
         }
     }
 
-    return null;
+    return fallbackHighPoint;
 }
 
 function getPursuitTargetY(pState, carrier, predictedY) {
@@ -1523,7 +1533,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             blocker.blockLaneX = runLaneX;
         }
 
+        const isDesignatedBlockingPath =
+            blocker.slot?.startsWith('OL') ||
+            blocker.assignment?.startsWith('pull') ||
+            blocker.assignment?.startsWith('lead_') ||
+            blocker.assignment?.includes('screen_block') ||
+            blocker.assignment?.includes('Wall');
+
+        const nearbyScreenThreat = isScreenPlay && isPostCatchBlock
+            ? blockerThreats.some(t => getDistance(blocker, t) < 3.0)
+            : false;
+
         const isPulling = Boolean(
+            isDesignatedBlockingPath &&
+            !nearbyScreenThreat &&
             blocker.routePath &&
             blocker.currentPathIndex < blocker.routePath.length
         );

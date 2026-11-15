@@ -622,16 +622,21 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     let steeringY = dy / safeDist;
 
     // UNIVERSAL OBSTACLE AVOIDANCE:
-    // Any free player (pursuer, pulling guard, or runner) should scrape around 
-    // engaged blocks when the direct route to their target is physically obstructed.
-    if (distToTarget > 1.5 && pState.movementMode !== 'ROUTE') {
+    // Free pursuers, runners, pulling guards, and screen linemen scrape around physical obstructions.
+    const isBlockingPathRunner =
+        pState.isOffense &&
+        pState.action === 'run_path' &&
+        !pState.isBallCarrier;
+
+    if (distToTarget > 1.5 && (pState.movementMode !== 'ROUTE' || isBlockingPathRunner)) {
         const pathLengthSquared = distToTarget * distToTarget;
         let nearestProjection = Infinity;
         let avoidanceSide = 0;
 
         for (const other of allPlayers) {
-            // Only avoid players who are actively locked up in a block
-            if (other.id === pState.id || !other.isEngaged) continue;
+            if (other.id === pState.id || other.balanceState === 'downed' || other.ghostTicks > 0) continue;
+            // Normally only avoid engaged piles, but pullers/screen OL must also sidestep unengaged bodies in their lane
+            if (!other.isEngaged && !isBlockingPathRunner) continue;
 
             const offsetX = other.x - pState.x;
             const offsetY = other.y - pState.y;

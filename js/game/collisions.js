@@ -702,9 +702,10 @@ export function checkTackleCollisions(playState, gameLog) {
 
         successChance -= truckAdvantage;
 
-        // Broken tackles give defenders a modest advantage on later attempts.
+        // Broken tackles wear down the runner: each broken tackle makes the next much harder to escape
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
-        successChance += Math.min(0.18, brokenCount * 0.08);
+        const cumulativeFatigueBonus = brokenCount * 0.12;
+        successChance += Math.min(0.40, cumulativeFatigueBonus);
 
         // Preserve the existing probability bounds.
         successChance = Math.max(0.32, Math.min(0.95, successChance));
@@ -781,47 +782,59 @@ export function checkTackleCollisions(playState, gameLog) {
         } else {
             carrier.tacklesBrokenThisPlay = brokenCount + 1;
 
-            // Prevent this specific defender from attempting another tackle on the same runner
-            // for at least 0.8 seconds (20 ticks). Other defenders can still make the tackle.
-            defender._carrierTackleCooldownTicks = 20;
+            // A defender who whiffs is taken out of the immediate pursuit on this carrier
+            // for at least 2.0s (50 ticks) unless another defender slows the carrier down first.
+            defender._carrierTackleCooldownTicks = 50;
 
-            // A failed tackle redirects the defender and disrupts his balance.
+            const weightDelta = carrierWeight - defenderWeight;
+
+            // In real life, if a runner outweighs the tackler by 40+ lbs (e.g. 160 lbs vs 85 lbs),
+            // a failed tackle attempt levels the smaller defender to the ground.
+            const isSevereMismatch = weightDelta >= 40;
+            const forceKnockdown = isSevereMismatch && (isTruckAttempt || Math.random() < 0.75);
+
             const bounceX = defender.x - carrier.x;
             const bounceY = defender.y - carrier.y;
             const bounceDistance = Math.max(
                 0.1,
                 Math.hypot(bounceX, bounceY)
             );
+
             applyImpactDisruption(
                 defender,
-                isTruckAttempt ? 55 : 42,
-                (bounceX / bounceDistance) * (isTruckAttempt ? 2.4 : 1.8),
-                (bounceY / bounceDistance) * (isTruckAttempt ? 2.4 : 1.8)
+                isTruckAttempt ? 65 : (isSevereMismatch ? 60 : 42),
+                (bounceX / bounceDistance) * (isTruckAttempt ? 2.6 : 2.0),
+                (bounceY / bounceDistance) * (isTruckAttempt ? 2.6 : 2.0),
+                forceKnockdown
             );
             
-            // Stumble cooldown: the whiffed defender needs time to recover their footing
-            defender.stunnedTicks = Math.max(defender.stunnedTicks || 0, 10);
+            // Stumble cooldown: downed or severely mismatched defenders take time to get back up
+            defender.stunnedTicks = Math.max(
+                defender.stunnedTicks || 0,
+                forceKnockdown ? 24 : 14
+            );
             
-            // Breaking a tackle shouldn't turn the runner into a statue.
-            // Power runners and agile evaders maintain forward momentum.
+            // Compounding runner fatigue: each broken tackle drains more momentum
+            const weightRatio = defenderWeight / carrierWeight;
             const baseSpeedDrain = Math.max(
-                0.06,
-                Math.min(
-                    0.28,
-                    (defenderWeight / carrierWeight) * 0.20
-                )
+                0.12,
+                Math.min(0.40, (weightRatio * 0.22) + (brokenCount * 0.06))
             );
 
             const speedDrain = isTruckAttempt
-                ? Math.max(
-                    0.04,
-                    Math.min(0.22, baseSpeedDrain - (truckAdvantage * 0.5))
-                )
+                ? Math.max(0.08, Math.min(0.32, baseSpeedDrain - (truckAdvantage * 0.4)))
                 : baseSpeedDrain;
 
             carrier.vx *= (1 - speedDrain);
             carrier.vy *= (1 - speedDrain);
-            carrier.moveCooldown = 12; // Modest cooldown to prevent instant spamming without paralyzing the runner
+            carrier.moveCooldown = Math.max(carrier.moveCooldown || 0, 16);
+
+            // Breaking multiple tackles disrupts the runner's balance
+            if (carrier.tacklesBrokenThisPlay >= 2) {
+                carrier.balanceState = 'off_balance';
+                carrier.offBalanceTicks = Math.max(carrier.offBalanceTicks || 0, 8);
+                carrier.balanceSeverity = Math.min(75, 30 + (carrier.tacklesBrokenThisPlay * 10));
+            }
 
             if (carrier.role === 'QB' && carrier.action === 'qb_setup' && carrier.y < playState.lineOfScrimmage) {
                 carrier.action = 'qb_scramble';
@@ -844,7 +857,8 @@ export function checkTackleCollisions(playState, gameLog) {
 
                 pushGameLog(gameLog, message, playState);
             }
-            break;
+            // Do not break; allow any second defender in range on this tick to contest the tackle
+            continue;
         }
     }
     return false;
