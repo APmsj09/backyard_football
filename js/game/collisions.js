@@ -149,6 +149,9 @@ export function checkBlockCollisions(playState, gameLog = null) {
         // FIX: In pass pro, linemen only block rushers/blitzers. 
         // Do NOT let OL block defenders who are running in man/zone coverage!
         const isPassBlock = blocker.action === 'pass_block';
+
+        if (isPassBlock && playState.ballState?.inAir) return;
+
         const eligibleDefenders = isPassBlock
             ? defenders.filter(d => d.role === 'DL' || d.assignment?.includes('rush') || d.assignment?.includes('blitz'))
             : defenders;
@@ -225,7 +228,11 @@ export function checkBlockCollisions(playState, gameLog = null) {
                 defender: target,
                 status: 'ongoing',
                 battleScore: strDiff / 10,
-                startTick: playState.tick
+                startTick: playState.tick,
+                isPassProtection: isPassBlock &&
+                    playState.type === 'pass' &&
+                    !playState.ballState?.throwTick &&
+                    !playState.ballState?.inAir
             });
 
             const isRunBlockEngagement =
@@ -912,9 +919,34 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
     const ballCarrier = playState.activePlayers.find(
         p => p.hasBall || p.isBallCarrier
     );
-    const MAX_BLOCK_SEPARATION = 2.5;
+    const MAX_BLOCK_SEPARATION = 3.1;
 
     playState.blockBattles.forEach((battle, index) => {
+        const passHasBeenReleased = Boolean(
+            playState.ballState?.throwTick || playState.ballState?.inAir
+        );
+
+        if (battle.isPassProtection && passHasBeenReleased) {
+            const blocker = battle.blocker;
+            const defender = battle.defender;
+
+            if (blocker?.engagedWith === defender) {
+                blocker.engagedWith = null;
+                blocker.isEngaged = false;
+            }
+
+            if (defender?.blockedBy === blocker) {
+                defender.isBlocked = false;
+                defender.blockedBy = null;
+                defender.isEngaged = false;
+                defender.action = 'pursuit';
+            }
+
+            battle.status = 'disengaged';
+            battlesToRemove.push(index);
+            return;
+        }
+
         if (battle.startTick === playState.tick) return;
 
         if (battle.status !== 'ongoing') {
