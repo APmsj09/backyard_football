@@ -1013,8 +1013,14 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             y: targetY
         };
 
+        // A player actively traveling in the correct direction at decent speed is not stalled
+        const isAligningTowardTarget =
+            targetDirectionAlignment > 0.45 &&
+            currentVelocityMagnitude > 0.40;
+
         const isMakingProgress =
-            progressTowardTarget >= 0.03;
+            progressTowardTarget >= 0.03 ||
+            (isAligningTowardTarget && progressTowardTarget >= 0.012);
 
         // Chasing a moving ball carrier or turning to track an airborne ball 
         // does not constitute being stuck in geometry or colliding with an obstacle.

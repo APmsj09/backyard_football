@@ -447,19 +447,9 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     // Preserve the existing RB2 behavior when unassigned.
                     (slot === 'RB2' && !assignment) ||
 
-                    // On pass plays, backs whose routes or assignments
-                    // can cross the QB's dropback lane need clearance.
-                    (
-                        play.type === 'pass' &&
-                        (
-                            !assignment ||
-                            assignment.startsWith('run_') ||
-                            [
-                                'pass_block',
-                                'CheckRelease'
-                            ].includes(assignment)
-                        )
-                    )
+                    // On pass plays, any backfield player aligned directly in the QB's dropback lane
+                    // needs lateral clearance so they don't clip the QB during dropback.
+                    (play.type === 'pass')
                 );
 
             if (backNeedsDropbackClearance) {
