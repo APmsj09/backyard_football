@@ -217,6 +217,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         }
 
         pState._routeWaypointStallTicks = 0;
+        pState._telemetryStallTicks = 0;
+        pState._telemetryStallLogged = false;
 
         pState.snapReactionTimer--;
         pState.vx = 0;
@@ -261,6 +263,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
          // A movement-restricted player is not evidence of a failed
         // route-navigation attempt. Do not carry stale stall ticks forward.
         pState._routeWaypointStallTicks = 0;
+        pState._telemetryStallTicks = 0;
+        pState._telemetryStallLogged = false;
 
         const passiveFriction = scalePerTickFactor(0.85, dt);
         pState.vx *= passiveFriction;
@@ -275,6 +279,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         clampToField(pState);
         return;
     }
+
+    pState._telemetryMotionPause = null;
 
     // Off-balance players retain momentum but cannot redirect it as quickly.
     // The timer advances once when normal movement control is available.
@@ -418,6 +424,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             pState.vy = 0;
             pState.currentSpeedYPS = 0;
             pState.velocity = { x: 0, y: 0 };
+            pState._telemetryStallTicks = 0;
+            pState._telemetryStallLogged = false;
 
             clampToField(pState);
             return;
@@ -1013,6 +1021,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             distToTarget > 2.0 &&
             !isMakingProgress &&
             !isDynamicAction &&
+            !isOffBalanceThisTick &&
             !pState._intent?.settled;
 
         if (isStalled) {
@@ -1329,7 +1338,9 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             let dy_norm = (pState.y - other.y) / dist;
 
             // GLANCING COLLISION OFFSET: Prevent 1D vertical head-on stalls
-            if (Math.abs(dx_norm) < 0.35) {
+            const isRouteCollision = pState.action === 'run_route' || pState.movementMode === 'ROUTE';
+            const glanceThreshold = isRouteCollision ? 0.55 : 0.35;
+            if (Math.abs(dx_norm) < glanceThreshold) {
                 dx_norm = pState.x >= other.x ? 1 : -1;
                 dy_norm *= 0.2;
                 const mag = Math.hypot(dx_norm, dy_norm);

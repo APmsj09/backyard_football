@@ -1062,11 +1062,12 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
                 // Pocket pass rushers must win their pass-protection battle (or rip/swim)
                 // instead of auto-shedding from 15 yards away on Tick 1.
+                // Once the carrier is past the defender (or right on top of the block),
+                // allow immediate shed/pursuit; otherwise fight through resolveBattle normally.
                 const shouldAttemptShed = isQBInPocket
                     ? distToCarrier < 2.2
                     : (
-                        distToCarrier < 5.0 ||
-                        (carrierPastLOS && distToCarrier < 20.0) ||
+                        distToCarrier < 3.5 ||
                         (carrierIsPastDefender && distToCarrier <= 6.0)
                     );
 
@@ -1093,6 +1094,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     if (shedScore > 110) {
                         blocker.engagedWith = null;
                         blocker.isEngaged = false;
+                        blocker.dynamicTargetId = null;
                         blocker.reengageCooldown = 14;
                         applyImpactDisruption(blocker, 28, 0, 0);
 
@@ -1427,8 +1429,9 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                                 )
                             );
                         } else {
-                            // OL wins: shove the rusher away from the QB.
-                            // The blocker holds his position to protect the pocket.
+                            // OL wins: shove the rusher away from the QB, but at arm's extension
+                            // ride them laterally around the arc so they aren't pushed past MAX_BLOCK_SEPARATION.
+                            const currentSep = getDistance(blocker, defender);
                             let awayX = uX;
                             let awayY = uY;
 
@@ -1444,22 +1447,38 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                                 awayY = dyFromQB / distanceFromQB;
                             }
 
-                            defender.x = Math.max(
-                                0.5,
-                                Math.min(
-                                    FIELD_WIDTH - 0.5,
-                                    defender.x + awayX * pushMagnitude
-                                )
-                            );
-                            defender.y = Math.max(
-                                0.5,
-                                Math.min(
-                                    FIELD_LENGTH - 0.5,
-                                    defender.y + awayY * pushMagnitude
-                                )
-                            );
-
-                            // Intentionally leave the blocker stationary.
+                            if (currentSep >= 2.0) {
+                                const rideDir = defender.x >= (qb ? qb.x : blocker.x) ? 1 : -1;
+                                defender.x = Math.max(
+                                    0.5,
+                                    Math.min(
+                                        FIELD_WIDTH - 0.5,
+                                        defender.x + rideDir * pushMagnitude * 0.75
+                                    )
+                                );
+                                blocker.x = Math.max(
+                                    0.5,
+                                    Math.min(
+                                        FIELD_WIDTH - 0.5,
+                                        blocker.x + rideDir * pushMagnitude * 0.65
+                                    )
+                                );
+                            } else {
+                                defender.x = Math.max(
+                                    0.5,
+                                    Math.min(
+                                        FIELD_WIDTH - 0.5,
+                                        defender.x + awayX * pushMagnitude
+                                    )
+                                );
+                                defender.y = Math.max(
+                                    0.5,
+                                    Math.min(
+                                        FIELD_LENGTH - 0.5,
+                                        defender.y + awayY * pushMagnitude
+                                    )
+                                );
+                            }
                         }
                     } else {
                         // Other blocking assignments use direct displacement.
@@ -1588,6 +1607,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
             blocker.engagedWith = null; 
             blocker.isEngaged = false;
+            blocker.dynamicTargetId = null;
             blocker.reengageCooldown = 12; // 0.48s recovery window so rusher can actually penetrate
 
             defender.stunnedTicks = 0;
@@ -1777,7 +1797,10 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
     if (ball.isSwatted) {
         if (ball.z <= 0) {
             ball.z = 0;
+            ball.vx = 0;
+            ball.vy = 0;
             ball.vz = 0;
+            ball.inAir = false;
             if (playState.type === 'pass' && !ball.isLoose && playState.playIsLive) {
                 playState.playIsLive = false;
                 playState.incomplete = true;

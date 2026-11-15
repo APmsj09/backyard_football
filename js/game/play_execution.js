@@ -1458,8 +1458,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
     const assignBlockerTarget = (blocker, threats) => {
         if (blocker.isEngaged) return;
-        // Do not vacuum a rusher back into an engagement if this blocker was just shed
-        if (blocker.reengageCooldown > 0) return;
 
         const isPostCatchBlock = Boolean(
             isPassCompleted &&
@@ -1481,6 +1479,25 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             !isPassCompleted &&
             !isScreenLeadBlocker &&
             !isScreenReleasedOL;
+
+        // While recovering from a shed, clear stale targets and move into pocket/escort
+        // without locking threats away from teammates.
+        if (blocker.reengageCooldown > 0) {
+            blocker.dynamicTargetId = null;
+            if (isPassPlay && qbState) {
+                blocker.targetX = blocker.x;
+                blocker.targetY = Math.max(LOS - 2.5, qbState.y + 2.0);
+                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.35);
+            } else if ((playType === 'run' || isPostCatchBlock || isScreenLeadBlocker) && ballCarrierState && ballCarrierState.id !== blocker.id) {
+                if (blocker._escortSide === undefined) {
+                    blocker._escortSide = blocker.initialX <= ballCarrierState.x ? -2.2 : 2.2;
+                }
+                blocker.targetX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, ballCarrierState.x + blocker._escortSide));
+                blocker.targetY = Math.min(115.0, ballCarrierState.y + 4.5);
+                setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.45);
+            }
+            return;
+        }
 
         if (isPassPlay && (playState.ballState?.inAir || playState.ballState?.throwTick)) {
             blocker.dynamicTargetId = null;
