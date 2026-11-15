@@ -957,34 +957,31 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             const carrierPastLOS = ballCarrier.y > playState.lineOfScrimmage + 1.0;
             const carrierIsPastDefender = ballCarrier.y > defender.y + 2.0;
 
-            // Shed block if carrier is close (<=5.0y) OR if carrier has broken past LOS on an open run
-            // Also shed immediately if the carrier has blown past the defender downfield.
-            const isPassRusher = playState.type === 'pass' && !playState.ballState?.inAir && (defender.role === 'DL' || defender.assignment?.includes('rush') || defender.assignment?.includes('blitz'));
-            const shouldAttemptShed = distToCarrier < 5.0 || (carrierPastLOS && distToCarrier < 20.0) || carrierIsPastDefender || (isPassRusher && distToCarrier < 15.0);
+            const isPassRusher =
+                playState.type === 'pass' &&
+                !playState.ballState?.inAir &&
+                (
+                    defender.role === 'DL' ||
+                    defender.assignment?.includes('rush') ||
+                    defender.assignment?.includes('blitz')
+                );
 
-            if (shouldAttemptShed) {
-                const reactionScore = (defender.playbookIQ || 50) + (defender.blockShedding || 50);
-                const shedBonus = Math.max(0, (5.0 - distToCarrier) * 12);
-                const openFieldUrgency = carrierPastLOS || carrierIsPastDefender ? 35 : 0;
-
-                const shedRoll = getRandomInt(0, 50);
-
-                if (reactionScore + shedBonus + openFieldUrgency + shedRoll > 110) {
+            if (playState.type === 'run') {
+                // The defender may abandon the block if the runner has
+                // genuinely passed him and is close enough to pursue.
+                // Otherwise, the normal block battle decides who gets free.
+                if (carrierIsPastDefender && distToCarrier <= 6.0) {
                     if (isRunBlock) {
                         logPlayDebug(
-                            'RUN_BLOCK_SHED',
-                            `${defender.name} shed ${blocker.name}'s block`,
+                            'RUN_BLOCK_PURSUIT_RELEASE',
+                            `${defender.name} abandoned ${blocker.name}'s block to pursue ${ballCarrier.name}`,
                             {
-                                reason: 'carrier_pressure',
+                                reason: 'carrier_passed_defender',
                                 ticksInBlock: playState.tick - battle.startTick,
                                 distanceToCarrier: Number(distToCarrier.toFixed(2)),
-                                reactionScore,
-                                shedBonus,
-                                openFieldUrgency,
-                                randomRoll: shedRoll,
-                                totalScore: reactionScore + shedBonus + openFieldUrgency + shedRoll,
-                                threshold: 110,
-                                battleScore: Number((battle.battleScore || 0).toFixed(2)),
+                                battleScore: Number(
+                                    (battle.battleScore || 0).toFixed(2)
+                                ),
                                 blockerPosition: {
                                     x: Number(blocker.x.toFixed(2)),
                                     y: Number(blocker.y.toFixed(2))
@@ -999,17 +996,65 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                         );
                     }
 
-                    blocker.engagedWith = null; 
+                    // This is a pursuit release, not a DL victory.
+                    // The blocker stays balanced and can look for another target.
+                    blocker.engagedWith = null;
                     blocker.isEngaged = false;
-                    blocker.reengageCooldown = 14;
-                    applyImpactDisruption(blocker, 28, 0, 0);
-                    defender.isBlocked = false; 
-                    defender.blockedBy = null; 
+                    blocker.dynamicTargetId = null;
+
+                    defender.isBlocked = false;
+                    defender.blockedBy = null;
                     defender.isEngaged = false;
                     defender.action = 'pursuit';
+
                     battle.status = 'disengaged';
                     battlesToRemove.push(index);
                     return;
+                }
+            } else {
+                // Preserve the existing carrier-pressure shed behavior
+                // for pass plays and other non-run situations.
+                const shouldAttemptShed =
+                    distToCarrier < 5.0 ||
+                    (carrierPastLOS && distToCarrier < 20.0) ||
+                    carrierIsPastDefender ||
+                    (isPassRusher && distToCarrier < 15.0);
+
+                if (shouldAttemptShed) {
+                    const reactionScore =
+                        (defender.playbookIQ || 50) +
+                        (defender.blockShedding || 50);
+
+                    const shedBonus = Math.max(
+                        0,
+                        (5.0 - distToCarrier) * 12
+                    );
+
+                    const openFieldUrgency =
+                        carrierPastLOS || carrierIsPastDefender ? 35 : 0;
+
+                    const shedRoll = getRandomInt(0, 50);
+                    const shedScore =
+                        reactionScore +
+                        shedBonus +
+                        openFieldUrgency +
+                        shedRoll;
+
+                    if (shedScore > 110) {
+                        blocker.engagedWith = null;
+                        blocker.isEngaged = false;
+                        blocker.reengageCooldown = 14;
+                        applyImpactDisruption(blocker, 28, 0, 0);
+
+                        defender.isBlocked = false;
+                        defender.blockedBy = null;
+                        defender.isEngaged = false;
+                        defender.action = 'pursuit';
+
+                        battle.status = 'disengaged';
+                        battlesToRemove.push(index);
+                        return;
+                    }
                 }
             }
         }
@@ -1031,6 +1076,26 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             blockPower *= 1.08;
         } else if (isRunBlock && ticksInBlock < 12) {
             blockPower *= 1.10;
+        }
+
+        // A nearby runner increases the defender's urgency.
+        // This strengthens the normal shed battle rather than
+        // allowing the defender to bypass the block contest.
+        if (isRunBlock && ballCarrier) {
+            const distToCarrier = getDistance(defender, ballCarrier);
+
+            const proximityPressure = Math.max(
+                0,
+                Math.min(1, (10.0 - distToCarrier) / 10.0)
+            );
+
+            const carrierPastLOS =
+                ballCarrier.y > playState.lineOfScrimmage + 1.0;
+
+            const pressureBoost =
+                proximityPressure * (carrierPastLOS ? 0.14 : 0.08);
+
+            shedPower *= 1.0 + pressureBoost;
         }
 
         // STALEMATE RESOLUTION:
