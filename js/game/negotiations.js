@@ -9,7 +9,21 @@ import {
 } from './state.js';
 import { relationshipLevels } from '../data.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
-import { isPlayerNaturalForPosition, isPlayerViableForPosition } from './depth_chart.js';
+import {
+    isPlayerNaturalForPosition,
+    isPlayerViableForPosition,
+    rebuildDepthChartFromOrder
+} from './depth_chart.js';
+
+function playerRefusesTeam(player, team) {
+    if (team?.id == null || !Array.isArray(player?.refusedTeamIds)) {
+        return false;
+    }
+
+    return player.refusedTeamIds.some(id =>
+        id != null && String(id) === String(team.id)
+    );
+}
 
 /**
  * Evaluates whether an AI team genuinely needs and desires a free agent
@@ -648,7 +662,8 @@ export function calculateAiTeamNeedAndDesire(
     const offer = {
         role,
         promiseTouches,
-        tokensOffered: tokensToSpend
+        tokensOffered: tokensToSpend,
+        position: bestPos
     };
 
     const recruitmentReason = isDesperateVoid
@@ -1071,12 +1086,30 @@ export function clearPlayerMarketCache(gameState) {
 export function checkInstantCommit(player, team, evalResult, offer) {
     if (!evalResult.accepted) return false;
 
-    const bestPos = player.pos || estimateBestPosition(player);
+    const validPositions = [
+        'QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'
+    ];
+
+    const offeredPosition = String(
+        offer.position || ''
+    ).toUpperCase();
+
+    const bestPos = validPositions.includes(offeredPosition)
+        ? offeredPosition
+        : (player.pos || estimateBestPosition(player));
+
     const playerOvr = calculateOverall(player, bestPos);
 
     if (playerOvr >= 55) {
-        const hasBFF = player.social?.bestFriendId && team.roster?.includes(player.social.bestFriendId);
-        return evalResult.interestScore >= 88 && (offer.tokensOffered >= 2 || hasBFF);
+        const bestFriendId = player.social?.bestFriendId;
+
+        const hasBFF = bestFriendId != null &&
+            getRosterObjects(team).some(rosterPlayer =>
+                String(rosterPlayer?.id) === String(bestFriendId)
+            );
+
+        return evalResult.interestScore >= 88 &&
+            (offer.tokensOffered >= 2 || hasBFF);
     }
 
     const isBlowaway = (offer.tokensOffered >= 2) && (offer.role === 'STARTER');
@@ -1087,7 +1120,12 @@ export function resolvePlayerBiddingWar(player, bids = []) {
     if (!bids || bids.length === 0) return null;
 
     const scoredBids = bids.map(bid => {
-        const evaluation = evaluatePlayerNegotiation(player, bid.team, bid.offer);
+        const evaluation = evaluatePlayerNegotiation(
+            player,
+            bid.team,
+            bid.offer
+        );
+
         return {
             ...bid,
             evaluation,
@@ -1096,18 +1134,36 @@ export function resolvePlayerBiddingWar(player, bids = []) {
     });
 
     scoredBids.sort((a, b) => b.score - a.score);
-    const winningBid = scoredBids[0];
 
-    const threshold = winningBid.evaluation.threshold || 48;
-    if (winningBid.evaluation.interestScore < threshold) {
-        const negativeReasons = winningBid.evaluation.reasons.filter(r => r.includes('-'));
-        const reason = negativeReasons.length > 0 
+    // A team must actually meet the prospect's acceptance threshold
+    // before it can win the bidding war.
+    const acceptableBids = scoredBids.filter(
+        bid => bid.evaluation.accepted
+    );
+
+    if (acceptableBids.length === 0) {
+        const leadingBid = scoredBids[0];
+        const threshold = leadingBid.evaluation.threshold || 48;
+
+        const negativeReasons = (
+            leadingBid.evaluation.reasons || []
+        ).filter(reason => reason.includes('-'));
+
+        const reason = negativeReasons.length > 0
             ? negativeReasons.slice(0, 2).join('; ')
-            : `Fell short of prospect's caliber expectations (${winningBid.evaluation.interestScore}/${threshold} interest).`;
-        return { winner: null, competingBids: scoredBids, rejectedReason: reason };
+            : `Fell short of prospect's caliber expectations (${leadingBid.evaluation.interestScore}/${threshold} interest).`;
+
+        return {
+            winner: null,
+            competingBids: scoredBids,
+            rejectedReason: reason
+        };
     }
 
-    return { winner: winningBid, competingBids: scoredBids };
+    return {
+        winner: acceptableBids[0],
+        competingBids: scoredBids
+    };
 }
 
 /**
@@ -1128,7 +1184,33 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
         };
     }
 
-    if (player.refusedTeamIds?.includes(team.id)) {
+    const candidateAge =
+        player.age == null || player.age === ''
+            ? NaN
+            : Number(player.age);
+
+    const candidateStatus = String(
+        player.status?.type || ''
+    ).toLowerCase();
+
+    if (
+        player.teamId != null ||
+        !Number.isInteger(candidateAge) ||
+        candidateAge < 12 ||
+        candidateAge > 18 ||
+        ['retired', 'departed', 'temporary'].includes(candidateStatus)
+    ) {
+        return {
+            accepted: false,
+            interestScore: 0,
+            threshold: 100,
+            reasons: ['Player is not eligible for free agency.'],
+            roleOffered,
+            promiseTouches: offer.promiseTouches || 'NORMAL'
+        };
+    }
+
+    if (playerRefusesTeam(player, team)) {
         return {
             accepted: false,
             interestScore: 0,
@@ -1167,7 +1249,18 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
 
     const roster = getRosterObjects(team);
 
-    const bestPos = player.pos || estimateBestPosition(player);
+    const validPositions = [
+        'QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'
+    ];
+
+    const offeredPosition = String(
+        offer?.position || ''
+    ).toUpperCase();
+
+    const bestPos = validPositions.includes(offeredPosition)
+        ? offeredPosition
+        : (player.pos || estimateBestPosition(player));
+
     const playerOvr = calculateOverall(player, bestPos);
     const age = player.age || 14;
     const ego = player.personality?.ego || 50;
@@ -1204,25 +1297,71 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
     }
 
     // 3. SOCIAL BONDS & CHEMISTRY
-    if (player.social?.bestFriendId && roster.some(r => r.id === player.social.bestFriendId)) {
+    // Normalize IDs so relationships work across numeric/string save formats.
+    const normalizeRelationshipIds = ids => new Set(
+        (Array.isArray(ids) ? ids : [])
+            .filter(id => id != null)
+            .map(String)
+    );
+
+    const bestFriendId = player.social?.bestFriendId;
+
+    const goodFriendIds = normalizeRelationshipIds(
+        player.social?.goodFriendIds
+    );
+
+    const rivalIds = normalizeRelationshipIds(
+        player.social?.rivalIds
+    );
+
+    const hasBFF = bestFriendId != null &&
+        roster.some(r =>
+            String(r?.id) === String(bestFriendId)
+        );
+
+    if (hasBFF) {
         interest += 28;
         reasons.push("🤝 Best friend is on team (+28)");
     }
-    const friendsCount = roster.filter(r => player.social?.goodFriendIds?.includes(r.id)).length;
+
+    const friendsCount = roster.filter(r =>
+        r?.id != null && goodFriendIds.has(String(r.id))
+    ).length;
+
     if (friendsCount > 0) {
         const bonus = Math.min(20, friendsCount * 8);
         interest += bonus;
         reasons.push(`👥 ${friendsCount} friend(s) on team (+${bonus})`);
     }
-    const rival = roster.find(r => player.social?.rivalIds?.includes(r.id));
+
+    const rival = roster.find(r =>
+        r?.id != null && rivalIds.has(String(r.id))
+    );
+
     if (rival) {
         interest -= 45;
-        reasons.push(`⚠️ Sworn rival (${rival.name.split(' ')[0]}) on roster (-45)`);
+        reasons.push(
+            `⚠️ Sworn rival (${String(rival.name || 'Teammate').split(' ')[0]}) on roster (-45)`
+        );
     }
-    const captain = roster.find(r => r.id === team.captainId);
-    if (captain && captain.personality?.clique === player.personality?.clique) {
+
+    const captain = team.captainId == null
+        ? null
+        : roster.find(r =>
+            String(r?.id) === String(team.captainId)
+        );
+
+    const playerClique = player.personality?.clique;
+    const captainClique = captain?.personality?.clique;
+
+    if (
+        captain &&
+        playerClique != null &&
+        captainClique != null &&
+        captainClique === playerClique
+    ) {
         interest += 6;
-        reasons.push(`🧢 Shares clique with captain (${player.personality.clique}) (+6)`);
+        reasons.push(`🧢 Shares clique with captain (${playerClique}) (+6)`);
     }
 
     // 4. DEPTH CHART REALITY CHECK (Detecting Fake "Starter" Promises)
@@ -1260,16 +1399,40 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
     const isPassCatcher = ['WR', 'TE'].includes(bestPos) || player.archetypeName?.includes('Receiving');
     if (isPassCatcher) {
         const qb1Id = team.depthChart?.offense?.QB1;
-        // FIX: Look for natural QB instead of accidental skill crossover
-        const qb1 = qb1Id ? getPlayer(qb1Id) : roster.find(p => isPlayerNaturalForPosition(p, 'QB'));
-        const qbThrow = qb1?.attributes?.technical?.throwingAccuracy ?? 40;
+
+        const depthChartQb = qb1Id != null
+            ? getPlayer(qb1Id)
+            : null;
+
+        const depthChartQbIsValid =
+            depthChartQb &&
+            roster.some(rosterPlayer =>
+                rosterPlayer?.id != null &&
+                String(rosterPlayer.id) === String(depthChartQb.id)
+            ) &&
+            isPlayerNaturalForPosition(depthChartQb, 'QB');
+
+        // Only trust the depth-chart QB if they are still on this
+        // team's roster and remain a natural quarterback.
+        const qb1 = depthChartQbIsValid
+            ? depthChartQb
+            : roster.find(p => isPlayerNaturalForPosition(p, 'QB'));
+
+        const qbThrow =
+            qb1?.attributes?.technical?.throwingAccuracy ?? 40;
 
         if (qbThrow >= 65) {
+            const qbName = String(qb1?.name || 'QB').split(' ')[0];
+
             interest += 14;
-            reasons.push(`🎯 Excited to catch passes from top QB ${qb1.name.split(' ')[0]} (+14)`);
+            reasons.push(
+                `🎯 Excited to catch passes from top QB ${qbName} (+14)`
+            );
         } else if (qbThrow < 42) {
             interest -= 16;
-            reasons.push("🤦 Distrusts team's inaccurate quarterback play (-16)");
+            reasons.push(
+                "🤦 Distrusts team's inaccurate quarterback play (-16)"
+            );
         }
     }
 
@@ -1293,7 +1456,11 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
     }
 
     // 7. POSITION-SPECIFIC WORKLOAD PROMISES
-    const promiseOptions = getRetentionPitchOptions(player);
+    const promiseOptions = getRetentionPitchOptions({
+        ...player,
+        pos: bestPos
+    });
+
     const focusPromise = promiseOptions.focusPromise;
 
     if (offer.promiseTouches === 'FEATURED') {
@@ -1361,7 +1528,8 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
         promiseTouches: offer.promiseTouches || 'NORMAL',
         promiseType: focusPromise && offer.promiseTouches === 'FEATURED'
             ? focusPromise.value
-            : 'NONE'
+            : 'NONE',
+        position: bestPos
     };
 }
 
@@ -1369,10 +1537,68 @@ export function evaluatePlayerNegotiation(player, team, offer = {}) {
  * Evaluates whether an available staff member agrees to sign.
  */
 export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
-    const tokensOffered = typeof pitch === 'number' ? pitch : (pitch.tokensOffered || 0);
-    const cashOffered = typeof pitch === 'object' ? (pitch.cashOffered || 0) : 0;
-    const schemePromise = typeof pitch === 'object' ? (pitch.schemePromise || 'GM_CHOICE') : 'GM_CHOICE';
-    const practiceFocus = typeof pitch === 'object' ? (pitch.practiceFocus || 'BALANCED') : 'BALANCED';
+    const pitchDetails = (
+        pitch !== null &&
+        typeof pitch === 'object'
+    ) ? pitch : {};
+
+    const rawTokensOffered = typeof pitch === 'number'
+        ? pitch
+        : (pitchDetails.tokensOffered ?? 0);
+
+    const rawCashOffered = pitchDetails.cashOffered ?? 0;
+
+    const parsedTokens = Number(rawTokensOffered);
+    const parsedCash = Number(rawCashOffered);
+
+    const tokensOffered = Number.isFinite(parsedTokens)
+        ? parsedTokens
+        : -1;
+
+    const cashOffered = Number.isFinite(parsedCash)
+        ? parsedCash
+        : -1;
+
+    const rawTokenBalance = Number(
+        team?.socialProfile?.favorTokens
+    );
+
+    const tokensAvailable = Number.isFinite(rawTokenBalance)
+        ? Math.max(0, Math.floor(rawTokenBalance))
+        : 0;
+
+    const rawCashBalance = Number(team?.finances?.balance);
+
+    const cashAvailable = Number.isFinite(rawCashBalance)
+        ? Math.max(0, rawCashBalance)
+        : 0;
+
+    const schemePromise =
+        pitchDetails.schemePromise || 'GM_CHOICE';
+
+    const practiceFocus =
+        pitchDetails.practiceFocus || 'BALANCED';
+
+    if (
+        !Number.isInteger(tokensOffered) ||
+        tokensOffered < 0 ||
+        tokensOffered > 2 ||
+        tokensOffered > tokensAvailable ||
+        !Number.isFinite(cashOffered) ||
+        cashOffered < 0 ||
+        cashOffered > cashAvailable
+    ) {
+        return {
+            accepted: false,
+            interestScore: 0,
+            reasons: [
+                'Invalid offer or insufficient team funds/Favor Tokens.'
+            ],
+            quote: '"Those terms are not available to your program."',
+            schemePromise,
+            practiceFocus
+        };
+    }
 
     const cred = team.socialProfile?.streetCred || 50;
     let interest = Math.round(cred * 0.42);
@@ -1385,10 +1611,31 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
     );
 
     // 1. FINANCIAL STIPEND & MARKET DESPERATION EVALUATION
-    const weeksUnemployed = staff.weeksUnemployed || 0;
-    const baseStipend = Math.max(0, Math.round((ratingAvg - 52) * 0.50));
-    const marketDecay = Math.pow(staff.stubbornness || 0.75, weeksUnemployed);
-    const requiredStipend = Math.max(0, Math.round(baseStipend * marketDecay));
+    const weeksUnemployed = Math.max(
+        0,
+        Number(staff.weeksUnemployed) || 0
+    );
+
+    const rawStubbornness = Number(staff.stubbornness);
+
+    const stubbornness = Number.isFinite(rawStubbornness)
+        ? Math.max(0, Math.min(1, rawStubbornness))
+        : 0.75;
+
+    const baseStipend = Math.max(
+        0,
+        Math.round((ratingAvg - 52) * 0.50)
+    );
+
+    const marketDecay = Math.pow(
+        stubbornness,
+        weeksUnemployed
+    );
+
+    const requiredStipend = Math.max(
+        0,
+        Math.round(baseStipend * marketDecay)
+    );
 
     if (cashOffered < requiredStipend) {
         const stipendDeficit = requiredStipend - cashOffered;
@@ -1404,7 +1651,9 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
     }
 
     if (weeksUnemployed >= 2) {
-        const desperationBonus = Math.round(weeksUnemployed * 6 * (1.0 - (staff.stubbornness || 0.75)));
+        const desperationBonus = Math.round(
+            weeksUnemployed * 6 * (1.0 - stubbornness)
+        );
         if (desperationBonus > 0) {
             interest += desperationBonus;
             reasons.push(`⏳ Eager to return to sideline after ${weeksUnemployed} weeks without team (+${desperationBonus})`);
@@ -1733,7 +1982,22 @@ export function createPlayerPromise(
 ) {
     if (!player || !team) return null;
 
-    const options = getRetentionPitchOptions(player);
+    const validPositions = [
+        'QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'
+    ];
+
+    const offeredPosition = String(
+        offer.position || ''
+    ).toUpperCase();
+
+    const promisePosition = validPositions.includes(offeredPosition)
+        ? offeredPosition
+        : (player.pos || estimateBestPosition(player));
+
+    const options = getRetentionPitchOptions({
+        ...player,
+        pos: promisePosition
+    });
     const validRoles = ['STARTER', 'ROTATION', 'BENCH'];
 
     const offeredRole = offer.role ?? offer.rolePromised ?? 'ROTATION';
@@ -1799,10 +2063,14 @@ function isPlayerStarterAtPosition(player, team, position) {
         team.depthChart?.defense || {}
     ];
 
+    const normalizedPosition =
+        normalizePromiseSlotPosition(position);
+
     return charts.some(chart =>
         Object.entries(chart).some(([slot, playerId]) =>
-            playerId === player.id &&
-            normalizePromiseSlotPosition(slot) === position
+            playerId != null &&
+            String(playerId) === String(player.id) &&
+            normalizePromiseSlotPosition(slot) === normalizedPosition
         )
     );
 }
@@ -1822,7 +2090,10 @@ function evaluateActivePlayerPromise(
         return { status: 'NONE', broken: false };
     }
 
-    if (promise.teamId && promise.teamId !== team?.id) {
+    if (
+        promise.teamId != null &&
+        String(promise.teamId) !== String(team?.id ?? '')
+    ) {
         player.activePromise = null;
         return { status: 'SUPERSEDED', broken: false };
     }
@@ -1836,12 +2107,19 @@ function evaluateActivePlayerPromise(
             player.personality.loyalty = 0;
         }
 
-        player.refusedTeamIds = [
-            ...new Set([
-                ...(player.refusedTeamIds || []),
-                team.id
-            ])
-        ];
+        const existingRefusals = Array.isArray(
+            player.refusedTeamIds
+        )
+            ? player.refusedTeamIds
+            : [];
+
+        const alreadyRefusesTeam = existingRefusals.some(id =>
+            id != null && String(id) === String(team.id)
+        );
+
+        player.refusedTeamIds = alreadyRefusesTeam
+            ? existingRefusals
+            : [...existingRefusals, team.id];
 
         player.retentionHistory = player.retentionHistory || [];
 
@@ -1978,7 +2256,7 @@ export function evaluateRetentionPitch(player, team, pitch = {}) {
         };
     }
 
-    if (player.refusedTeamIds?.includes(team.id)) {
+    if (playerRefusesTeam(player, team)) {
         return {
             accepted: false,
             score: 0,
@@ -2186,7 +2464,7 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
         };
     }
 
-    if (player.refusedTeamIds?.includes(team.id)) {
+    if (playerRefusesTeam(player, team)) {
         return {
             attempted: false,
             accepted: false,
@@ -2263,7 +2541,10 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
 
     // FIX: Filter roster competitors strictly by natural position fit
     const rosterCompetitors = getRosterObjects(team).filter(
-        p => p && p.id !== player.id && isPlayerNaturalForPosition(p, position)
+        p =>
+            p &&
+            String(p.id) !== String(player.id) &&
+            isPlayerNaturalForPosition(p, position)
     );
 
     const requiredStarters = position === 'OL'
@@ -2430,9 +2711,58 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
  * Evaluates a player position conversion pitch.
  */
 export function discussPositionChange(player, targetPos, team, useToken = false) {
-    if (!player || !targetPos) return { success: false, message: "Invalid discussion." };
+    if (!player || !team || player.id == null || !targetPos) {
+        return {
+            success: false,
+            message: "Invalid discussion. Player or team is unavailable."
+        };
+    }
 
-    const currentPos = player.pos || estimateBestPosition(player);
+    const playerIsOnRoster = getRosterObjects(team).some(
+        rosterPlayer =>
+            rosterPlayer?.id != null &&
+            String(rosterPlayer.id) === String(player.id)
+    );
+
+    if (!playerIsOnRoster) {
+        return {
+            success: false,
+            message: "This player is not on your team's roster."
+        };
+    }
+
+    const validPositions = [
+        'QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'
+    ];
+
+    targetPos = String(targetPos).trim().toUpperCase();
+
+    if (!validPositions.includes(targetPos)) {
+        return {
+            success: false,
+            message: `Invalid target position: ${targetPos}.`
+        };
+    }
+
+    const currentPos = String(
+        player.pos || estimateBestPosition(player) || ''
+    ).trim().toUpperCase();
+
+    const rawTokenBalance = Number(
+        team?.socialProfile?.favorTokens
+    );
+
+    const availableTokens = Number.isFinite(rawTokenBalance)
+        ? Math.max(0, Math.floor(rawTokenBalance))
+        : 0;
+
+    if (useToken && availableTokens < 1) {
+        return {
+            success: false,
+            message: 'You do not have a Favor Token available.'
+        };
+    }
+
     if (currentPos === targetPos) {
         return { success: false, message: `${player.name} already plays ${targetPos}.` };
     }
@@ -2540,7 +2870,16 @@ export function discussPositionChange(player, targetPos, team, useToken = false)
         player.pos = targetPos;
         player.bestPosition = targetPos;
         player.primarySide = isOffensive ? 'offense' : 'defense';
-        if (player.scouting) player.scouting.bestPosition = targetPos;
+
+        const currentYear = Number(game?.year);
+
+        if (Number.isFinite(currentYear)) {
+            player.positionChangedYear = currentYear;
+        }
+
+        if (player.scouting) {
+            player.scouting.bestPosition = targetPos;
+        }
 
         if (isOffensive) {
             player.favoriteOffensivePosition = targetPos;
@@ -2554,8 +2893,10 @@ export function discussPositionChange(player, targetPos, team, useToken = false)
             }
         }
 
-        if (useToken && team?.socialProfile) {
-            team.socialProfile.favorTokens = Math.max(0, (team.socialProfile.favorTokens || 1) - 1);
+        rebuildDepthChartFromOrder(team);
+
+        if (useToken) {
+            team.socialProfile.favorTokens = availableTokens - 1;
         }
 
         quote = ethic >= 65 

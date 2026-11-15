@@ -2923,7 +2923,7 @@ export function simulateHistoricalSeason(yearNum, gameInstance) {
 
         // Run the normal postgame systems for this historical week:
         // finances, AI preparation, practice, scouting, events, and growth.
-        processEndOfWeek();
+        processEndOfWeek({ financesOnly: true });
 
         gameInstance.currentWeek++;
     }
@@ -3568,7 +3568,8 @@ export function processWeeklyPlayerGrowth() {
                     !focusedTrainingPlayers.has(player) &&
                     matchesTrainingFocus(
                         player,
-                        assignment.focus
+                        assignment.focus,
+                        team
                     )
                 )
                 .map(player => {
@@ -3580,10 +3581,10 @@ export function processWeeklyPlayerGrowth() {
                     }
 
                     const skill = requestedSkill ||
-                        getAutomaticTrainingSkill(player);
+                        getAutomaticTrainingSkill(player, team);
 
                     const skillValue = skill
-                        ? getTrainingSkillValue(player, skill)
+                        ? getTrainingSkillValue(player, skill, team)
                         : null;
 
                     // A chosen skill at its cap does not silently turn into
@@ -3601,21 +3602,14 @@ export function processWeeklyPlayerGrowth() {
                         ? ageValue
                         : 14;
 
-                    const ethicValue = Number(
-                        player.personality?.workEthic
-                    );
+                    // Use this team's scouting evidence rather than hidden
+                    // work-ethic or potential ratings.
+                    const reportedTraits =
+                        getReportedTrainingTraits(player);
 
-                    const workEthic = Number.isFinite(ethicValue)
-                        ? Math.max(0, Math.min(100, ethicValue))
-                        : 50;
-
-                    const potentialFactor = {
-                        A: 2.0,
-                        B: 1.5,
-                        C: 1.0,
-                        D: 0.5,
-                        F: 0
-                    }[player.potential] ?? 1.0;
+                    const workEthic = reportedTraits.workEthic;
+                    const potentialFactor =
+                        reportedTraits.potentialPriority;
 
                     // Preserve the existing development assessment.
                     const priority =
@@ -3629,7 +3623,10 @@ export function processWeeklyPlayerGrowth() {
                         skill,
                         skillValue,
                         priority,
-                        instructionPriority: instructionPriority.rank
+                        instructionPriority: instructionPriority.rank,
+                        workEthic,
+                        potentialGrowthFactor:
+                            reportedTraits.potentialGrowthFactor
                     };
                 })
                 .filter(Boolean)
@@ -7939,6 +7936,27 @@ export function resolveRecruitingDay(gameState = game) {
 export function executeAICutDowns() {
     if (!game || !Array.isArray(game.teams)) return;
 
+    const offseasonState = game.offseasonState;
+    const recruitingProgress =
+        offseasonState?.recruitingProgress;
+
+    const phase = String(offseasonState?.phase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+
+    const recruitingComplete =
+        recruitingProgress?.initialized === true &&
+        recruitingProgress?.completed === true &&
+        Number(recruitingProgress?.seasonYear) ===
+            Number(game.year);
+
+    if (
+        phase !== 'rosterfinalization' ||
+        !recruitingComplete
+    ) {
+        return;
+    }
+
     const limit = REGULAR_SEASON_ROSTER_LIMIT;
 
     const playerTeamId = game.playerTeam?.id == null
@@ -8219,9 +8237,14 @@ export function executeAICutDowns() {
                 };
             }
 
-            team.roster = team.roster.filter(
-                id => String(id) !== String(p.id)
-            );
+            team.roster = team.roster.filter(entry => {
+                const rosterPlayerId =
+                    entry && typeof entry === 'object'
+                        ? entry.id
+                        : entry;
+
+                return String(rosterPlayerId) !== String(p.id);
+            });
         });
 
         aiSetDepthChart(team);
@@ -9823,7 +9846,7 @@ function getTeamDevelopmentPriority(team, player) {
     const positionPriorities = development.positionPriorities || {};
 
     const playerKey = String(player?.id ?? '');
-    const position = getTrainingPlayerPosition(player);
+    const position = getTrainingPlayerPosition(player, team);
 
     const hasPlayerPriority =
         Object.prototype.hasOwnProperty.call(
@@ -9917,18 +9940,18 @@ function getTrainingAssignmentTargetIds(team, assignment) {
         }
 
         const positionA =
-            getTrainingPlayerPosition(a.player) || 'WR';
+            getTrainingPlayerPosition(a.player, team) || 'WR';
 
         const positionB =
-            getTrainingPlayerPosition(b.player) || 'WR';
+            getTrainingPlayerPosition(b.player, team) || 'WR';
 
         const scoreA = skill
-            ? getTrainingAttributeScore(a.player, skill)
-            : calculateOverall(a.player, positionA);
+            ? getTrainingAttributeScore(a.player, skill, team)
+            : getTrainingOverallScore(a.player, positionA, team);
 
         const scoreB = skill
-            ? getTrainingAttributeScore(b.player, skill)
-            : calculateOverall(b.player, skill);
+            ? getTrainingAttributeScore(b.player, skill, team)
+            : getTrainingOverallScore(b.player, positionB, team);
 
         return scoreA - scoreB ||
             String(a.player.id).localeCompare(String(b.player.id));
@@ -10020,6 +10043,14 @@ function resolvePracticeFieldAccessForWeek(team, gameLog = null) {
             balance >= cost
         ) {
             team.finances.balance = balance - cost;
+
+            recordFinanceLedgerEntry(
+                team,
+                game,
+                'practiceField',
+                `Practice field booking: ${requestedAccess}`,
+                -cost
+            );
 
             if (
                 team.id === game?.playerTeam?.id &&

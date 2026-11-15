@@ -7484,8 +7484,19 @@ export function processAiRecruitingDay(gameState) {
 
         if (!isPlayerTeam) return true;
 
-        // The user's staff only work prospects explicitly placed
-        // on the persistent recruiting list.
+        const recruitingAutonomy = String(
+            team.teamInstructions?.departments?.recruiting?.autonomy ||
+            'guided'
+        ).toLowerCase();
+
+        // Direct autonomy leaves recruiting actions entirely
+        // under the GM's manual control.
+        if (recruitingAutonomy === 'direct') {
+            return false;
+        }
+
+        // Guided and delegated staff only work prospects explicitly
+        // placed on the persistent recruiting list.
         return getTeamRecruitingList(team).some(
             entry => entry?.playerId != null
         );
@@ -8835,8 +8846,19 @@ export function processAiRecruitingDay(gameState) {
 
                 const giftSpendingPolicy = recruitingInstructions.giftSpendingPolicy || {};
                 const allowGifts = !isPlayerControlledTeam || giftSpendingPolicy.allowGifts !== false;
+                const configuredGiftCap =
+                    giftSpendingPolicy.maxGiftPerRecruit;
+
+                const parsedGiftCap = Number(configuredGiftCap);
+
                 const maxGiftCap = isPlayerControlledTeam
-                    ? (Number(giftSpendingPolicy.maxGiftPerRecruit) || 10.00)
+                    ? (
+                        configuredGiftCap !== null &&
+                        configuredGiftCap !== undefined &&
+                        Number.isFinite(parsedGiftCap)
+                            ? Math.max(0, parsedGiftCap)
+                            : 10.00
+                    )
                     : Infinity;
 
                 const shouldConsiderSweetener =
@@ -11360,15 +11382,23 @@ export function previewCoachTendencies(coach, team) {
 
     const targetRunTendency = 50 + (rosterRunPreference * 1.5);
 
-    earlyDownTendency =
-        (earlyDownTendency * stubbornness) +
-        (targetRunTendency * adaptability);
+    const tendencyBlendWeight = stubbornness + adaptability;
+
+    if (tendencyBlendWeight > 0) {
+        earlyDownTendency = (
+            (earlyDownTendency * stubbornness) +
+            (targetRunTendency * adaptability)
+        ) / tendencyBlendWeight;
+    }
 
     const targetDefAggro = 50 + rosterBlitzPreference;
 
-    defAggro =
-        (defAggro * stubbornness) +
-        (targetDefAggro * adaptability);
+    if (tendencyBlendWeight > 0) {
+        defAggro = (
+            (defAggro * stubbornness) +
+            (targetDefAggro * adaptability)
+        ) / tendencyBlendWeight;
+    }
 
     return {
         earlyDownTendency: Math.max(
@@ -12503,13 +12533,13 @@ export function aiEvaluatePositionChanges(team, gameState) {
 
     for (const targetPos of deficits) {
         // Find candidate from a surplus position who is viable at targetPos
-        const bestCandidate = eligibleKids.find(kid => {
+        const bestCandidate = eligibleKids.map(kid => {
             const currentPos = String(
                 kid.pos || ''
             ).toUpperCase();
 
             if (!positions.includes(currentPos)) {
-                return false;
+                return null;
             }
 
             const isSurplus = counts[currentPos] > idealCounts[currentPos];
@@ -12584,7 +12614,7 @@ export function aiEvaluatePositionChanges(team, gameState) {
 
             // Without estimates for both positions, the AI cannot
             // reliably judge whether the conversion is worthwhile.
-            if (!isViableAtNew) return false;
+            if (!isViableAtNew) return null;
 
             // Individual coach tendencies influence position-conversion
             // decisions. They affect willingness, not player ability.
@@ -12664,8 +12694,21 @@ export function aiEvaluatePositionChanges(team, gameState) {
                 }
             }
 
-            return isSurplus && isViableAtNew && (targetOvr >= threshold);
-        });
+            return isSurplus &&
+                isViableAtNew &&
+                targetOvr >= threshold
+                ? {
+                    player: kid,
+                    conversionAdvantage: targetOvr - currentOvr
+                }
+                : null;
+        })
+            .filter(Boolean)
+            .sort((a, b) =>
+                b.conversionAdvantage - a.conversionAdvantage
+            );
+
+        //const bestCandidate = eligibleCandidates[0]?.player;
 
         if (bestCandidate) {
             const oldPos = String(

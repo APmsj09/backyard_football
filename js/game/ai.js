@@ -98,12 +98,23 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
             observedCarrier.action === 'qb_scramble'
         )
     );
-    const qbIsPassingPosture = qb && (qb.action === 'qb_setup' || qb.action === 'dropback');
+    const qbIsPassingPosture = Boolean(
+        qb &&
+        (qb.action === 'qb_setup' || qb.action === 'dropback')
+    );
+
+    // Defenders recognize a possible trick-play pass from the QB's
+    // observable possession and passing posture, not the play-call key.
+    const isObservablePassReset = Boolean(
+        qb &&
+        qb.hasBall &&
+        qbIsPassingPosture
+    );
     const qbIsRunning = qb && observedCarrier?.id === qb.id && !qbIsPassingPosture && (qb.action === 'run_path' || qb.y > (playState?.lineOfScrimmage || 0));
 
     const observedRunCarrier = Boolean(
         (observedCarrier && (!carrierIsPasser || qbIsRunning)) ||
-        (isLateralInAir && playState?.ballState?.lateralPurpose !== 'flea_return')
+        isLateralInAir
     );
 
     const qbScramble = Boolean(
@@ -136,16 +147,21 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
 
         if (debugEnabled && pState._lastLoggedGuess !== 'run') {
             logPlayDebug('DEF_READ', `${pState.name} (${pState.role}) committed to [RUN] (${observedRunCarrier ? 'Observed ball carrier' : 'QB scramble'})`, {
-                confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
+                confidence: confidenceLevel, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0
             }, tick, playState?.playId);
             pState._lastLoggedGuess = 'run';
         }
-        return { guess: 'run', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
+        return {
+            guess: 'run',
+            confidence: confidenceLevel,
+            direction: pState._diagnosedDirection || 'center',
+            dirConfidence: 1.0
+        };
     }
 
     // Once ANY defender confirms a live runner carrying the ball on a designed run,
     // they NEVER revert to 'pass' unless a trick play pitch/flea-flicker return occurs!
-    const isTrickPass = playState?.playKey === 'Trick_Flea_Flicker' && playState?.fleaFlickerPhase === 'qb_pass';
+    const isTrickPass = isObservablePassReset;
     if (pState._diagnosedGuess === 'run' && pState._sawLiveRunnerTick && !isTrickPass) {
         return { guess: 'run', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
     }
@@ -227,10 +243,11 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
 
     // MISDIRECTION / JET SWEEP READ:
     // Fast-moving WRs crossing the backfield trick defenders into flowing horizontally.
-    const jetSweepers = offenseStates.filter(p => 
-        p.role === 'WR' && 
-        p.y < (playState?.lineOfScrimmage || 60) + 1.0 && 
-        Math.abs(p.vx || 0) > 3.5
+    const jetSweepers = offenseStates.filter(p =>
+        p.role === 'WR' &&
+        p.y < (playState?.lineOfScrimmage || 60) + 1.0 &&
+        Math.abs(p.vx || 0) > 3.5 &&
+        getPerceptionWeight(visionContext, p) > 0
     );
 
     jetSweepers.forEach(wr => {
@@ -299,9 +316,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
             guess = finalRunScore >= finalPassScore ? 'run' : 'pass';
         }
         } else if (currentGuess === 'run') {
-        const isTrickPass =
-            playState?.playKey === 'Trick_Flea_Flicker' &&
-            playState?.fleaFlickerPhase === 'qb_pass';
+        const isTrickPass = isObservablePassReset;
 
         // Once an actual live runner has been observed, preserve the
         // run read unless the play is in the flea-flicker pass phase.
@@ -439,7 +454,55 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
         
         if (ballFlightTime >= reactionTicks) {
             const targetId = playState.ballState.targetPlayerId;
-            const receiver = offenseStates.find(o => o.id === targetId);
+
+            const receiver = offenseStates.find(o =>
+                targetId != null &&
+                o.id != null &&
+                String(o.id) === String(targetId)
+            );
+
+            const anticipatedTargetId =
+                safetyState._readAnticipationTargetId;
+
+            const anticipatedTargetSlot =
+                safetyState._readAnticipationTargetSlot;
+
+            const anticipationUntil = Number(
+                safetyState._readAnticipationUntilTick
+            );
+
+            const anticipationStillActive =
+                Number.isFinite(anticipationUntil) &&
+                playState.tick <= anticipationUntil;
+
+            const matchedAnticipation =
+                anticipationStillActive &&
+                receiver &&
+                (
+                    (
+                        anticipatedTargetId != null &&
+                        String(anticipatedTargetId) === String(targetId)
+                    ) ||
+                    (
+                        anticipatedTargetSlot != null &&
+                        receiver.slot === anticipatedTargetSlot
+                    )
+                );
+
+            // A safety who correctly anticipated the target can
+            // immediately break toward the actual ball destination.
+            if (matchedAnticipation) {
+                return {
+                    type: 'help',
+                    helpX: playState.ballState.targetX,
+                    helpY: playState.ballState.targetY,
+                    targetReceiver: receiver,
+                    targetCorner: null,
+                    pressureScore: 100,
+                    delayedHelp: false,
+                    readAnticipation: true
+                };
+            }
             
             // Absolute priority: Abandon zone drops and break directly to the ball's landing spot
             return {
@@ -458,6 +521,511 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
     // Before the reaction delay expires, let the normal assignment logic
     // maintain coverage instead of switching help targets between receivers.
     if (isBallInAir) return null;
+
+    // Deep safeties maintain broad awareness of the field rather
+    // than relying exclusively on the direction they are facing.
+    const isDeepSafety = String(
+        safetyState.assignment || ''
+    ).includes('deep');
+
+    const safetyVisionDepth = isDeepSafety ? 38 : 25;
+
+    const safetyVisionContext = getPerceptionContext(
+        safetyState,
+        playState.tick,
+        22,
+        safetyVisionDepth,
+        3.25
+    );
+
+    const getSafetyThreatAwareness = receiver => {
+        const directAwareness = getPerceptionWeight(
+            safetyVisionContext,
+            receiver
+        );
+
+        // Normal vision receives the full existing perception weight.
+        if (directAwareness > 0) {
+            return directAwareness;
+        }
+
+        // Broad scanning is reserved for deep safeties.
+        if (
+            !isDeepSafety ||
+            !receiver ||
+            !Number.isFinite(receiver.x) ||
+            !Number.isFinite(receiver.y)
+        ) {
+            return 0;
+        }
+
+        const dx = receiver.x - safetyState.x;
+        const dy = receiver.y - safetyState.y;
+
+        const distanceSq = (dx * dx) + (dy * dy);
+        const scanRangeSq =
+            safetyVisionDepth * safetyVisionDepth;
+
+        if (distanceSq > scanRangeSq) {
+            return 0;
+        }
+
+        const distance = Math.sqrt(distanceSq);
+
+        const awareness = Math.max(
+            15,
+            Math.min(
+                99,
+                Number(
+                    safetyVisionContext?.awareness ??
+                    safetyState.playbookIQ ??
+                    50
+                )
+            )
+        );
+
+        const dirX = safetyVisionContext?.dirX ?? 0;
+        const dirY = safetyVisionContext?.dirY ?? -1;
+
+        const facingCos = distance > 0
+            ? ((dx * dirX) + (dy * dirY)) / distance
+            : 1;
+
+        // Broad scanning is weaker than direct vision, especially
+        // for threats behind the safety or near the edge of range.
+        const baseAwareness = 0.08 + (awareness / 100) * 0.12;
+        const distanceFactor = Math.max(
+            0.65,
+            1 - (0.35 * distance / safetyVisionDepth)
+        );
+
+        const directionFactor = facingCos < 0 ? 0.60 : 1.0;
+
+        return baseAwareness *
+            distanceFactor *
+            directionFactor;
+    };
+
+    // ED REED-STYLE QUARTERBACK READ ANTICIPATION
+    //
+    // The safety interprets the QB's observable read focus.
+    // It never reads the QB's private readProgression array.
+    //
+    // Both safety skill and QB deception ability scale continuously.
+    // Even average safeties retain a small chance to anticipate.
+
+    const readTick = Number.isFinite(playState.tick)
+        ? playState.tick
+        : 0;
+
+    const currentPlayId = playState.playId ?? null;
+
+    const previousReadTick = Number(
+        safetyState._qbReadLastTick
+    );
+
+    // Reset the anticipation memory when a new play begins.
+    if (
+        safetyState._qbReadPlayId !== currentPlayId ||
+        (
+            Number.isFinite(previousReadTick) &&
+            readTick < previousReadTick
+        )
+    ) {
+        safetyState._qbReadPlayId = currentPlayId;
+        safetyState._qbReadLastTick = null;
+        safetyState._qbReadFocusSlot = null;
+        safetyState._qbReadFocusTicks = 0;
+        safetyState._qbReadFocusLastTick = null;
+        safetyState._qbReadAnticipationAttempted = false;
+        safetyState._readAnticipationTargetId = null;
+        safetyState._readAnticipationTargetSlot = null;
+        safetyState._readAnticipationUntilTick = -1;
+    }
+
+    safetyState._qbReadLastTick = readTick;
+
+    const qb = offenseStates.find(player =>
+        player.role === 'QB' ||
+        player.formationRole === 'QB' ||
+        player.slot?.startsWith('QB')
+    );
+
+    const qbCanBeRead = Boolean(
+        isDeepSafety &&
+        qb?.hasBall &&
+        !isBallInAir &&
+        ['qb_setup', 'dropback'].includes(qb.action) &&
+        qb.currentReadTargetSlot != null
+    );
+
+    const clampSkill = value => {
+        const parsed = Number(value);
+
+        return Number.isFinite(parsed)
+            ? Math.max(15, Math.min(99, parsed))
+            : 50;
+    };
+
+    const safetyProfile = getDecisionProfile(
+        safetyState,
+        readTick
+    );
+
+    const qbProfile = qb
+        ? getDecisionProfile(qb, readTick)
+        : null;
+
+    const safetyAwareness = clampSkill(
+        safetyProfile?.awareness ??
+        safetyState.playbookIQ
+    );
+
+    const safetyDecision = clampSkill(
+        safetyProfile?.decisionQuality ??
+        safetyProfile?.decisionMaking ??
+        safetyAwareness
+    );
+
+    const safetyCoverage = clampSkill(
+        safetyState.coverage
+    );
+
+    const safetyDiscipline = clampSkill(
+        safetyProfile?.assignmentDiscipline
+    );
+
+    const safetyReadSkill =
+        (safetyAwareness * 0.35) +
+        (safetyDecision * 0.30) +
+        (safetyCoverage * 0.25) +
+        (safetyDiscipline * 0.10);
+
+    const qbAwareness = clampSkill(
+        qbProfile?.awareness ??
+        qb?.playbookIQ
+    );
+
+    const qbDecision = clampSkill(
+        qbProfile?.decisionMaking ??
+        qbProfile?.decisionQuality ??
+        qbAwareness
+    );
+
+    const qbDeceptionSkill =
+        (qbAwareness * 0.65) +
+        (qbDecision * 0.35);
+
+    const isRouteReceiver = receiver =>
+        receiver &&
+        (
+            receiver.action?.includes('route') ||
+            receiver.action === 'route_complete'
+        );
+
+    // Estimate the receiver's likely location when the QB's
+    // projected pass reaches him, following the route path.
+    const buildAnticipationHelp = receiver => {
+        const qbPower = clampSkill(
+            qb?.throwPower ??
+            qb?.thp ??
+            qb?.attributes?.technical?.throwPower
+        );
+
+        const routeAssignment = String(
+            receiver.assignment || ''
+        ).toLowerCase();
+
+        const distanceFromQB = getDistance(qb, receiver);
+
+        let passType = 'touch';
+
+        if (
+            distanceFromQB < 12 ||
+            ['slant', 'drag', 'curl', 'hitch', 'quick']
+                .some(route => routeAssignment.includes(route))
+        ) {
+            passType = 'bullet';
+        } else if (
+            distanceFromQB > 25 ||
+            ['fly', 'go', 'streak', 'post', 'corner']
+                .some(route => routeAssignment.includes(route))
+        ) {
+            passType = 'lob';
+        }
+
+        // Match the QB's existing estimated throw-speed model.
+        const maxArmVelocity = 16 + (qbPower / 100) * 14;
+
+        let estimatedBallSpeed = maxArmVelocity;
+
+        if (passType === 'lob') {
+            estimatedBallSpeed *= 0.84;
+        } else if (passType === 'touch') {
+            estimatedBallSpeed *= 0.92;
+        }
+
+        const estimatedFlightTime =
+            distanceFromQB / Math.max(1, estimatedBallSpeed);
+
+        const recYPS = getReceiverProjectionSpeedYPS(receiver);
+
+        let distanceToTravel =
+            recYPS * estimatedFlightTime;
+
+        let projectedX = receiver.x;
+        let projectedY = receiver.y;
+
+        const routePath = Array.isArray(receiver.routePath)
+            ? receiver.routePath
+            : [];
+
+        const currentPathIndex = Math.max(
+            0,
+            Math.floor(Number(receiver.currentPathIndex) || 0)
+        );
+
+        let lastValidDirX = 0;
+        let lastValidDirY = 1;
+
+        if (routePath.length > currentPathIndex) {
+            for (
+                let i = currentPathIndex;
+                i < routePath.length;
+                i++
+            ) {
+                const nextNode = routePath[i];
+
+                const dx = nextNode.x - projectedX;
+                const dy = nextNode.y - projectedY;
+
+                const distanceToNext = Math.hypot(dx, dy);
+
+                if (distanceToNext > 0.1) {
+                    lastValidDirX = dx / distanceToNext;
+                    lastValidDirY = dy / distanceToNext;
+                }
+
+                if (distanceToTravel > distanceToNext) {
+                    distanceToTravel -= distanceToNext;
+                    projectedX = nextNode.x;
+                    projectedY = nextNode.y;
+                } else if (distanceToNext > 0.1) {
+                    const ratio = distanceToTravel / distanceToNext;
+
+                    projectedX += dx * ratio;
+                    projectedY += dy * ratio;
+
+                    distanceToTravel = 0;
+                    break;
+                }
+            }
+
+            const continuousRoute = [
+                'fly', 'go', 'streak', 'vert', 'fade',
+                'post', 'corner', 'cross', 'crosser',
+                'crossing', 'deep_cross', 'over',
+                'wheel', 'seam', 'mesh', 'drag'
+            ].some(route => routeAssignment.includes(route));
+
+            if (distanceToTravel > 0 && continuousRoute) {
+                const receiverSpeed = Math.hypot(
+                    receiver.vx || 0,
+                    receiver.vy || 0
+                );
+
+                const dirX = receiverSpeed > 0.5
+                    ? receiver.vx / receiverSpeed
+                    : lastValidDirX;
+
+                const dirY = receiverSpeed > 0.5
+                    ? receiver.vy / receiverSpeed
+                    : lastValidDirY;
+
+                projectedX += dirX * distanceToTravel;
+                projectedY += dirY * distanceToTravel;
+            }
+        } else {
+            projectedX +=
+                (receiver.vx || 0) * estimatedFlightTime;
+
+            projectedY +=
+                (receiver.vy || 0) * estimatedFlightTime;
+        }
+
+        // Find the closest point to the safety along the likely
+        // QB-to-receiver passing lane, rather than chasing the
+        // receiver's projected catch point directly.
+        const laneDX = projectedX - qb.x;
+        const laneDY = projectedY - qb.y;
+
+        const laneLengthSq =
+            (laneDX * laneDX) + (laneDY * laneDY);
+
+        let laneFraction = 0.70;
+
+        if (laneLengthSq > 0.01) {
+            const safetyDX = safetyState.x - qb.x;
+            const safetyDY = safetyState.y - qb.y;
+
+            const nearestFraction = (
+                (safetyDX * laneDX) +
+                (safetyDY * laneDY)
+            ) / laneLengthSq;
+
+            laneFraction = Math.max(
+                0.35,
+                Math.min(0.92, nearestFraction)
+            );
+        }
+
+        const helpX = qb.x + (laneDX * laneFraction);
+        const helpY = qb.y + (laneDY * laneFraction);
+
+        return {
+            type: 'help',
+            helpX: Math.max(1, Math.min(FIELD_WIDTH - 1, helpX)),
+            helpY: Math.max(1, Math.min(118.5, helpY)),
+            targetReceiver: receiver,
+            targetCorner: null,
+            pressureScore: 100,
+            delayedHelp: false,
+            readAnticipation: true,
+            predictedCatchX: projectedX,
+            predictedCatchY: projectedY
+        };
+    };
+
+    // Maintain a brief route jump once the safety commits.
+    const anticipatedTargetId =
+        safetyState._readAnticipationTargetId;
+
+    const anticipatedTargetSlot =
+        safetyState._readAnticipationTargetSlot;
+
+    const anticipationUntil = Number(
+        safetyState._readAnticipationUntilTick
+    );
+
+    if (
+        qbCanBeRead &&
+        Number.isFinite(anticipationUntil) &&
+        readTick <= anticipationUntil
+    ) {
+        const anticipatedReceiver = offenseStates.find(receiver =>
+            (
+                anticipatedTargetId != null &&
+                receiver.id != null &&
+                String(receiver.id) === String(anticipatedTargetId)
+            ) ||
+            (
+                anticipatedTargetSlot != null &&
+                receiver.slot === anticipatedTargetSlot
+            )
+        );
+
+        if (isRouteReceiver(anticipatedReceiver)) {
+            return buildAnticipationHelp(anticipatedReceiver);
+        }
+    }
+
+    if (
+        !qbCanBeRead ||
+        !Number.isFinite(anticipationUntil) ||
+        readTick > anticipationUntil
+    ) {
+        safetyState._readAnticipationTargetId = null;
+        safetyState._readAnticipationTargetSlot = null;
+        safetyState._readAnticipationUntilTick = -1;
+    }
+
+    if (qbCanBeRead) {
+        const gazeReceiver = offenseStates.find(receiver =>
+            receiver.slot === qb.currentReadTargetSlot
+        );
+
+        const receiverAwareness = getSafetyThreatAwareness(
+            gazeReceiver
+        );
+
+        if (
+            isRouteReceiver(gazeReceiver) &&
+            receiverAwareness > 0
+        ) {
+            const gazeSlot = String(
+                gazeReceiver.slot ?? gazeReceiver.id
+            );
+
+            if (safetyState._qbReadFocusSlot === gazeSlot) {
+                if (
+                    safetyState._qbReadFocusLastTick !== readTick
+                ) {
+                    safetyState._qbReadFocusTicks =
+                        (Number(safetyState._qbReadFocusTicks) || 0) + 1;
+                }
+            } else {
+                safetyState._qbReadFocusSlot = gazeSlot;
+                safetyState._qbReadFocusTicks = 1;
+            }
+
+            safetyState._qbReadFocusLastTick = readTick;
+
+            const safetySkillFactor = safetyReadSkill / 100;
+            const qbSkillFactor = qbDeceptionSkill / 100;
+
+            // Continuous skill scaling. Even average safeties
+            // retain a chance to recognize and anticipate a read.
+            const baseChance =
+                0.005 +
+                (0.075 * Math.pow(safetySkillFactor, 1.5));
+
+            // Elite quarterbacks remain difficult to read,
+            // but can never completely eliminate anticipation.
+            const qbDeceptionMultiplier =
+                1 - (0.25 * qbSkillFactor);
+
+            const perceptionMultiplier =
+                0.85 +
+                (0.15 * Math.max(
+                    0,
+                    Math.min(1, receiverAwareness)
+                ));
+
+            const anticipationChance = Math.min(
+                0.08,
+                baseChance *
+                qbDeceptionMultiplier *
+                perceptionMultiplier
+            );
+
+            // One anticipation attempt per safety per play.
+            // Prevent repeated rolls during the same sustained read.
+            if (!safetyState._qbReadAnticipationAttempted) {
+                safetyState._qbReadAnticipationAttempted = true;
+
+                if (Math.random() < anticipationChance) {
+                    safetyState._readAnticipationTargetId =
+                        gazeReceiver.id ?? null;
+
+                    safetyState._readAnticipationTargetSlot =
+                        gazeReceiver.slot;
+
+                    // Better safeties sustain their route jump slightly longer.
+                    safetyState._readAnticipationUntilTick =
+                        readTick +
+                        Math.round(4 + (safetySkillFactor * 5));
+
+                    return buildAnticipationHelp(gazeReceiver);
+                }
+            }
+        } else {
+            safetyState._qbReadFocusSlot = null;
+            safetyState._qbReadFocusTicks = 0;
+        }
+    } else {
+        safetyState._qbReadFocusSlot = null;
+        safetyState._qbReadFocusTicks = 0;
+    }
 
     // 2. PRE-THROW ZONE MATCHING / MAN HELP
     const LOS = playState.lineOfScrimmage;
@@ -479,11 +1047,17 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
         const targetSlot = corner.assignment.replace('man_cover_', '');
         const receiver = offenseStates.find(r => r.slot === targetSlot);
 
-        if (receiver) {
+        const receiverAwareness = receiver
+            ? getSafetyThreatAwareness(receiver)
+            : 0;
+
+        if (receiverAwareness > 0) {
             const separationDist = getDistance(corner, receiver);
             const distFromSafety = getDistance(safetyState, receiver);
 
-            let pressureScore = separationDist - (distFromSafety * 0.15);
+            let pressureScore =
+                (separationDist - (distFromSafety * 0.15)) *
+                (0.70 + receiverAwareness * 0.30);
 
             if (pressureScore > maxPressure) {
                 maxPressure = pressureScore;
@@ -495,7 +1069,17 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
     // B. Zone Coverage Pattern Match (Stop DBs from sitting at an empty waypoint)
     if (safetyState.assignment && safetyState.assignment.includes('zone_deep')) {
         offenseStates.forEach(receiver => {
-            if (receiver.role === 'QB' || !receiver.action?.includes('route')) return;
+            if (
+                receiver.role === 'QB' ||
+                !receiver.action?.includes('route')
+            ) {
+                return;
+            }
+
+            const receiverAwareness =
+                getSafetyThreatAwareness(receiver);
+
+            if (receiverAwareness <= 0) return;
 
             const recDepth = receiver.y - LOS;
             const distanceToGoal = 110 - LOS;
@@ -505,7 +1089,11 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
 
             // IQ & Instinct Check: Better safeties consistently realize when there are no deep threats.
             // But even a low-IQ safety might have a good instinctual feel for the play (random variance).
-            const anyDeepThreat = offenseStates.some(o => o.action?.includes('route') && (o.y - LOS) > 12.0);
+            const anyDeepThreat = offenseStates.some(o =>
+                o.action?.includes('route') &&
+                (o.y - LOS) > 12.0 &&
+                getSafetyThreatAwareness(o) > 0
+            );
             
             if (!anyDeepThreat) {
                 // Evaluate awareness deterministically to avoid 25Hz threshold flickering
@@ -525,7 +1113,9 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             const isMiddle = Math.abs(receiver.x - CENTER_X) < 12;
             const isMySide = Math.sign(receiver.x - CENTER_X) === Math.sign(safetyState.x - CENTER_X);
 
-            let pressureScore = (recDepth * 0.2) - (distFromSafety * 0.15);
+            let pressureScore = (
+                (recDepth * 0.2) - (distFromSafety * 0.15)
+            ) * (0.70 + receiverAwareness * 0.30);
 
             if (safetyState.assignment.includes('middle') && isMiddle) pressureScore += 3;
             else if (!safetyState.assignment.includes('middle') && isMySide) pressureScore += 3;
@@ -829,14 +1419,31 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     // Pre-calculate the threat straight up the middle so we know if we NEED to bounce outside
     let centerThreat = 0;
     defenseStates.forEach(def => {
-        if (def.stunnedTicks > 0 || def.y < runner.y - 1.0) return;
-        // Focus center threat specifically on the immediate 3-yard tunnel ahead
-        const dist = Math.hypot(runner.x - def.x, (runner.y + Math.min(visionDepth, 3.0)) - def.y);
-        
+        if (
+            def.stunnedTicks > 0 ||
+            def.y < runner.y - 1.0
+        ) {
+            return;
+        }
+
+        const perceptionWeight = getPerceptionWeight(
+            visionContext,
+            def
+        );
+
+        if (perceptionWeight <= 0) return;
+
+        // Focus center threat specifically on the immediate 3-yard tunnel ahead.
+        const dist = Math.hypot(
+            runner.x - def.x,
+            (runner.y + Math.min(visionDepth, 3.0)) - def.y
+        );
+
         if (dist < 4.5) {
-            // Both unblocked AND engaged defenders physically clog the middle!
+            // Both unblocked and engaged defenders physically clog the middle.
             const weight = (def.isBlocked || def.isEngaged) ? 6 : 10;
-            centerThreat += (weight / (dist + 0.1));
+            centerThreat +=
+                (weight / (dist + 0.1)) * perceptionWeight;
         }
     });
 
@@ -1434,34 +2041,111 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     }
 
     // --- ELITE QB EYE MANIPULATION (Looking off Safeties) ---
-    const eyeManipChance = Math.max(0, (qbIQ - 50) / 100) * 0.7; 
-    if (playState.tick < 30 && progression.length > 1 && readIndex === 0 && Math.random() < eyeManipChance) {
-        const trueTarget = offenseStates.find(o => o.slot === progression[0]);
-        if (trueTarget && trueTarget.initialX !== undefined) {
-            const decoy = offenseStates.find(o =>
-                o.slot !== 'QB1' && !o.slot.startsWith('OL') &&
-                o.slot !== trueTarget.slot &&
-                (o.action?.includes('route') || o.action === 'run_path') &&
-                o.initialX !== undefined && Math.sign(o.initialX - 26.6) !== Math.sign(trueTarget.initialX - 26.6)
+
+    // Resolve eye manipulation once per play instead of rerolling
+    // every tick. Sustained deception gives defenders a meaningful
+    // opportunity to recognize the QB's apparent target.
+    const currentEyeManipPlayId = playState.playId ?? null;
+
+    const previousEyeManipTick = Number(
+        qbState._eyeManipulationLastTick
+    );
+
+    if (
+        qbState._eyeManipulationPlayId !== currentEyeManipPlayId ||
+        (
+            Number.isFinite(previousEyeManipTick) &&
+            playState.tick < previousEyeManipTick
+        )
+    ) {
+        qbState._eyeManipulationPlayId = currentEyeManipPlayId;
+        qbState._eyeManipulationLastTick = null;
+        qbState._eyeManipulationResolved = false;
+        qbState._eyeManipulationDecoySlot = null;
+    }
+
+    qbState._eyeManipulationLastTick = playState.tick;
+
+    if (
+        playState.tick < 30 &&
+        progression.length > 1 &&
+        readIndex === 0
+    ) {
+        if (!qbState._eyeManipulationResolved) {
+            qbState._eyeManipulationResolved = true;
+            qbState._eyeManipulationDecoySlot = null;
+
+            // Continuous skill scaling: even inexperienced QBs can
+            // occasionally manipulate a defender, while better QBs
+            // execute the deception more effectively.
+            const qbSkillFactor = Math.max(
+                0,
+                Math.min(1, qbIQ / 100)
             );
-            if (decoy) {
-                qbState.currentReadTargetSlot = decoy.slot;
-                if (debugEnabled && qbState._lastLoggedDecoy !== decoy.slot) {
-                    logPlayDebug('QB_EYE_MANIPULATION', `${qbState.name} uses eyes to look safety off primary read (${progression[0]}) using decoy ${decoy.slot}`, {
-                        trueRead: progression[0],
-                        decoySlot: decoy.slot
-                    }, playState.tick, playState.playId);
-                    qbState._lastLoggedDecoy = decoy.slot;
+
+            const eyeManipChance =
+                0.005 +
+                (0.075 * Math.pow(qbSkillFactor, 1.5));
+
+            if (Math.random() < eyeManipChance) {
+                const trueTarget = offenseStates.find(
+                    o => o.slot === progression[0]
+                );
+
+                if (
+                    trueTarget &&
+                    trueTarget.initialX !== undefined
+                ) {
+                    const decoy = offenseStates.find(o =>
+                        o.slot !== 'QB1' &&
+                        !o.slot.startsWith('OL') &&
+                        o.slot !== trueTarget.slot &&
+                        (
+                            o.action?.includes('route') ||
+                            o.action === 'run_path'
+                        ) &&
+                        o.initialX !== undefined &&
+                        Math.sign(o.initialX - CENTER_X) !==
+                            Math.sign(trueTarget.initialX - CENTER_X)
+                    );
+
+                    if (decoy) {
+                        qbState._eyeManipulationDecoySlot =
+                            decoy.slot;
+
+                        if (
+                            debugEnabled &&
+                            qbState._lastLoggedDecoy !== decoy.slot
+                        ) {
+                            logPlayDebug(
+                                'QB_EYE_MANIPULATION',
+                                `${qbState.name} uses his eyes to look the safety off primary read (${progression[0]}) using decoy ${decoy.slot}`,
+                                {
+                                    trueRead: progression[0],
+                                    decoySlot: decoy.slot
+                                },
+                                playState.tick,
+                                playState.playId
+                            );
+
+                            qbState._lastLoggedDecoy = decoy.slot;
+                        }
+
+                        if (gameLog && Math.random() < 0.10) {
+                            pushGameLog(
+                                gameLog,
+                                `[Tick ${playState.tick}] 👀 ${qbState.name} uses his eyes to look the safety off his primary read!`,
+                                playState
+                            );
+                        }
+                    }
                 }
-                if (gameLog && playState.tick === 25 && Math.random() < 0.1) {
-                    pushGameLog(gameLog, `[Tick ${playState.tick}] 👀 ${qbState.name} uses his eyes to look the safety off his primary read!`, playState);
-                }
-            } else {
-                qbState.currentReadTargetSlot = progression[0];
             }
-        } else {
-            qbState.currentReadTargetSlot = progression[0];
         }
+
+        qbState.currentReadTargetSlot =
+            qbState._eyeManipulationDecoySlot ||
+            progression[0];
     } else {
         qbState.currentReadTargetSlot = progression[readIndex];
     }
@@ -2522,7 +3206,7 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
 
     if (throwDistance < 12 || ['slant', 'drag', 'curl', 'hitch', 'quick'].some(r => assignmentStr.includes(r))) {
         passType = 'bullet';
-    } else if (throwDistance > 25 || ['fly', 'go', 'streak', 'post'].some(r => assignmentStr.includes(r))) {
+    } else if (throwDistance > 25 || ['fly', 'go', 'streak', 'post', 'corner'].some(r => assignmentStr.includes(r))) {
         passType = 'lob';
     }
 

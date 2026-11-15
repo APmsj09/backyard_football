@@ -281,10 +281,22 @@ async function startNewGame() {
             startupStage = `advancing offseason after Season ${y}`;
             const offseasonReport = Game.advanceToOffseason();
 
-            // Refresh state after rollover, then resolve AI staffing
-            // against the season that just finished. This uses the same
-            // year key as the live Coach Carousel transition.
+            // Historical startup must not continue into coach or draft
+            // processing unless the completed-season rollover succeeded.
             gameState = Game.getGameState();
+
+            if (
+                offseasonReport?.interrupted === true ||
+                Number(gameState?.year) !== y + 1 ||
+                Number(gameState?.offseasonState?.completedSeasonYear) !== y
+            ) {
+                throw new Error(
+                    `Historical Season ${y} did not complete its offseason rollover safely.`
+                );
+            }
+
+            // Resolve AI staffing against the season that just finished.
+            // This uses the same year key as the live Coach Carousel transition.
 
             const completedSeasonYear = Number(
                 gameState.offseasonState?.completedSeasonYear
