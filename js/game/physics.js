@@ -549,8 +549,13 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // They close with full sprint speed until physical tackle range (0.5y) is reached.
     const isAggressiveAttackAction = [
         'run_path', 'run_route', 'tracking_ball', 'pursuit',
-        'pass_rush', 'blitz', 'blitz_gap', 'blitz_edge', 'run_gap_A'
-    ].includes(pState.action) || Boolean(pState.action?.startsWith('man_cover_'));
+        'pass_rush', 'blitz', 'blitz_gap', 'blitz_edge',
+        'qb_scramble', 'run_block', 'pass_block', 'lead_block', 'screen_block'
+    ].includes(pState.action) ||
+        Boolean(pState.action?.startsWith('man_cover_')) ||
+        Boolean(pState.action?.startsWith('run_gap_')) ||
+        Boolean(pState.action?.startsWith('run_edge_')) ||
+        Boolean(pState.action?.includes('block'));
 
     const isStopping =
         distToTarget < 2.5 &&
@@ -1277,13 +1282,17 @@ function resolveNewtonianCollisions(pState, allPlayers) {
         if (pState.ghostTicks > 0 || other.ghostTicks > 0) continue;
 
         const isNonOLOffensePair = pState.isOffense && other.isOffense && !pState.slot?.startsWith('OL') && !other.slot?.startsWith('OL');
+        const isMeshAction = action =>
+            action === 'handoff_setup' ||
+            action === 'handoff_receive' ||
+            action === 'qb_rpo_read';
         const isQBInHandoffMesh = isNonOLOffensePair && (
-            (pState.role === 'QB' && pState.action === 'handoff_setup') ||
-            (other.role === 'QB' && other.action === 'handoff_setup')
+            (pState.role === 'QB' && isMeshAction(pState.action)) ||
+            (other.role === 'QB' && isMeshAction(other.action))
         );
         const isHandoffPair = isQBInHandoffMesh || (pState.role === 'QB' && other.role === 'RB') || (pState.role === 'RB' && other.role === 'QB');
-        // Exempt QB and handoff target (RB/WR/TE) from body bumping during handoffs and releases
-        if (isHandoffPair && (pState.action === 'handoff_setup' || other.action === 'handoff_setup')) {
+        // Exempt QB and handoff target (RB/WR/TE) from body bumping during handoffs, RPO meshes, and releases
+        if (isHandoffPair && (isMeshAction(pState.action) || isMeshAction(other.action))) {
             continue;
         }
 
@@ -1315,7 +1324,11 @@ function resolveNewtonianCollisions(pState, allPlayers) {
             }
 
             const totalW = myWeight + theirWeight;
-            const myMoveRatio = theirWeight / totalW;
+            const p1Settled = pState.movementMode === 'HOLD' && pState._intent?.settled;
+            const p2Settled = other.movementMode === 'HOLD' && other._intent?.settled;
+            const myMoveRatio = (p1Settled && !p2Settled)
+                ? 0
+                : (theirWeight / totalW);
 
             pState.x += dx_norm * overlap * myMoveRatio * 0.25;
             pState.y += dy_norm * overlap * myMoveRatio * 0.25;

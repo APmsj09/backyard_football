@@ -952,6 +952,8 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 x: startX, y: startY, initialX: startX, initialY: startY,
                 angle: isOffense ? 0 : Math.PI,
                 targetX, targetY,
+                fatigue: player.fatigue || 0,
+                stamina: player.attributes?.physical?.stamina ?? 50,
                 fatigueModifier: fatigueMod,
                 spd: speed, agi: agility, str: strength, jump: jumping,
                 wgt: weight, hgt: height, iq: playerIQ,
@@ -959,7 +961,6 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 cons: consistency, tgh: toughness, ctch: catching,
                 tkl: tackling, blk: blocking, shed: blockShedding,
                 acc: accuracy, thp: throwPower, cov: coverage,
-                speed, agility, strength, weight, height, playbookIQ: playerIQ,
                 consistency, toughness, catchingHands: catching,
                 tackling, blocking, blockShedding, throwingAccuracy: accuracy,
                 throwPower, coverage,
@@ -1068,15 +1069,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     // while 17-18 year olds have low stamina and start to gas out on long drives.
     playState.activePlayers.forEach(pState => {
         pState.contactReduction = 1.0;
-
-        const currentSpeed = Math.hypot(pState.vx || 0, pState.vy || 0);
-        if (currentSpeed > 5.5) {
-            const stamina = pState.attributes?.physical?.stamina || pState.stamina || 50;
-            // High stamina kids (12-14yo) barely fatigue; low stamina older kids feel the burn
-            const fatigueRate = Math.max(0.0002, (100 - stamina) * 0.000025);
-            pState.fatigue = Math.min(100, (pState.fatigue || 0) + fatigueRate);
-            pState.fatigueModifier = Math.max(0.70, 1.0 - ((pState.fatigue || 0) / 100) * 0.30);
-        }
     });
 
     const qbState =
@@ -1297,15 +1289,45 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         return true;
     });
 
-    const linemen = offenseStates.filter(
-        p => !p.isEngaged && p.slot.startsWith('OL')
-    );
-
     // Detect screens by playKey, play tags, or screen-specific assignments
     const isScreenPlay = Boolean(
         playState.playKey?.includes('Screen') ||
         playState.playKey?.includes('Bubble') ||
         playState.play?.tags?.includes('screen')
+    );
+
+    // Release screen linemen from their initial pass-pro sell at tick 20 (0.8s)
+    if (isScreenPlay && playState.tick >= 20) {
+        offenseStates.forEach(ol => {
+            if (
+                ol.slot?.startsWith('OL') &&
+                !ol._screenReleased &&
+                Array.isArray(ol._screenReleasePath) &&
+                ol._screenReleasePath.length > 0
+            ) {
+                if (ol.isEngaged && ol.engagedWith) {
+                    const defender = ol.engagedWith;
+                    if (defender.blockedBy === ol) {
+                        defender.isBlocked = false;
+                        defender.blockedBy = null;
+                        defender.isEngaged = false;
+                        defender.action = 'pursuit';
+                    }
+                    ol.engagedWith = null;
+                    ol.isEngaged = false;
+                }
+
+                ol._screenReleased = true;
+                ol.routePath = ol._screenReleasePath;
+                ol.currentPathIndex = 0;
+                ol.action = 'run_path';
+                ol.dynamicTargetId = null;
+            }
+        });
+    }
+
+    const linemen = offenseStates.filter(
+        p => !p.isEngaged && p.slot.startsWith('OL')
     );
 
     // Lead blockers (e.g. WRs on Bubble/Tunnel screens) only engage blocks
@@ -1402,16 +1424,23 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         const isScreenLeadBlocker =
             isReadyScreenLeadBlocker(blocker);
 
+        const isScreenReleasedOL = Boolean(
+            isScreenPlay &&
+            blocker.slot?.startsWith('OL') &&
+            blocker._screenReleased
+        );
+
         // INITIALIZE HERE: Prevents Temporal Dead Zone ReferenceError
         const isPassPlay =
             playType === 'pass' &&
             !isPassCompleted &&
-            !isScreenLeadBlocker;
+            !isScreenLeadBlocker &&
+            !isScreenReleasedOL;
 
-        // Lead blockers can identify downfield defenders once their screen
-        // route is finished, even before the pass is caught.
+        // Lead blockers and released screen linemen can identify downfield defenders
+        // before the screen pass is caught.
         const blockerThreats =
-            isScreenLeadBlocker && !isPassCompleted
+            (isScreenLeadBlocker || isScreenReleasedOL) && !isPassCompleted
                 ? defenseStates.filter(t =>
                     !t.isBlocked &&
                     !t.isEngaged &&
@@ -1431,7 +1460,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             blocker.currentPathIndex < blocker.routePath.length
         );
 
-        if (playType === 'run' && isPulling) {
+        if ((playType === 'run' || isScreenPlay) && isPulling) {
             const pullPoint = blocker.routePath[blocker.currentPathIndex];
             if (pullPoint) {
                 blocker.action = 'run_path';
@@ -1477,7 +1506,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             let dangerPriorityA = 0;
             let dangerPriorityB = 0;
 
-            const effectiveBlockerIQ = blockerIQ + (Math.random() * 30 - 15);
+            if (blocker._blockerInstinctBias === undefined) {
+                blocker._blockerInstinctBias = (Math.random() * 30 - 15);
+            }
+            const effectiveBlockerIQ = blockerIQ + blocker._blockerInstinctBias;
 
             if (effectiveBlockerIQ > 55 && qb) {
                 const distToQBA = Math.hypot(a.x - qb.x, a.y - qb.y);
@@ -1720,7 +1752,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     blocker, defender: target,
                     status: 'ongoing',
                     battleScore: strDiff / 10,
-                    startTick: playState.tick
+                    startTick: playState.tick,
+                    isPassProtection: isPassPlay && !isPassCompleted
                 });
             }
         } else {
@@ -1975,7 +2008,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         }
 
         if (pState.isOffense) {
-            const isRunner = pState.isBallCarrier || (pState.slot === 'QB1' && pState.action === 'qb_scramble');
+            const isRunner = pState.isBallCarrier || ((pState.formationRole === 'QB' || pState.slot === 'QB1') && pState.action === 'qb_scramble');
 
             // Transition skill positions to run block on a catch, but keep the passing QB idle in the pocket
             if (isPassCompleted && ballCarrierState && ballCarrierState.id !== pState.id && !pState.slot.startsWith('OL')) {
@@ -2267,12 +2300,18 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             incomingBlitzer.isBlocked = true;
                             incomingBlitzer.blockedBy = pState;
 
+                            pState.vx *= 0.15;
+                            pState.vy *= 0.15;
+                            incomingBlitzer.vx *= 0.15;
+                            incomingBlitzer.vy *= 0.15;
+
                             playState.blockBattles.push({
                                 blocker: pState,
                                 defender: incomingBlitzer,
                                 status: 'ongoing',
                                 battleScore: ((pState.str || 50) - (incomingBlitzer.str || 50)) / 10,
-                                startTick: playState.tick
+                                startTick: playState.tick,
+                                isPassProtection: playType === 'pass' && !isPassCompleted
                             });
                         }
                         break;
@@ -2522,7 +2561,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     const receiverProfile = getDecisionProfile(pState, playState.tick);
                     const recIQ = receiverProfile?.awareness ?? (pState.playbookIQ || pState.iq || 50);
                     
-                    const effectiveSettleIQ = recIQ + (Math.random() * 40 - 15);
+                    if (pState._settleInstinctBias === undefined) {
+                        pState._settleInstinctBias = (Math.random() * 40 - 15);
+                    }
+                    const effectiveSettleIQ = recIQ + pState._settleInstinctBias;
                     
                     if (
                         isSettleRoute &&
@@ -2840,7 +2882,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 pState,
                 playState.tick,
                 22,
-                21,
+                25,
                 3.2
             );
 
@@ -2983,7 +3025,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const receiverIsBlocking = assignedReceiver && (assignedReceiver.action?.includes('block') || assignedReceiver.isEngaged);
 
                 const carrierPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
-                const carrierIsClose = ballCarrierState && getDistance(pState, ballCarrierState) < 8.0;
+                const carrierCommittedRun = ballCarrierState?.role !== 'QB' || playState.qbRunCommitted || carrierPastLOS;
+                const carrierIsClose = ballCarrierState && carrierCommittedRun && getDistance(pState, ballCarrierState) < 8.0;
                 const isHandoffRun = playState.type === 'run' && playState.handoffOccurred;
                 const isConfidentRun = (isRunRead && diagConfidence >= 0.60) || isHandoffRun;
 
@@ -2996,12 +3039,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const carrierPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
                 const isConfidentRun = isRunRead && diagConfidence >= 0.55;
                 const distToCarrier = ballCarrierState ? getDistance(pState, ballCarrierState) : 999;
+                const carrierCommittedRun = ballCarrierState?.role !== 'QB' || playState.qbRunCommitted || carrierPastLOS;
+                const carrierCloseThreat = distToCarrier <= 6.0 && carrierCommittedRun;
                 
                 // Zone defenders must break on the ball if:
                 // 1. Confirmed run read, OR
                 // 2. Ball carrier has crossed the line of scrimmage, OR
-                // 3. Ball carrier has leaked dangerously close (< 6 yards)
-                if (!isConfidentRun && !(qbScrambling && carrierPastLOS) && !carrierPastLOS && !isRunReadAtMesh && distToCarrier > 6.0) {
+                // 3. Committed runner has leaked dangerously close (<= 6 yards)
+                if (!isConfidentRun && !(qbScrambling && carrierPastLOS) && !carrierPastLOS && !isRunReadAtMesh && !carrierCloseThreat) {
                     shouldPursue = false;
                 }
             }
@@ -3226,7 +3271,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                     setPointIntent(pState, predX, pursuitTargetY, 0.5);
 
-                    pState.contactReduction = 0.7 + (diagConfidence * 0.3);
+                    pState.contactReduction = hasCommittedToLiveRunner
+                        ? 1.0
+                        : (0.7 + (diagConfidence * 0.3));
                     pState.action = 'pursuit';
                 }
             } else if (isBallInAir) {
@@ -3262,13 +3309,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             const breakThreshold = isDeepZoneDB ? 24.0 : 14.0;
 
                             if (isAssignedToTarget || distToLanding < breakThreshold) {
-                                let trackTargetY = ballPos.targetY;
-                                
-                                if (isDeepZoneDB && distToLanding > 6.0) {
-                                    trackTargetY = Math.max(LOS + 6.0, trackTargetY + 2.5);
-                                }
-                                
-                                setPointIntent(pState, ballPos.targetX, trackTargetY, 0.45);
+                                setPointIntent(pState, ballPos.targetX, ballPos.targetY, 0.45);
                                 pState.action = 'tracking_ball';
                                 pState.contactReduction = 1.15;
                             } else {
@@ -3406,8 +3447,11 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             // Speed mismatch adjustment: If the receiver is a burner, DBs should bail out deeper.
             // High-IQ DBs consistently recognize this pre-snap. Low-IQ DBs might guess wrong or not notice.
             if (speedDiff > 5) {
-                const respectSpeedChance = Math.max(0.1, (defIQ / 100) + 0.15); // 50 IQ = 65% chance, 90 IQ = 100% chance
-                if (Math.random() < respectSpeedChance) {
+                if (pState._respectsWRSpeed === undefined) {
+                    const respectSpeedChance = Math.max(0.1, (defIQ / 100) + 0.15); // 50 IQ = 65% chance, 90 IQ = 100% chance
+                    pState._respectsWRSpeed = Math.random() < respectSpeedChance;
+                }
+                if (pState._respectsWRSpeed) {
                     cushionY += (speedDiff * 0.12); // Variable cushion based on exact speed difference
                 }
             }
@@ -3627,10 +3671,14 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
         // High-IQ QBs disguise their eyes, meaning DBs rarely get an early read.
         const qb = qbState;
         if (qb && qb.currentReadTargetSlot) {
-            const qbIQ = qb.playbookIQ || 50;
-            const stareDownChance = Math.max(0.05, 0.85 - (qbIQ * 0.008)); // 50 IQ = 45% chance, 90 IQ = 13% chance
-                
-            if (Math.random() < stareDownChance) {
+            if (pState._stareDownEvalSlot !== qb.currentReadTargetSlot) {
+                pState._stareDownEvalSlot = qb.currentReadTargetSlot;
+                const qbIQ = qb.playbookIQ || 50;
+                const stareDownChance = Math.max(0.05, 0.85 - (qbIQ * 0.008)); // 50 IQ = 45% chance, 90 IQ = 13% chance
+                pState._stareDownBit = Math.random() < stareDownChance;
+            }
+
+            if (pState._stareDownBit) {
                 const primaryRec = offenseStates.find(o => o.slot === qb.currentReadTargetSlot);
                 if (primaryRec && Math.abs(primaryRec.x - zoneCenter.x) < 14) {
                        zoneCenter.x += (primaryRec.x > zoneCenter.x ? 2.0 : -2.0);
@@ -3709,7 +3757,10 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                     if (isDeep) {
                         const anyDeepThreat = offenseStates.some(o => o.action?.includes('route') && (o.y - LOS) > 12.0);
                         if (!anyDeepThreat) {
-                            const effectiveAwareness = iq + (Math.random() * 40 - 10); // -10 to +30 variance
+                            if (pState._zoneDeepInstinctBias === undefined) {
+                                pState._zoneDeepInstinctBias = (Math.random() * 40 - 10); // -10 to +30 variance
+                            }
+                            const effectiveAwareness = iq + pState._zoneDeepInstinctBias;
                             if (effectiveAwareness > 55) {
                                 // Scales from 9.0 (at 60 awareness) down to 5.0 (at 90+ awareness)
                                 const sinkReduction = Math.min(5.0, (effectiveAwareness - 50) * 0.12);
@@ -3729,7 +3780,10 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 }
             } else {
                 // Short Zone
-                const shortTrapAwareness = iq + (Math.random() * 40 - 15);
+                if (pState._zoneShortInstinctBias === undefined) {
+                    pState._zoneShortInstinctBias = (Math.random() * 40 - 15);
+                }
+                const shortTrapAwareness = iq + pState._zoneShortInstinctBias;
                 if (shortTrapAwareness > 80 && !isBallInAir) {
                     // Bait shallow crossers by drifting slightly away (smart DBs or lucky guesses)
                     pState.targetX = primaryThreat.x + (primaryThreat.vx > 0 ? -2.0 : 2.0);

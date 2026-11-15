@@ -1097,6 +1097,26 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         let blockPower = (((blocker.blocking || 50) * 1.15) + (blocker.strength || 50) + (blockerIQ * 0.3)) * blocker.fatigueModifier;
         let shedPower = (((defender.blockShedding || 50) * 1.15) + (defender.strength || 50) + (defenderIQ * 0.3)) * defender.fatigueModifier;
 
+        const offensePool = (offenseStates && offenseStates.length > 0)
+            ? offenseStates
+            : playState.activePlayers.filter(p => p.isOffense);
+
+        const doubleTeamHelper = offensePool.find(p =>
+            p.id !== blocker.id &&
+            !p.isEngaged &&
+            p.stunnedTicks === 0 &&
+            p.balanceState !== 'downed' &&
+            p.dynamicTargetId === defender.id &&
+            (p.action === 'pass_block' || p.action === 'run_block') &&
+            getDistance(p, defender) <= 2.2
+        );
+
+        if (doubleTeamHelper) {
+            const helperIQ = doubleTeamHelper.iq || doubleTeamHelper.playbookIQ || 50;
+            const helperPower = (((doubleTeamHelper.blocking || 50) * 1.15) + (doubleTeamHelper.strength || 50) + (helperIQ * 0.3)) * (doubleTeamHelper.fatigueModifier || 1);
+            blockPower += helperPower * 0.40;
+        }
+
         if (playState.playKey?.includes('Screen') && playState.tick < 20) {
             blockPower *= 0.1;
         }
@@ -1184,8 +1204,8 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     const dirX = dx / dist;
                     const dirY = dy / dist;
 
-                    // Allow pass rush moves to trigger once the initial block set has settled (14 ticks = ~0.56s)
-                    const minEngagementTicks = 14;
+                    // Allow pass rush moves to trigger once the initial block set has settled (15 ticks = 0.60s)
+                    const minEngagementTicks = 15;
                     const ripMoveChance = Math.max(0.015, Math.min(0.08, 0.03 + (skillDelta * 0.002)));
                     const swimMoveChance = Math.max(0.010, Math.min(0.06, 0.02 + (skillDelta * 0.002)));
 

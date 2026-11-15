@@ -448,62 +448,61 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
     if (isBallInAir && playState.ballState && playState.ballState.targetX !== undefined) {
         const ballFlightTime = playState.tick - (playState.ballState.releaseTick || playState.ballState.throwTick || 0);
         const iq = safetyState.playbookIQ || 50;
+        const targetId = playState.ballState.targetPlayerId;
+
+        const receiver = offenseStates.find(o =>
+            targetId != null &&
+            o.id != null &&
+            String(o.id) === String(targetId)
+        );
+
+        const anticipatedTargetId =
+            safetyState._readAnticipationTargetId;
+
+        const anticipatedTargetSlot =
+            safetyState._readAnticipationTargetSlot;
+
+        const anticipationUntil = Number(
+            safetyState._readAnticipationUntilTick
+        );
+
+        const anticipationStillActive =
+            Number.isFinite(anticipationUntil) &&
+            playState.tick <= anticipationUntil;
+
+        const matchedAnticipation =
+            anticipationStillActive &&
+            receiver &&
+            (
+                (
+                    anticipatedTargetId != null &&
+                    String(anticipatedTargetId) === String(targetId)
+                ) ||
+                (
+                    anticipatedTargetSlot != null &&
+                    receiver.slot === anticipatedTargetSlot
+                )
+            );
+
+        // A safety who correctly anticipated the target jumps the throw
+        // immediately without waiting through the normal post-throw reaction delay.
+        if (matchedAnticipation) {
+            return {
+                type: 'help',
+                helpX: playState.ballState.targetX,
+                helpY: playState.ballState.targetY,
+                targetReceiver: receiver,
+                targetCorner: null,
+                pressureScore: 100,
+                delayedHelp: false,
+                readAnticipation: true
+            };
+        }
         
         // High IQ reacts in ~3 ticks (0.12s), Low IQ in ~7 ticks (0.28s)
         const reactionTicks = Math.max(3, 11 - Math.floor(iq / 12)); 
         
         if (ballFlightTime >= reactionTicks) {
-            const targetId = playState.ballState.targetPlayerId;
-
-            const receiver = offenseStates.find(o =>
-                targetId != null &&
-                o.id != null &&
-                String(o.id) === String(targetId)
-            );
-
-            const anticipatedTargetId =
-                safetyState._readAnticipationTargetId;
-
-            const anticipatedTargetSlot =
-                safetyState._readAnticipationTargetSlot;
-
-            const anticipationUntil = Number(
-                safetyState._readAnticipationUntilTick
-            );
-
-            const anticipationStillActive =
-                Number.isFinite(anticipationUntil) &&
-                playState.tick <= anticipationUntil;
-
-            const matchedAnticipation =
-                anticipationStillActive &&
-                receiver &&
-                (
-                    (
-                        anticipatedTargetId != null &&
-                        String(anticipatedTargetId) === String(targetId)
-                    ) ||
-                    (
-                        anticipatedTargetSlot != null &&
-                        receiver.slot === anticipatedTargetSlot
-                    )
-                );
-
-            // A safety who correctly anticipated the target can
-            // immediately break toward the actual ball destination.
-            if (matchedAnticipation) {
-                return {
-                    type: 'help',
-                    helpX: playState.ballState.targetX,
-                    helpY: playState.ballState.targetY,
-                    targetReceiver: receiver,
-                    targetCorner: null,
-                    pressureScore: 100,
-                    delayedHelp: false,
-                    readAnticipation: true
-                };
-            }
-            
             // Absolute priority: Abandon zone drops and break directly to the ball's landing spot
             return {
                 type: 'help',
@@ -638,6 +637,7 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
         safetyState._qbReadFocusTicks = 0;
         safetyState._qbReadFocusLastTick = null;
         safetyState._qbReadAnticipationAttempted = false;
+        safetyState._qbReadAttemptedSlots = new Set();
         safetyState._readAnticipationTargetId = null;
         safetyState._readAnticipationTargetSlot = null;
         safetyState._readAnticipationUntilTick = -1;
@@ -881,11 +881,12 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
 
         const helpX = qb.x + (laneDX * laneFraction);
         const helpY = qb.y + (laneDY * laneFraction);
+        const minAnticipationY = (playState.lineOfScrimmage || 0) + 1.5;
 
         return {
             type: 'help',
             helpX: Math.max(1, Math.min(FIELD_WIDTH - 1, helpX)),
-            helpY: Math.max(1, Math.min(118.5, helpY)),
+            helpY: Math.max(minAnticipationY, Math.min(118.5, helpY)),
             targetReceiver: receiver,
             targetCorner: null,
             pressureScore: 100,
@@ -973,16 +974,24 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             const safetySkillFactor = safetyReadSkill / 100;
             const qbSkillFactor = qbDeceptionSkill / 100;
 
-            // Continuous skill scaling. Even average safeties
-            // retain a chance to recognize and anticipate a read.
+            // Require the QB to actually settle into his read and stare at the
+            // target long enough for a safety to diagnose the route stem.
+            const minFocusTicks = Math.max(
+                4,
+                Math.round(9 - (safetySkillFactor * 4))
+            );
+            const routeDownfield =
+                gazeReceiver.y >= (playState.lineOfScrimmage || 0) + 2.0;
+
+            // Continuous skill scaling per sustained QB read focus.
             const baseChance =
-                0.005 +
-                (0.075 * Math.pow(safetySkillFactor, 1.5));
+                0.04 +
+                (0.28 * Math.pow(safetySkillFactor, 1.6));
 
             // Elite quarterbacks remain difficult to read,
             // but can never completely eliminate anticipation.
             const qbDeceptionMultiplier =
-                1 - (0.25 * qbSkillFactor);
+                1 - (0.30 * qbSkillFactor);
 
             const perceptionMultiplier =
                 0.85 +
@@ -992,28 +1001,38 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
                 ));
 
             const anticipationChance = Math.min(
-                0.08,
+                0.30,
                 baseChance *
                 qbDeceptionMultiplier *
                 perceptionMultiplier
             );
 
-            // One anticipation attempt per safety per play.
-            // Prevent repeated rolls during the same sustained read.
-            if (!safetyState._qbReadAnticipationAttempted) {
-                safetyState._qbReadAnticipationAttempted = true;
+            if (!(safetyState._qbReadAttemptedSlots instanceof Set)) {
+                safetyState._qbReadAttemptedSlots = new Set();
+            }
+
+            // Evaluate once per sustained read target per play (at most one jump per play).
+            if (
+                !safetyState._qbReadAnticipationAttempted &&
+                (readTick >= 18 || qb.hasCompletedDropback) &&
+                routeDownfield &&
+                safetyState._qbReadFocusTicks >= minFocusTicks &&
+                !safetyState._qbReadAttemptedSlots.has(gazeSlot)
+            ) {
+                safetyState._qbReadAttemptedSlots.add(gazeSlot);
 
                 if (Math.random() < anticipationChance) {
+                    safetyState._qbReadAnticipationAttempted = true;
                     safetyState._readAnticipationTargetId =
                         gazeReceiver.id ?? null;
 
                     safetyState._readAnticipationTargetSlot =
                         gazeReceiver.slot;
 
-                    // Better safeties sustain their route jump slightly longer.
+                    // Sustain the route jump long enough to stay active into the throw window.
                     safetyState._readAnticipationUntilTick =
                         readTick +
-                        Math.round(4 + (safetySkillFactor * 5));
+                        Math.round(14 + (safetySkillFactor * 10));
 
                     return buildAnticipationHelp(gazeReceiver);
                 }
@@ -2084,8 +2103,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             );
 
             const eyeManipChance =
-                0.005 +
-                (0.075 * Math.pow(qbSkillFactor, 1.5));
+                0.06 +
+                (0.38 * Math.pow(qbSkillFactor, 1.4));
 
             if (Math.random() < eyeManipChance) {
                 const trueTarget = offenseStates.find(
@@ -2597,7 +2616,19 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         });
 
-        if (rushScore > 25 && rushScore > bestPassScore) {
+        const isBootleg = /boot|rollout/i.test(playState.playKey || '');
+        const minScrambleThrowTicks = isBootleg ? 45 : 30;
+        const immediateThreatToQB = defenseStates.some(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(qbState, d) < 2.5);
+        const bootlegReadyToDecide = !isBootleg || playState.tick >= minScrambleThrowTicks || qbState._bootlegRolloutReady || immediateThreatToQB;
+
+        if (bestTarget && bestPassScore > 30 && (playState.tick >= minScrambleThrowTicks || immediateThreatToQB)) {
+            const onTheRunMod = Math.max(0.45, (qbAgility / 100) * 0.85);
+            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃‍♂️🎯 ${qbState.name} keeps his eyes downfield and throws on the run!`, playState);
+            executeThrow(qbState, bestTarget, qbPower, qbAcc * onTheRunMod, playState, gameLog, "Throw on Run");
+            return;
+        }
+
+        if (bootlegReadyToDecide && rushScore > 25 && rushScore > bestPassScore) {
             qbState.action = 'run_path'; // BREAK OUT OF QB_SCRAMBLE LOCK
             qbState.isBallCarrier = true;
             playState.qbIntent = 'scramble';
@@ -2613,17 +2644,6 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                     wouldGainFirstDown
                 }, playState.tick, playState.playId);
             }
-            return;
-        }
-
-        const isBootleg = /boot|rollout/i.test(playState.playKey || '');
-        const minScrambleThrowTicks = isBootleg ? 45 : 30;
-        const immediateThreatToQB = defenseStates.some(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(qbState, d) < 2.5);
-
-        if (bestTarget && bestPassScore > 30 && (playState.tick >= minScrambleThrowTicks || immediateThreatToQB)) {
-            const onTheRunMod = Math.max(0.45, (qbAgility / 100) * 0.85);
-            if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🏃‍♂️🎯 ${qbState.name} keeps his eyes downfield and throws on the run!`, playState);
-            executeThrow(qbState, bestTarget, qbPower, qbAcc * onTheRunMod, playState, gameLog, "Throw on Run");
             return;
         }
 

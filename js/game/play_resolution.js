@@ -3864,7 +3864,6 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         qb1.action = 'qb_setup';
                         qb1.hasCompletedDropback = true;
                         rb1.action = 'run_fake';
-                        playState.handoffOccurred = true;
 
                         const readLog = !defenderActuallyBites ? " (misread!)" : "";
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] ⚡ RPO: ${qb1.name} reads the defender${readLog}, pulls the ball, and looks to throw!`, playState);
@@ -4229,6 +4228,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     const staminaFactor = (150 - stamina) / 100;
                     const drain = 0.03 * effortMultiplier * staminaFactor * conditioningMod;
                     player.fatigue = Math.min(100, (player.fatigue || 0) + drain);
+                    p.fatigue = player.fatigue;
                     p.fatigueModifier = Math.max(0.70, 1.0 - (player.fatigue / 100) * 0.30);
                 }
             });
