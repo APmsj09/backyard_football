@@ -227,6 +227,61 @@ export function checkBlockCollisions(playState, gameLog = null) {
                 battleScore: strDiff / 10,
                 startTick: playState.tick
             });
+
+            const isRunBlockEngagement =
+                playState.type === 'run' &&
+                (
+                    blocker.action === 'run_block' ||
+                    /pull|lead/i.test(blocker.assignment || '')
+                );
+
+            if (isRunBlockEngagement) {
+                logPlayDebug(
+                    'RUN_BLOCK_ENGAGEMENT',
+                    `${blocker.name} engaged ${target.name}`,
+                    {
+                        blocker: {
+                            id: blocker.id,
+                            name: blocker.name,
+                            slot: blocker.slot,
+                            role: blocker.role,
+                            action: blocker.action,
+                            assignment: blocker.assignment || null,
+                            blocking: blocker.blocking || 50,
+                            strength: blocker.strength || blocker.str || 50,
+                            iq: blocker.iq || blocker.playbookIQ || 50,
+                            fatigueModifier: blocker.fatigueModifier || 1,
+                            blockLaneX: blocker.blockLaneX ?? null,
+                            position: {
+                                x: Number(blocker.x.toFixed(2)),
+                                y: Number(blocker.y.toFixed(2))
+                            }
+                        },
+                        defender: {
+                            id: target.id,
+                            name: target.name,
+                            slot: target.slot,
+                            role: target.role,
+                            action: target.action,
+                            assignment: target.assignment || null,
+                            blockShedding: target.blockShedding || 50,
+                            strength: target.strength || target.str || 50,
+                            iq: target.iq || target.playbookIQ || 50,
+                            fatigueModifier: target.fatigueModifier || 1,
+                            position: {
+                                x: Number(target.x.toFixed(2)),
+                                y: Number(target.y.toFixed(2))
+                            }
+                        },
+                        startingBattleScore: Number((strDiff / 10).toFixed(2)),
+                        engagementDistance: Number(
+                            getDistance(blocker, target).toFixed(2)
+                        )
+                    },
+                    playState.tick,
+                    playState.playId
+                );
+            }
         }
     });
 }
@@ -890,6 +945,13 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
             return;
         }
 
+        const isRunBlock =
+            playState.type === 'run' &&
+            (
+                blocker.action === 'run_block' ||
+                /pull|lead/i.test(blocker.assignment || '')
+            );
+
         if (ballCarrier) {
             const distToCarrier = getDistance(defender, ballCarrier);
             const carrierPastLOS = ballCarrier.y > playState.lineOfScrimmage + 1.0;
@@ -905,7 +967,38 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 const shedBonus = Math.max(0, (5.0 - distToCarrier) * 12);
                 const openFieldUrgency = carrierPastLOS || carrierIsPastDefender ? 35 : 0;
 
-                if (reactionScore + shedBonus + openFieldUrgency + getRandomInt(0, 50) > 110) {
+                const shedRoll = getRandomInt(0, 50);
+
+                if (reactionScore + shedBonus + openFieldUrgency + shedRoll > 110) {
+                    if (isRunBlock) {
+                        logPlayDebug(
+                            'RUN_BLOCK_SHED',
+                            `${defender.name} shed ${blocker.name}'s block`,
+                            {
+                                reason: 'carrier_pressure',
+                                ticksInBlock: playState.tick - battle.startTick,
+                                distanceToCarrier: Number(distToCarrier.toFixed(2)),
+                                reactionScore,
+                                shedBonus,
+                                openFieldUrgency,
+                                randomRoll: shedRoll,
+                                totalScore: reactionScore + shedBonus + openFieldUrgency + shedRoll,
+                                threshold: 110,
+                                battleScore: Number((battle.battleScore || 0).toFixed(2)),
+                                blockerPosition: {
+                                    x: Number(blocker.x.toFixed(2)),
+                                    y: Number(blocker.y.toFixed(2))
+                                },
+                                defenderPosition: {
+                                    x: Number(defender.x.toFixed(2)),
+                                    y: Number(defender.y.toFixed(2))
+                                }
+                            },
+                            playState.tick,
+                            playState.playId
+                        );
+                    }
+
                     blocker.engagedWith = null; 
                     blocker.isEngaged = false;
                     blocker.reengageCooldown = 14;
@@ -933,12 +1026,6 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
         const ticksInBlock = playState.tick - battle.startTick;
         const isPassBlock = blocker.action === 'pass_block';
-        const isRunBlock =
-            playState.type === 'run' &&
-            (
-                blocker.action === 'run_block' ||
-                /pull|lead/i.test(blocker.assignment || '')
-            );
 
         if (isPassBlock && ticksInBlock < 20) {
             blockPower *= 1.08;
@@ -1027,6 +1114,70 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         let pushAmount = 0;
         if (battle.status === 'ongoing') {
             pushAmount = resolveBattle(blockPower, shedPower, battle);
+
+            if (isRunBlock) {
+                const currentOutcome =
+                    battle.status === 'win_A'
+                        ? 'blocker_edge'
+                        : battle.status === 'win_B'
+                            ? 'defender_edge'
+                            : 'contested';
+
+                const previousOutcome =
+                    battle._telemetryRunBlockOutcome ?? null;
+
+                const outcomeChanged =
+                    currentOutcome !== previousOutcome;
+
+                const lastProgressTick =
+                    battle._telemetryRunBlockProgressTick ?? battle.startTick;
+
+                const shouldLogProgress =
+                    outcomeChanged ||
+                    playState.tick - lastProgressTick >= 5;
+
+                if (shouldLogProgress) {
+                    logPlayDebug(
+                        'RUN_BLOCK_PROGRESS',
+                        `${blocker.name} vs ${defender.name}: ${currentOutcome}`,
+                        {
+                            ticksInBlock,
+                            outcome: currentOutcome,
+                            previousOutcome,
+                            battleStatus: battle.status,
+                            battleScore: Number(
+                                (battle.battleScore || 0).toFixed(2)
+                            ),
+                            scoreChange: Number(pushAmount.toFixed(3)),
+                            blockPower: Number(blockPower.toFixed(2)),
+                            shedPower: Number(shedPower.toFixed(2)),
+                            blockerFatigue: blocker.fatigueModifier || 1,
+                            defenderFatigue: defender.fatigueModifier || 1,
+                            carrierDistance: ballCarrier
+                                ? Number(
+                                    getDistance(defender, ballCarrier).toFixed(2)
+                                )
+                                : null,
+                            carrierPastLOS: ballCarrier
+                                ? ballCarrier.y > playState.lineOfScrimmage + 1.0
+                                : false,
+                            blockerPosition: {
+                                x: Number(blocker.x.toFixed(2)),
+                                y: Number(blocker.y.toFixed(2))
+                            },
+                            defenderPosition: {
+                                x: Number(defender.x.toFixed(2)),
+                                y: Number(defender.y.toFixed(2))
+                            }
+                        },
+                        playState.tick,
+                        playState.playId
+                    );
+
+                    battle._telemetryRunBlockOutcome = currentOutcome;
+                    battle._telemetryRunBlockProgressTick = playState.tick;
+                }
+            }
 
             if (battle.status === 'ongoing') {
                 const defStr = defender.strength || defender.str || 50;
@@ -1234,6 +1385,36 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 battle.status = 'ongoing';
                 return;
             }
+
+            if (isRunBlock) {
+                logPlayDebug(
+                    'RUN_BLOCK_SHED',
+                    `${defender.name} defeated ${blocker.name}'s block`,
+                    {
+                        reason: 'battle_score',
+                        durationTicks: dur,
+                        battleScore: Number((battle.battleScore || 0).toFixed(2)),
+                        blockerStrength: blocker.strength || blocker.str || 50,
+                        blockerBlocking: blocker.blocking || 50,
+                        defenderStrength: defender.strength || defender.str || 50,
+                        defenderBlockShedding: defender.blockShedding || 50,
+                        distanceToCarrier: ballCarrier
+                            ? Number(getDistance(defender, ballCarrier).toFixed(2))
+                            : null,
+                        blockerPosition: {
+                            x: Number(blocker.x.toFixed(2)),
+                            y: Number(blocker.y.toFixed(2))
+                        },
+                        defenderPosition: {
+                            x: Number(defender.x.toFixed(2)),
+                            y: Number(defender.y.toFixed(2))
+                        }
+                    },
+                    playState.tick,
+                    playState.playId
+                );
+            }
+
             if (isPassRush) logPlayDebug('BLOCK_SHED', `${defender.name} defeated ${blocker.name}'s block`, { durationTicks: dur }, playState.tick, playState.playId);
 
             const blockerAwayX = blocker.x - defender.x;
@@ -1276,9 +1457,13 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     Math.min(0.25, 0.04 + (strAdvantage * 0.006) + (techniqueEdge * 0.002))
                 );
 
+                const pancakeRoll = hasSustainedDrive
+                    ? Math.random()
+                    : null;
+
                 const isPancake =
                     hasSustainedDrive &&
-                    Math.random() < pancakeChance &&
+                    pancakeRoll < pancakeChance &&
                     !defender._pancakedThisPlay;
 
                 if (isPancake) {
@@ -1297,11 +1482,29 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                         (pancakeDy / pancakeDistance) * 2.4,
                         true
                     );
-
                     logPlayDebug('PANCAKE_BLOCK', `${blocker.name} flattened ${defender.name}`, {
                         engagementDurationTicks: dur,
                         downedTicks: defender.downedTicks
                     }, playState.tick, playState.playId);
+
+                    if (isRunBlock) {
+                        logPlayDebug(
+                            'RUN_BLOCK_PANCAKE',
+                            `${blocker.name} pancaked ${defender.name}`,
+                            {
+                                engagementDurationTicks: dur,
+                                pancakeChance: Number(pancakeChance.toFixed(3)),
+                                pancakeRoll: Number(pancakeRoll.toFixed(3)),
+                                blockerStrength: blocker.strength || blocker.str || 50,
+                                blockerBlocking: blocker.blocking || 50,
+                                defenderStrength: defender.strength || defender.str || 50,
+                                defenderBlockShedding: defender.blockShedding || 50,
+                                downedTicks: defender.downedTicks
+                            },
+                            playState.tick,
+                            playState.playId
+                        );
+                    }
 
                     defender._pancakedThisPlay = true;
                     defender.action = 'pursuit';
