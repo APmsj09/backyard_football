@@ -1522,12 +1522,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const distToQBB = Math.hypot(b.x - qb.x, b.y - qb.y);
                 const iqWeight = Math.max(0.1, (effectiveBlockerIQ - 40) * 0.25);
 
-                if (distToQBA < 4.5) dangerPriorityA -= (5.0 - distToQBA) * iqWeight;
-                if (distToQBB < 4.5) dangerPriorityB -= (5.0 - distToQBB) * iqWeight;
+                // Only override lane discipline for rushers actively penetrating inside the pocket
+                if (distToQBA < 4.5 && a.y < LOS + 0.5) dangerPriorityA -= (5.0 - distToQBA) * iqWeight;
+                if (distToQBB < 4.5 && b.y < LOS + 0.5) dangerPriorityB -= (5.0 - distToQBB) * iqWeight;
 
-                // High IQ centers/guards prioritize A-gap rushers over outside stunts
-                if (Math.abs(a.x - CENTER_X) < 2.5 && (a.assignment?.includes('blitz') || a.assignment?.includes('rush'))) dangerPriorityA -= 8;
-                if (Math.abs(b.x - CENTER_X) < 2.5 && (b.assignment?.includes('blitz') || b.assignment?.includes('rush'))) dangerPriorityB -= 8;
+                // High IQ centers/guards prioritize penetrating A-gap blitzers/rushers over outside stunts
+                if (a.y < LOS + 0.5 && Math.abs(a.x - CENTER_X) < 2.5 && (a.assignment?.includes('blitz') || a.assignment?.includes('rush'))) dangerPriorityA -= 8;
+                if (b.y < LOS + 0.5 && Math.abs(b.x - CENTER_X) < 2.5 && (b.assignment?.includes('blitz') || b.assignment?.includes('rush'))) dangerPriorityB -= 8;
             }
 
             // TEAM PRIORITY:
@@ -1584,8 +1585,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 ? (avoidsUnneededDoubleTeam ? 30 : 18)
                 : 0;
 
-            const gapResponsibilityA = isPassPlay ? laneDiffA : (laneDiffA * 3.0);
-            const gapResponsibilityB = isPassPlay ? laneDiffB : (laneDiffB * 3.0);
+            const gapResponsibilityA = isPassPlay ? (laneDiffA * 3.5) : (laneDiffA * 3.0);
+            const gapResponsibilityB = isPassPlay ? (laneDiffB * 3.5) : (laneDiffB * 3.0);
 
             return (
                 gapResponsibilityA +
@@ -3834,21 +3835,36 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             }
 
             let baselineDepth = zoneCenter.y;
+
+            const hasVerticalStemInZone = isDeep && offenseStates.some(o =>
+                o.role !== 'QB' &&
+                !o.slot?.startsWith('OL') &&
+                o.x >= minX &&
+                o.x <= maxX &&
+                (o.vy || 0) > 3.0
+            );
             
-            // Re-evaluate read steps more continuously while in the read window
+            // Higher IQ defenders diagnose the play sooner and drop more smoothly
             if (pState._readWindowTicks === undefined) {
-                const instinctRoll = Math.floor(Math.random() * 15);
-                pState._readWindowTicks = 12 + Math.floor(iq / 3) + instinctRoll;
+                const instinctRoll = Math.floor(Math.random() * 10);
+                pState._readWindowTicks = 10 + Math.floor((100 - iq) / 5) + instinctRoll;
             }
             
-            if (isDeep && playState.tick < pState._readWindowTicks) {
+            if (isDeep && !hasVerticalStemInZone && playState.tick < pState._readWindowTicks) {
                 if (pState._backpedalSpeed === undefined) {
-                    pState._backpedalSpeed = 0.22 - (iq * 0.0012) + (Math.random() * 0.05); 
+                    pState._backpedalSpeed = 0.20 + (iq * 0.0012) + (Math.random() * 0.04); 
                 }
-                const backpedalDepth = pState.initialY + (playState.tick * Math.max(0.07, pState._backpedalSpeed));
+                // Keep target >= 3.0y ahead so arrival braking doesn't stall the drop
+                const backpedalDepth = Math.max(
+                    pState.y + 3.0,
+                    pState.initialY + (playState.tick * pState._backpedalSpeed)
+                );
                 baselineDepth = Math.min(zoneCenter.y, backpedalDepth);
             } else if (!isDeep && playState.tick < pState._readWindowTicks * 0.5) {
-                const readDepth = pState.initialY + (playState.tick * 0.15);
+                const readDepth = Math.max(
+                    pState.y + 2.5,
+                    pState.initialY + (playState.tick * 0.20)
+                );
                 baselineDepth = Math.min(zoneCenter.y, readDepth);
             }
 
@@ -3882,7 +3898,7 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 0.5
             );
         }
-    } else if (assignment?.includes('rush') || assignment?.includes('blitz') || assignment?.includes('run_gap')) {
+    } else if (assignment?.includes('rush') || assignment?.includes('blitz') || assignment?.includes('run_gap') || assignment?.includes('run_edge')) {
         if (playState.handoffOccurred && ballCarrierState) {
             pState.targetX = ballCarrierState.x;
             pState.targetY = ballCarrierState.y;

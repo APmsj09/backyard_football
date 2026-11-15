@@ -2000,15 +2000,13 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     hands: hndEff
                 }, playState.tick, playState.playId);
             } else {
-                // Realistic INT rate: Interceptions require exceptional hands and positioning.
-                // Normal defensive plays result in incomplete passes (swats/PBUs), not turnovers.
-                catchScore = catchScore * (0.12 * handsFactor);
-                
-                // If receiver is fighting for the ball, INT chance is halved
-                if (attackersNear > 0) catchScore *= 0.45;
-
-                // Cap defensive INT chance on standard passes to 18% max (elite ballhawks)
-                catchScore = Math.min(18.0, catchScore);
+                // Contested passes primarily yield PBUs/swats; truly uncontested throws
+                // straight to a defender are much more interceptable based on hands.
+                if (attackersNear > 0) {
+                    catchScore = Math.min(12.0, catchScore * (0.09 * handsFactor));
+                } else {
+                    catchScore = Math.min(45.0, catchScore * (0.38 * handsFactor));
+                }
 
                 logPlayDebug('DEF_BALL_ATTEMPT', `${bestCandidate.name} attempted INT/Swat`, {
                     rawIntProbability: `${Math.round(catchScore)}%`,
@@ -2446,7 +2444,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                         touchChance = 4 + (heightAdv * 1.5);
                     } else {
                         const coverageSkill = bestCandidate.cov || bestCandidate.coverage || 50;
-                        touchChance = 20 + (coverageSkill * 0.4);
+                        touchChance = 32 + (coverageSkill * 0.45);
                         if (attackersNear > 0) touchChance += 20;
                     }
                     

@@ -490,6 +490,20 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
         // A safety who correctly anticipated the target jumps the throw
         // immediately without waiting through the normal post-throw reaction delay.
         if (matchedAnticipation) {
+            if (isDebugMode() && safetyState._lastLoggedJumpThrowTick !== playState.ballState.throwTick) {
+                logPlayDebug(
+                    'DB_QB_READ_JUMP_BREAK',
+                    `${safetyState.name} anticipated ${receiver.name} and jumped the throw immediately`,
+                    {
+                        targetSlot: receiver.slot,
+                        ballFlightTime,
+                        safetyIQ: safetyState.playbookIQ || 50
+                    },
+                    playState.tick,
+                    playState.playId
+                );
+                safetyState._lastLoggedJumpThrowTick = playState.ballState.throwTick;
+            }
             return {
                 type: 'help',
                 helpX: playState.ballState.targetX,
@@ -1036,6 +1050,22 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
                     safetyState._readAnticipationUntilTick =
                         readTick +
                         Math.round(14 + (safetySkillFactor * 10));
+
+                    if (isDebugMode()) {
+                        logPlayDebug(
+                            'DB_QB_READ_JUMP',
+                            `${safetyState.name} reads ${qb.name}'s eyes and jumps ${gazeReceiver.slot} (${gazeReceiver.name})`,
+                            {
+                                targetSlot: gazeReceiver.slot,
+                                focusTicks: safetyState._qbReadFocusTicks,
+                                chance: Number(anticipationChance.toFixed(3)),
+                                safetyReadSkill: Number(safetyReadSkill.toFixed(1)),
+                                qbDeceptionSkill: Number(qbDeceptionSkill.toFixed(1))
+                            },
+                            readTick,
+                            playState.playId
+                        );
+                    }
 
                     return buildAnticipationHelp(gazeReceiver);
                 }
