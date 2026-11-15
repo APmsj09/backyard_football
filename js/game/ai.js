@@ -312,8 +312,11 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     const commitThreshold = 0.55 - (iqFactor * 0.25);
 
     if (currentGuess === 'read') {
-        if (confidence > commitThreshold || tick > 35) {
+        const hasAnyPlayEvidence = (runScore + passScore) >= 5;
+        if (confidence > commitThreshold || (tick > 35 && hasAnyPlayEvidence)) {
             guess = finalRunScore >= finalPassScore ? 'run' : 'pass';
+        } else if (tick > 35 && !hasAnyPlayEvidence && pState.role === 'DB') {
+            guess = 'pass';
         }
         } else if (currentGuess === 'run') {
         const isTrickPass = isObservablePassReset;
@@ -1070,7 +1073,11 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             ? getSafetyThreatAwareness(receiver)
             : 0;
 
-        if (receiverAwareness > 0) {
+        if (
+            receiverAwareness > 0 &&
+            receiver.y >= LOS + 0.5 &&
+            receiver.action?.includes('route')
+        ) {
             const separationDist = getDistance(corner, receiver);
             const distFromSafety = getDistance(safetyState, receiver);
 
@@ -2365,9 +2372,13 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 if (isPressured) {
                     // Under pressure, an open checkdown behind the line is a high-value safety valve
                     score += Math.max(8, 22 - (yardsBehindLOS * 2.5));
+                } else if (down === 4 && yardsToGo >= 4) {
+                    // In a clean pocket on 4th & medium/long, throwing behind the LOS is almost an automatic turnover on downs
+                    const depthPenalty = 32 + Math.min(28, yardsBehindLOS * 4.0);
+                    score -= depthPenalty;
                 } else if (down >= 3) {
                     // On 3rd/4th down, penalize throws short of the sticks
-                    const depthPenalty = 14 + Math.min(22, yardsBehindLOS * 3.5);
+                    const depthPenalty = 18 + Math.min(24, yardsBehindLOS * 3.5);
                     score -= depthPenalty;
                 } else {
                     // On 1st/2nd down, flat routes and checkdowns are productive; apply only a modest depth tax

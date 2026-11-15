@@ -139,7 +139,7 @@ export const routeTree = {
     'Wheel': { path: [{ x: 4, y: 1 }, { x: 6, y: 8 }, { x: 6, y: 25 }] },
     'Angle': { path: [{ x: 3, y: 2 }, { x: -2, y: 6 }] },
     'Screen': { path: [{ x: -2, y: -1 }, { x: -4, y: -0.5 }] },
-    'Slip_Screen': { path: [{ x: 0, y: 2 }, { x: 4, y: 0 }] }, 
+    'Slip_Screen': { path: [{ x: -2.5, y: -0.5 }, { x: -5.5, y: 0.5 }], mirror: false },
     'CheckRelease': { path: [{ x: 0, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 4 }] },
     'Texas': { path: [{ x: 3, y: 1 }, { x: 5, y: 4 }, { x: -3, y: 9 }] },
 
@@ -184,7 +184,7 @@ export const routeTree = {
     'pull_left': { path: [{ x: 0.5, y: -1.0 }, { x: -4, y: -0.5 }, { x: -5, y: 3 }], mirror: false },
     'pull_right_wide': { path: [{ x: -0.5, y: -1.0 }, { x: 6, y: -0.5 }, { x: 7, y: 4 }], mirror: false },
     'pull_left_wide': { path: [{ x: 0.5, y: -1.0 }, { x: -6, y: -0.5 }, { x: -7, y: 4 }], mirror: false },
-    'screen_block': { path: [{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }] },
+    'screen_block': { path: [{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }], mirror: false },
     'Screen_Wait': { path: [{ x: 0, y: -1 }, { x: 4, y: -1 }, { x: 5, y: 1 }] },
     'Wall_Alley_Left': { path: [{ x: -2, y: -1 }, { x: -8, y: 1 }, { x: -10, y: 5 }] },
     'Wall_Alley_Right': { path: [{ x: 2, y: -1 }, { x: 8, y: 1 }, { x: 10, y: 5 }] }

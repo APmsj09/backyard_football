@@ -5,8 +5,8 @@ import { logPlayDebug, logPlayEventSnapshot } from './telemetry.js';
 
 const FIELD_WIDTH = 53.3;
 const FIELD_LENGTH = 120;
-const TACKLE_RANGE = 2.2;
-const TACKLE_CONTACT_RANGE = 1.4;
+const TACKLE_RANGE = 1.85;
+const TACKLE_CONTACT_RANGE = 1.60;
 const FUMBLE_CHANCE_BASE = 0.015;
 const DEBUG_MODE = false;
 const BLOCK_WIN_SCORE = 10;
@@ -122,7 +122,8 @@ export function checkBlockCollisions(playState, gameLog = null) {
         p.isOffense &&
         !p.isEngaged &&
         p.stunnedTicks === 0 &&
-        p.balanceState !== 'downed'
+        p.balanceState !== 'downed' &&
+        !(p.snapReactionTimer > 0)
     );
     const defenders = playState.activePlayers.filter(p =>
         !p.isOffense &&
@@ -165,9 +166,14 @@ export function checkBlockCollisions(playState, gameLog = null) {
             target = imminentThreat;
         } else if (blocker.dynamicTargetId) {
             target = eligibleDefenders.find(d => d.id === blocker.dynamicTargetId);
-            if (!target || target.isEngaged || getDistance(blocker, target) > 3.0) {
+            if (!target || target.isEngaged || getDistance(blocker, target) > 1.8) {
                 target = null;
             }
+        }
+
+        // Prevent pre-snap line proximity from engaging a defender before the snap unfolds
+        if (target && target.snapReactionTimer > 0 && playState.tick < 3 && getDistance(blocker, target) >= 1.45) {
+            target = null;
         }
 
         if (target) {
@@ -596,7 +602,7 @@ export function checkTackleCollisions(playState, gameLog) {
             }
         }
 
-        if (checkFumble(carrier, defender, playState, gameLog)) {
+        if (distance <= TACKLE_CONTACT_RANGE && checkFumble(carrier, defender, playState, gameLog)) {
             return false;
         }
 
@@ -688,9 +694,7 @@ export function checkTackleCollisions(playState, gameLog) {
         // Tackling and strength versus the carrier's agility and strength.
         successChance += (tPower - rPower) * 0.005;
 
-        if (isTruckAttempt) {
-            successChance -= truckAdvantage;
-        }
+        successChance -= truckAdvantage;
 
         // Broken tackles give defenders a modest advantage on later attempts.
         const brokenCount = carrier.tacklesBrokenThisPlay || 0;
@@ -1326,29 +1330,49 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
                 if (pushAmount > 0) {
                     if (isRunBlock && Number.isFinite(blocker.blockLaneX)) {
-                        // Push the defender away from the intended running lane.
+                        // Push the defender away from the intended running lane
+                        // and step the blocker with them to maintain chest-to-chest contact.
                         const outsideDirection =
                             defender.x < blocker.blockLaneX ? -1 : 1;
+                        const currentSep = getDistance(blocker, defender);
 
-                        defender.x = Math.max(
-                            0.5,
-                            Math.min(
-                                FIELD_WIDTH - 0.5,
-                                defender.x + outsideDirection * pushMagnitude * 1.25
-                            )
-                        );
+                        if (currentSep >= 2.0) {
+                            // Close distance instead of pushing the defender out of engagement range
+                            blocker.x = Math.max(
+                                0.5,
+                                Math.min(FIELD_WIDTH - 0.5, blocker.x + uX * pushMagnitude * 1.1)
+                            );
+                            blocker.y = Math.min(
+                                FIELD_LENGTH - 0.5,
+                                blocker.y + uY * pushMagnitude * 1.1
+                            );
+                        } else {
+                            defender.x = Math.max(
+                                0.5,
+                                Math.min(
+                                    FIELD_WIDTH - 0.5,
+                                    defender.x + outsideDirection * pushMagnitude * 1.15
+                                )
+                            );
 
-                        defender.y = Math.min(
-                            FIELD_LENGTH - 0.5,
-                            defender.y + pushMagnitude * 0.45
-                        );
+                            defender.y = Math.min(
+                                FIELD_LENGTH - 0.5,
+                                defender.y + pushMagnitude * 0.45
+                            );
 
-                        // Keep the blocker laterally stable so adjacent OL
-                        // do not all slide toward the same gap.
-                        blocker.y = Math.min(
-                            FIELD_LENGTH - 0.5,
-                            blocker.y + pushMagnitude * 0.15
-                        );
+                            blocker.x = Math.max(
+                                0.5,
+                                Math.min(
+                                    FIELD_WIDTH - 0.5,
+                                    blocker.x + outsideDirection * pushMagnitude * 0.70
+                                )
+                            );
+
+                            blocker.y = Math.min(
+                                FIELD_LENGTH - 0.5,
+                                blocker.y + pushMagnitude * 0.35
+                            );
+                        }
                     } else if (isPassBlock) {
                         const qb = offenseStates?.find(
                             p => p.slot?.startsWith?.('QB')

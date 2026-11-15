@@ -31,7 +31,7 @@ const CENTER_X = FIELD_WIDTH / 2;
 
 const PASS_INTERCEPT_STEPS = 24;
 const PASS_INTERCEPT_SPEED_FACTOR = 0.82;
-const PASS_INTERCEPT_MARGIN = 0.85;
+const PASS_INTERCEPT_MARGIN = 0.45;
 
 function getReachablePassInterceptionPoint(pState, ballState) {
     if (
@@ -126,18 +126,24 @@ function getReachablePassInterceptionPoint(pState, ballState) {
         const directionX = distanceToPoint > 0.001 ? toPointDX / distanceToPoint : 0;
         const directionY = distanceToPoint > 0.001 ? toPointDY / distanceToPoint : 0;
 
-        const velocityTowardPoint = Math.max(
-            0,
-            (playerVX * directionX) + (playerVY * directionY)
-        );
+        const rawVelocityTowardPoint =
+            (playerVX * directionX) + (playerVY * directionY);
+
+        const velocityTowardPoint = Math.max(0, rawVelocityTowardPoint);
+
+        // If moving away from the intercept point, account for plant-and-turn lag
+        const turningPenaltySeconds = rawVelocityTowardPoint < 0
+            ? Math.min(0.28, -rawVelocityTowardPoint / Math.max(1.0, accelerationYPS2))
+            : 0;
+        const effectiveTime = Math.max(0, timeToPoint - turningPenaltySeconds);
 
         const accelerationReach =
-            (velocityTowardPoint * timeToPoint) +
-            (0.5 * accelerationYPS2 * timeToPoint * timeToPoint);
+            (velocityTowardPoint * effectiveTime) +
+            (0.5 * accelerationYPS2 * effectiveTime * effectiveTime);
 
         const topSpeedReach =
             maxSpeedYPS *
-            timeToPoint *
+            effectiveTime *
             PASS_INTERCEPT_SPEED_FACTOR;
 
         const reachableDistance =
@@ -1733,7 +1739,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 isPassPlay ? 0.45 : 0.5
             );
 
-            if (getDistance(blocker, target) < 1.8 && !target.isEngaged) {
+            const canEngageAtSnap = !(blocker.snapReactionTimer > 0) &&
+                !(target.snapReactionTimer > 0 && playState.tick < 3 && getDistance(blocker, target) >= 1.45);
+            if (canEngageAtSnap && getDistance(blocker, target) < 1.8 && !target.isEngaged) {
                 const strDiff = (blocker.str || 50) - (target.str || 50);
                 blocker.isEngaged = true;
                 blocker.engagedWith = target;

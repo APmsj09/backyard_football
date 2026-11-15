@@ -838,10 +838,26 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         desiredSpeed < currentVelocityMagnitude - 0.05 ||
         targetDirectionAlignment < 0;
 
+    // Sharp lateral cuts (45-90 deg) require planting cleats to kill old momentum
+    const isSharpCut =
+        !isBraking &&
+        currentVelocityMagnitude > 1.5 &&
+        desiredSpeed > 0.5 &&
+        targetDirectionAlignment < 0.45;
+
+    let cutAccelerationYPS2 = maxAccelerationYPS2;
+    if (isSharpCut) {
+        const cutSharpness = (0.45 - targetDirectionAlignment) / 0.45; // 0..1
+        const agilityCutScale = 0.65 + (agiFactor * 0.35);
+        cutAccelerationYPS2 =
+            maxAccelerationYPS2 +
+            ((maxDecelerationYPS2 - maxAccelerationYPS2) * cutSharpness * agilityCutScale);
+    }
+
     // Apply physical acceleration limits independently of steering response.
     const effectiveAccelerationYPS2 = isBraking
         ? Math.max(0, maxDecelerationYPS2)
-        : Math.max(0, maxAccelerationYPS2);
+        : Math.max(0, cutAccelerationYPS2);
 
     const maxVelocityChange = effectiveAccelerationYPS2 * dt;
     
