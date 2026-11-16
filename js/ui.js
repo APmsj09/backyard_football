@@ -1135,10 +1135,9 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         const isOverview = activeDraftView === 'overview';
 
         draftPoolTable.style.tableLayout = isOverview ? 'fixed' : 'auto';
-        draftPoolTable.style.width = '100%';
-
+        draftPoolTable.style.width = isOverview ? '100%' : '';
         draftPoolTable.style.minWidth = isOverview
-            ? '0px'
+            ? '0'
             : activeDraftView === 'ratings'
                 ? '1180px'
                 : activeDraftView === 'youthStats'
@@ -1252,9 +1251,9 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             thead.innerHTML = `
                 <tr>
                     <th style="width:3%" class="py-1 px-1 text-center">★</th>
-                    <th style="width:16%" class="py-1 px-1.5 text-left" data-sort="name">Prospect</th>
-                    <th style="width:8%" class="py-1 px-1 text-center whitespace-nowrap">Off Fit</th>
-                    <th style="width:8%" class="py-1 px-1 text-center whitespace-nowrap">Def Fit</th>
+                    <th style="width:18%" class="py-1 px-1.5 text-left" data-sort="name">Prospect</th>
+                    <th style="width:7%" class="py-1 px-1 text-center whitespace-nowrap">Off Fit</th>
+                    <th style="width:7%" class="py-1 px-1 text-center whitespace-nowrap">Def Fit</th>
                     <th style="width:4%" class="py-1 px-1 text-center" data-sort="age">Age</th>
                     <th style="width:5%" class="py-1 px-1 text-center" data-sort="potential">Pot</th>
                     <th style="width:8%" class="py-1 px-1 text-center">Scout</th>

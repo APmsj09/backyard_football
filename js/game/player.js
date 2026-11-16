@@ -605,6 +605,8 @@ const archetypeBoosts = {
 };
 
 // Estimate an external prospect's archetype from scouting-adjusted attributes.
+// Uses general skill estimates as primary evidence.
+// Positional fits provide supporting evidence, not mandatory restrictions.
 // Never reads the player's actual archetypeName.
 export function estimateProjectedArchetype(
     player,
@@ -612,129 +614,224 @@ export function estimateProjectedArchetype(
     defensePosition = null
 ) {
     const attributes = player?.attributes;
-    if (!attributes) return null;
+    if (!attributes || typeof attributes !== 'object') return null;
 
+    // Convert numeric estimates or scouting ranges into usable values.
     const getAttribute = name => {
-        // Physical measurements use different scales from 0–100 skills.
-        // Do not mix them into the archetype signature score.
-        if (name === 'height' || name === 'weight') {
+        if (
+            name === 'height' ||
+            name === 'weight' ||
+            !name
+        ) {
             return null;
         }
 
         for (const category of Object.values(attributes)) {
-            if (category?.[name] === undefined) continue;
+            if (
+                !category ||
+                typeof category !== 'object' ||
+                category[name] === undefined
+            ) {
+                continue;
+            }
 
-            const value = Number(category[name]);
-            if (Number.isFinite(value)) return value;
+            const raw = category[name];
+
+            if (
+                raw &&
+                typeof raw === 'object' &&
+                Number.isFinite(Number(raw.low)) &&
+                Number.isFinite(Number(raw.high))
+            ) {
+                return (
+                    Number(raw.low) + Number(raw.high)
+                ) / 2;
+            }
+
+            if (
+                raw === null ||
+                raw === undefined ||
+                String(raw).trim() === ''
+            ) {
+                return null;
+            }
+
+            const numeric = Number(raw);
+
+            if (Number.isFinite(numeric)) {
+                return numeric;
+            }
+
+            // Also support displayed scouting ranges such as "71 - 97".
+            if (typeof raw === 'string') {
+                const matches = raw.match(/\d+(?:\.\d+)?/g);
+
+                if (matches?.length >= 2) {
+                    return (
+                        Number(matches[0]) +
+                        Number(matches[1])
+                    ) / 2;
+                }
+
+                if (matches?.length === 1) {
+                    return Number(matches[0]);
+                }
+            }
         }
 
         return null;
     };
 
-    const skillValues = Object.entries(attributes)
-        .flatMap(([_, category]) =>
-            Object.entries(category || {})
-                .filter(([name, value]) =>
-                    !['height', 'weight'].includes(name) &&
-                    Number.isFinite(Number(value))
-                )
-                .map(([_, value]) => Number(value))
-        );
+    // Collect all available estimated football skills.
+    const availableSkills = {};
+
+    for (const category of Object.values(attributes)) {
+        if (
+            !category ||
+            typeof category !== 'object' ||
+            Array.isArray(category)
+        ) {
+            continue;
+        }
+
+        for (const name of Object.keys(category)) {
+            if (['height', 'weight'].includes(name)) continue;
+
+            const value = getAttribute(name);
+
+            if (Number.isFinite(value)) {
+                availableSkills[name] = value;
+            }
+        }
+    }
+
+    const skillValues = Object.values(availableSkills);
 
     if (skillValues.length === 0) return null;
 
-    const baseline =
-        skillValues.reduce((sum, value) => sum + value, 0) /
-        skillValues.length;
+    // Compare each signature against the player's own estimated skill profile.
+    const baseline = skillValues.reduce(
+        (sum, value) => sum + value,
+        0
+    ) / skillValues.length;
 
-    // Prefer archetypes compatible with both estimated positional fits.
-    let candidates = archetypes;
+    const variance = skillValues.reduce(
+        (sum, value) => sum + Math.pow(value - baseline, 2),
+        0
+    ) / skillValues.length;
 
-    if (offensePosition && defensePosition) {
-        const exactMatches = archetypes.filter(
-            archetype =>
-                archetype.off === offensePosition &&
-                archetype.def === defensePosition
-        );
+    const spread = Math.max(12, Math.sqrt(variance));
 
-        if (exactMatches.length > 0) {
-            candidates = exactMatches;
-        } else {
-            candidates = archetypes.filter(
-                archetype =>
-                    archetype.off === offensePosition ||
-                    archetype.def === defensePosition
-            );
-        }
-    } else if (offensePosition) {
-        candidates = archetypes.filter(
-            archetype => archetype.off === offensePosition
-        );
-    } else if (defensePosition) {
-        candidates = archetypes.filter(
-            archetype => archetype.def === defensePosition
-        );
-    }
-
-    if (candidates.length === 0) return null;
+    const normalized = value => Math.max(
+        -2.5,
+        Math.min(2.5, (value - baseline) / spread)
+    );
 
     const scoreArchetype = archetype => {
-        const keyValues = archetype.keyAttrs
-            .map(getAttribute)
-            .filter(Number.isFinite);
+        const keyAttributes = Array.isArray(archetype.keyAttrs)
+            ? archetype.keyAttrs
+            : [];
 
-        const keyAverage = keyValues.length
-            ? keyValues.reduce((sum, value) => sum + value, 0) /
-                keyValues.length
-            : baseline;
+        const boosts = archetypeBoosts[archetype.name] || {};
 
-        // Archetype-specific boosts provide additional signature evidence.
-        const boosts = Object.entries(
-            archetypeBoosts[archetype.name] || {}
-        )
-            .map(([attribute, boost]) => ({
-                value: getAttribute(attribute),
-                boost: Number(boost)
-            }))
-            .filter(item =>
-                Number.isFinite(item.value) &&
-                Number.isFinite(item.boost) &&
-                item.boost > 0
+        // Combine core signature skills and archetype-specific boosts.
+        const weights = new Map();
+
+        keyAttributes.forEach(attribute => {
+            weights.set(attribute, 1);
+        });
+
+        Object.entries(boosts).forEach(([attribute, boost]) => {
+            const boostWeight = 1.15 + Math.min(
+                0.75,
+                Math.max(0, Number(boost) || 0) / 30
             );
 
-        const boostWeight = boosts.reduce(
-            (sum, item) => sum + item.boost,
-            0
-        );
+            weights.set(
+                attribute,
+                Math.max(weights.get(attribute) || 0, boostWeight)
+            );
+        });
 
-        const boostSignal = boostWeight > 0
-            ? boosts.reduce(
-                (sum, item) =>
-                    sum + (item.value - baseline) * item.boost,
-                0
-            ) / boostWeight
+        let weightedTotal = 0;
+        let totalWeight = 0;
+        let matchedSkills = 0;
+
+        for (const [attribute, weight] of weights) {
+            const value = getAttribute(attribute);
+
+            if (!Number.isFinite(value)) continue;
+
+            weightedTotal += normalized(value) * weight;
+            totalWeight += weight;
+            matchedSkills++;
+        }
+
+        // Score the actual available signature evidence.
+        let signatureScore = totalWeight > 0
+            ? weightedTotal / totalWeight
             : 0;
 
-        const speed = getAttribute('speed') ?? baseline;
-        const strength = getAttribute('strength') ?? baseline;
+        // Avoid overconfidence when only one signature skill is known.
+        const expectedSkills = Math.max(1, weights.size);
+        const coverage = matchedSkills / expectedSkills;
 
-        const athleticSignal =
-            (speed - baseline) * ((archetype.speedMod || 1) - 1) +
-            (strength - baseline) * ((archetype.strMod || 1) - 1);
+        signatureScore *= 0.65 + coverage * 0.35;
+
+        // Athletic tendencies provide additional supporting evidence.
+        const speed = getAttribute('speed');
+        const strength = getAttribute('strength');
+
+        let athleticScore = 0;
+
+        if (Number.isFinite(speed)) {
+            athleticScore +=
+                normalized(speed) *
+                ((Number(archetype.speedMod) || 1) - 1) *
+                0.30;
+        }
+
+        if (Number.isFinite(strength)) {
+            athleticScore +=
+                normalized(strength) *
+                ((Number(archetype.strMod) || 1) - 1) *
+                0.30;
+        }
+
+        // Position matches are helpful, but never mandatory.
+        let positionBonus = 0;
+
+        if (
+            offensePosition &&
+            archetype.off === offensePosition
+        ) {
+            positionBonus += 0.20;
+        }
+
+        if (
+            defensePosition &&
+            archetype.def === defensePosition
+        ) {
+            positionBonus += 0.20;
+        }
 
         return (
-            (keyAverage - baseline) +
-            (boostSignal * 0.35) +
-            (athleticSignal * 0.15)
+            signatureScore +
+            athleticScore +
+            positionBonus
         );
     };
 
-    return candidates
+    // Consider the entire archetype catalogue.
+    // Do not eliminate candidates based on positional fit.
+    const ranked = archetypes
         .map(archetype => ({
             name: archetype.name,
             score: scoreArchetype(archetype)
         }))
-        .sort((a, b) => b.score - a.score)[0]?.name || null;
+        .sort((a, b) => b.score - a.score);
+
+    return ranked[0]?.name || null;
 }
 
 export function gaussianRandom(mean = 0, stdev = 1) {
