@@ -724,14 +724,56 @@ function renderSignatureSkillChips(skills, estimated = false) {
             skill.val === '?' ||
             String(skill.val).trim() === '';
 
+        const numericValues = isUnknown
+            ? []
+            : String(skill.val).match(/\d+(?:\.\d+)?/g)?.map(Number) || [];
+
+        const rating = numericValues.length
+            ? numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
+            : null;
+
+        let tileClass = 'bg-slate-50 border-slate-200';
+        let labelClass = 'text-slate-500';
+        let valueClass = 'text-slate-500';
+
+        if (isUnknown) {
+            tileClass = 'bg-slate-50 border-slate-200';
+        } else if (estimated) {
+            tileClass = 'bg-indigo-50 border-indigo-200';
+            labelClass = 'text-indigo-600';
+            valueClass = 'text-indigo-900';
+        } else if (rating >= 80) {
+            tileClass = 'bg-emerald-50 border-emerald-200';
+            labelClass = 'text-emerald-700';
+            valueClass = 'text-emerald-900';
+        } else if (rating >= 65) {
+            tileClass = 'bg-blue-50 border-blue-200';
+            labelClass = 'text-blue-700';
+            valueClass = 'text-blue-900';
+        } else if (rating >= 50) {
+            tileClass = 'bg-amber-50 border-amber-200';
+            labelClass = 'text-amber-700';
+            valueClass = 'text-amber-900';
+        } else {
+            tileClass = 'bg-rose-50 border-rose-200';
+            labelClass = 'text-rose-700';
+            valueClass = 'text-rose-900';
+        }
+
         const displayValue = isUnknown
             ? '?'
             : `${estimated ? '~' : ''}${skill.val}`;
 
         return `
-            <span class="inline-flex items-center gap-0.5 rounded bg-slate-100 border border-slate-200 px-1 py-0.5 text-[9px] leading-none font-mono whitespace-nowrap">
-                <span class="text-slate-500">${skill.label}</span>
-                <b class="text-slate-800">${displayValue}</b>
+            <span
+                title="${skill.label}: ${displayValue}"
+                class="inline-flex flex-col items-center justify-center w-[44px] min-h-[34px] rounded border ${tileClass} px-1 py-1 leading-none">
+                <span class="text-[8px] font-bold tracking-wide ${labelClass}">
+                    ${skill.label}
+                </span>
+                <b class="mt-1 text-[11px] font-black font-mono ${valueClass}">
+                    ${displayValue}
+                </b>
             </span>`;
     }).join('');
 }
@@ -1009,7 +1051,7 @@ export function renderTeamNameSuggestions(names, onSelect) {
 
 export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection) {
     if (!gameState?.playerTeam) return;
-    window.app_switchDraftSidebarTab('team');
+    window.app_switchDraftSidebarTab(activeDraftSidebarTab);
     const { year, draftOrder, currentPick, playerTeam } = gameState;
     const rosterLimit = getCurrentRosterLimit(gameState);
 
@@ -1088,6 +1130,20 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
     const thead = document.getElementById('draft-pool-thead');
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
+
+    // Give wide draft-board views enough room to remain readable.
+    // The existing overflow-auto wrapper handles horizontal scrolling.
+    const draftPoolTable = thead?.closest('table');
+
+    if (draftPoolTable) {
+        const minWidthByView = {
+            ratings: '1180px',
+            youthStats: '1280px'
+        };
+
+        draftPoolTable.style.minWidth =
+            minWidthByView[activeDraftView] || '';
+    }
 
     const watchlistCountEl = document.getElementById('draft-watchlist-count');
     if (watchlistCountEl) watchlistCountEl.textContent = draftWatchlist.size;
@@ -1204,39 +1260,67 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 </tr>`;
         } else if (activeDraftView === 'ratings') {
             thead.innerHTML = `
-                <tr>
-                    <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
-                    <th class="py-2 px-2 text-center">Off Fit</th>
-                    <th class="py-2 px-2 text-center">Def Fit</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="height">Hgt</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="weight">Wgt</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200 text-blue-600" data-sort="speed">Speed</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="strength">Strength</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="agility">Agility</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="stamina">Stamina</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="throwingAccuracy">Acc</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="throwPower">Pow</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="catchingHands">Hands</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="blocking">Block</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="tackling">Tackle</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="blockShedding">B.Shed</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="playbookIQ">IQ</th>
+                <tr class="text-[9px] uppercase tracking-wide">
+                    <th rowspan="2" class="py-2 px-2 text-center w-8 bg-slate-100 border-b border-slate-300">★</th>
+                    <th rowspan="2" class="py-2 px-3 text-left bg-slate-100 border-b border-slate-300">Prospect</th>
+                    <th rowspan="2" class="py-2 px-2 text-center bg-slate-100 border-b border-slate-300">Pos</th>
+
+                    <th colspan="2" class="py-1.5 px-2 text-center bg-indigo-50 text-indigo-700 border-b border-indigo-200">
+                        Positional Fit
+                    </th>
+
+                    <th colspan="6" class="py-1.5 px-2 text-center bg-emerald-50 text-emerald-700 border-b border-emerald-200">
+                        Physical
+                    </th>
+
+                    <th colspan="6" class="py-1.5 px-2 text-center bg-amber-50 text-amber-700 border-b border-amber-200">
+                        Technical
+                    </th>
+
+                    <th colspan="1" class="py-1.5 px-2 text-center bg-violet-50 text-violet-700 border-b border-violet-200">
+                        Mental
+                    </th>
+                </tr>
+
+                <tr class="text-[9px] font-bold text-slate-600">
+                    <th class="py-2 px-2 text-center bg-indigo-50/60 whitespace-nowrap">Off Fit</th>
+                    <th class="py-2 px-2 text-center bg-indigo-50/60 whitespace-nowrap">Def Fit</th>
+
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Hgt</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Wgt</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Speed</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Strength</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Agility</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Stamina</th>
+
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Acc</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Pow</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Hands</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Block</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Tackle</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">B.Shed</th>
+
+                    <th class="py-2 px-2 text-center bg-violet-50/60 whitespace-nowrap">IQ</th>
                 </tr>`;
         } else if (activeDraftView === 'youthStats') {
             thead.innerHTML = `
                 <tr>
                     <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
                     <th class="py-2 px-2 text-center">Pos</th>
+                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthSeasons">Seasons</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthPassCompletions">Pass C/A</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthPassYards">Pass Yds</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthInterceptionsThrown">INT Thrown</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthRushAttempts">Rush Att</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthRushYards">Rush Yds</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthReceptions">Rec/Tgt</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthRecYards">Rec Yds</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthTouchdowns">TD</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthPancakes">Pancakes</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthTackles">Tackles</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthSacks">Sacks</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthInterceptions">INT</th>
                 </tr>`;
         } else {
@@ -1326,10 +1410,15 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
     };
 
     const YOUTH_STAT_SORT_FIELDS = {
+        youthPassCompletions: 'passCompletions',
         youthPassYards: 'passYards',
+        youthInterceptionsThrown: 'interceptionsThrown',
+        youthRushAttempts: 'rushAttempts',
         youthRushYards: 'rushYards',
+        youthReceptions: 'receptions',
         youthRecYards: 'recYards',
         youthTouchdowns: 'touchdowns',
+        youthPancakes: 'pancakes',
         youthTackles: 'tackles',
         youthSacks: 'sacks',
         youthInterceptions: 'interceptions'
@@ -1486,7 +1575,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     : 'No prospects match filters.');
         const emptyColspan =
             activeDraftView === 'ratings' ? 18 :
-            activeDraftView === 'youthStats' ? 11 :
+            activeDraftView === 'youthStats' ? 17 :
             9;
         elements.draftPoolTbody.innerHTML = `<tr><td colspan="${emptyColspan}" class="p-6 text-center text-slate-400 font-sans italic">${msg}</td></tr>`;
         return;
@@ -1565,7 +1654,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             const sigSkillsHtml = scoutingLevel === 0
                 ? '<span class="text-[10px] text-slate-400 italic">Scout to reveal skill estimates</span>'
                 : sigSkills.length > 0
-                    ? `<div class="flex flex-wrap justify-center gap-1">
+                    ? `<div class="grid grid-cols-3 justify-items-center gap-1 w-fit mx-auto">
                         ${renderSignatureSkillChips(sigSkills, true)}
                        </div>`
                     : '<span class="text-[10px] text-slate-400 italic">Positional fits not yet established</span>';
@@ -1614,24 +1703,38 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 (Number(player.youthSeasonsPlayed) || 0);
 
             const youthStatDisplay = statKey => {
-                if (youthHistory.length === 0) return '—';
-
                 const value = getYouthStatTotal(player, statKey);
-
                 return value === null ? '—' : value.toLocaleString();
+            };
+
+            const youthRatioDisplay = (numeratorKey, denominatorKey) => {
+                const numerator = getYouthStatTotal(player, numeratorKey);
+                const denominator = getYouthStatTotal(player, denominatorKey);
+
+                if (numerator === null || denominator === null) {
+                    return '—';
+                }
+
+                return `${numerator.toLocaleString()}/${denominator.toLocaleString()}`;
             };
 
             row.innerHTML = `
                 <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
                 <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
                 <td class="text-center py-2 px-2">${scouted.age}</td>
                 <td class="text-center py-2 px-2">${youthSeasons > 0 ? youthSeasons : '—'}</td>
+                <td class="text-center py-2 px-2">${youthRatioDisplay('passCompletions', 'passAttempts')}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('passYards')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('interceptionsThrown')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('rushAttempts')}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('rushYards')}</td>
+                <td class="text-center py-2 px-2">${youthRatioDisplay('receptions', 'targets')}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('recYards')}</td>
                 <td class="text-center py-2 px-2 font-bold">${youthStatDisplay('touchdowns')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('pancakes')}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('tackles')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('sacks')}</td>
                 <td class="text-center py-2 px-2">${youthStatDisplay('interceptions')}</td>
             `;
         } else {
@@ -1648,7 +1751,11 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             `;
         }
 
-        row.onclick = () => onPlayerSelect(scouted.id);
+        row.onclick = () => {
+            window.app_switchDraftSidebarTab('prospect');
+            onPlayerSelect(scouted.id);
+        };
+
         elements.draftPoolTbody.appendChild(row);
     });
 }
@@ -1712,25 +1819,39 @@ export function updateSelectedPlayerRow(newSelectedId) {
     document.querySelectorAll('.draft-player-row').forEach(r => r.classList.toggle('bg-amber-100', r.dataset.playerId === newSelectedId));
 }
 
-let activeDraftSidebarTab = 'team';
+let activeDraftSidebarTab = 'prospect';
 
 window.app_switchDraftSidebarTab = function(tab) {
-    if (tab !== 'team') return;
+    if (!['prospect', 'team'].includes(tab)) return;
 
-    activeDraftSidebarTab = 'team';
+    activeDraftSidebarTab = tab;
 
-    // The Team workspace is now the only right-column view.
-    const sidebarTabNav = document
-        .getElementById('draft-sidebar-prospect-btn')
-        ?.parentElement;
+    document.querySelectorAll('.draft-sidebar-tab-btn').forEach(btn => {
+        const isActive = btn.dataset.sidebarTab === tab;
 
-    sidebarTabNav?.classList.add('hidden');
+        btn.className = `draft-sidebar-tab-btn py-2 rounded text-xs font-black uppercase tracking-wider transition ${
+            isActive
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+        }`;
 
-    document.getElementById('draft-sidebar-prospect-pane')
-        ?.classList.add('hidden');
+        btn.setAttribute('aria-selected', String(isActive));
+    });
 
-    document.getElementById('draft-sidebar-team-pane')
-        ?.classList.remove('hidden');
+    const prospectPane = document.getElementById('draft-sidebar-prospect-pane');
+    const teamPane = document.getElementById('draft-sidebar-team-pane');
+
+    if (prospectPane) {
+        const showProspect = tab === 'prospect';
+        prospectPane.classList.toggle('hidden', !showProspect);
+        prospectPane.style.display = showProspect ? 'block' : 'none';
+    }
+
+    if (teamPane) {
+        const showTeam = tab === 'team';
+        teamPane.classList.toggle('hidden', !showTeam);
+        teamPane.style.display = showTeam ? 'flex' : 'none';
+    }
 };
 
 let activeDossierTab = 'overview';
@@ -1745,18 +1866,23 @@ window.app_switchDossierTab = function(tab) {
 };
 
 function renderDraftProspectComparison(player, gameState) {
-    const teamPane = document.getElementById('draft-sidebar-team-pane');
-    if (!teamPane || !gameState?.playerTeam) return;
+    const prospectPane = document.getElementById('draft-sidebar-prospect-pane');
+    if (!prospectPane || !gameState?.playerTeam) return;
 
-    let comparisonEl = document.getElementById(
-        'draft-selected-prospect-comparison'
+    // Remove any comparison previously inserted into the Team workspace.
+    document.querySelector(
+        '#draft-sidebar-team-pane #draft-selected-prospect-comparison'
+    )?.remove();
+
+    let comparisonEl = prospectPane.querySelector(
+        '#draft-selected-prospect-comparison'
     );
 
     if (!comparisonEl) {
         comparisonEl = document.createElement('div');
         comparisonEl.id = 'draft-selected-prospect-comparison';
-        comparisonEl.className = 'mb-3 p-2.5 bg-white border border-slate-200 rounded';
-        teamPane.prepend(comparisonEl);
+        comparisonEl.className = 'w-full max-w-[32rem] mx-auto p-2 bg-white border border-slate-200 rounded';
+        prospectPane.prepend(comparisonEl);
     }
 
     if (!player) {
@@ -1920,13 +2046,40 @@ function renderDraftProspectComparison(player, gameState) {
         return `${estimated ? '~' : ''}${skill.val}`;
     };
 
-    const offenseSkillMap = new Map(
-        offensePlayerSkills.map(skill => [skill.label, skill])
-    );
+    const sameCurrentPlayer =
+        bestOffensePlayer &&
+        bestDefensePlayer &&
+        String(bestOffensePlayer.player.id) ===
+            String(bestDefensePlayer.player.id);
 
-    const defenseSkillMap = new Map(
-        defensePlayerSkills.map(skill => [skill.label, skill])
-    );
+    const rosterSkillColumns = [];
+
+    if (bestOffensePlayer) {
+        rosterSkillColumns.push({
+            label: sameCurrentPlayer
+                ? `Roster · ${bestOffensePlayer.player.name}`
+                : `Off · ${bestOffensePlayer.player.name}`,
+            skills: offensePlayerSkills
+        });
+    }
+
+    if (bestDefensePlayer && !sameCurrentPlayer) {
+        rosterSkillColumns.push({
+            label: `Def · ${bestDefensePlayer.player.name}`,
+            skills: defensePlayerSkills
+        });
+    }
+
+    if (rosterSkillColumns.length === 0) {
+        rosterSkillColumns.push({
+            label: 'Your Roster',
+            skills: []
+        });
+    }
+
+    const pairedGridClass = rosterSkillColumns.length > 1
+        ? 'grid-cols-[2.25rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]'
+        : 'grid-cols-[2.25rem_minmax(0,1fr)_minmax(0,1fr)]';
 
     const pairedSkillsHtml = prospectSkills.length > 0
         ? `
@@ -1935,34 +2088,38 @@ function renderDraftProspectComparison(player, gameState) {
                     Two-Way Skill Comparison
                 </div>
 
-                <div class="grid grid-cols-[32px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-1 pb-1 text-[8px] font-bold text-slate-500">
+                <div class="grid ${pairedGridClass} gap-1 pb-1 text-[8px] font-bold text-slate-500">
                     <span>Skill</span>
-                    <span class="text-center text-amber-700">Prospect</span>
-                    <span class="text-center truncate">
-                        ${bestOffensePlayer?.player.name || 'No OFF match'}
-                    </span>
-                    <span class="text-center truncate">
-                        ${bestDefensePlayer?.player.name || 'No DEF match'}
-                    </span>
+                    <span class="text-center text-indigo-700">Prospect</span>
+
+                    ${rosterSkillColumns.map(column => `
+                        <span class="text-center truncate">
+                            ${column.label}
+                        </span>
+                    `).join('')}
                 </div>
 
                 ${prospectSkills.map(skill => `
-                    <div class="grid grid-cols-[32px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-1 items-center py-1 border-t border-slate-100">
+                    <div class="grid ${pairedGridClass} gap-1 items-center py-1 border-t border-slate-100">
                         <span class="font-mono text-[9px] text-slate-500">
                             ${skill.label}
                         </span>
 
-                        <b class="text-center font-mono text-[10px] text-amber-700">
+                        <b class="text-center font-mono text-[10px] text-indigo-700">
                             ${formatSkillValue(skill, true)}
                         </b>
 
-                        <span class="text-center font-mono text-[10px] text-slate-700">
-                            ${formatSkillValue(offenseSkillMap.get(skill.label))}
-                        </span>
+                        ${rosterSkillColumns.map(column => {
+                            const currentSkill = column.skills.find(
+                                item => item.label === skill.label
+                            );
 
-                        <span class="text-center font-mono text-[10px] text-slate-700">
-                            ${formatSkillValue(defenseSkillMap.get(skill.label))}
-                        </span>
+                            return `
+                                <span class="text-center font-mono text-[10px] text-slate-700">
+                                    ${formatSkillValue(currentSkill)}
+                                </span>
+                            `;
+                        }).join('')}
                     </div>
                 `).join('')}
             </div>
@@ -2012,7 +2169,7 @@ function renderDraftProspectComparison(player, gameState) {
             </button>
         </div>
 
-        <div class="grid grid-cols-1 gap-1.5 mt-2">
+        <div class="grid grid-cols-2 gap-1.5 mt-2">
             ${renderFitComparison('Offense', fits.offense, 'offense')}
             ${renderFitComparison('Defense', fits.defense, 'defense')}
         </div>
@@ -2032,27 +2189,33 @@ export function resetDraftWatchlist() {
 let activeDraftTeamTab = 'roster';
 
 window.app_switchDraftTeamTab = function(tab) {
+    if (!['roster', 'needs'].includes(tab)) return;
+
     activeDraftTeamTab = tab;
+
     const rosterBtn = document.getElementById('draft-tab-roster-btn');
     const needsBtn = document.getElementById('draft-tab-needs-btn');
     const rosterPane = document.getElementById('draft-roster-pane');
     const needsPane = document.getElementById('draft-needs-pane');
 
-    if (tab === 'roster') {
-        rosterBtn?.classList.add('bg-slate-900', 'text-white', 'shadow-sm');
-        rosterBtn?.classList.remove('bg-slate-200', 'text-slate-700');
-        needsBtn?.classList.add('bg-slate-200', 'text-slate-700');
-        needsBtn?.classList.remove('bg-slate-900', 'text-white', 'shadow-sm');
-        rosterPane?.classList.remove('hidden');
-        needsPane?.classList.add('hidden');
-    } else {
-        needsBtn?.classList.add('bg-slate-900', 'text-white', 'shadow-sm');
-        needsBtn?.classList.remove('bg-slate-200', 'text-slate-700');
-        rosterBtn?.classList.add('bg-slate-200', 'text-slate-700');
-        rosterBtn?.classList.remove('bg-slate-900', 'text-white', 'shadow-sm');
-        needsPane?.classList.remove('hidden');
-        rosterPane?.classList.add('hidden');
-    }
+    const showRoster = tab === 'roster';
+
+    rosterBtn?.classList.toggle('bg-slate-900', showRoster);
+    rosterBtn?.classList.toggle('text-white', showRoster);
+    rosterBtn?.classList.toggle('shadow-sm', showRoster);
+    rosterBtn?.classList.toggle('bg-slate-200', !showRoster);
+    rosterBtn?.classList.toggle('text-slate-700', !showRoster);
+    rosterBtn?.setAttribute('aria-selected', String(showRoster));
+
+    needsBtn?.classList.toggle('bg-slate-900', !showRoster);
+    needsBtn?.classList.toggle('text-white', !showRoster);
+    needsBtn?.classList.toggle('shadow-sm', !showRoster);
+    needsBtn?.classList.toggle('bg-slate-200', showRoster);
+    needsBtn?.classList.toggle('text-slate-700', showRoster);
+    needsBtn?.setAttribute('aria-selected', String(!showRoster));
+
+    rosterPane?.classList.toggle('hidden', !showRoster);
+    needsPane?.classList.toggle('hidden', showRoster);
 };
 
 function calculateTwoWayDepthAnalysis(roster) {
@@ -9873,6 +10036,17 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             String(player.id) === String(selectedId)
         );
 
+        const getStrategyTargetDisplayLabel = player => {
+            if (!player) return label;
+
+            const baseLabel = getStrategyProspectLabel(player);
+
+            // Only actual team players may display their recorded archetype.
+            return targetType === 'player'
+                ? `${baseLabel} · ${strategyEscape(player.archetypeName || 'Athlete')}`
+                : baseLabel;
+        };
+
         return `
             <input type="hidden" id="${id}" value="${strategyEscape(selectedId)}">
             <div class="relative">
@@ -9884,7 +10058,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     onclick="window.app_toggleStrategyListPicker('${id}')"
                     class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-2 text-left text-xs font-semibold text-slate-800 hover:border-slate-500">
                     <span id="${id}-label" class="truncate">
-                        ${selectedPlayer ? strategyEscape(getStrategyProspectLabel(selectedPlayer)) : label}
+                        ${getStrategyTargetDisplayLabel(selectedPlayer)}
                     </span>
                     <span aria-hidden="true" class="text-slate-400">▾</span>
                 </button>
@@ -9908,12 +10082,21 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 type="button"
                                 data-strategy-list-option="${id}"
                                 data-strategy-list-value="${strategyEscape(player.id)}"
-                                data-strategy-list-label="${strategyEscape(getStrategyProspectLabel(player))}"
-                                data-strategy-list-search-text="${strategyEscape(getStrategyProspectLabel(player))}"
+                                data-strategy-list-label="${getStrategyTargetDisplayLabel(player)}"
+                                data-strategy-list-search-text="${getStrategyTargetDisplayLabel(player)}"
                                 aria-pressed="${String(player.id) === String(selectedId)}"
                                 onclick="window.app_selectStrategyListTarget(this, '${targetType}')"
                                 class="grid w-full grid-cols-[minmax(0,1fr)_3.25rem_3.5rem] gap-2 border-t border-slate-100 px-2 py-1.5 text-left text-xs ${String(player.id) === String(selectedId) ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}">
-                                <span class="truncate font-semibold">${strategyEscape(player.name || 'Unnamed player')}</span>
+                                <span class="flex min-w-0 flex-col">
+                                    <span class="truncate font-semibold">
+                                        ${strategyEscape(player.name || 'Unnamed player')}
+                                    </span>
+                                    ${targetType === 'player' ? `
+                                        <span class="text-[9px] text-indigo-600 font-semibold truncate">
+                                            ${strategyEscape(player.archetypeName || 'Athlete')}
+                                        </span>
+                                    ` : ''}
+                                </span>
                                 <span class="text-[10px]">${strategyEscape(String(player.pos || 'ATH').toUpperCase())}</span>
                                 <span class="text-[10px]">${Number.isFinite(Number(player.age)) ? `Age ${Number(player.age)}` : '—'}</span>
                             </button>
@@ -15314,10 +15497,19 @@ function renderMyTeamTab(gameState) {
 
             html += `
             <tr data-player-id="${p.id}" class="hover:bg-slate-50 transition cursor-pointer group">
-                <td class="py-1.5 px-3 font-semibold text-slate-900 sticky left-0 bg-white group-hover:bg-slate-50 z-10 flex items-center gap-2 truncate font-sans">
-                    <span class="text-slate-400 font-mono text-[10px] w-4">#${p.number || '--'}</span>
-                    <span class="truncate group-hover:text-amber-600 transition">${p.name}</span>
-                    ${p.status?.duration > 0 ? `<span class="text-[9px] bg-rose-50 text-rose-800 border border-rose-200 px-1 py-0.5 rounded font-bold" title="${p.status.description}">🩹 ${p.status.duration}w</span>` : ''}
+                <td class="py-2 px-3 font-semibold text-slate-900 sticky left-0 bg-white group-hover:bg-slate-50 z-10 flex items-center gap-2 font-sans">
+                    <span class="text-slate-400 font-mono text-[10px] w-4 shrink-0">#${p.number || '--'}</span>
+
+                    <span class="flex flex-col min-w-0">
+                        <span class="truncate group-hover:text-amber-600 transition">
+                            ${p.name}
+                        </span>
+                        <span class="text-[9px] font-semibold text-indigo-600 truncate">
+                            ${p.archetypeName || 'Athlete'}
+                        </span>
+                    </span>
+
+                    ${p.status?.duration > 0 ? `<span class="text-[9px] bg-rose-100 text-rose-700 px-1 py-0.5 rounded font-bold shrink-0" title="${p.status.description}">🩹 ${p.status.duration}w</span>` : ''}
                 </td>
                 <td class="text-center py-1.5 px-2">
                     <div class="flex flex-col items-center gap-0.5 text-[10px] leading-tight">
