@@ -5373,56 +5373,6 @@ export function openPlayerCard(playerId) {
 
     overallsHtml += '</div>';
 
-            <!-- PANE 2: ALL ATTRIBUTES -->
-            <div id="pcard-pane-attributes" class="pcard-pane hidden grid grid-cols-1 md:grid-cols-3 gap-3">
-
-                <div class="bg-white p-3 rounded border border-slate-200">
-                    <h5 class="font-bold text-xs uppercase text-slate-500 tracking-wider mb-2 pb-1 border-b border-slate-200">
-                        Physicals
-                    </h5>
-                    <div class="grid grid-cols-2 gap-1.5">
-                        ${renderAttrValue('Speed', phys.speed)}
-                        ${renderAttrValue('Strength', phys.strength)}
-                        ${renderAttrValue('Agility', phys.agility)}
-                        ${renderAttrValue('Explosiveness', phys.explosiveness)}
-                        ${renderAttrValue('Stamina', phys.stamina)}
-                    </div>
-                </div>
-
-                <div class="bg-white p-3 rounded border border-slate-200">
-                    <h5 class="font-bold text-xs uppercase text-slate-500 tracking-wider mb-2 pb-1 border-b border-slate-200">
-                        Mental & IQ
-                    </h5>
-                    <div class="grid grid-cols-2 gap-1.5">
-                        ${renderAttrValue('Playbook IQ', ment.playbookIQ)}
-                        ${renderAttrValue('Decision Making', ment.decisionMaking)}
-                        ${renderAttrValue('Toughness', ment.toughness)}
-                        ${renderAttrValue('Consistency', ment.consistency)}
-                        ${renderAttrValue('Clutch', ment.clutch)}
-                    </div>
-                </div>
-
-                <div class="bg-white p-3 rounded border border-slate-200">
-                    <h5 class="font-bold text-xs uppercase text-slate-500 tracking-wider mb-2 pb-1 border-b border-slate-200">
-                        Technical Skills
-                    </h5>
-                    <div class="grid grid-cols-2 gap-1.5">
-                        ${renderAttrValue('Throwing Acc', tech.throwingAccuracy)}
-                        ${renderAttrValue('Catching Hands', tech.catchingHands)}
-                        ${renderAttrValue('Blocking', tech.blocking)}
-                        ${renderAttrValue('Tackling', tech.tackling)}
-                        ${renderAttrValue(
-                            'Pass Coverage',
-                            tech.coverage !== undefined
-                                ? tech.coverage
-                                : tech.passCoverage
-                        )}
-                        ${renderAttrValue('Block Shed', tech.blockShedding)}
-                    </div>
-                </div>
-
-            </div>
-
     const phys = player.attributes?.physical || {};
     const ment = player.attributes?.mental || {};
     const tech = player.attributes?.technical || {};
