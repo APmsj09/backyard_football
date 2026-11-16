@@ -5,7 +5,7 @@ import {
     getRosterObjects, getPlayer, rebuildDepthChartFromOrder, assignPlayerToSlot
 } from './game.js';
 import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames, offensivePlaybook, defensivePlaybook, routeTree, getFormationSlotLabel } from './data.js';
-import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills, calculateSlotSuitability } from './game/player.js';
+import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills, getTwoWaySignatureSkills, calculateSlotSuitability } from './game/player.js';
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';
@@ -715,6 +715,27 @@ function renderPositionFit(fit, side, includeSideLabel = false) {
         </span>`;
 }
 
+function renderSignatureSkillChips(skills, estimated = false) {
+    if (!Array.isArray(skills) || skills.length === 0) return '';
+
+    return skills.map(skill => {
+        const isUnknown =
+            skill.val == null ||
+            skill.val === '?' ||
+            String(skill.val).trim() === '';
+
+        const displayValue = isUnknown
+            ? '?'
+            : `${estimated ? '~' : ''}${skill.val}`;
+
+        return `
+            <span class="inline-flex items-center gap-0.5 rounded bg-slate-100 border border-slate-200 px-1 py-0.5 text-[9px] leading-none font-mono whitespace-nowrap">
+                <span class="text-slate-500">${skill.label}</span>
+                <b class="text-slate-800">${displayValue}</b>
+            </span>`;
+    }).join('');
+}
+
 export function setupElements() {
     const getEl = (id) => document.getElementById(id);
     elements = {
@@ -884,12 +905,24 @@ export function showScreen(screenId) {
     if (target?.classList) target.classList.remove('hidden');
 }
 
-export function showModal(title, bodyHtml, onConfirm = null, confirmText = 'Confirm', onCancel = null, cancelText = 'Close') {
+export function showModal(title, bodyHtml, onConfirm = null, confirmText = 'Confirm', onCancel = null, cancelText = 'Close', modalSize = 'default') {
     if (!elements.modal) return;
     elements.modalTitle.innerHTML = title;
     elements.modalBody.innerHTML = bodyHtml;
 
     const modalContent = elements.modal.querySelector('#modal-content');
+
+    // Reset dimensions so a previous wide dossier does not affect other modals.
+    if (modalContent) {
+        modalContent.style.removeProperty('width');
+        modalContent.style.removeProperty('max-width');
+
+        if (modalSize === 'wide') {
+            modalContent.style.width = '96vw';
+            modalContent.style.maxWidth = '88rem';
+        }
+    }
+
     modalContent?.querySelector('#modal-actions')?.remove();
 
     const actionsDiv = document.createElement('div');
@@ -976,6 +1009,7 @@ export function renderTeamNameSuggestions(names, onSelect) {
 
 export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, sortColumn, sortDirection) {
     if (!gameState?.playerTeam) return;
+    window.app_switchDraftSidebarTab('team');
     const { year, draftOrder, currentPick, playerTeam } = gameState;
     const rosterLimit = getCurrentRosterLimit(gameState);
 
@@ -1030,10 +1064,13 @@ export function renderDraftScreen(gameState, onPlayerSelect, currentSelectedId, 
     renderDraftPool(gameState, onPlayerSelect, sortColumn, sortDirection);
     renderPlayerRoster(gameState.playerTeam);
 
-    if (currentSelectedId) {
-        const playerObj = gameState.players.find(p => p.id === currentSelectedId);
-        if (playerObj) renderSelectedPlayerCard(playerObj, gameState);
-    }
+    const selectedPlayer = currentSelectedId == null
+        ? null
+        : gameState.players.find(
+            p => String(p.id) === String(currentSelectedId)
+        ) || null;
+
+    renderSelectedPlayerCard(selectedPlayer, gameState);
 
     if (elements.draftPlayerBtn) {
         elements.draftPlayerBtn.disabled = !playerCanPick || currentSelectedId === null;
@@ -1055,38 +1092,13 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
     const watchlistCountEl = document.getElementById('draft-watchlist-count');
     if (watchlistCountEl) watchlistCountEl.textContent = draftWatchlist.size;
 
-    // 1. Use active Pee Wee rosters for youth stats, but keep the actual
-    // rookie draft restricted to eligible, unassigned prospects.
+    // Every draft-board view uses the same source of eligible prospects.
+    // Pee Wee Stats changes the displayed columns, not the player population.
     const isYouthStatsView = activeDraftView === 'youthStats';
 
-    const draftClassIds = new Set(
-        (Array.isArray(gameState.draftClass) ? gameState.draftClass : [])
-            .filter(p => p?.id != null)
-            .map(p => String(p.id))
-    );
-
-    const poolSource = isYouthStatsView
-        ? (gameState.players || []).filter(player => {
-            if (!player) return false;
-
-            // Show current draft-eligible prospects and active Pee Wee players;
-            // exclude pro players already drafted onto main-league rosters.
-            if (draftClassIds.has(String(player.id))) return true;
-
-            if (!player.teamId) return false;
-
-            const assignedTeam = (gameState.teams || []).find(team =>
-                String(team?.id) === String(player.teamId)
-            );
-
-            return (
-                player.lifecycle === 'youth' &&
-                assignedTeam?.leagueType === 'youth'
-            );
-        })
-        : Array.isArray(gameState.draftClass)
-            ? gameState.draftClass
-            : [];
+    const poolSource = Array.isArray(gameState.draftClass)
+        ? gameState.draftClass
+        : [];
 
     const isInauguralDraft = Number(gameState.year) === 1;
 
@@ -1100,24 +1112,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             return false;
         }
 
-        if (isYouthStatsView) {
-            const age = Number(player.age);
-
-            const isActiveYouth =
-                player.lifecycle === 'youth' &&
-                player.teamId != null &&
-                Number.isInteger(age) &&
-                age >= 8 &&
-                age <= 11;
-
-            const isDraftPoolProspect =
-                draftClassIds.has(String(player.id)) &&
-                player.teamId == null;
-
-            return isActiveYouth || isDraftPoolProspect;
-        }
-
-        // The actual draft must only show unassigned eligible prospects.
+        // Every view must only show unassigned eligible draft prospects.
         if (
             player.teamId ||
             player.personality?.entersDraft === false
@@ -1191,40 +1186,36 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         return matchesName && matchesPos;
     });
 
-    // 2. Render Dynamic Table Header based on View Tab
+    // 2. Render Dynamic Table Header based on View Tab.
+    // Keep the prospect identity column in the same position in every view.
     if (thead) {
         if (activeDraftView === 'overview') {
             thead.innerHTML = `
                 <tr>
                     <th class="py-2 px-2 text-center w-8">★</th>
+                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
                     <th class="py-2 px-2 text-center">Off Fit</th>
                     <th class="py-2 px-2 text-center">Def Fit</th>
-                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect / Style</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="potential">Pot</th>
                     <th class="py-2 px-2 text-center">Scout</th>
                     <th class="py-2 px-2 text-center">Frame</th>
                     <th class="py-2 px-3 text-center">Key Skills</th>
                 </tr>`;
-        } else if (activeDraftView === 'physicals') {
+        } else if (activeDraftView === 'ratings') {
             thead.innerHTML = `
                 <tr>
                     <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
                     <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
+                    <th class="py-2 px-2 text-center">Off Fit</th>
+                    <th class="py-2 px-2 text-center">Def Fit</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="height">Hgt</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="weight">Wgt</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200 text-blue-600" data-sort="speed">Speed</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="strength">Strength</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="agility">Agility</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="stamina">Stamina</th>
-                </tr>`;
-        } else if (activeDraftView === 'skills') {
-            thead.innerHTML = `
-                <tr>
-                    <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
-                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="throwingAccuracy">Acc</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="throwPower">Pow</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="catchingHands">Hands</th>
@@ -1237,9 +1228,8 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             thead.innerHTML = `
                 <tr>
                     <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
                     <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
-                    <th class="py-2 px-2 text-center">Status</th>
+                    <th class="py-2 px-2 text-center">Pos</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthSeasons">Seasons</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthPassYards">Pass Yds</th>
@@ -1247,16 +1237,16 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthRecYards">Rec Yds</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthTouchdowns">TD</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthTackles">Tackles</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthSacks">Sacks</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="youthInterceptions">INT</th>
                 </tr>`;
         } else {
-            // Watchlist View (mirrors overview)
+            // Watchlist View
             thead.innerHTML = `
                 <tr>
                     <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-2 text-center w-12 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
                     <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th class="py-2 px-2 text-center">Off Fit</th>
+                    <th class="py-2 px-2 text-center">Def Fit</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="potential">Pot</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200 text-blue-600" data-sort="speed">Speed</th>
@@ -1490,11 +1480,14 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         const msg = activeDraftView === 'watchlist'
             ? 'No prospects pinned to your watchlist yet. Click the ★ next to any player to shortlist them.'
             : activeDraftView === 'youthStats'
-                ? 'No active Pee Wee players match these filters.'
+                ? 'No prospects in the current draft have matching Pee Wee records.'
                 : (!hasEligibleClass && Number(gameState.year) !== 1
                     ? 'No eligible Pee Wee graduates are available in this draft class.'
                     : 'No prospects match filters.');
-        const emptyColspan = activeDraftView === 'youthStats'
+        const emptyColspan =
+            activeDraftView === 'ratings' ? 18 :
+            activeDraftView === 'youthStats' ? 11 :
+            9;
             ? 13
             : (activeDraftView === 'watchlist' ? 8 : 9);
         elements.draftPoolTbody.innerHTML = `<tr><td colspan="${emptyColspan}" class="p-6 text-center text-slate-400 font-sans italic">${msg}</td></tr>`;
@@ -1552,69 +1545,108 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         const potPill = `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] ${getPotentialTierStyle(scouted.potential)}">${scouted.potential}</span>`;
 
         if (activeDraftView === 'overview') {
+            const offensePos = fits.offense.available !== false &&
+                fits.offense.position !== '—'
+                    ? fits.offense.position
+                    : null;
+
+            const defensePos = fits.defense.available !== false &&
+                fits.defense.position !== '—'
+                    ? fits.defense.position
+                    : null;
+
             const sigSkills = scoutingLevel > 0
-                ? getProspectSignatureSkills(getPlayerForPositionRatings(scouted), pos)
+                ? getTwoWaySignatureSkills(
+                    scouted,
+                    offensePos,
+                    defensePos,
+                    6
+                )
                 : [];
 
             const sigSkillsHtml = scoutingLevel === 0
                 ? '<span class="text-[10px] text-slate-400 italic">Scout to reveal skill estimates</span>'
-                : sigSkills.map(s =>
-                    `<span class="inline-block text-[10px] px-1.5 py-0.5 rounded font-mono mr-1 ${getRatingTierStyle(s.val, false)}">
-                        <span class="opacity-70 font-normal">${s.label}:</span> <b>~${s.val}</b>
-                    </span>`
-                ).join('');
+                : sigSkills.length > 0
+                    ? `<div class="flex flex-wrap justify-center gap-1">
+                        ${renderSignatureSkillChips(sigSkills, true)}
+                       </div>`
+                    : '<span class="text-[10px] text-slate-400 italic">Positional fits not yet established</span>';
 
             row.innerHTML = `
-                <td class="py-1.5 px-2 text-center">${starBtn}</td>
-                <td class="py-1.5 px-2 text-center">${offFitHtml}</td>
-                <td class="text-center py-1.5 px-2">${defFitHtml}</td>
-                <td class="py-1.5 px-3 font-sans truncate max-w-[150px]">
+                <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-3 font-sans truncate max-w-[150px]">
                     <span class="block font-semibold text-slate-900 truncate leading-tight">${scouted.name}</span>
                     <span class="block text-[10px] text-slate-500 truncate leading-tight">${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Role projection developing' : 'Unscouted prospect')}</span>
                 </td>
-                <td class="text-center py-1.5 px-2 text-slate-600 font-mono">${scouted.age}</td>
-                <td class="text-center py-1.5 px-2">${potPill}</td>
-                <td class="text-center py-1.5 px-2">${scoutingStatusHtml}</td>
-                <td class="text-center py-1.5 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
-                <td class="text-center py-1.5 px-3 whitespace-nowrap">${sigSkillsHtml}</td>
+                <td class="py-2 px-2 text-center">${offFitHtml}</td>
+                <td class="text-center py-2 px-2">${defFitHtml}</td>
+                <td class="text-center py-2 px-2 text-slate-600 font-mono">${scouted.age}</td>
+                <td class="text-center py-2 px-2 font-bold ${String(scouted.potential).startsWith('A') ? 'text-amber-600' : (String(scouted.potential).startsWith('B') ? 'text-blue-600' : 'text-slate-500')}">${scouted.potential}</td>
+                <td class="text-center py-2 px-2">${scoutingStatusHtml}</td>
+                <td class="text-center py-2 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
+                <td class="text-center py-2 px-3">${sigSkillsHtml}</td>
             `;
-        } else if (activeDraftView === 'physicals') {
-            const spd = scouted.attributes?.physical?.speed ?? '?';
-            const str = scouted.attributes?.physical?.strength ?? '?';
-            const agi = scouted.attributes?.physical?.agility ?? '?';
-            const stm = scouted.attributes?.physical?.stamina ?? '?';
+        } else if (activeDraftView === 'ratings') {
+            row.innerHTML = `
+                <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
+                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="py-2 px-2 text-center">${renderPositionFit(fits.offense, 'offense', true)}</td>
+                <td class="py-2 px-2 text-center">${renderPositionFit(fits.defense, 'defense', true)}</td>
+                <td class="text-center py-2 px-2">${formatHeight(scouted.attributes?.physical?.height)}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.weight ?? '?'}</td>
+                <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.strength ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.agility ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.physical?.stamina ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.throwingAccuracy ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.throwPower ?? scouted.attributes?.physical?.strength ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.blocking ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.tackling ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.blockShedding ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.mental?.playbookIQ ?? '?'}</td>
+            `;
+        } else if (activeDraftView === 'youthStats') {
+            const youthHistory = Array.isArray(player.youthSeasonHistory)
+                ? player.youthSeasonHistory
+                : [];
+
+            const youthSeasons = youthHistory.length ||
+                (Number(player.youthSeasonsPlayed) || 0);
+
+            const youthStatDisplay = statKey => {
+                if (youthHistory.length === 0) return '—';
+
+                const value = getYouthStatTotal(player, statKey);
+
+                return value === null ? '—' : value.toLocaleString();
+            };
 
             row.innerHTML = `
-                <td class="py-1.5 px-2 text-center">${starBtn}</td>
-                <td class="py-1.5 px-2 text-center">${bothFitsHtml}</td>
-                <td class="py-1.5 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
-                <td class="text-center py-1.5 px-2 text-slate-600">${formatHeight(scouted.attributes?.physical?.height)}</td>
-                <td class="text-center py-1.5 px-2 text-slate-600">${scouted.attributes?.physical?.weight}#</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(spd, true)}">${spd}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(str, true)}">${str}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(agi, true)}">${agi}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(stm, true)}">${stm}</td>
+                <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
+                <td class="py-2 px-2 text-center">${posBadge}</td>
+                <td class="text-center py-2 px-2">${scouted.age}</td>
+                <td class="text-center py-2 px-2">${youthSeasons > 0 ? youthSeasons : '—'}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('passYards')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('rushYards')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('recYards')}</td>
+                <td class="text-center py-2 px-2 font-bold">${youthStatDisplay('touchdowns')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('tackles')}</td>
+                <td class="text-center py-2 px-2">${youthStatDisplay('interceptions')}</td>
             `;
-        } else if (activeDraftView === 'skills') {
-            const acc = scouted.attributes?.technical?.throwingAccuracy ?? '?';
-            const pow = scouted.attributes?.technical?.throwPower ?? scouted.attributes?.physical?.strength ?? '?';
-            const hnd = scouted.attributes?.technical?.catchingHands ?? '?';
-            const blk = scouted.attributes?.technical?.blocking ?? '?';
-            const tkl = scouted.attributes?.technical?.tackling ?? '?';
-            const bsh = scouted.attributes?.technical?.blockShedding ?? '?';
-            const iq = scouted.attributes?.mental?.playbookIQ ?? '?';
-
+        } else {
             row.innerHTML = `
-                <td class="py-1.5 px-2 text-center">${starBtn}</td>
-                <td class="py-1.5 px-2 text-center">${bothFitsHtml}</td>
-                <td class="py-1.5 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(acc, true)}">${acc}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(pow, true)}">${pow}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(hnd, true)}">${hnd}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(blk, true)}">${blk}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(tkl, true)}">${tkl}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(bsh, true)}">${bsh}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(iq, true)}">${iq}</td>
+                <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
+                <td class="py-2 px-2 text-center">${renderPositionFit(fits.offense, 'offense', true)}</td>
+                <td class="py-2 px-2 text-center">${renderPositionFit(fits.defense, 'defense', true)}</td>
+                <td class="text-center py-2 px-2">${scouted.age}</td>
+                <td class="text-center py-2 px-2 font-bold text-amber-600">${scouted.potential}</td>
+                <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
+                <td class="text-center py-2 px-2">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
+                <td class="text-center py-2 px-2 font-black text-slate-900">${ovrDisplay}</td>
             `;
         } else if (activeDraftView === 'youthStats') {
             const youthHistory = Array.isArray(player.youthSeasonHistory)
@@ -1732,28 +1764,25 @@ export function updateSelectedPlayerRow(newSelectedId) {
     document.querySelectorAll('.draft-player-row').forEach(r => r.classList.toggle('bg-amber-100', r.dataset.playerId === newSelectedId));
 }
 
-let activeDraftSidebarTab = 'prospect';
+let activeDraftSidebarTab = 'team';
 
 window.app_switchDraftSidebarTab = function(tab) {
-    if (!['prospect', 'team'].includes(tab)) return;
+    if (tab !== 'team') return;
 
-    activeDraftSidebarTab = tab;
+    activeDraftSidebarTab = 'team';
 
-    document.querySelectorAll('.draft-sidebar-tab-btn').forEach(btn => {
-        const isActive = btn.dataset.sidebarTab === tab;
+    // The Team workspace is now the only right-column view.
+    const sidebarTabNav = document
+        .getElementById('draft-sidebar-prospect-btn')
+        ?.parentElement;
 
-        btn.className = `draft-sidebar-tab-btn py-2 rounded text-xs font-black uppercase tracking-wider transition ${
-            isActive
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-        }`;
-    });
+    sidebarTabNav?.classList.add('hidden');
 
     document.getElementById('draft-sidebar-prospect-pane')
-        ?.classList.toggle('hidden', tab !== 'prospect');
+        ?.classList.add('hidden');
 
     document.getElementById('draft-sidebar-team-pane')
-        ?.classList.toggle('hidden', tab !== 'team');
+        ?.classList.remove('hidden');
 };
 
 let activeDossierTab = 'overview';
@@ -1767,157 +1796,285 @@ window.app_switchDossierTab = function(tab) {
     document.getElementById(`dossier-pane-${tab}`)?.classList.remove('hidden');
 };
 
-export function renderSelectedPlayerCard(player, gameState) {
-    if (!elements.selectedPlayerCard) return;
-    if (!player || !gameState?.playerTeam) {
-        elements.selectedPlayerCard.innerHTML = `<p class="text-slate-400 text-xs italic text-center py-4">Select a prospect from the board to examine report.</p>`;
-        if (elements.draftPlayerBtn) elements.draftPlayerBtn.disabled = true;
+function renderDraftProspectComparison(player, gameState) {
+    const teamPane = document.getElementById('draft-sidebar-team-pane');
+    if (!teamPane || !gameState?.playerTeam) return;
+
+    let comparisonEl = document.getElementById(
+        'draft-selected-prospect-comparison'
+    );
+
+    if (!comparisonEl) {
+        comparisonEl = document.createElement('div');
+        comparisonEl.id = 'draft-selected-prospect-comparison';
+        comparisonEl.className = 'mb-3 p-2.5 bg-white border border-slate-200 rounded';
+        teamPane.prepend(comparisonEl);
+    }
+
+    if (!player) {
+        comparisonEl.innerHTML = `
+            <div class="text-center py-3">
+                <p class="text-xs font-bold text-slate-600">
+                    Select a prospect to compare
+                </p>
+                <p class="text-[10px] text-slate-400 mt-1">
+                    Your roster and positional depth will be compared with the selected player.
+                </p>
+            </div>
+        `;
         return;
     }
 
-    const playerRoster = getUIRosterObjects(gameState.playerTeam);
-    const scouted = getScoutingAwarePlayerView(player, gameState.playerTeam);
-
+    const team = gameState.playerTeam;
+    const scouted = getScoutingAwarePlayerView(player, team);
     if (!scouted) return;
 
-    const pos = scouted.pos || '—';
+    const roster = getUIRosterObjects(team);
+    const depthAnalysis = calculateTwoWayDepthAnalysis(roster);
     const fits = getBestTwoWayFits(scouted);
     const scoutingLevel = scouted.scoutingLevel || 0;
-    const scoutingLabel = SCOUTING_LEVEL_LABELS[scoutingLevel] || 'Known player';
-    const characterSummary = scouted.scoutingEvaluation?.characterSummary ||
-        (scoutingLevel >= 3 ? 'Not included in this report' : 'Not assessed yet');
-    const publicInfo = Game.getPublicPlayerInfo?.(player) || null;
-    const publicRecordHtml = renderPublicPlayerRecord(publicInfo);
-    const youthRecordHtml = renderPeeWeeHistory(player);
 
-    // External prospects' exact relationships are hidden until the game
-    // has a dedicated scouting report field for verified connections.
-    const canShowDirectSocialInfo = !scouted.isExternalProspect;
+    const offensePos =
+        fits.offense.available !== false &&
+        fits.offense.position !== '—'
+            ? fits.offense.position
+            : null;
 
-    const bestFriend = canShowDirectSocialInfo
-        ? playerRoster.find(r => r.id === player.social?.bestFriendId)
-        : null;
+    const defensePos =
+        fits.defense.available !== false &&
+        fits.defense.position !== '—'
+            ? fits.defense.position
+            : null;
 
-    const friendsOnTeam = canShowDirectSocialInfo
-        ? playerRoster.filter(r =>
-            player.social?.goodFriendIds?.includes(r.id)
+    const prospectSkills = scoutingLevel > 0
+        ? getTwoWaySignatureSkills(
+            scouted,
+            offensePos,
+            defensePos,
+            6
         )
         : [];
 
-    const rivalOnTeam = canShowDirectSocialInfo
-        ? playerRoster.find(r => player.social?.rivalIds?.includes(r.id))
-        : null;
+    const getBestCurrentPlayer = position => {
+        if (!position) return null;
 
-    let socialBadgeHtml = '';
-    if (bestFriend) socialBadgeHtml += `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1 py-0.5 rounded text-[9px] font-bold">🤝 BFF: ${bestFriend.name.split(' ')[0]}</span>`;
-    if (friendsOnTeam.length > 0) socialBadgeHtml += `<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-1 py-0.5 rounded text-[9px] font-bold">Friends: ${friendsOnTeam.length}</span>`;
-    if (rivalOnTeam) socialBadgeHtml += `<span class="bg-rose-100 text-rose-800 border border-rose-300 px-1 py-0.5 rounded text-[9px] font-bold">⚠️ Rival</span>`;
+        const room = depthAnalysis.find(
+            item => item.pos === position
+        );
 
-    // Character estimates will be displayed only when the scouting report
-    // explicitly includes them. Do not read hidden external-player traits here.
+        return room?.players?.[0] || null;
+    };
 
-    const positions = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'];
-    let overallsHtml = '<div class="grid grid-cols-4 gap-1 text-center">';
+    const bestOffensePlayer = getBestCurrentPlayer(offensePos);
+    const bestDefensePlayer = getBestCurrentPlayer(defensePos);
 
-    positions.forEach(pKey => {
-        const pOvr = scouted.isExternalProspect && scoutingLevel === 0
-            ? '—'
-            : `~${Math.round(calculateDisplayOverall(scouted, pKey))}`;
-        const isBestOffense = pKey === fits.offense.position;
-        const isBestDefense = pKey === fits.defense.position;
+    const offensePlayerSkills = bestOffensePlayer
+        ? getTwoWaySignatureSkills(
+            bestOffensePlayer.player,
+            offensePos,
+            defensePos,
+            6
+        )
+        : [];
 
-        const fitCardClass = isBestOffense
-            ? 'bg-emerald-700 text-white border-emerald-700'
-            : isBestDefense
-                ? 'bg-blue-700 text-white border-blue-700'
-                : 'bg-slate-100 text-slate-700';
+    const defensePlayerSkills = bestDefensePlayer
+        ? getTwoWaySignatureSkills(
+            bestDefensePlayer.player,
+            offensePos,
+            defensePos,
+            6
+        )
+        : [];
 
-        const fitLabelClass = isBestOffense
-            ? 'text-emerald-100'
-            : isBestDefense
-                ? 'text-blue-100'
-                : 'text-slate-400';
+    const renderFitComparison = (label, fit, side) => {
+        const isOffense = side === 'offense';
+        const accent = isOffense ? 'emerald' : 'blue';
 
-        overallsHtml += `
-            <div class="${fitCardClass} p-1 rounded border">
-                <p class="text-[9px] font-bold uppercase ${fitLabelClass}">${pKey}</p>
-                <p class="font-black text-xs">${pOvr}</p>
-            </div>`;
-    });
-
-    overallsHtml += '</div>';
-
-    /*// Identify top secondary position for two-way scouting preview
-    const secPosList = ['QB', 'RB', 'WR', 'TE', 'OL', 'DL', 'LB', 'DB'].filter(pKey => pKey !== pos);
-    const topSecPos = secPosList.map(pKey => ({ pos: pKey, ovr: calculateOverall(scouted, pKey) }))
-                                .sort((a, b) => b.ovr - a.ovr)[0];
-    const twoWaySnippet = topSecPos && topSecPos.ovr >= ovr - 8
-        ? `<span class="bg-indigo-50 text-indigo-700 border border-indigo-200 px-1 py-0.2 rounded text-[8px] font-bold">2-Way: ${topSecPos.pos} (${topSecPos.ovr})</span>`
-        : '';*/
-
-    elements.selectedPlayerCard.innerHTML = `
-        <div class="flex flex-col">
-            <!-- Compact Header -->
-            <div class="flex justify-between items-center mb-1.5 pb-1 border-b border-slate-200">
-                <div class="truncate pr-1">
-                    <div class="flex items-center gap-1.5">
-                        <h3 class="font-black text-sm text-slate-900 truncate leading-tight">${scouted.name}</h3>
+        if (
+            fit.available === false ||
+            !fit.position ||
+            fit.position === '—'
+        ) {
+            return `
+                <div class="p-2 bg-slate-50 border border-slate-200 rounded">
+                    <div class="text-[9px] font-black uppercase text-${accent}-700">
+                        ${label}
                     </div>
-                    <p class="text-[10px] text-slate-500 font-mono">${scouted.age}yo • ${formatHeight(scouted.attributes?.physical?.height)} • ${scouted.attributes?.physical?.weight}#</p>
-                    <p class="text-[9px] text-slate-500">${scoutingLabel}${scoutingLevel > 0 ? ` · ${Math.round(scouted.scoutingConfidence * 100)}% confidence` : ' · Assign scouting time to begin'}</p>
+                    <div class="text-xs font-bold text-slate-500 mt-1">
+                        Not yet scouted
+                    </div>
+                    <p class="text-[9px] text-slate-400 mt-1">
+                        Assign scouting time to estimate this player's fit.
+                    </p>
                 </div>
-                <div class="flex items-center gap-1 shrink-0">
-                    <div class="text-right bg-emerald-50 border border-emerald-200 px-2 py-1 rounded">
-                        <span class="text-[8px] uppercase tracking-wider block text-emerald-700">Off Fit</span>
-                        <span class="text-sm font-black leading-none text-emerald-800">
-                            ${fits.offense.available === false ? 'Unscouted' : `${fits.offense.position} ${fits.offense.estimated ? '~' : ''}${fits.offense.ovr}`}
+            `;
+        }
+
+        const room = depthAnalysis.find(item => item.pos === fit.position);
+        const bestCurrentPlayer = room?.players?.[0] || null;
+
+        const prospectRating = Number.isFinite(fit.low) &&
+            Number.isFinite(fit.high)
+            ? `~${fit.low}–${fit.high}`
+            : `${fit.estimated ? '~' : ''}${fit.ovr}`;
+
+        const currentPlayerHtml = bestCurrentPlayer
+            ? `
+                <div class="flex items-center justify-between gap-2 mt-1">
+                    <span class="text-[10px] text-slate-500 truncate">
+                        ${bestCurrentPlayer.player.name}
+                    </span>
+                    <b class="text-xs font-mono text-slate-800 shrink-0">
+                        ${bestCurrentPlayer.ovr} OVR
+                    </b>
+                </div>
+            `
+            : `
+                <p class="text-[10px] text-slate-400 mt-1">
+                    No current player viable at ${fit.position}
+                </p>
+            `;
+
+        return `
+            <div class="p-2 bg-slate-50 border border-slate-200 rounded">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-[9px] font-black uppercase text-${accent}-700">
+                        ${label} · ${fit.position}
+                    </span>
+                    <span class="text-sm font-black font-mono text-slate-900">
+                        ${prospectRating}
+                    </span>
+                </div>
+
+                <div class="text-[9px] text-slate-400 uppercase font-bold mt-2">
+                    Best current ${fit.position}
+                </div>
+                ${currentPlayerHtml}
+
+                <div class="text-[9px] text-slate-400 mt-1">
+                    ${room?.viableCount || 0} viable roster player(s)
+                    · ${room?.ideal || 0} target
+                </div>
+            </div>
+        `;
+    };
+
+    const formatSkillValue = (skill, estimated = false) => {
+        if (
+            !skill ||
+            skill.val == null ||
+            skill.val === '?' ||
+            String(skill.val).trim() === ''
+        ) {
+            return '?';
+        }
+
+        return `${estimated ? '~' : ''}${skill.val}`;
+    };
+
+    const offenseSkillMap = new Map(
+        offensePlayerSkills.map(skill => [skill.label, skill])
+    );
+
+    const defenseSkillMap = new Map(
+        defensePlayerSkills.map(skill => [skill.label, skill])
+    );
+
+    const pairedSkillsHtml = prospectSkills.length > 0
+        ? `
+            <div class="mt-2 p-2 bg-white border border-slate-200 rounded">
+                <div class="text-[9px] font-black uppercase tracking-wide text-slate-600 mb-1.5">
+                    Two-Way Skill Comparison
+                </div>
+
+                <div class="grid grid-cols-[32px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-1 pb-1 text-[8px] font-bold text-slate-500">
+                    <span>Skill</span>
+                    <span class="text-center text-amber-700">Prospect</span>
+                    <span class="text-center truncate">
+                        ${bestOffensePlayer?.player.name || 'No OFF match'}
+                    </span>
+                    <span class="text-center truncate">
+                        ${bestDefensePlayer?.player.name || 'No DEF match'}
+                    </span>
+                </div>
+
+                ${prospectSkills.map(skill => `
+                    <div class="grid grid-cols-[32px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-1 items-center py-1 border-t border-slate-100">
+                        <span class="font-mono text-[9px] text-slate-500">
+                            ${skill.label}
+                        </span>
+
+                        <b class="text-center font-mono text-[10px] text-amber-700">
+                            ${formatSkillValue(skill, true)}
+                        </b>
+
+                        <span class="text-center font-mono text-[10px] text-slate-700">
+                            ${formatSkillValue(offenseSkillMap.get(skill.label))}
+                        </span>
+
+                        <span class="text-center font-mono text-[10px] text-slate-700">
+                            ${formatSkillValue(defenseSkillMap.get(skill.label))}
                         </span>
                     </div>
-                    <div class="text-right bg-blue-50 border border-blue-200 px-2 py-1 rounded">
-                        <span class="text-[8px] uppercase tracking-wider block text-blue-700">Def Fit</span>
-                        <span class="text-sm font-black leading-none text-blue-800">
-                             ${fits.defense.available === false ? 'Unscouted' : `${fits.defense.position} ${fits.defense.estimated ? '~' : ''}${fits.defense.ovr}`}
-                        </span>
-                    </div>
+                `).join('')}
+            </div>
+        `
+        : `
+            <p class="text-[10px] text-slate-400 italic mt-2">
+                Scout this prospect to establish a two-way skill comparison.
+            </p>
+        `;
+
+    const physical = scouted.attributes?.physical || {};
+    const measurements = [
+        scouted.age != null ? `${scouted.age}yo` : null,
+        physical.height != null ? formatHeight(physical.height) : null,
+        physical.weight != null ? `${physical.weight}#` : null
+    ].filter(Boolean).join(' · ');
+
+    const potential = scouted.potential && scouted.potential !== '?'
+        ? scouted.potential
+        : 'Unknown';
+
+    const scoutingLabel =
+        SCOUTING_LEVEL_LABELS[scoutingLevel] || 'Unscouted';
+
+    comparisonEl.innerHTML = `
+        <div class="flex items-start justify-between gap-2 pb-2 border-b border-slate-200">
+            <div class="min-w-0">
+                <div class="text-[9px] font-black uppercase tracking-wider text-slate-400">
+                    Selected Prospect
+                </div>
+                <div class="font-black text-sm text-slate-900 truncate">
+                    ${scouted.name}
+                </div>
+                <div class="text-[10px] text-slate-500 font-mono">
+                    ${measurements || 'Measurements unavailable'}
+                </div>
+                <div class="text-[9px] text-slate-500 mt-0.5">
+                    ${scoutingLabel} · Potential: ${potential}
                 </div>
             </div>
 
-            <!-- Dossier Navigation Tabs -->
-            <div class="flex gap-1 mb-2 border-b border-slate-200 pb-1.5">
-                <button class="dossier-tab-btn flex-1 py-1 rounded text-[10px] font-bold transition ${activeDossierTab === 'overview' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}" data-dtab="overview" onclick="window.app_switchDossierTab('overview')">
-                    Overview
-                </button>
-                <button class="dossier-tab-btn flex-1 py-1 rounded text-[10px] font-bold transition ${activeDossierTab === 'matrix' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}" data-dtab="matrix" onclick="window.app_switchDossierTab('matrix')">
-                    8-Way Matrix
-                </button>
-                <button class="dossier-tab-btn flex-1 py-1 rounded text-[10px] font-bold transition ${activeDossierTab === 'bio' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}" data-dtab="bio" onclick="window.app_switchDossierTab('bio')">
-                    Scouting Bio
-                </button>
-            </div>
-
-            <!-- Tab 1: Overview Pane (Clean & Compact) -->
-            <div id="dossier-pane-overview" class="dossier-pane ${activeDossierTab === 'overview' ? '' : 'hidden'} text-[10px] space-y-1.5">
-                ${publicRecordHtml}
-                ${youthRecordHtml}
-                <div class="flex flex-wrap items-center gap-1">
-                    <span class="bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded border border-amber-200">Role: ${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Under evaluation' : 'Unscouted')}</span>
-                    <span class="bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded border border-indigo-200">Character: ${characterSummary}</span>
-                    ${socialBadgeHtml}
-                    <p class="w-full text-slate-600 italic">${scouted.scoutingEvaluation?.summary || (scoutingLevel > 0 ? 'Your staff is still developing this evaluation.' : 'No scouting report yet. Allocate staff time to begin learning about this prospect.')}</p>
-                </div>
-            </div>
-
-            <!-- Tab 2: Positional Suitability Matrix -->
-            <div id="dossier-pane-matrix" class="dossier-pane ${activeDossierTab === 'matrix' ? '' : 'hidden'}">
-                ${overallsHtml}
-            </div>
-
-            <!-- Tab 3: Bio & Lore -->
-            <div id="dossier-pane-bio" class="dossier-pane ${activeDossierTab === 'bio' ? '' : 'hidden'} text-[11px] text-slate-700 italic bg-amber-50/70 p-2 rounded border border-amber-200 max-h-24 overflow-y-auto">
-                "${player.bio || 'A dependable playground competitor.'}"
-            </div>
+            <button
+                type="button"
+                class="shrink-0 bg-slate-900 hover:bg-slate-700 text-white font-bold px-2 py-1.5 rounded text-[9px] uppercase tracking-wide"
+                onclick="app.openPlayerCard('${player.id}')">
+                Full Dossier
+            </button>
         </div>
+
+        <div class="grid grid-cols-1 gap-1.5 mt-2">
+            ${renderFitComparison('Offense', fits.offense, 'offense')}
+            ${renderFitComparison('Defense', fits.defense, 'defense')}
+        </div>
+
+        ${pairedSkillsHtml}
     `;
+}
+
+export function renderSelectedPlayerCard(player, gameState) {
+    renderDraftProspectComparison(player, gameState);
 }
 
 export function resetDraftWatchlist() {
@@ -1999,27 +2156,47 @@ export function renderPlayerRoster(playerTeam) {
     const roster = getUIRosterObjects(playerTeam);
     elements.rosterCount.textContent = `${roster.length}/18`;
 
-    // 1. Render a compact, full-width two-way roster list.
+    // 1. Render roster players with actual position-relevant skills.
     elements.draftRosterList.innerHTML = roster.map(p => {
         const fits = getBestTwoWayFits(p);
+
+        const signatureSkills = getTwoWaySignatureSkills(
+            p,
+            fits.offense.position !== '—'
+                ? fits.offense.position
+                : null,
+            fits.defense.position !== '—'
+                ? fits.defense.position
+                : null,
+            6
+        );
+
+        const signatureSkillsHtml =
+            renderSignatureSkillChips(signatureSkills);
 
         return `
         <li
             class="px-2.5 py-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-xs hover:bg-slate-100 transition cursor-pointer"
             onclick="app.openPlayerCard('${p.id}')">
 
-            <div class="flex items-center gap-1.5 min-w-0">
-                <span class="text-slate-400 font-mono text-[10px] shrink-0">
-                    #${p.number || '--'}
-                </span>
+            <div class="flex flex-col min-w-0">
+                <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="text-slate-400 font-mono text-[10px] shrink-0">
+                        #${p.number || '--'}
+                    </span>
 
-                <span class="font-semibold text-slate-900 truncate">
-                    ${p.name}
-                </span>
+                    <span class="font-semibold text-slate-900 truncate">
+                        ${p.name}
+                    </span>
 
-                <span class="text-[10px] text-slate-400 font-mono shrink-0">
-                    (${p.age}yo)
-                </span>
+                    <span class="text-[10px] text-slate-400 font-mono shrink-0">
+                        (${p.age}yo)
+                    </span>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-1 mt-0.5">
+                    ${signatureSkillsHtml}
+                </div>
             </div>
 
             <div class="flex items-center justify-end flex-wrap gap-x-2 gap-y-0.5 text-[10px] shrink-0">
@@ -2103,15 +2280,43 @@ window.app_openDraftTeamModal = function() {
                                 <span>(${item.primaryCount} Natural • ${item.twoWayCount} Two-Way)</span>
                             </div>
                             <div class="space-y-1 font-mono text-[11px]">
-                                ${item.players.map(p => `
-                                    <div class="flex justify-between items-center p-1 bg-slate-50 rounded hover:bg-slate-100 cursor-pointer" onclick="app.openPlayerCard('${p.player.id}')">
-                                        <div class="flex items-center gap-1.5 truncate pr-2 font-sans">
-                                            <span class="font-semibold text-slate-800 truncate">${p.player.name}</span>
-                                            ${!p.isPrimary ? `<span class="bg-indigo-100 text-indigo-900 text-[8px] font-bold px-1 rounded uppercase">2-Way (${p.player.pos || 'ATH'})</span>` : ''}
+                                ${item.players.map(p => {
+                                    const playerFits = getBestTwoWayFits(p.player);
+
+                                    const offensePos =
+                                        playerFits.offense.position !== '—'
+                                            ? playerFits.offense.position
+                                            : null;
+
+                                    const defensePos =
+                                        playerFits.defense.position !== '—'
+                                            ? playerFits.defense.position
+                                            : null;
+
+                                    const keySkills = getTwoWaySignatureSkills(
+                                        p.player,
+                                        offensePos,
+                                        defensePos,
+                                        6
+                                    );
+
+                                    const keySkillsHtml =
+                                        renderSignatureSkillChips(keySkills);
+
+                                    return `
+                                    <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-1.5 bg-slate-50 rounded hover:bg-slate-100 cursor-pointer" onclick="app.openPlayerCard('${p.player.id}')">
+                                        <div class="min-w-0">
+                                            <div class="flex items-center gap-1.5 truncate font-sans">
+                                                <span class="font-semibold text-slate-800 truncate">${p.player.name}</span>
+                                                ${!p.isPrimary ? `<span class="bg-indigo-100 text-indigo-900 text-[8px] font-bold px-1 rounded uppercase shrink-0">2-Way (${p.player.pos || 'ATH'})</span>` : ''}
+                                            </div>
+                                            <div class="flex flex-wrap items-center gap-1 mt-1">
+                                                ${keySkillsHtml}
+                                            </div>
                                         </div>
-                                        <span class="font-bold text-slate-900">${p.ovr} OVR</span>
-                                    </div>
-                                `).join('') || '<p class="text-slate-400 italic text-[10px] py-1">No players viable at this position.</p>'}
+                                        <span class="font-bold text-slate-900 whitespace-nowrap">${p.ovr} OVR</span>
+                                    </div>`;
+                                }).join('') || '<p class="text-slate-400 italic text-[10px] py-1">No players viable at this position.</p>'}
                             </div>
                         </div>
                     `).join('')}
@@ -17793,12 +17998,37 @@ export function renderPlaybookManager(gameState) {
         .filter(k => !BASICS_DEF.includes(k) && defensivePlaybook[k])
         .slice(0, 8);
 
-    // Default starters if empty
-    if (team.gameplan.installedOffense.length === 0) {
-        team.gameplan.installedOffense = ['Uni_Stick', 'Uni_Drive', 'Uni_HB_Screen', 'PA_Crossers', 'Uni_Mesh', 'Uni_Counter_Trap', 'Uni_PowerLead', 'Uni_Double_Moves'];
-    }
-    if (team.gameplan.installedDefense.length === 0) {
-        team.gameplan.installedDefense = ['Cover_3_Sky', 'Nickel_Tampa_2', 'Fire_Zone_3', 'Cover_6_Split', 'Cover_3_Drop', 'Nickel_Strong_Blitz', 'Overload_Blitz_Right', 'Dime_Lockdown'];
+    // Apply default custom installs only during initial setup.
+    // After initialization, an empty list is a valid user choice:
+    // the team can run with only the four locked fundamentals.
+    if (team.gameplan.playbookDefaultsApplied !== true) {
+        if (team.gameplan.installedOffense.length === 0) {
+            team.gameplan.installedOffense = [
+                'Uni_Stick',
+                'Uni_Drive',
+                'Uni_HB_Screen',
+                'PA_Crossers',
+                'Uni_Mesh',
+                'Uni_Counter_Trap',
+                'Uni_PowerLead',
+                'Uni_Double_Moves'
+            ];
+        }
+
+        if (team.gameplan.installedDefense.length === 0) {
+            team.gameplan.installedDefense = [
+                'Cover_3_Sky',
+                'Nickel_Tampa_2',
+                'Fire_Zone_3',
+                'Cover_6_Split',
+                'Cover_3_Drop',
+                'Nickel_Strong_Blitz',
+                'Overload_Blitz_Right',
+                'Dime_Lockdown'
+            ];
+        }
+
+        team.gameplan.playbookDefaultsApplied = true;
     }
 
     // Active 12-play unified lists (Guaranteed 0 duplicates)

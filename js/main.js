@@ -5373,55 +5373,55 @@ export function openPlayerCard(playerId) {
 
     overallsHtml += '</div>';
 
-    // Tab 2: Detailed Attributes View
-    const renderAttrBar = (label, val) => {
-        const isRange = Boolean(
-            val &&
-            typeof val === 'object' &&
-            Number.isFinite(val.low) &&
-            Number.isFinite(val.high)
-        );
+            <!-- PANE 2: ALL ATTRIBUTES -->
+            <div id="pcard-pane-attributes" class="pcard-pane hidden grid grid-cols-1 md:grid-cols-3 gap-3">
 
-        const hasNumber = Number.isFinite(val);
-
-        const numericValue = isRange
-            ? (val.low + val.high) / 2
-            : hasNumber
-                ? val
-                : 0;
-
-        const displayValue = isRange
-            ? `${val.low}–${val.high}`
-            : hasNumber
-                ? val
-                : 'Unknown';
-
-        const barColor = !isRange && !hasNumber
-            ? 'bg-slate-300'
-            : isRange
-                ? 'bg-indigo-400'
-                : numericValue >= 70
-                    ? 'bg-emerald-500'
-                    : numericValue >= 50
-                        ? 'bg-blue-500'
-                        : 'bg-amber-500';
-
-        return `
-            <div class="flex items-center justify-between text-xs py-1 border-b border-slate-100">
-                <span class="text-slate-600 font-medium">${label}</span>
-                <div class="flex items-center gap-2">
-                    <div class="w-24 bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                        <div
-                            class="h-full ${barColor}"
-                            style="width: ${numericValue}%"
-                        ></div>
+                <div class="bg-white p-3 rounded border border-slate-200">
+                    <h5 class="font-bold text-xs uppercase text-slate-500 tracking-wider mb-2 pb-1 border-b border-slate-200">
+                        Physicals
+                    </h5>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        ${renderAttrValue('Speed', phys.speed)}
+                        ${renderAttrValue('Strength', phys.strength)}
+                        ${renderAttrValue('Agility', phys.agility)}
+                        ${renderAttrValue('Explosiveness', phys.explosiveness)}
+                        ${renderAttrValue('Stamina', phys.stamina)}
                     </div>
-                    <span class="font-mono font-bold w-12 text-right">
-                        ${displayValue}
-                    </span>
                 </div>
-            </div>`;
-    };
+
+                <div class="bg-white p-3 rounded border border-slate-200">
+                    <h5 class="font-bold text-xs uppercase text-slate-500 tracking-wider mb-2 pb-1 border-b border-slate-200">
+                        Mental & IQ
+                    </h5>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        ${renderAttrValue('Playbook IQ', ment.playbookIQ)}
+                        ${renderAttrValue('Decision Making', ment.decisionMaking)}
+                        ${renderAttrValue('Toughness', ment.toughness)}
+                        ${renderAttrValue('Consistency', ment.consistency)}
+                        ${renderAttrValue('Clutch', ment.clutch)}
+                    </div>
+                </div>
+
+                <div class="bg-white p-3 rounded border border-slate-200">
+                    <h5 class="font-bold text-xs uppercase text-slate-500 tracking-wider mb-2 pb-1 border-b border-slate-200">
+                        Technical Skills
+                    </h5>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        ${renderAttrValue('Throwing Acc', tech.throwingAccuracy)}
+                        ${renderAttrValue('Catching Hands', tech.catchingHands)}
+                        ${renderAttrValue('Blocking', tech.blocking)}
+                        ${renderAttrValue('Tackling', tech.tackling)}
+                        ${renderAttrValue(
+                            'Pass Coverage',
+                            tech.coverage !== undefined
+                                ? tech.coverage
+                                : tech.passCoverage
+                        )}
+                        ${renderAttrValue('Block Shed', tech.blockShedding)}
+                    </div>
+                </div>
+
+            </div>
 
     const phys = player.attributes?.physical || {};
     const ment = player.attributes?.mental || {};
@@ -6000,7 +6000,15 @@ export function openPlayerCard(playerId) {
         </div>
     `;
 
-    UI.showModal('Player Dossier', modalHtml);
+    UI.showModal(
+        'Player Dossier',
+        modalHtml,
+        null,
+        'Confirm',
+        null,
+        'Close',
+        'wide'
+    );
 }
 
 function handleSetCaptain(playerId) {
@@ -8717,25 +8725,16 @@ document.getElementById('sim-speed-faster')
         UI.updateDraftSortIndicators(currentSortColumn, currentSortDirection);
     });*/
 
-    // Draft Sub-View Tabs (Overview, Physicals, Skills, Watchlist, Pee Wee Stats)
+    // Draft Sub-View Tabs
+    // Changing views changes the displayed information, not prospect order.
     document.querySelectorAll('.draft-view-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const view = btn.dataset.view;
 
-            const defaultSorts = {
-                overview: 'potential',
-                physicals: 'speed',
-                skills: 'playbookIQ',
-                watchlist: 'potential',
-                youthStats: 'youthTouchdowns'
-            };
-
             UI.setDraftView(view);
 
-            // Don't silently keep sorting by a column that isn't visible.
-            currentSortColumn = defaultSorts[view] || 'potential';
-            currentSortDirection = 'desc';
-
+            // Preserve the current board sort across every view.
+            // The user changes prospect order only by selecting a sort column.
             if (gameState) {
                 UI.renderDraftPool(
                     gameState,

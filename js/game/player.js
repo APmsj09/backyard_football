@@ -637,57 +637,182 @@ export function getProspectSignatureSkills(player, pos) {
             return [
                 { label: 'ACC', val: tech.throwingAccuracy ?? '?' },
                 { label: 'POW', val: tech.throwPower ?? phys.strength ?? '?' },
-                { label: 'IQ', val: ment.playbookIQ ?? '?' }
+                { label: 'IQ', val: ment.playbookIQ ?? '?' },
+                { label: 'DEC', val: ment.decisionMaking ?? '?' },
+                { label: 'SPD', val: phys.speed ?? '?' },
+                { label: 'CON', val: ment.consistency ?? '?' }
             ];
+
         case 'RB':
             return [
                 { label: 'SPD', val: phys.speed ?? '?' },
+                { label: 'CAR', val: tech.carrying ?? '?' },
                 { label: 'AGI', val: phys.agility ?? '?' },
-                { label: 'CAR', val: tech.carrying ?? '?' }
+                { label: 'IQ', val: ment.playbookIQ ?? '?' },
+                { label: 'STR', val: phys.strength ?? '?' },
+                { label: 'EXP', val: phys.explosiveness ?? '?' }
             ];
+
         case 'WR':
             return [
                 { label: 'HND', val: tech.catchingHands ?? '?' },
                 { label: 'SPD', val: phys.speed ?? '?' },
-                { label: 'AGI', val: phys.agility ?? '?' }
+                { label: 'AGI', val: phys.agility ?? '?' },
+                { label: 'EXP', val: phys.explosiveness ?? '?' },
+                { label: 'JMP', val: phys.jumping ?? '?' },
+                { label: 'IQ', val: ment.playbookIQ ?? '?' }
             ];
+
         case 'TE':
             return [
                 { label: 'HND', val: tech.catchingHands ?? '?' },
                 { label: 'BLK', val: tech.blocking ?? '?' },
-                { label: 'STR', val: phys.strength ?? '?' }
+                { label: 'STR', val: phys.strength ?? '?' },
+                { label: 'IQ', val: ment.playbookIQ ?? '?' },
+                { label: 'JMP', val: phys.jumping ?? '?' },
+                { label: 'TGH', val: ment.toughness ?? '?' }
             ];
+
         case 'OL':
             return [
                 { label: 'BLK', val: tech.blocking ?? '?' },
                 { label: 'STR', val: phys.strength ?? '?' },
-                { label: 'IQ', val: ment.playbookIQ ?? '?' }
+                { label: 'IQ', val: ment.playbookIQ ?? '?' },
+                { label: 'TGH', val: ment.toughness ?? '?' },
+                { label: 'CON', val: ment.consistency ?? '?' }
             ];
+
         case 'DL':
             return [
                 { label: 'BSH', val: tech.blockShedding ?? '?' },
                 { label: 'STR', val: phys.strength ?? '?' },
-                { label: 'TKL', val: tech.tackling ?? '?' }
+                { label: 'TKL', val: tech.tackling ?? '?' },
+                { label: 'TGH', val: ment.toughness ?? '?' },
+                { label: 'SPD', val: phys.speed ?? '?' },
+                { label: 'EXP', val: phys.explosiveness ?? '?' }
             ];
+
         case 'LB':
             return [
                 { label: 'TKL', val: tech.tackling ?? '?' },
                 { label: 'IQ', val: ment.playbookIQ ?? '?' },
-                { label: 'SPD', val: phys.speed ?? '?' }
+                { label: 'SPD', val: phys.speed ?? '?' },
+                { label: 'STR', val: phys.strength ?? '?' },
+                { label: 'BSH', val: tech.blockShedding ?? '?' },
+                { label: 'COV', val: tech.coverage ?? tech.passCoverage ?? '?' }
             ];
+
         case 'DB':
             return [
-                { label: 'COV', val: (tech.coverage ?? tech.passCoverage) ?? '?' },
+                { label: 'COV', val: tech.coverage ?? tech.passCoverage ?? '?' },
                 { label: 'SPD', val: phys.speed ?? '?' },
-                { label: 'TKL', val: tech.tackling ?? '?' }
+                { label: 'AGI', val: phys.agility ?? '?' },
+                { label: 'IQ', val: ment.playbookIQ ?? '?' },
+                { label: 'TKL', val: tech.tackling ?? '?' },
+                { label: 'JMP', val: phys.jumping ?? '?' }
             ];
+
         default:
             return [
                 { label: 'SPD', val: phys.speed ?? '?' },
                 { label: 'STR', val: phys.strength ?? '?' },
-                { label: 'AGI', val: phys.agility ?? '?' }
+                { label: 'AGI', val: phys.agility ?? '?' },
+                { label: 'EXP', val: phys.explosiveness ?? '?' },
+                { label: 'STA', val: phys.stamina ?? '?' }
             ];
     }
+}
+
+const TWO_WAY_SIGNATURE_SKILL_PROFILES = {
+    // Quarterback pairings
+    'QB|DL': ['ACC', 'POW', 'IQ', 'BSH', 'STR', 'TKL'],
+    'QB|LB': ['ACC', 'TKL', 'POW', 'SPD', 'IQ', 'DEC'],
+    'QB|DB': ['ACC', 'COV', 'POW', 'SPD', 'IQ', 'AGI'],
+
+    // Running back pairings
+    'RB|DL': ['SPD', 'BSH', 'CAR', 'STR', 'AGI', 'TKL'],
+    'RB|LB': ['SPD', 'TKL', 'CAR', 'IQ', 'AGI', 'BSH'],
+    'RB|DB': ['SPD', 'COV', 'CAR', 'AGI', 'TKL', 'JMP'],
+
+    // Wide receiver pairings
+    'WR|DL': ['HND', 'BSH', 'SPD', 'STR', 'AGI', 'TKL'],
+    'WR|LB': ['HND', 'TKL', 'SPD', 'IQ', 'AGI', 'BSH'],
+    'WR|DB': ['HND', 'COV', 'SPD', 'AGI', 'EXP', 'IQ'],
+
+    // Tight end pairings
+    'TE|DL': ['HND', 'BSH', 'BLK', 'STR', 'TKL', 'TGH'],
+    'TE|LB': ['HND', 'TKL', 'BLK', 'IQ', 'STR', 'SPD'],
+    'TE|DB': ['HND', 'COV', 'BLK', 'SPD', 'STR', 'AGI'],
+
+    // Offensive line pairings
+    'OL|DL': ['BLK', 'BSH', 'STR', 'TKL', 'IQ', 'TGH'],
+    'OL|LB': ['BLK', 'TKL', 'STR', 'IQ', 'SPD', 'BSH'],
+    'OL|DB': ['BLK', 'COV', 'STR', 'SPD', 'IQ', 'AGI']
+};
+
+export function getTwoWaySignatureSkills(
+    player,
+    offensePos,
+    defensePos,
+    limit = 6
+) {
+    const offenseSkills = offensePos
+        ? getProspectSignatureSkills(player, offensePos)
+        : [];
+
+    const defenseSkills = defensePos
+        ? getProspectSignatureSkills(player, defensePos)
+        : [];
+
+    const skillMap = new Map();
+
+    [...offenseSkills, ...defenseSkills].forEach(skill => {
+        if (!skillMap.has(skill.label)) {
+            skillMap.set(skill.label, skill);
+        }
+    });
+
+    const key = offensePos && defensePos
+        ? `${offensePos}|${defensePos}`
+        : null;
+
+    const profile = key
+        ? TWO_WAY_SIGNATURE_SKILL_PROFILES[key]
+        : null;
+
+    // Use the explicit pairing profile whenever both positions are known.
+    if (profile) {
+        return profile
+            .map(label => skillMap.get(label))
+            .filter(Boolean)
+            .slice(0, Math.max(0, limit));
+    }
+
+    // Fallback for players whose two-way fit is not fully established.
+    const fallbackLabels = [];
+    const seen = new Set();
+
+    const addSkill = skill => {
+        if (!skill || seen.has(skill.label)) return;
+
+        seen.add(skill.label);
+        fallbackLabels.push(skill.label);
+    };
+
+    const maxSkills = Math.max(
+        offenseSkills.length,
+        defenseSkills.length
+    );
+
+    for (let i = 0; i < maxSkills; i++) {
+        addSkill(offenseSkills[i]);
+        addSkill(defenseSkills[i]);
+    }
+
+    return fallbackLabels
+        .map(label => skillMap.get(label))
+        .filter(Boolean)
+        .slice(0, Math.max(0, limit));
 }
 
 export function generatePlayer(minAge = 12, maxAge = 18, classModifiers = null) {

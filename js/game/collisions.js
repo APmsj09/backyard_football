@@ -882,7 +882,19 @@ export function checkFumbleRecovery(playState, gameLog, tackleRange) {
     let maxScore = -Infinity;
 
     playersInRange.forEach(p => {
-        const skill = (p.agility * 0.4) + (p.catchingHands * 0.4) + (p.toughness * 0.2);
+        const agility = Number(
+            p.agi ?? p.agility ?? p.attributes?.physical?.agility
+        );
+        const catchingHands = Number(
+            p.ctch ?? p.catchingHands ?? p.attributes?.technical?.catchingHands
+        );
+        const toughness = Number(p.tgh ?? p.toughness);
+
+        const skill =
+            (Number.isFinite(agility) ? agility : 50) * 0.4 +
+            (Number.isFinite(catchingHands) ? catchingHands : 50) * 0.4 +
+            (Number.isFinite(toughness) ? toughness : 50) * 0.2;
+
         const distance = getDistance(p, ballPos);
         const proximityBonus = (tackleRange - distance) * 50;
         const roll = getRandomInt(-10, 10);
@@ -1808,6 +1820,18 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         ball._attemptedCatchPlayerIds = new Set();
     }
 
+    if (!(ball._mistimedJumpCheckedPlayerIds instanceof Set)) {
+        ball._mistimedJumpCheckedPlayerIds = new Set();
+    }
+
+    if (!Number.isFinite(ball._deflectionCount)) {
+        ball._deflectionCount = 0;
+    }
+
+    if (!Number.isFinite(ball._bobbleCount)) {
+        ball._bobbleCount = 0;
+    }
+
     if (ball.isSwatted) {
         if (ball.z <= 0) {
             ball.z = 0;
@@ -1885,8 +1909,16 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
 
         const verticalLeap = (p.jumping || p.agi || p.agility || 50) / 100;
         const standingReach = (playerHeight / 36) + 0.6;
-        const isTracking = p.action === 'tracking_ball' || p.action === 'field_punt';
-        const maxCatchHeight = isTracking 
+
+        // Once the pass is tipped or bobbled, players can react
+        // to the new ball flight rather than only their original assignment.
+        const isDeflectedBall = (ball.tipCount || 0) > 0;
+        const isTracking =
+            p.action === 'tracking_ball' ||
+            p.action === 'field_punt' ||
+            isDeflectedBall;
+
+        const maxCatchHeight = isTracking
             ? (playerHeight / 36) + 1.1 + (verticalLeap * 0.7)
             : standingReach;
 
@@ -1914,21 +1946,29 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                 const isNearLanding = distToLanding < 2.8;
                 const isDescending = (ball.vz || 0) <= 0.5;
 
-                // When pass is still high up on its arc (z > 2.5 yds / 7.5 ft):
+                // When the pass is still high on its rising arc, give each
+                // defender one chance to misjudge the timing of the jump.
                 if (!isNearLanding && ball.z > 2.5 && !isDescending) {
-                    // OCCASIONAL MISTIMED EARLY LEAP:
-                    // Low-IQ or aggressive defenders sometimes misjudge and bite early (~15% chance).
-                    // Disciplined DBs stay grounded and track the route.
-                    const defIQ = p.iq || p.playbookIQ || 50;
-                    const mistimedJumpChance = Math.max(0.04, 0.28 - (defIQ * 0.003));
-                    const willMistimeJump = Math.random() < mistimedJumpChance;
+                    if (!ball._mistimedJumpCheckedPlayerIds.has(p.id)) {
+                        ball._mistimedJumpCheckedPlayerIds.add(p.id);
+                        p._isMistimedLeap = false;
 
-                    if (!willMistimeJump) {
-                        return false; // Disciplined: stays on his feet, tracking to the catch point
+                        const defIQ = p.iq || p.playbookIQ || 50;
+                        const mistimedJumpChance = Math.max(
+                            0.04,
+                            0.28 - (defIQ * 0.003)
+                        );
+
+                        p._isMistimedLeap = Math.random() < mistimedJumpChance;
                     }
 
-                    // Flag the mistimed leap so they animate the jump and suffer the recovery penalty
-                    p._isMistimedLeap = true;
+                    if (!p._isMistimedLeap) {
+                        return false; // Waits for the ball to descend
+                    }
+                } else {
+                    // No early leap was actually made; allow a normal
+                    // attempt as the ball comes down.
+                    p._isMistimedLeap = false;
                 }
             }
         }
@@ -1957,9 +1997,13 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             let posScore = ((p.ctch || p.catchingHands || 50) * 0.4) + ((p.agi || p.agility || 50) * 0.2);
 
             if (p.id === ball.targetPlayerId) {
+                // The intended receiver knows the route and has a natural
+                // advantage at the designed catch point.
                 posScore += 22;
             } else if (!p.isOffense) {
-                posScore += ((p.cov || p.coverage || 50) * 0.45) + ((p.iq || p.playbookIQ || 50) * 0.25);
+                // Coverage and IQ help defenders anticipate the ball,
+                // but should not overwhelm the receiver's route advantage.
+                posScore += ((p.cov || p.coverage || 50) * 0.20) + ((p.iq || p.playbookIQ || 50) * 0.10);
             }
 
             posScore += ((p.hgt || 70) > 74 ? 12 : 0);
@@ -2015,28 +2059,50 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         const fatPct = Math.round((bestCandidate.fatigueModifier || 1) * 100);
         const isDefense = !bestCandidate.isOffense;
 
-        let catchScore = (catching * 0.50) + (agility * 0.20) + 35;
+        let catchScore = (hndEff * 0.50) + (agility * 0.20) + 35;
 
         // Physical proximity check (within 2.2 yards of catch spot)
         // Evaluates ALL live players regardless of whether they already rolled an attempt
-        const defendersNear = playState.activePlayers.filter(p =>
-            !p.isOffense &&
-            p.stunnedTicks <= 0 &&
-            !p.isEngaged &&
-            getDistance(p, ball) <= 2.2
-        ).length;
+        const contestingDefenderDistances = playState.activePlayers
+            .filter(p =>
+                !p.isOffense &&
+                !p.isBlocked &&
+                !p.isEngaged &&
+                p.stunnedTicks <= 0 &&
+                p.balanceState !== 'downed'
+            )
+            .map(p => getDistance(p, bestCandidate))
+            .filter(distance => distance <= 2.2)
+            .sort((a, b) => a - b);
 
-        let attackersNear = playState.activePlayers.filter(p =>
+        const defendersNear = contestingDefenderDistances.length;
+
+        const nearbyAttackers = playState.activePlayers.filter(p =>
             p.isOffense &&
             p.stunnedTicks <= 0 &&
             !p.isEngaged &&
             getDistance(p, ball) <= 2.2
-        ).length;
+        );
 
-        const intendedTarget = playState.activePlayers.find(p => p.id === ball.targetPlayerId);
-        if (intendedTarget && getDistance(intendedTarget, ball) <= 2.2 && attackersNear === 0) {
+        let attackersNear = nearbyAttackers.length;
+
+        const intendedTarget = playState.activePlayers.find(
+            p => p.id === ball.targetPlayerId
+        );
+
+        if (
+            intendedTarget &&
+            getDistance(intendedTarget, ball) <= 2.2 &&
+            attackersNear === 0
+        ) {
+            nearbyAttackers.push(intendedTarget);
             attackersNear = 1;
         }
+
+        const nearestAttackerDistance = nearbyAttackers.reduce(
+            (closest, p) => Math.min(closest, getDistance(p, ball)),
+            Infinity
+        );
 
         if (isDefense && ball.isLateral) {
             // A backward pitch is recoverable by either team.
@@ -2048,43 +2114,132 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             }
         } else if (isDefense) {
             const isPunt = playState.type === 'punt';
-            const handsFactor = Math.min(1.0, catching / 80);
+                const handsFactor = Math.min(1.0, hndEff / 80);
 
-            if (isPunt) {
-                catchScore = (catchScore * 0.85) + 20;
-                logPlayDebug('PUNT_CATCH_ATTEMPT', `${bestCandidate.name} fielding punt`, {
-                    catchProbability: `${Math.round(catchScore)}%`,
-                    hands: hndEff
-                }, playState.tick, playState.playId);
-            } else {
-                // Contested passes primarily yield PBUs/swats; truly uncontested throws
-                // straight to a defender are much more interceptable based on hands.
-                if (attackersNear > 0) {
-                    catchScore = Math.min(12.0, catchScore * (0.09 * handsFactor));
+                if (isPunt) {
+                    catchScore = (catchScore * 0.85) + 20;
+                    logPlayDebug('PUNT_CATCH_ATTEMPT', `${bestCandidate.name} fielding punt`, {
+                        catchProbability: `${Math.round(catchScore)}%`,
+                        hands: hndEff
+                    }, playState.tick, playState.playId);
                 } else {
-                    catchScore = Math.min(45.0, catchScore * (0.38 * handsFactor));
-                }
+                    // A defender who reaches the ball ahead of the receiver
+                    // has a better opportunity to secure an interception.
+                    const rawDefIQ = Number(
+                        bestCandidate.iq ?? bestCandidate.playbookIQ ?? 50
+                    );
+                    const defIQ = Number.isFinite(rawDefIQ) ? rawDefIQ : 50;
+                    const readFactor = Math.max(
+                        0.9,
+                        Math.min(1.1, 0.9 + (defIQ / 500))
+                    );
 
-                logPlayDebug('DEF_BALL_ATTEMPT', `${bestCandidate.name} attempted INT/Swat`, {
-                    rawIntProbability: `${Math.round(catchScore)}%`,
-                    hands: hndEff,
-                    attackersContesting: attackersNear
-                }, playState.tick, playState.playId);
-            }
+                    if (attackersNear > 0) {
+                        const defenderBallDistance = getDistance(bestCandidate, ball);
+                        const positionEdge =
+                            nearestAttackerDistance - defenderBallDistance;
+
+                        const rawCoverage = Number(
+                            bestCandidate.cov ?? bestCandidate.coverage ?? 50
+                        );
+                        const safeCoverage = Number.isFinite(rawCoverage)
+                            ? rawCoverage
+                            : 50;
+
+                        // Better coverage and IQ help a DB recognize
+                        // when going after the interception is worthwhile.
+                        const pickThreshold = Math.max(
+                            0.20,
+                            Math.min(
+                                0.50,
+                                0.35 -
+                                    ((defIQ - 50) * 0.002) -
+                                    ((safeCoverage - 50) * 0.001)
+                            )
+                        );
+
+                        const shouldAttackBall = positionEdge >= pickThreshold;
+
+                        bestCandidate._defensivePlayMode = shouldAttackBall
+                            ? 'attack_ball'
+                            : 'play_receiver';
+
+                        if (shouldAttackBall) {
+                            let interceptionMultiplier = 0.09;
+                            let maxInterceptionChance = 12.0;
+
+                            if (positionEdge >= 0.35) {
+                                interceptionMultiplier = 0.15;
+                                maxInterceptionChance = 16.0;
+                            }
+
+                            catchScore = Math.min(
+                                maxInterceptionChance,
+                                catchScore *
+                                    interceptionMultiplier *
+                                    handsFactor *
+                                    readFactor
+                            );
+                        } else {
+                            // Poor position: prioritize breaking up the catch.
+                            // A small interception chance remains for lucky plays.
+                            catchScore = Math.min(
+                                3.0,
+                                catchScore *
+                                    0.04 *
+                                    handsFactor *
+                                    readFactor
+                            );
+                        }
+                    } else {
+                        // Uncontested throws directly to a defender:
+                        // attack the ball and try to secure possession.
+                        bestCandidate._defensivePlayMode = 'attack_ball';
+                        // An uncontested throw directly to a defender is more interceptable.
+                        catchScore = Math.min(
+                            45.0,
+                            catchScore * (0.38 * handsFactor) * readFactor
+                        );
+                    }
+
+                    logPlayDebug('DEF_BALL_ATTEMPT', `${bestCandidate.name} attempted INT/Swat`, {
+                        rawIntProbability: `${Math.round(catchScore)}%`,
+                        hands: hndEff,
+                        attackersContesting: attackersNear
+                    }, playState.tick, playState.playId);
+                }
         } else {
-            // Offensive Catch logic
-            if (defendersNear === 1) {
-                catchScore -= 20; // Contested catch penalty
-            } else if (defendersNear >= 2) {
-                catchScore -= 45; // Double coverage penalty
-            } else {
-                catchScore += 15; // "Wide Open" bonus!
+            // Offensive catch: measure how much the defenders can
+            // physically affect this receiver's attempt.
+            const pressureAtDistance = distance =>
+                Math.max(0, Math.min(1, (2.2 - distance) / 1.5));
+
+            const primaryPressure = defendersNear >= 1
+                ? pressureAtDistance(contestingDefenderDistances[0])
+                : 0;
+
+            const secondaryPressure = defendersNear >= 2
+                ? pressureAtDistance(contestingDefenderDistances[1])
+                : 0;
+
+            const contestPenalty =
+                (24 * primaryPressure) +
+                (12 * secondaryPressure);
+
+            catchScore -= Math.min(36, contestPenalty);
+
+            if (defendersNear === 0) {
+                catchScore += 15; // Wide open bonus
             }
 
             logPlayDebug('REC_CATCH_ATTEMPT', `${bestCandidate.name} attempted catch`, {
                 rawCatchOdds: `${Math.round(catchScore)}%`,
                 baseHands: hndEff,
                 defendersClosingIn: defendersNear,
+                nearestDefenderDistance: defendersNear > 0
+                    ? Number(contestingDefenderDistances[0].toFixed(2))
+                    : null,
+                contestPenalty: Number(contestPenalty.toFixed(1)),
                 isWideOpen: defendersNear === 0
             }, playState.tick, playState.playId);
         }
@@ -2514,15 +2669,77 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     // ONLY update ball physics if the defender ACTUALLY manages to touch/deflect the ball!
                     if (Math.random() * 100 < touchChance) {
                         ball.tipCount = (ball.tipCount || 0) + 1;
-                        
+                        ball._deflectionCount += 1;
+
                         const coverageSkill = bestCandidate.cov || bestCandidate.coverage || 50;
-                        const defIQ = bestCandidate.iq || bestCandidate.playbookIQ || 50;
-                        const swatChance = 0.35 + ((coverageSkill + defIQ) / 400);
-                        
-                        const isTip = (Math.random() > swatChance) && ball.tipCount < 3;
+                        const defIQ = Number(
+                            bestCandidate.iq ?? bestCandidate.playbookIQ ?? 50
+                        );
+
+                        const safeCoverage = Number.isFinite(coverageSkill)
+                            ? coverageSkill
+                            : 50;
+                        const safeIQ = Number.isFinite(defIQ)
+                            ? defIQ
+                            : 50;
+
+                        // Compare the defender's access to the ball with
+                        // the nearest offensive player's access.
+                        const nearestReceiverDistance = playState.activePlayers.reduce(
+                            (closest, p) => {
+                                if (
+                                    !p.isOffense ||
+                                    p.stunnedTicks > 0 ||
+                                    p.isEngaged
+                                ) {
+                                    return closest;
+                                }
+
+                                return Math.min(closest, getDistance(p, ball));
+                            },
+                            Infinity
+                        );
+
+                        const defenderDistance = getDistance(bestCandidate, ball);
+                        const positionEdge =
+                            nearestReceiverDistance - defenderDistance;
+
+                        // Better positioning makes a controlled breakup more likely.
+                        // A trailing defender is more likely to make imperfect contact.
+                        const positionAdjustment =
+                            positionEdge >= 0.35
+                                ? 0.10
+                                : positionEdge <= -0.35
+                                    ? -0.10
+                                    : 0;
+
+                        const baseSwatChance =
+                            0.35 + ((safeCoverage + safeIQ) / 400);
+
+                        const decisionAdjustment =
+                            bestCandidate._defensivePlayMode === 'play_receiver'
+                                ? 0.15
+                                : bestCandidate._defensivePlayMode === 'attack_ball'
+                                    ? -0.08
+                                    : 0;
+
+                        const swatChance = Math.max(
+                            0.25,
+                            Math.min(
+                                0.90,
+                                baseSwatChance +
+                                    positionAdjustment +
+                                    decisionAdjustment
+                            )
+                        );
+
+                        const isTip =
+                            (Math.random() > swatChance) &&
+                            ball._deflectionCount < 3;
 
                         if (isTip) {
                             ball._attemptedCatchPlayerIds.clear();
+                            ball._mistimedJumpCheckedPlayerIds.clear();
                             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} tips pass!`, playState);
                             ball.vz = 2.5 + (Math.random() * 2);
                             ball.vx = (ball.vx * 0.5) + (Math.random() - 0.5) * 3;
@@ -2548,9 +2765,55 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                     // CRITICAL: If defender failed to touch the ball, DO NOT corrupt ball.targetX/Y!
                 } else {
                     ball.tipCount = (ball.tipCount || 0) + 1;
-                    const isBobble = (Math.random() < 0.20) && ball.tipCount < 3;
+
+                    // A defender close enough to challenge the receiver can
+                    // turn an incomplete catch attempt into an airborne bobble.
+                    const nearestDefenderDistance = playState.activePlayers.reduce(
+                        (closest, p) => {
+                            if (
+                                p.isOffense ||
+                                p.stunnedTicks > 0 ||
+                                p.isEngaged
+                            ) {
+                                return closest;
+                            }
+
+                            return Math.min(
+                                closest,
+                                getDistance(p, bestCandidate)
+                            );
+                        },
+                        Infinity
+                    );
+
+                    const pressureAdjustment =
+                        nearestDefenderDistance <= 1.0
+                            ? 0.12
+                            : nearestDefenderDistance <= 2.2
+                                ? 0.06
+                                : 0;
+
+                    // Poorer or fatigue-reduced hands make it harder to
+                    // control a ball that has already gotten through the hands.
+                    const handReliability = Math.max(
+                        0,
+                        Math.min(1, (hndEff - 40) / 60)
+                    );
+
+                    const handsAdjustment = (1 - handReliability) * 0.06;
+
+                    const bobbleChance = Math.min(
+                        0.30,
+                        0.12 + pressureAdjustment + handsAdjustment
+                    );
+
+                    const isBobble =
+                        Math.random() < bobbleChance &&
+                        ball._bobbleCount < 2;
 
                     if (isBobble) {
+                        ball._bobbleCount += 1;
+                        ball.tipCount = (ball.tipCount || 0) + 1;
                         ball._attemptedCatchPlayerIds.clear();
                         if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🖐️ ${bestCandidate.name} bobbles the ball! (Hands: ${hndEff}, Energy: ${fatPct}%)`, playState);
                         ball.vz = 2.5 + Math.random();

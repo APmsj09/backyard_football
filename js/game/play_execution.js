@@ -2262,16 +2262,40 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             if (isBallInAir && !playState.ballState.isThrowAway) {
                 const isIntendedTarget = (playState.ballState.targetPlayerId === pState.id);
-                const isTippedBall = Boolean(playState.ballState.tipCount && playState.ballState.tipCount > 0);
+                const isDeflectedBall = ['tip', 'bobble'].includes(
+                    playState.ballState.lastInteraction?.type
+                );
                 const iq = pState.playbookIQ || 50;
                 const flightTime = playState.tick - (playState.ballState.throwTick || 0);
                 const reactionDelay = isIntendedTarget ? 2 : Math.max(5, 20 - Math.floor(iq / 5));
 
                 if (flightTime > reactionDelay || (playState.ballState.isLateral && isIntendedTarget)) {
                     const distToLanding = Math.hypot(pState.x - playState.ballState.targetX, pState.y - playState.ballState.targetY);
-                    if (isIntendedTarget || (isTippedBall && !pState.slot.startsWith('OL') && distToLanding < 8.0)) {
+
+                    // For a tipped or bobbled pass, check whether the receiver
+                    // can reach the actual airborne trajectory, not just its landing spot.
+                    const deflectedInterceptPoint =
+                        isDeflectedBall && !pState.slot.startsWith('OL')
+                            ? getReachablePassInterceptionPoint(pState, playState.ballState)
+                            : null;
+
+                    const canReachDeflectedBall =
+                        isDeflectedBall &&
+                        !pState.slot.startsWith('OL') &&
+                        (deflectedInterceptPoint || distToLanding < 8.0);
+
+                    if (isIntendedTarget || canReachDeflectedBall) {
                         if (playState.ballState.isLateral && isIntendedTarget) {
                             setRouteIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.6);
+                        } else if (deflectedInterceptPoint) {
+                            // Redirect toward the earliest physically reachable point
+                            // along the deflected ball's flight.
+                            setPointIntent(
+                                pState,
+                                deflectedInterceptPoint.x,
+                                deflectedInterceptPoint.y,
+                                0.4
+                            );
                         } else {
                             // MOMENTUM-AWARE DEEP PASS TRACKING: Prevent overrunning the landing spot
                             const isDeepPass = (playState.type === 'pass' && (playState.ballState.targetY - playState.lineOfScrimmage) > 14);
@@ -2285,6 +2309,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                             setPointIntent(pState, trackX, trackY, 0.4);
                         }
+
                         pState.action = 'tracking_ball';
                         pState.contactReduction = 1.1 + ((pState.agility || 50) / 250);
                         return;
