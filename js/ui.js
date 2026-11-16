@@ -1129,6 +1129,20 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
     currentDraftSortDir = sortDirection;
 
     const thead = document.getElementById('draft-pool-thead');
+
+    const draftPoolTable = thead?.closest('table');
+
+    if (draftPoolTable) {
+        const minWidthByView = {
+            overview: '1080px',
+            ratings: '1180px',
+            youthStats: '1280px'
+        };
+
+        draftPoolTable.style.minWidth =
+            minWidthByView[activeDraftView] || '';
+    }
+
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
 
     const watchlistCountEl = document.getElementById('draft-watchlist-count');
@@ -1234,14 +1248,15 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         if (activeDraftView === 'overview') {
             thead.innerHTML = `
                 <tr>
-                    <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-2 text-center">Off Fit</th>
-                    <th class="py-2 px-2 text-center">Def Fit</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
-                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="potential">Pot</th>
-                    <th class="py-2 px-2 text-center">Scout</th>
-                    <th class="py-2 px-2 text-center">Frame</th>
-                    <th class="py-2 px-3 text-center min-w-[190px]">Key Skills</th>
+                    <th class="py-2 px-2 text-center w-9">★</th>
+                    <th class="py-2 px-3 text-left min-w-[190px]" data-sort="name">Prospect</th>
+                    <th class="py-2 px-2 text-center min-w-[85px]">Off Fit</th>
+                    <th class="py-2 px-2 text-center min-w-[85px]">Def Fit</th>
+                    <th class="py-2 px-2 text-center min-w-[55px]" data-sort="age">Age</th>
+                    <th class="py-2 px-2 text-center min-w-[60px]" data-sort="potential">Pot</th>
+                    <th class="py-2 px-2 text-center min-w-[85px]">Scout</th>
+                    <th class="py-2 px-2 text-center min-w-[90px]">Frame</th>
+                    <th class="py-2 px-3 text-center min-w-[210px]">Key Skills</th>
                 </tr>`;
         } else if (activeDraftView === 'ratings') {
             thead.innerHTML = `
@@ -1645,20 +1660,56 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     : '<span class="text-[10px] text-slate-400 italic">Positional fits not yet established</span>';
 
             row.innerHTML = `
-                <td class="py-2 px-2 text-center">${starBtn}</td>
-                <td class="py-2 px-2 text-center">${offFitHtml}</td>
-                <td class="text-center py-2 px-2">${defFitHtml}</td>
-                <td class="py-2 px-3 font-sans truncate max-w-[150px]">
-                    <span class="block font-semibold text-slate-900 truncate leading-tight">${scouted.name}</span>
-                    <span class="block text-[10px] text-slate-500 truncate leading-tight">${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Role projection developing' : 'Unscouted prospect')}</span>
+                <td class="py-2 px-2 text-center">
+                    ${starBtn}
                 </td>
-                <td class="py-2 px-2 text-center">${offFitHtml}</td>
-                <td class="text-center py-2 px-2">${defFitHtml}</td>
-                <td class="text-center py-2 px-2 text-slate-600 font-mono">${scouted.age}</td>
-                <td class="text-center py-2 px-2 font-bold ${String(scouted.potential).startsWith('A') ? 'text-amber-600' : (String(scouted.potential).startsWith('B') ? 'text-blue-600' : 'text-slate-500')}">${scouted.potential}</td>
-                <td class="text-center py-2 px-2">${scoutingStatusHtml}</td>
-                <td class="text-center py-2 px-2 text-slate-500 text-[10px]">${formatHeight(scouted.attributes?.physical?.height)} / ${scouted.attributes?.physical?.weight}#</td>
-                <td class="text-center py-2 px-3">${sigSkillsHtml}</td>
+
+                <td class="py-2 px-3 font-sans min-w-[190px] max-w-[220px]">
+                    <span class="block font-semibold text-slate-900 truncate leading-tight">
+                        ${scouted.name}
+                    </span>
+                    <span class="block text-[10px] text-slate-500 truncate leading-tight">
+                        ${scouted.scoutingEvaluation?.projectedRole ||
+                            (scoutingLevel > 0
+                                ? 'Role projection developing'
+                                : 'Unscouted prospect')}
+                    </span>
+                </td>
+
+                <td class="py-2 px-2 text-center">
+                    ${offFitHtml}
+                </td>
+
+                <td class="py-2 px-2 text-center">
+                    ${defFitHtml}
+                </td>
+
+                <td class="py-2 px-2 text-center text-slate-600 font-mono">
+                    ${scouted.age}
+                </td>
+
+                <td class="py-2 px-2 text-center font-bold ${
+                    String(scouted.potential).startsWith('A')
+                        ? 'text-amber-600'
+                        : String(scouted.potential).startsWith('B')
+                            ? 'text-blue-600'
+                            : 'text-slate-500'
+                }">
+                    ${scouted.potential}
+                </td>
+
+                <td class="py-2 px-2 text-center">
+                    ${scoutingStatusHtml}
+                </td>
+
+                <td class="py-2 px-2 text-center text-slate-500 text-[10px] whitespace-nowrap">
+                    ${formatHeight(scouted.attributes?.physical?.height)}
+                    / ${scouted.attributes?.physical?.weight}#
+                </td>
+
+                <td class="py-2 px-3 text-center min-w-[210px]">
+                    ${sigSkillsHtml}
+                </td>
             `;
         } else if (activeDraftView === 'ratings') {
             row.innerHTML = `
