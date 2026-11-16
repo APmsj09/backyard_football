@@ -604,6 +604,139 @@ const archetypeBoosts = {
     'Free Safety': { coverage: 12, playbookIQ: 8 }
 };
 
+// Estimate an external prospect's archetype from scouting-adjusted attributes.
+// Never reads the player's actual archetypeName.
+export function estimateProjectedArchetype(
+    player,
+    offensePosition = null,
+    defensePosition = null
+) {
+    const attributes = player?.attributes;
+    if (!attributes) return null;
+
+    const getAttribute = name => {
+        // Physical measurements use different scales from 0–100 skills.
+        // Do not mix them into the archetype signature score.
+        if (name === 'height' || name === 'weight') {
+            return null;
+        }
+
+        for (const category of Object.values(attributes)) {
+            if (category?.[name] === undefined) continue;
+
+            const value = Number(category[name]);
+            if (Number.isFinite(value)) return value;
+        }
+
+        return null;
+    };
+
+    const skillValues = Object.entries(attributes)
+        .flatMap(([_, category]) =>
+            Object.entries(category || {})
+                .filter(([name, value]) =>
+                    !['height', 'weight'].includes(name) &&
+                    Number.isFinite(Number(value))
+                )
+                .map(([_, value]) => Number(value))
+        );
+
+    if (skillValues.length === 0) return null;
+
+    const baseline =
+        skillValues.reduce((sum, value) => sum + value, 0) /
+        skillValues.length;
+
+    // Prefer archetypes compatible with both estimated positional fits.
+    let candidates = archetypes;
+
+    if (offensePosition && defensePosition) {
+        const exactMatches = archetypes.filter(
+            archetype =>
+                archetype.off === offensePosition &&
+                archetype.def === defensePosition
+        );
+
+        if (exactMatches.length > 0) {
+            candidates = exactMatches;
+        } else {
+            candidates = archetypes.filter(
+                archetype =>
+                    archetype.off === offensePosition ||
+                    archetype.def === defensePosition
+            );
+        }
+    } else if (offensePosition) {
+        candidates = archetypes.filter(
+            archetype => archetype.off === offensePosition
+        );
+    } else if (defensePosition) {
+        candidates = archetypes.filter(
+            archetype => archetype.def === defensePosition
+        );
+    }
+
+    if (candidates.length === 0) return null;
+
+    const scoreArchetype = archetype => {
+        const keyValues = archetype.keyAttrs
+            .map(getAttribute)
+            .filter(Number.isFinite);
+
+        const keyAverage = keyValues.length
+            ? keyValues.reduce((sum, value) => sum + value, 0) /
+                keyValues.length
+            : baseline;
+
+        // Archetype-specific boosts provide additional signature evidence.
+        const boosts = Object.entries(
+            archetypeBoosts[archetype.name] || {}
+        )
+            .map(([attribute, boost]) => ({
+                value: getAttribute(attribute),
+                boost: Number(boost)
+            }))
+            .filter(item =>
+                Number.isFinite(item.value) &&
+                Number.isFinite(item.boost) &&
+                item.boost > 0
+            );
+
+        const boostWeight = boosts.reduce(
+            (sum, item) => sum + item.boost,
+            0
+        );
+
+        const boostSignal = boostWeight > 0
+            ? boosts.reduce(
+                (sum, item) =>
+                    sum + (item.value - baseline) * item.boost,
+                0
+            ) / boostWeight
+            : 0;
+
+        const speed = getAttribute('speed') ?? baseline;
+        const strength = getAttribute('strength') ?? baseline;
+
+        const athleticSignal =
+            (speed - baseline) * ((archetype.speedMod || 1) - 1) +
+            (strength - baseline) * ((archetype.strMod || 1) - 1);
+
+        return (
+            (keyAverage - baseline) +
+            (boostSignal * 0.35) +
+            (athleticSignal * 0.15)
+        );
+    };
+
+    return candidates
+        .map(archetype => ({
+            name: archetype.name,
+            score: scoreArchetype(archetype)
+        }))
+        .sort((a, b) => b.score - a.score)[0]?.name || null;
+}
+
 export function gaussianRandom(mean = 0, stdev = 1) {
     const u = 1 - Math.random();
     const v = Math.random();

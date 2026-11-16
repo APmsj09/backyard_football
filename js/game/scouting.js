@@ -1,5 +1,9 @@
 import { getTeamScoutingReport, setTeamScoutingReport, getRosterObjects } from './state.js';
-import { calculateOverall, positionOverallWeights } from './player.js';
+import {
+    calculateOverall,
+    positionOverallWeights,
+    estimateProjectedArchetype
+} from './player.js';
 import { isPlayerViableForPosition } from './depth_chart.js';
 import {
     ensureTeamStaffWorkPlan,
@@ -700,6 +704,13 @@ function generateEvaluation(team, player, evaluator, level, ranges) {
         defenseFit ? (defenseFit.low + defenseFit.high) / 2 : 0
     );
 
+    // Project archetype from scouting estimates, never the hidden actual archetype.
+    const projectedArchetype = estimateProjectedArchetype(
+        center,
+        offenseFit?.position || null,
+        defenseFit?.position || null
+    );
+
     return {
         potentialRange: estimatePotential(
             team,
@@ -713,6 +724,7 @@ function generateEvaluation(team, player, evaluator, level, ranges) {
             defenseFit,
             strengths,
             concerns,
+            projectedArchetype,
             projectedRole: best >= 82
                 ? 'Potential impact starter'
                 : best >= 72
@@ -835,10 +847,40 @@ export function advanceTeamScoutingReport(
         ? week
         : previous?.evaluatedWeek ?? null;
 
-    // Within a level, update progress without recalculating or rerolling estimates.
+    // Within a level, preserve existing estimates and only update progress.
     if (previous && level === previousLevel) {
         const stored = team.scoutingReports?.[String(player.id)];
         if (!stored) return false;
+
+        // Backfill projected archetypes for older scouting reports.
+        // Use only the attribute ranges already available to this team.
+        // Do not regenerate potential, scouting estimates, or relationships.
+        if (
+            previousLevel > 0 &&
+            !stored.evaluation?.projectedArchetype &&
+            stored.attributeRanges &&
+            Object.values(stored.attributeRanges).some(
+                group => group && Object.keys(group).length > 0
+            )
+        ) {
+            const estimatedPlayer = buildEstimatedPlayer(
+                player,
+                stored.attributeRanges
+            );
+
+            const projectedArchetype = estimateProjectedArchetype(
+                estimatedPlayer,
+                stored.evaluation?.offenseFit?.position || null,
+                stored.evaluation?.defenseFit?.position || null
+            );
+
+            if (projectedArchetype) {
+                stored.evaluation = {
+                    ...(stored.evaluation || {}),
+                    projectedArchetype
+                };
+            }
+        }
 
         stored.level = previousLevel;
         stored.progressPoints = progressPoints;

@@ -762,16 +762,16 @@ function renderSignatureSkillChips(skills, estimated = false) {
 
         const displayValue = isUnknown
             ? '?'
-            : `${estimated ? '~' : ''}${skill.val}`;
+            : `${estimated ? '~' : ''}${String(skill.val).replace(/\s*-\s*/g, '–')}`;
 
         return `
             <span
                 title="${skill.label}: ${displayValue}"
-                class="inline-flex flex-col items-center justify-center w-[44px] min-h-[34px] rounded border ${tileClass} px-1 py-1 leading-none">
+                class="inline-flex flex-col items-center justify-center w-[48px] h-[34px] rounded border ${tileClass} px-1 py-1 leading-none">
                 <span class="text-[8px] font-bold tracking-wide ${labelClass}">
                     ${skill.label}
                 </span>
-                <b class="mt-1 text-[11px] font-black font-mono ${valueClass}">
+                <b class="mt-1 text-[10px] font-black font-mono whitespace-nowrap ${valueClass}">
                     ${displayValue}
                 </b>
             </span>`;
@@ -1129,18 +1129,21 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
     currentDraftSortDir = sortDirection;
 
     const thead = document.getElementById('draft-pool-thead');
-
     const draftPoolTable = thead?.closest('table');
 
     if (draftPoolTable) {
-        const minWidthByView = {
-            overview: '1080px',
-            ratings: '1180px',
-            youthStats: '1280px'
-        };
+        const isOverview = activeDraftView === 'overview';
 
-        draftPoolTable.style.minWidth =
-            minWidthByView[activeDraftView] || '';
+        draftPoolTable.style.tableLayout = isOverview ? 'fixed' : 'auto';
+        draftPoolTable.style.width = isOverview ? '100%' : '';
+
+        draftPoolTable.style.minWidth = isOverview
+            ? '1080px'
+            : activeDraftView === 'ratings'
+                ? '1180px'
+                : activeDraftView === 'youthStats'
+                    ? '1280px'
+                    : '';
     }
 
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
@@ -1248,15 +1251,15 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         if (activeDraftView === 'overview') {
             thead.innerHTML = `
                 <tr>
-                    <th class="py-2 px-2 text-center w-9">★</th>
-                    <th class="py-2 px-3 text-left min-w-[190px]" data-sort="name">Prospect</th>
-                    <th class="py-2 px-2 text-center min-w-[85px]">Off Fit</th>
-                    <th class="py-2 px-2 text-center min-w-[85px]">Def Fit</th>
-                    <th class="py-2 px-2 text-center min-w-[55px]" data-sort="age">Age</th>
-                    <th class="py-2 px-2 text-center min-w-[60px]" data-sort="potential">Pot</th>
-                    <th class="py-2 px-2 text-center min-w-[85px]">Scout</th>
-                    <th class="py-2 px-2 text-center min-w-[90px]">Frame</th>
-                    <th class="py-2 px-3 text-center min-w-[210px]">Key Skills</th>
+                    <th style="width: 3%" class="py-2 px-1 text-center">★</th>
+                    <th style="width: 21%" class="py-2 px-2 text-left" data-sort="name">Prospect</th>
+                    <th style="width: 9%" class="py-2 px-1 text-center">Off Fit</th>
+                    <th style="width: 9%" class="py-2 px-1 text-center">Def Fit</th>
+                    <th style="width: 5%" class="py-2 px-1 text-center" data-sort="age">Age</th>
+                    <th style="width: 5%" class="py-2 px-1 text-center" data-sort="potential">Pot</th>
+                    <th style="width: 8%" class="py-2 px-1 text-center">Scout</th>
+                    <th style="width: 9%" class="py-2 px-1 text-center">Frame</th>
+                    <th style="width: 31%" class="py-2 px-1 text-center">Key Skills</th>
                 </tr>`;
         } else if (activeDraftView === 'ratings') {
             thead.innerHTML = `
@@ -1654,7 +1657,7 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             const sigSkillsHtml = scoutingLevel === 0
                 ? '<span class="text-[10px] text-slate-400 italic">Scout to reveal skill estimates</span>'
                 : sigSkills.length > 0
-                    ? `<div class="grid grid-cols-3 justify-items-center gap-1 w-fit mx-auto">
+                    ? `<div class="flex flex-nowrap items-center justify-center gap-1 w-full">
                         ${renderSignatureSkillChips(sigSkills, true)}
                        </div>`
                     : '<span class="text-[10px] text-slate-400 italic">Positional fits not yet established</span>';
@@ -1668,11 +1671,12 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     <span class="block font-semibold text-slate-900 truncate leading-tight">
                         ${scouted.name}
                     </span>
-                    <span class="block text-[10px] text-slate-500 truncate leading-tight">
-                        ${scouted.scoutingEvaluation?.projectedRole ||
-                            (scoutingLevel > 0
-                                ? 'Role projection developing'
-                                : 'Unscouted prospect')}
+                    <span class="block text-[10px] text-indigo-600 font-semibold truncate leading-tight">
+                        ${scouted.scoutingEvaluation?.projectedArchetype
+                            ? `Projected: ${scouted.scoutingEvaluation.projectedArchetype}`
+                            : scoutingLevel > 0
+                                ? 'Archetype estimate developing'
+                                : 'Unscouted prospect'}
                     </span>
                 </td>
 
