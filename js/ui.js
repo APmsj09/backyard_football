@@ -5,7 +5,7 @@ import {
     getRosterObjects, getPlayer, rebuildDepthChartFromOrder, assignPlayerToSlot
 } from './game.js';
 import { offenseFormations, defenseFormations, relationshipLevels, firstNames, lastNames, offensivePlaybook, defensivePlaybook, routeTree, getFormationSlotLabel } from './data.js';
-import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills, getTwoWaySignatureSkills, calculateSlotSuitability } from './game/player.js';
+import { positionOverallWeights, estimateBestPosition, calculateOverall, getProspectSignatureSkills, getTwoWaySignatureSkills, getTwoWaySignatureSkills, calculateSlotSuitability } from './game/player.js';
 import { formatHeight } from './utils.js';
 import { drawFieldVisualization, formatGameClock, showPlayOverlay } from './ui/field_visualizer.js';
 import { renderDepthOrderPane } from './ui/depth_order.js';
@@ -1131,20 +1131,6 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
     const thead = document.getElementById('draft-pool-thead');
     const playerRoster = getUIRosterObjects(gameState.playerTeam);
 
-    // Give wide draft-board views enough room to remain readable.
-    // The existing overflow-auto wrapper handles horizontal scrolling.
-    const draftPoolTable = thead?.closest('table');
-
-    if (draftPoolTable) {
-        const minWidthByView = {
-            ratings: '1180px',
-            youthStats: '1280px'
-        };
-
-        draftPoolTable.style.minWidth =
-            minWidthByView[activeDraftView] || '';
-    }
-
     const watchlistCountEl = document.getElementById('draft-watchlist-count');
     if (watchlistCountEl) watchlistCountEl.textContent = draftWatchlist.size;
 
@@ -1249,14 +1235,13 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             thead.innerHTML = `
                 <tr>
                     <th class="py-2 px-2 text-center w-8">★</th>
-                    <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
                     <th class="py-2 px-2 text-center">Off Fit</th>
                     <th class="py-2 px-2 text-center">Def Fit</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="age">Age</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-200" data-sort="potential">Pot</th>
                     <th class="py-2 px-2 text-center">Scout</th>
                     <th class="py-2 px-2 text-center">Frame</th>
-                    <th class="py-2 px-3 text-center">Key Skills</th>
+                    <th class="py-2 px-3 text-center min-w-[190px]">Key Skills</th>
                 </tr>`;
         } else if (activeDraftView === 'ratings') {
             thead.innerHTML = `
@@ -1661,6 +1646,8 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
 
             row.innerHTML = `
                 <td class="py-2 px-2 text-center">${starBtn}</td>
+                <td class="py-2 px-2 text-center">${offFitHtml}</td>
+                <td class="text-center py-2 px-2">${defFitHtml}</td>
                 <td class="py-2 px-3 font-sans truncate max-w-[150px]">
                     <span class="block font-semibold text-slate-900 truncate leading-tight">${scouted.name}</span>
                     <span class="block text-[10px] text-slate-500 truncate leading-tight">${scouted.scoutingEvaluation?.projectedRole || (scoutingLevel > 0 ? 'Role projection developing' : 'Unscouted prospect')}</span>
@@ -2334,7 +2321,11 @@ export function renderPlayerRoster(playerTeam) {
                 <div class="grid grid-cols-2 gap-1.5 font-mono text-xs">
                     ${analysis.map(item => {
                         return `
-                        <div class="bg-white border p-1.5 rounded flex flex-col justify-between shadow-2xl hover:border-slate-400 transition" title="${item.viableCount} viable (${item.primaryCount} natural, ${item.twoWayCount} two-way). Top OVR: ${item.topOvr}">
+                        <button
+                            type="button"
+                            data-depth-position="${item.pos}"
+                            class="w-full text-left bg-white border p-2 rounded flex flex-col justify-between shadow-sm hover:border-amber-400 hover:bg-amber-50/30 focus:outline-none focus:ring-2 focus:ring-amber-400 transition cursor-pointer"
+                            title="Open ${item.pos} depth chart. ${item.viableCount} viable players (${item.primaryCount} natural, ${item.twoWayCount} two-way). Top OVR: ${item.topOvr}">
                             <div class="flex justify-between items-center">
                                 <span class="font-black text-slate-900 font-sans">${item.pos}</span>
                                 <span class="text-[9px] font-black uppercase px-1 rounded border ${item.badgeColor}">${item.status}</span>
@@ -2343,11 +2334,19 @@ export function renderPlayerRoster(playerTeam) {
                                 <span class="text-slate-500 font-bold">${item.viableCount}/${item.ideal} <span class="text-[9px] font-normal text-slate-400">(${item.twoWayCount > 0 ? `+${item.twoWayCount} 2W` : 'nat'})</span></span>
                                 <span class="font-black text-slate-800">${item.starterAvg ? `${item.starterAvg} avg` : '--'}</span>
                             </div>
-                        </div>`;
+                        </button>`;
                     }).join('')}
                 </div>
             </div>
         `;
+
+        summaryEl.querySelectorAll('[data-depth-position]').forEach(button => {
+            button.addEventListener('click', () => {
+                window.app?.openDepthChartPosition?.(
+                    button.dataset.depthPosition
+                );
+            });
+        });
     }
 }
 
@@ -2378,7 +2377,12 @@ window.app_openDraftTeamModal = function() {
                 <h5 class="text-xs font-black uppercase tracking-wider text-slate-700 mb-2">Positional Rooms & Quality (Starters vs. 2-Way Depth)</h5>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                     ${analysis.map(item => `
-                        <div class="bg-white border border-slate-200 rounded p-2.5 shadow-sm">
+                        <div
+                            role="button"
+                            tabindex="0"
+                            data-depth-position="${item.pos}"
+                            class="bg-white border border-slate-200 rounded p-2.5 shadow-sm cursor-pointer hover:border-amber-400 hover:bg-amber-50/30 transition focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            title="Open ${item.pos} depth chart">
                             <div class="flex justify-between items-center mb-1 pb-1 border-b border-slate-100">
                                 <div class="flex items-center gap-2">
                                     <span class="font-black text-sm text-slate-900">${item.pos} Room</span>
@@ -2391,43 +2395,15 @@ window.app_openDraftTeamModal = function() {
                                 <span>(${item.primaryCount} Natural • ${item.twoWayCount} Two-Way)</span>
                             </div>
                             <div class="space-y-1 font-mono text-[11px]">
-                                ${item.players.map(p => {
-                                    const playerFits = getBestTwoWayFits(p.player);
-
-                                    const offensePos =
-                                        playerFits.offense.position !== '—'
-                                            ? playerFits.offense.position
-                                            : null;
-
-                                    const defensePos =
-                                        playerFits.defense.position !== '—'
-                                            ? playerFits.defense.position
-                                            : null;
-
-                                    const keySkills = getTwoWaySignatureSkills(
-                                        p.player,
-                                        offensePos,
-                                        defensePos,
-                                        6
-                                    );
-
-                                    const keySkillsHtml =
-                                        renderSignatureSkillChips(keySkills);
-
-                                    return `
-                                    <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-1.5 bg-slate-50 rounded hover:bg-slate-100 cursor-pointer" onclick="app.openPlayerCard('${p.player.id}')">
-                                        <div class="min-w-0">
-                                            <div class="flex items-center gap-1.5 truncate font-sans">
-                                                <span class="font-semibold text-slate-800 truncate">${p.player.name}</span>
-                                                ${!p.isPrimary ? `<span class="bg-indigo-100 text-indigo-900 text-[8px] font-bold px-1 rounded uppercase shrink-0">2-Way (${p.player.pos || 'ATH'})</span>` : ''}
-                                            </div>
-                                            <div class="flex flex-wrap items-center gap-1 mt-1">
-                                                ${keySkillsHtml}
-                                            </div>
+                                ${item.players.map(p => `
+                                    <div class="flex justify-between items-center p-1 bg-slate-50 rounded hover:bg-slate-100 cursor-pointer" onclick="app.openPlayerCard('${p.player.id}')">
+                                        <div class="flex items-center gap-1.5 truncate pr-2 font-sans">
+                                            <span class="font-semibold text-slate-800 truncate">${p.player.name}</span>
+                                            ${!p.isPrimary ? `<span class="bg-indigo-100 text-indigo-900 text-[8px] font-bold px-1 rounded uppercase">2-Way (${p.player.pos || 'ATH'})</span>` : ''}
                                         </div>
-                                        <span class="font-bold text-slate-900 whitespace-nowrap">${p.ovr} OVR</span>
-                                    </div>`;
-                                }).join('') || '<p class="text-slate-400 italic text-[10px] py-1">No players viable at this position.</p>'}
+                                        <span class="font-bold text-slate-900">${p.ovr} OVR</span>
+                                    </div>
+                                `).join('') || '<p class="text-slate-400 italic text-[10px] py-1">No players viable at this position.</p>'}
                             </div>
                         </div>
                     `).join('')}
@@ -2437,8 +2413,24 @@ window.app_openDraftTeamModal = function() {
     `;
 
     showModal("Franchise War Room & 2-Way Depth", modalHtml, null, null, null, "Close War Room");
-};
 
+    document.querySelectorAll('#modal-body [data-depth-position]').forEach(card => {
+        const openDepthChart = () => {
+            window.app?.openDepthChartPosition?.(
+                card.dataset.depthPosition
+            );
+        };
+
+        card.addEventListener('click', openDepthChart);
+
+        card.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openDepthChart();
+            }
+        });
+    });
+};
 export function renderDashboard(gameState) {
     if (!gameState?.playerTeam) return;
     const { playerTeam, year, currentWeek, messages } = gameState;

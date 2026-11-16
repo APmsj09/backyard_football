@@ -5373,6 +5373,58 @@ export function openPlayerCard(playerId) {
 
     overallsHtml += '</div>';
 
+    // Compact attribute display used by the All Attributes tab.
+    const renderAttrValue = (label, val) => {
+        const isRange =
+            val !== null &&
+            typeof val === 'object' &&
+            val.low != null &&
+            val.high != null &&
+            Number.isFinite(Number(val.low)) &&
+            Number.isFinite(Number(val.high));
+
+        const isKnown =
+            val !== null &&
+            val !== undefined &&
+            val !== '' &&
+            Number.isFinite(Number(val));
+
+        const numericValue = isRange
+            ? (Number(val.low) + Number(val.high)) / 2
+            : isKnown
+                ? Number(val)
+                : null;
+
+        const displayValue = isRange
+            ? `${val.low}–${val.high}`
+            : isKnown
+                ? val
+                : 'Unknown';
+
+        const valueClass = numericValue === null
+            ? 'text-slate-400'
+            : isRange
+                ? 'text-indigo-700'
+                : numericValue >= 80
+                    ? 'text-emerald-700'
+                    : numericValue >= 65
+                        ? 'text-blue-700'
+                        : numericValue >= 50
+                            ? 'text-amber-700'
+                            : 'text-rose-700';
+
+        return `
+            <div class="flex items-center justify-between gap-2 min-w-0 rounded bg-slate-50 border border-slate-100 px-2 py-1.5">
+                <span class="text-[10px] text-slate-500 font-medium truncate">
+                    ${label}
+                </span>
+                <b class="font-mono text-[11px] font-black ${valueClass} shrink-0">
+                    ${displayValue}
+                </b>
+            </div>
+        `;
+    };
+
     const phys = player.attributes?.physical || {};
     const ment = player.attributes?.mental || {};
     const tech = player.attributes?.technical || {};
@@ -8280,6 +8332,31 @@ window.app = {
     switchTab: (tabId) => {
         gameState = Game.getGameState();
         if (gameState) UI.switchTab(tabId, gameState);
+    },
+
+        openDepthChartPosition: (pos) => {
+        const validPositions = [
+            'QB', 'RB', 'WR', 'TE',
+            'OL', 'DL', 'LB', 'DB'
+        ];
+
+        if (!validPositions.includes(pos)) return;
+
+        const gs = Game.getGameState() || gameState;
+        if (!gs?.playerTeam) return;
+
+        gameState = gs;
+
+        // Navigate to the Strategy screen.
+        UI.showScreen('dashboard-screen');
+        UI.switchTab('depth-chart', gs);
+
+        // Open the positional depth-order view and select the requested room.
+        document
+            .querySelector('.depth-chart-tab[data-sub-tab="depth-order"]')
+            ?.click();
+
+        window.app_switchDepthTab?.(pos);
     },
     autoFillRoster: () => {
         gameState = Game.getGameState();
