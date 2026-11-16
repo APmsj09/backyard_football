@@ -1135,10 +1135,10 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         const isOverview = activeDraftView === 'overview';
 
         draftPoolTable.style.tableLayout = isOverview ? 'fixed' : 'auto';
-        draftPoolTable.style.width = isOverview ? '100%' : '';
+        draftPoolTable.style.width = '100%';
 
         draftPoolTable.style.minWidth = isOverview
-            ? '1080px'
+            ? '0px'
             : activeDraftView === 'ratings'
                 ? '1180px'
                 : activeDraftView === 'youthStats'
@@ -1251,15 +1251,15 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
         if (activeDraftView === 'overview') {
             thead.innerHTML = `
                 <tr>
-                    <th style="width: 3%" class="py-2 px-1 text-center">★</th>
-                    <th style="width: 21%" class="py-2 px-2 text-left" data-sort="name">Prospect</th>
-                    <th style="width: 9%" class="py-2 px-1 text-center">Off Fit</th>
-                    <th style="width: 9%" class="py-2 px-1 text-center">Def Fit</th>
-                    <th style="width: 5%" class="py-2 px-1 text-center" data-sort="age">Age</th>
-                    <th style="width: 5%" class="py-2 px-1 text-center" data-sort="potential">Pot</th>
-                    <th style="width: 8%" class="py-2 px-1 text-center">Scout</th>
-                    <th style="width: 9%" class="py-2 px-1 text-center">Frame</th>
-                    <th style="width: 31%" class="py-2 px-1 text-center">Key Skills</th>
+                    <th style="width:3%" class="py-1 px-1 text-center">★</th>
+                    <th style="width:16%" class="py-1 px-1.5 text-left" data-sort="name">Prospect</th>
+                    <th style="width:8%" class="py-1 px-1 text-center whitespace-nowrap">Off Fit</th>
+                    <th style="width:8%" class="py-1 px-1 text-center whitespace-nowrap">Def Fit</th>
+                    <th style="width:4%" class="py-1 px-1 text-center" data-sort="age">Age</th>
+                    <th style="width:5%" class="py-1 px-1 text-center" data-sort="potential">Pot</th>
+                    <th style="width:8%" class="py-1 px-1 text-center">Scout</th>
+                    <th style="width:8%" class="py-1 px-1 text-center">Frame</th>
+                    <th style="width:40%" class="py-1 px-1 text-center">Key Skills</th>
                 </tr>`;
         } else if (activeDraftView === 'ratings') {
             thead.innerHTML = `
@@ -1657,42 +1657,42 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             const sigSkillsHtml = scoutingLevel === 0
                 ? '<span class="text-[10px] text-slate-400 italic">Scout to reveal skill estimates</span>'
                 : sigSkills.length > 0
-                    ? `<div class="flex flex-nowrap items-center justify-center gap-1 w-full">
+                    ? `<div class="flex flex-nowrap items-center justify-center gap-1 w-full min-w-0">
                         ${renderSignatureSkillChips(sigSkills, true)}
                        </div>`
                     : '<span class="text-[10px] text-slate-400 italic">Positional fits not yet established</span>';
 
             row.innerHTML = `
-                <td class="py-2 px-2 text-center">
+                <td class="py-1 px-1 text-center">
                     ${starBtn}
                 </td>
 
-                <td class="py-2 px-3 font-sans min-w-[190px] max-w-[220px]">
+                <td class="py-1 px-1.5 font-sans min-w-0">
                     <span class="block font-semibold text-slate-900 truncate leading-tight">
                         ${scouted.name}
                     </span>
                     <span class="block text-[10px] text-indigo-600 font-semibold truncate leading-tight">
                         ${scouted.scoutingEvaluation?.projectedArchetype
-                            ? `Projected: ${scouted.scoutingEvaluation.projectedArchetype}`
+                            ? `Est. ${scouted.scoutingEvaluation.projectedArchetype}`
                             : scoutingLevel > 0
                                 ? 'Archetype estimate developing'
                                 : 'Unscouted prospect'}
                     </span>
                 </td>
 
-                <td class="py-2 px-2 text-center">
+                <td class="py-1 px-1 text-center">
                     ${offFitHtml}
                 </td>
 
-                <td class="py-2 px-2 text-center">
+                <td class="py-1 px-1 text-center">
                     ${defFitHtml}
                 </td>
 
-                <td class="py-2 px-2 text-center text-slate-600 font-mono">
+                <td class="py-1 px-1 text-center text-slate-600 font-mono">
                     ${scouted.age}
                 </td>
 
-                <td class="py-2 px-2 text-center font-bold ${
+                <td class="py-1 px-1 text-center font-bold ${
                     String(scouted.potential).startsWith('A')
                         ? 'text-amber-600'
                         : String(scouted.potential).startsWith('B')
@@ -1702,16 +1702,16 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     ${scouted.potential}
                 </td>
 
-                <td class="py-2 px-2 text-center">
+                <td class="py-1 px-1 text-center">
                     ${scoutingStatusHtml}
                 </td>
 
-                <td class="py-2 px-2 text-center text-slate-500 text-[10px] whitespace-nowrap">
+                <td class="py-1 px-1 text-center text-slate-500 text-[10px] whitespace-nowrap">
                     ${formatHeight(scouted.attributes?.physical?.height)}
                     / ${scouted.attributes?.physical?.weight}#
                 </td>
 
-                <td class="py-2 px-3 text-center min-w-[210px]">
+                <td class="py-1 px-1 text-center min-w-0 overflow-hidden">
                     ${sigSkillsHtml}
                 </td>
             `;
