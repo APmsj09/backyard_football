@@ -1488,8 +1488,6 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             activeDraftView === 'ratings' ? 18 :
             activeDraftView === 'youthStats' ? 11 :
             9;
-            ? 13
-            : (activeDraftView === 'watchlist' ? 8 : 9);
         elements.draftPoolTbody.innerHTML = `<tr><td colspan="${emptyColspan}" class="p-6 text-center text-slate-400 font-sans italic">${msg}</td></tr>`;
         return;
     }
@@ -1647,56 +1645,6 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                 <td class="text-center py-2 px-2 text-blue-600 font-bold">${scouted.attributes?.physical?.speed ?? '?'}</td>
                 <td class="text-center py-2 px-2">${scouted.attributes?.technical?.catchingHands ?? '?'}</td>
                 <td class="text-center py-2 px-2 font-black text-slate-900">${ovrDisplay}</td>
-            `;
-        } else if (activeDraftView === 'youthStats') {
-            const youthHistory = Array.isArray(player.youthSeasonHistory)
-                ? player.youthSeasonHistory
-                : [];
-
-            const youthSeasons = youthHistory.length ||
-                (Number(player.youthSeasonsPlayed) || 0);
-
-            const isDraftProspect = draftClassIds.has(String(player.id)) && player.teamId == null;
-            const statusBadge = isDraftProspect
-                ? '<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[9px] font-bold">Draft</span>'
-                : '<span class="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded text-[9px] font-bold">Pee Wee</span>';
-
-            const youthStatCell = (statKey) => {
-                const rawVal = getYouthStatTotal(player, statKey);
-                if (rawVal === null) {
-                    return `<td class="text-center py-1.5 px-2 text-slate-300">—</td>`;
-                }
-                return `<td class="text-center py-1.5 px-2 ${getStatCellStyle(rawVal, statKey)}">${rawVal.toLocaleString()}</td>`;
-            };
-
-            row.innerHTML = `
-                <td class="py-1.5 px-2 text-center">${starBtn}</td>
-                <td class="py-1.5 px-2 text-center">${posBadge}</td>
-                <td class="py-1.5 px-3 font-semibold text-slate-900 font-sans truncate max-w-[150px]">${scouted.name}</td>
-                <td class="text-center py-1.5 px-2 font-sans">${statusBadge}</td>
-                <td class="text-center py-1.5 px-2 text-slate-600">${scouted.age}</td>
-                <td class="text-center py-1.5 px-2 text-slate-700">${youthSeasons > 0 ? youthSeasons : '—'}</td>
-                ${youthStatCell('passYards')}
-                ${youthStatCell('rushYards')}
-                ${youthStatCell('recYards')}
-                ${youthStatCell('touchdowns')}
-                ${youthStatCell('tackles')}
-                ${youthStatCell('sacks')}
-                ${youthStatCell('interceptions')}
-            `;
-        } else {
-            const spd = scouted.attributes?.physical?.speed ?? '?';
-            const hnd = scouted.attributes?.technical?.catchingHands ?? '?';
-
-            row.innerHTML = `
-                <td class="py-1.5 px-2 text-center">${starBtn}</td>
-                <td class="py-1.5 px-2 text-center">${bothFitsHtml}</td>
-                <td class="py-1.5 px-3 font-semibold text-slate-900 font-sans truncate max-w-[140px]">${scouted.name}</td>
-                <td class="text-center py-1.5 px-2 text-slate-600">${scouted.age}</td>
-                <td class="text-center py-1.5 px-2">${potPill}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(spd, true)}">${spd}</td>
-                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(hnd, true)}">${hnd}</td>
-                <td class="text-center py-1.5 px-2 ${ovr !== null ? getRatingTierStyle(ovr, true) : 'text-slate-400'}">${ovrDisplay}</td>
             `;
         }
 
