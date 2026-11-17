@@ -1293,6 +1293,7 @@ function decompressSaveText(stored) {
 }
 
 const DEFAULT_SAVE_KEY = 'backyardFootballGameState';
+let currentSaveSlotKey = DEFAULT_SAVE_KEY;
 
 // Measure serialized state and identify its largest sections when saving fails.
 function getSerializedByteLength(value) {
@@ -1464,20 +1465,6 @@ function autoWriteStorage(
     }
 }
 
-let scheduledSaveTimer = null;
-let scheduledSaveKey = null;
-
-export function flushScheduledSaveGameState() {
-    if (scheduledSaveTimer !== null) {
-        clearTimeout(scheduledSaveTimer);
-        scheduledSaveTimer = null;
-        const key = scheduledSaveKey || DEFAULT_SAVE_KEY;
-        scheduledSaveKey = null;
-        return saveGameState(key);
-    }
-    return false;
-}
-
 const EMPTY_PLAYER_STATS = Object.freeze({
     passYards: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0,
     rushYards: 0, rushAttempts: 0,
@@ -1515,8 +1502,8 @@ export function flushScheduledSaveGameState() {
     return false;
 }
 
-export function scheduleSaveGameState(saveKey = DEFAULT_SAVE_KEY, delayMs = 400) {
-    scheduledSaveKey = typeof saveKey === 'string' ? saveKey : DEFAULT_SAVE_KEY;
+export function scheduleSaveGameState(saveKey = currentSaveSlotKey, delayMs = 400) {
+    scheduledSaveKey = typeof saveKey === 'string' ? saveKey : currentSaveSlotKey;
     if (scheduledSaveTimer !== null) clearTimeout(scheduledSaveTimer);
     scheduledSaveTimer = setTimeout(() => {
         scheduledSaveTimer = null;
@@ -1538,9 +1525,15 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
 
     if (typeof targetOrKey === 'string') {
         saveKey = targetOrKey;
+        currentSaveSlotKey = saveKey;
     } else if (targetOrKey && typeof targetOrKey === 'object') {
         activeGame = targetOrKey;
-        if (typeof maybeKey === 'string') saveKey = maybeKey;
+        if (typeof maybeKey === 'string') {
+            saveKey = maybeKey;
+            currentSaveSlotKey = saveKey;
+        }
+    } else {
+        saveKey = currentSaveSlotKey;
     }
 
     if (!activeGame) {
@@ -1889,6 +1882,7 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
     try {
         const saved = localStorage.getItem(saveKey);
         if (!saved) return null;
+        currentSaveSlotKey = saveKey;
 
         const loaded = JSON.parse(
             decompressSaveText(saved)
