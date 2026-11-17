@@ -20310,7 +20310,10 @@ export function renderLiveFieldLineup(frameData, gameState) {
 
     if (myPlayers.length === 0) return;
     
-    const fullRoster = Game.getGameDayRosterObjects(team);
+    const fullRoster =
+        typeof Game.getGameDayRosterObjects === 'function'
+            ? (Game.getGameDayRosterObjects(team) || [])
+            : (Game.getUIRosterObjects(team) || []);
     const activeOffense = new Set(Object.values(team.depthChart?.offense || {}).filter(Boolean));
     const activeDefense = new Set(Object.values(team.depthChart?.defense || {}).filter(Boolean));
 
