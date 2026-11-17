@@ -147,6 +147,17 @@ export function checkBlockCollisions(playState, gameLog = null) {
 
         if (!isBlockingDuty) return;
 
+        // Breakaway cleanup: do NOT initiate new blocks far behind the ball carrier
+        const ballCarrier = playState.activePlayers.find(p => p.hasBall || p.isBallCarrier);
+        if (ballCarrier && !playState.ballState.inAir) {
+            const runnerAheadDistance = playState.type === 'run' || ballCarrier.isOffense
+                ? (ballCarrier.y - blocker.y)
+                : (blocker.y - ballCarrier.y);
+            if (runnerAheadDistance > 7.0) {
+                return; // Let defenders chase and blockers escort instead of locking up in the rearview mirror
+            }
+        }
+
         // FIX: In pass pro, linemen only block rushers/blitzers. 
         // Do NOT let OL block defenders who are running in man/zone coverage!
         const isPassBlock = blocker.action === 'pass_block';
@@ -937,8 +948,9 @@ export function resolveBattle(powerA, powerB, battle) {
     const BASE_DIFF = powerA - powerB;
     const roll = getRandomInt(-10, 10);
 
-    // Convert the matchup advantage into a meaningful per-tick battle change.
-    const finalDiff = (BASE_DIFF + roll) / 40;
+    // Scaled to / 85 so power disparities take 15-25 ticks to build up to a shed
+    // rather than instantly maxing out in 5 ticks.
+    const finalDiff = (BASE_DIFF + roll) / 85;
 
     // Initialize once; do not reset the score on every tick.
     if (!Number.isFinite(battle.battleScore)) {
@@ -947,9 +959,11 @@ export function resolveBattle(powerA, powerB, battle) {
 
     battle.battleScore += finalDiff;
 
-    if (battle.battleScore >= BLOCK_WIN_SCORE) {
+    const WIN_THRESHOLD = BLOCK_WIN_SCORE * 1.25; // 12.5 threshold
+
+    if (battle.battleScore >= WIN_THRESHOLD) {
         battle.status = 'win_A';
-    } else if (battle.battleScore <= -BLOCK_WIN_SCORE) {
+    } else if (battle.battleScore <= -WIN_THRESHOLD) {
         battle.status = 'win_B';
     } else {
         battle.status = 'ongoing';
@@ -1042,11 +1056,26 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     defender.assignment?.includes('blitz')
                 );
 
-            if (playState.type === 'run') {
-                // The defender may abandon the block if the runner has
-                // genuinely passed him and is close enough to pursue.
-                // Otherwise, the normal block battle decides who gets free.
-                if (carrierIsPastDefender && distToCarrier <= 6.0) {
+            if (playState.type === 'run' || (ballCarrier && ballCarrier.y > playState.lineOfScrimmage)) {
+                // If the runner has blown past this block by 7+ yards, disengage immediately
+                // so the defender can pursue and the blocker can climb/escort.
+                const carrierSeparationY = ballCarrier.y - defender.y;
+                if (carrierSeparationY > 7.0 || (carrierIsPastDefender && distToCarrier <= 6.0)) {
+                    blocker.engagedWith = null;
+                    blocker.isEngaged = false;
+                    blocker.dynamicTargetId = null;
+                    blocker.reengageCooldown = 25; // Long cooldown so they don't re-lock while chasing
+
+                    defender.isBlocked = false;
+                    defender.blockedBy = null;
+                    defender.isEngaged = false;
+                    defender.action = 'pursuit';
+
+                    battle.status = 'disengaged';
+                    battlesToRemove.push(index);
+                    return;
+                }
+            }
                     if (isRunBlock) {
                         logPlayDebug(
                             'RUN_BLOCK_PURSUIT_RELEASE',
@@ -1180,10 +1209,10 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         const ticksInBlock = playState.tick - battle.startTick;
         const isPassBlock = blocker.action === 'pass_block';
 
-        if (isPassBlock && ticksInBlock < 20) {
-            blockPower *= 1.08;
-        } else if (isRunBlock && ticksInBlock < 12) {
-            blockPower *= 1.10;
+        if (isPassBlock && ticksInBlock < 28) {
+            blockPower *= 1.15; // Initial pass-pro anchor
+        } else if (isRunBlock && ticksInBlock < 28) {
+            blockPower *= 1.25; // Linemen fire off low on run plays, establishing the hole
         }
 
         // A nearby runner increases the defender's urgency.
@@ -1591,7 +1620,13 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
         if (battle.status === 'win_B') {
             const dur = playState.tick - battle.startTick;
-            const minShedTicks = (defender.blockShedding || 0) >= 90 ? 14 : 22;
+            // Casual 12-18yo league: Even elite mismatches take ~1.2s (30 ticks) to disengage,
+            // while average matchups hold for ~1.8-2.2s (45-55 ticks).
+            const defShed = defender.blockShedding || defender.shed || 50;
+            const minShedTicks = isPassBlock
+                ? (defShed >= 85 ? 30 : (defShed >= 65 ? 42 : 55))
+                : (defShed >= 85 ? 26 : (defShed >= 65 ? 36 : 46));
+
             if (!battle._bypassedDurationCheck && dur < minShedTicks) {
                 battle.status = 'ongoing';
                 return;
