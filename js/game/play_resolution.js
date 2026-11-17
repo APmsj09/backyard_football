@@ -2,7 +2,7 @@
 
 import {
     game, getPlayer, getRosterObjects, getTeamScoutingReport,
-    finalizeGameResults, resetGameStats, applyStatEvents
+    finalizeGameResults, resetGameStats, applyStatEvents, getGameDayRosterObjects
 } from './state.js';
 import {
     pushGameLog, checkBlockCollisions, resolveOngoingBlocks,
