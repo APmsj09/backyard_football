@@ -1174,9 +1174,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             if (pState.isBlocked || pState.isEngaged) return;
 
             if (pState.id === ballCarrierState.id) {
-                let targetX = pState.x;
-                
-                // Find the safest lane for the returner
                 let leftThreats = 0, rightThreats = 0, centerThreats = 0;
                 offenseStates.forEach(o => {
                     if (o.isBlocked || o.stunnedTicks > 0 || o.y < pState.y - 15 || o.y > pState.y + 2) return;
@@ -1185,19 +1182,27 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     else if (dx > 0) rightThreats++;
                     else leftThreats++;
                 });
-                
-                if (centerThreats > 0) {
-                    targetX += (leftThreats < rightThreats) ? -4.5 : 4.5;
-                    targetX = Math.max(2, Math.min(51.3, targetX));
+
+                if ((pState._returnLaneTicks || 0) > 0 && pState._returnLaneX !== undefined) {
+                    pState._returnLaneTicks--;
+                } else {
+                    let laneX = pState.x;
+                    if (centerThreats > 0) {
+                        laneX += (leftThreats < rightThreats) ? -4.5 : 4.5;
+                        laneX = Math.max(2, Math.min(51.3, laneX));
+                        pState._returnLaneTicks = 8;
+                    } else {
+                        pState._returnLaneTicks = 0;
+                    }
+                    pState._returnLaneX = laneX;
                 }
-                
-                pState.targetX = targetX;
-                // Target the 0-yard line (defense's scoring end zone)
-                pState.targetY = -5; 
+
+                pState.targetX = pState._returnLaneX;
+                // Use a local 6-yard lookahead so lateral cuts produce real ~35 deg evasion angles toward y <= 10
+                pState.targetY = Math.max(-5, pState.y - 6.0);
                 pState.action = 'run_path';
                 pState.contactReduction = centerThreats === 0 ? 1.0 : 0.9;
-                
-                // Use lane intent so they weave through traffic instead of running straight into a block
+
                 setLaneIntent(pState, pState.targetX, pState.targetY, 8);
             } else if (!pState.isOffense) {
                 // Latch onto an escort target with a timer to prevent 25Hz flickering
@@ -1208,7 +1213,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 }
 
                 let targetThreat = null;
-                if (pState.escortTargetId) {
+                if (pState.escortTargetId && !claimedEscortTargets.has(pState.escortTargetId)) {
                     targetThreat = offenseStates.find(o =>
                         o.id === pState.escortTargetId &&
                         o.balanceState !== 'downed' &&
@@ -1219,6 +1224,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         pState.escortTargetId = null;
                         pState._escortLockTicks = 0;
                     }
+                } else if (pState.escortTargetId && claimedEscortTargets.has(pState.escortTargetId)) {
+                    pState.escortTargetId = null;
+                    pState._escortLockTicks = 0;
                 }
 
                 if (!targetThreat && pState._escortLockTicks <= 0) {
@@ -2444,8 +2452,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         !d.isEngaged &&
                         d.stunnedTicks === 0 &&
                         (d.assignment?.includes('rush') || d.assignment?.includes('blitz') || d.role === 'DL' || d.role === 'LB') &&
-                        d.y < LOS + 2.0 && // Approaching or past line of scrimmage
-                        getDistance(pState, d) < 4.2
+                        d.y < LOS + 1.5 && // Approaching or past line of scrimmage
+                        getDistance(pState, d) < 5.0
                     );
 
                     const incomingBlitzer = unblockedThreats.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
@@ -2510,8 +2518,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         break;
                     }
 
-                    // 3. HOLD STATION: Stay anchored near initial alignment without overshooting route waypoints
-                    const holdY = Math.min(qbY + 0.4, pState.initialY + 0.5);
+                    // 3. HOLD STATION: Stay anchored at check-release depth instead of chasing QB backward on deep drops
+                    const holdY = Math.max(pState.initialY - 0.5, Math.min(LOS - 2.0, pState.initialY + 0.5));
                     setHoldIntent(pState, pState.initialX, holdY);
                     break;
                 }

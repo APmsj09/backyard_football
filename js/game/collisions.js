@@ -1591,7 +1591,8 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
 
         if (battle.status === 'win_B') {
             const dur = playState.tick - battle.startTick;
-            if (!battle._bypassedDurationCheck && dur < 15 && (defender.blockShedding || 0) < 90) {
+            const minShedTicks = (defender.blockShedding || 0) >= 90 ? 14 : 22;
+            if (!battle._bypassedDurationCheck && dur < minShedTicks) {
                 battle.status = 'ongoing';
                 return;
             }

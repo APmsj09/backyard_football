@@ -1174,9 +1174,9 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
                 receiver.action?.includes('route')
             ) {
                 const recDepth = receiver.y - LOS;
-                const isVerticalThreat = (receiver.vy || 0) > 3.5;
+                const isVerticalThreat = (receiver.vy || 0) > 3.5 && recDepth >= 5.0;
 
-                // Do not abandon center field to chase shallow underneath slants/drags
+                // Do not abandon center field to chase shallow stems before routes develop
                 if (!isRedZone && recDepth < 7.5 && !isVerticalThreat) return;
 
                 const separationDist = getDistance(corner, receiver);
@@ -1191,9 +1191,16 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
                     (recDepth >= 10.0 ? 1.2 : 0) +
                     (isVerticalThreat ? 1.0 : 0);
 
+                // Hysteresis: favor the receiver the safety is already committed to helping
+                const isLockedTarget =
+                    safetyState._manHelpLockId === receiver.id &&
+                    playState.tick <= (safetyState._manHelpLockUntilTick || 0);
+                const commitmentBonus = isLockedTarget ? 1.25 : 0;
+
                 const pressureScore =
-                    (separationDist + overTopRisk - (distFromSafety * 0.10)) *
-                    (0.70 + receiverAwareness * 0.30);
+                    ((separationDist + overTopRisk - (distFromSafety * 0.10)) *
+                    (0.70 + receiverAwareness * 0.30)) +
+                    commitmentBonus;
 
                 if (pressureScore > maxPressure) {
                     maxPressure = pressureScore;
@@ -1327,7 +1334,16 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
     if (!shouldHelp) {
         safetyState._isHelpingWithMan = false;
         safetyState._isHelpingWithZoneMatch = false;
+        safetyState._manHelpLockId = null;
+        safetyState._manHelpLockUntilTick = 0;
         return null;
+    }
+
+    if (helpTarget?.type === 'man_help' && helpTarget.receiver) {
+        if (safetyState._manHelpLockId !== helpTarget.receiver.id) {
+            safetyState._manHelpLockId = helpTarget.receiver.id;
+            safetyState._manHelpLockUntilTick = playState.tick + 12;
+        }
     }
 
     if (helpTarget && helpTarget.receiver) {
