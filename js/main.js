@@ -9625,6 +9625,9 @@ document.getElementById('sim-speed-faster')
         UI.switchTab(activeTab, gameState);
     });
 
+    window.addEventListener('pagehide', () => flushScheduledSaveGameState());
+    window.addEventListener('beforeunload', () => flushScheduledSaveGameState());
+
     UI.showScreen('start-screen');
 }
 

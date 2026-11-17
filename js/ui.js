@@ -42,6 +42,7 @@ import {
     moveScoutingShortlistPlayer,
     setScoutingDelegationSettings
 } from './game/scouting.js';
+import { scheduleSaveGameState } from './game/state.js';
 
 let elements = {};
 let selectedPlayerId = null;
@@ -3424,7 +3425,29 @@ window.app_setPlayerDbView = function(view) {
     if (!['database', 'scouting'].includes(view)) return;
     activePlayerDbView = view;
     const gs = getGameState();
-    if (gs) renderFreeAgentsTab(gs);
+    if (!gs) return;
+
+    const container = document.getElementById('free-agents-container');
+    const scoutingContainer = document.getElementById('scouting-hub-container');
+    const filtersBar = document.getElementById('player-db-filters-bar');
+    const browseBtn = document.getElementById('player-db-tab-browse');
+    const scoutBtn = document.getElementById('player-db-tab-scouting');
+
+    const showScouting = view === 'scouting';
+    container?.classList.toggle('hidden', showScouting);
+    filtersBar?.classList.toggle('hidden', showScouting);
+    scoutingContainer?.classList.toggle('hidden', !showScouting);
+
+    if (browseBtn && scoutBtn) {
+        browseBtn.className = `px-3 py-1 rounded ${!showScouting ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`;
+        scoutBtn.className = `px-3 py-1 rounded ${showScouting ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`;
+    }
+
+    if (showScouting) {
+        renderScoutingHub(gs);
+    } else if (container && container.dataset.needsRefresh === 'true') {
+        renderFreeAgentsTab(gs);
+    }
 };
 
 window.app_toggleScoutingShortlist = function(playerId, refreshSource = null) {
@@ -3434,10 +3457,15 @@ window.app_toggleScoutingShortlist = function(playerId, refreshSource = null) {
 
     toggleScoutingShortlistPlayer(team, playerId, gs);
     syncDraftWatchlistFromTeam(team);
-    saveGameState();
+    scheduleSaveGameState();
 
     const countEl = document.getElementById('scouting-shortlist-count');
     if (countEl) countEl.textContent = ensureScoutingShortlist(team).length;
+
+    const dbContainer = document.getElementById('free-agents-container');
+    if (dbContainer && refreshSource !== 'database') {
+        dbContainer.dataset.needsRefresh = 'true';
+    }
 
     if (refreshSource === 'stats') renderPlayerStatsTab(gs);
     else if (refreshSource === 'scouting') renderScoutingHub(gs);
@@ -3449,16 +3477,30 @@ window.app_moveScoutingShortlist = function(playerId, dir) {
     const gs = getGameState();
     if (!gs?.playerTeam) return;
     moveScoutingShortlistPlayer(gs.playerTeam, playerId, dir);
-    saveGameState();
+    scheduleSaveGameState();
     renderScoutingHub(gs);
 };
 
 window.app_setScoutingDelegation = function(field, value) {
     const gs = getGameState();
-    if (!gs?.playerTeam) return;
-    setScoutingDelegationSettings(gs.playerTeam, { [field]: value });
-    saveGameState();
-    renderScoutingHub(gs);
+    const team = gs?.playerTeam;
+    if (!team) return;
+    setScoutingDelegationSettings(team, { [field]: value });
+    scheduleSaveGameState();
+
+    // Update only the active button pills in place — zero table/DOM rebuild.
+    const activeStyles = {
+        autonomy: 'bg-slate-900 text-white shadow-sm',
+        delegatedFocus: 'bg-indigo-700 text-white shadow-sm',
+        shortlistMode: 'bg-emerald-700 text-white shadow-sm'
+    };
+    document.querySelectorAll(`[data-scout-ctrl="${field}"]`).forEach(btn => {
+        const isActive = btn.dataset.scoutVal === String(value);
+        btn.className = `flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold whitespace-nowrap ${
+            isActive ? activeStyles[field] : 'text-slate-600 hover:bg-white'
+        }`;
+        btn.setAttribute('aria-pressed', String(isActive));
+    });
 };
 
 export function renderScoutingHub(gameState) {
@@ -3477,6 +3519,7 @@ export function renderScoutingHub(gameState) {
         .reduce((sum, a) => sum + Math.max(0, Number(a.hours) || 0), 0);
 
     const teamsById = new Map((gameState.teams || []).map(t => [String(t.id), t]));
+    const playersById = new Map((gameState.players || []).map(pl => [String(pl?.id), pl]));
     const isRecruiting = gameState.offseasonState?.phase === 'recruiting' && !gameState.offseasonState?.completed;
     const recruitingListIds = new Set(
         (gameState.offseasonState?.recruitingProgress?.teamRecruitingLists?.[String(team.id)] || [])
@@ -3570,7 +3613,7 @@ export function renderScoutingHub(gameState) {
                                 </thead>
                                 <tbody class="divide-y divide-slate-100">
                                     ${shortlist.map((entry, idx) => {
-                                        const p = (gameState.players || []).find(pl => String(pl?.id) === String(entry.playerId));
+                                        const p = playersById.get(String(entry.playerId));
                                         if (!p) return '';
                                         const pTeam = p.teamId ? teamsById.get(String(p.teamId)) : null;
                                         const scouting = getFreeAgentScoutingView(team, p);
@@ -19151,6 +19194,75 @@ function getPlayPersonnelBadge(play, teamFormation) {
     return parts.join(' · ') || 'Standard';
 }
 
+function getPlayCatalogMeta(play, side) {
+    const tags = Array.isArray(play?.tags) ? play.tags : [];
+    const assigns = play?.assignments || {};
+    const pretty = str => String(str || '').replace(/^(FB_|WR_Screen_|Slip_)/, '').replace(/_/g, ' ');
+
+    if (side === 'offense') {
+        let style = { border: 'border-l-sky-600', pill: 'bg-sky-100 text-sky-900', label: '🎯 MEDIUM' };
+        if (tags.includes('trick')) style = { border: 'border-l-purple-600', pill: 'bg-purple-100 text-purple-900', label: '🎲 TRICK' };
+        else if (tags.includes('rpo')) style = { border: 'border-l-violet-600', pill: 'bg-violet-100 text-violet-900', label: '⚡ RPO' };
+        else if (tags.includes('screen')) style = { border: 'border-l-teal-600', pill: 'bg-teal-100 text-teal-900', label: '🖥️ SCREEN' };
+        else if (play?.type === 'run') {
+            const runLabel = tags.includes('counter') || tags.includes('misdirection')
+                ? '🏃 COUNTER'
+                : tags.includes('outside') || tags.includes('toss')
+                    ? '🏃 OUTSIDE'
+                    : tags.includes('qb') ? '🏃 QB RUN' : '🏃 POWER RUN';
+            style = { border: 'border-l-amber-500', pill: 'bg-amber-100 text-amber-900', label: runLabel };
+        } else if (tags.includes('pa')) style = { border: 'border-l-indigo-600', pill: 'bg-indigo-100 text-indigo-900', label: '🎭 PLAY ACTION' };
+        else if (tags.includes('deep') || tags.includes('vertical') || tags.includes('double-move')) {
+            style = { border: 'border-l-blue-700', pill: 'bg-blue-100 text-blue-900', label: '🚀 DEEP SHOT' };
+        } else if (tags.includes('quick') || tags.includes('short')) {
+            style = { border: 'border-l-emerald-600', pill: 'bg-emerald-100 text-emerald-900', label: '⚡ QUICK' };
+        }
+
+        let summary = '';
+        if (play?.type === 'run') {
+            const runnerEntry = Object.entries(assigns).find(([, a]) => String(a).startsWith('run_') && a !== 'run_block');
+            const hasLead = Object.values(assigns).some(a => String(a).startsWith('lead_'));
+            const hasPull = Object.values(assigns).some(a => String(a).startsWith('pull_'));
+            const carrier = runnerEntry ? runnerEntry[0] : 'RB';
+            const pathName = runnerEntry ? pretty(String(runnerEntry[1]).replace(/^run_/, '')) : 'Zone';
+            summary = `${carrier}: ${pathName}` + (hasLead ? ' · Lead Blocker' : '') + (hasPull ? ' · Pulling OL' : '');
+        } else {
+            const reads = Array.isArray(play?.readProgression) ? play.readProgression : [];
+            const firstRead = reads[0];
+            const firstRoute = firstRead && assigns[firstRead] ? pretty(assigns[firstRead]) : null;
+            const routeCount = Object.entries(assigns).filter(([k, v]) =>
+                !['QB', 'QB1', 'OL', 'OL1', 'OL2', 'OL3', 'OL4'].includes(k) &&
+                !['run_block', 'pass_block', 'screen_block', 'qb_setup'].includes(v)
+            ).length;
+            const hasPullOrScreen = Object.values(assigns).some(a => String(a).includes('screen') || String(a).startsWith('pull_'));
+            summary = firstRead
+                ? `1st Read: ${firstRead}${firstRoute ? ` (${firstRoute})` : ''} · ${routeCount} routes`
+                : `${routeCount} routes`;
+            if (hasPullOrScreen) summary += ' · OL Wall';
+        }
+        return { ...style, summary };
+    }
+
+    let style = { border: 'border-l-sky-600', pill: 'bg-sky-100 text-sky-900', label: '🛡️ ZONE' };
+    if (tags.includes('prevent')) style = { border: 'border-l-slate-600', pill: 'bg-slate-200 text-slate-800', label: '🛑 PREVENT' };
+    else if (play?.concept === 'Run' || tags.includes('runStop')) style = { border: 'border-l-amber-600', pill: 'bg-amber-100 text-amber-900', label: '🧱 RUN STOP' };
+    else if (play?.blitz) style = { border: 'border-l-rose-600', pill: 'bg-rose-100 text-rose-900', label: play.concept === 'Zone' ? '🔥 ZONE BLITZ' : '🔥 MAN BLITZ' };
+    else if (play?.concept === 'Man') style = { border: 'border-l-indigo-600', pill: 'bg-indigo-100 text-indigo-900', label: '👤 MAN' };
+
+    const vals = Object.values(assigns);
+    const rushCount = vals.filter(v => v === 'pass_rush' || String(v).startsWith('blitz_') || String(v).startsWith('run_')).length;
+    const blitzCount = vals.filter(v => String(v).startsWith('blitz_')).length;
+    const deepCount = vals.filter(v => String(v).startsWith('zone_deep_')).length;
+    const manCount = vals.filter(v => String(v).startsWith('man_cover_')).length;
+    const spyCount = vals.filter(v => v === 'spy_QB').length;
+
+    const parts = [`${rushCount} Rush${blitzCount ? ` (${blitzCount} Blitz)` : ''}`];
+    if (manCount > 0) parts.push(`${manCount} Man`);
+    if (deepCount > 0) parts.push(`${deepCount} Deep`);
+    if (spyCount > 0) parts.push('QB Spy');
+    return { ...style, summary: parts.join(' · ') };
+}
+
 export function renderPlaybookManager(gameState) {
     const container = document.getElementById('playbook-manager-container');
     if (!container || !gameState?.playerTeam) return;
@@ -19238,8 +19350,19 @@ export function renderPlaybookManager(gameState) {
     // Active View ('plays' vs 'clipboard'), Unit ('offense' vs 'defense') & Filter State
     window._activePlaybookView = window._activePlaybookView || 'plays';
     window._activePlaybookUnit = window._activePlaybookUnit || 'offense';
-    window._activePlaybookTabOff = window._activePlaybookTabOff || 'all';
-    window._activePlaybookTabDef = window._activePlaybookTabDef || 'all';
+    window._activePlaybookTabOff = window._activePlaybookTabOff || 'scheme';
+    window._activePlaybookTabDef = window._activePlaybookTabDef || 'scheme';
+    window._playbookCatalogSearch = window._playbookCatalogSearch || '';
+
+    window.app_setPlaybookSearch = (val) => {
+        window._playbookCatalogSearch = String(val || '');
+        renderPlaybookManager(gameState);
+        const el = document.getElementById('playbook-catalog-search');
+        if (el) {
+            el.focus();
+            el.setSelectionRange(el.value.length, el.value.length);
+        }
+    };
 
     window.app_setPlaybookView = (view) => {
         window._activePlaybookView = view;
@@ -19280,7 +19403,7 @@ export function renderPlaybookManager(gameState) {
             if (!team.gameplan.mastery[key]) team.gameplan.mastery[key] = 40;
         }
         renderPlaybookManager(gameState);
-        saveGameState();
+        scheduleSaveGameState();
     };
 
 const offAvailable = Object.entries(offensivePlaybook || {}).filter(([k]) => k !== 'Punt_Punt' && !BASICS_OFF.includes(k));
@@ -19457,72 +19580,76 @@ const offAvailable = Object.entries(offensivePlaybook || {}).filter(([k]) => k !
                     `).join('')}
                 </div>
 
-                <!-- Available Library with Refined Tabs & Full Catalog View -->
-                <div class="pt-3 border-t">
-                    <div class="flex flex-wrap justify-between items-center mb-2 gap-2">
-                        <span class="font-bold text-[10px] uppercase text-slate-600 tracking-wider">Offensive Playbook Catalog</span>
-                        <div class="flex bg-slate-100 p-0.5 rounded border border-slate-300 text-[10px] font-bold">
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'all')">All</button>
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'scheme' ? 'bg-blue-600 text-white' : 'text-blue-700'}" onclick="app_setPlaybookTab('offense', 'scheme')" title="Plays matching your active ${team.formations?.offense} formation">⚡ Scheme Fits</button>
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'run' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'run')">Ground</button>
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'quick' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'quick')">Quick & Screen</button>
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'deep' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'deep')">Vertical & Cross</button>
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'action' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('offense', 'action')">Action & Tricks</button>
+                <!-- Compact Color-Coded Offensive Catalog -->
+                <div class="pt-3 border-t space-y-2">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-[10px] uppercase text-slate-600 tracking-wider">Play Catalog</span>
+                            <input type="search" id="playbook-catalog-search" value="${window._playbookCatalogSearch.replace(/"/g, '&quot;')}"
+                                placeholder="Filter plays..." oninput="app_setPlaybookSearch(this.value)"
+                                class="w-32 sm:w-44 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] outline-none focus:border-blue-500">
+                        </div>
+                        <div class="flex flex-wrap bg-slate-100 p-0.5 rounded border border-slate-300 text-[10px] font-bold gap-0.5">
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'scheme' ? 'bg-blue-700 text-white shadow-sm' : 'text-blue-700 hover:bg-white'}" onclick="app_setPlaybookTab('offense', 'scheme')">⚡ Fits ${team.formations?.offense || 'Scheme'}</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('offense', 'all')">All (${offAvailable.length})</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'run' ? 'bg-amber-600 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('offense', 'run')">Ground</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'quick' ? 'bg-emerald-700 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('offense', 'quick')">Quick & Screen</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'deep' ? 'bg-blue-700 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('offense', 'deep')">Deep & Cross</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabOff === 'action' ? 'bg-purple-700 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('offense', 'action')">PA / RPO / Trick</button>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5">
                         ${offAvailable.filter(([k, play]) => {
                             const isCompatible = !play.compatibleFormations || play.compatibleFormations.includes(team.formations?.offense || 'Balanced');
+                            const q = window._playbookCatalogSearch.trim().toLowerCase();
+                            if (q && !`${getPlayDisplayName(play, k)} ${(play.tags || []).join(' ')}`.toLowerCase().includes(q)) return false;
                             if (window._activePlaybookTabOff === 'scheme') return isCompatible;
                             if (window._activePlaybookTabOff === 'run') return play.type === 'run';
                             if (window._activePlaybookTabOff === 'quick') return play.tags?.includes('quick') || play.tags?.includes('short') || play.tags?.includes('screen');
                             if (window._activePlaybookTabOff === 'deep') return play.tags?.includes('deep') || play.tags?.includes('cross') || play.tags?.includes('flood') || play.tags?.includes('vertical');
                             if (window._activePlaybookTabOff === 'action') return play.tags?.includes('pa') || play.tags?.includes('rpo') || play.tags?.includes('trick');
                             return true;
+                        }).sort((a, b) => {
+                            const compA = !a[1].compatibleFormations || a[1].compatibleFormations.includes(team.formations?.offense || 'Balanced');
+                            const compB = !b[1].compatibleFormations || b[1].compatibleFormations.includes(team.formations?.offense || 'Balanced');
+                            return Number(compB) - Number(compA);
                         }).map(([key, play]) => {
                             const isInstalledCustom = team.gameplan.installedOffense.includes(key);
-                            const isLockedBasic = BASICS_OFF.includes(key);
-                            const isActive = isInstalledCustom || isLockedBasic;
-                            const mastery = team.gameplan.mastery[key] || (isLockedBasic ? 85 : 35);
+                            const mastery = team.gameplan.mastery[key] || 35;
                             const isCompatible = !play.compatibleFormations ||
                                 play.compatibleFormations.includes(team.formations?.offense || 'Balanced');
                             const cleanName = getPlayDisplayName(play, key);
-                            const personnelBadge = getPlayPersonnelBadge(play, team.formations?.offense);
-
-                            const schemeFitBadge = !play.compatibleFormations
-                                ? '<span class="text-[8px] bg-slate-100 text-slate-500 px-1 rounded">All Formations</span>'
+                            const meta = getPlayCatalogMeta(play, 'offense');
+                            const fitNote = !play.compatibleFormations
+                                ? 'Universal'
                                 : isCompatible
-                                    ? '<span class="text-[8px] bg-emerald-100 text-emerald-800 px-1 rounded font-bold">✓ Scheme Fit</span>'
-                                    : `<span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded font-bold"
-                                               title="Compatible formations: ${play.compatibleFormations.join(', ')}">
-                                           Fits: ${play.compatibleFormations.join(', ')}
-                                       </span>`;
+                                    ? '✓ Fits Scheme'
+                                    : `Needs: ${play.compatibleFormations.join('/')}`;
 
                             return `
-                            <div class="p-2 rounded border ${isActive ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200 bg-white hover:border-blue-400'} flex flex-col justify-between transition cursor-pointer group shadow-sm" onclick="app_previewPlay('${key}', 'offense')">
-                                <div class="truncate mb-1.5">
-                                    <div class="flex justify-between items-start">
-                                        <span class="font-bold text-slate-800 group-hover:text-blue-700 truncate text-[11px]" title="${cleanName}">${cleanName} 🔍</span>
+                            <div class="rounded border border-slate-200 border-l-4 ${meta.border} ${isInstalledCustom ? 'bg-emerald-50/50' : isCompatible ? 'bg-white' : 'bg-slate-50/80 opacity-80'} px-2.5 py-2 flex items-center justify-between gap-2 hover:shadow-sm transition cursor-pointer"
+                                 onclick="app_previewPlay('${key}', 'offense')">
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5 flex-wrap">
+                                        <span class="rounded px-1.5 py-0.2 text-[8px] font-black uppercase ${meta.pill}">${meta.label}</span>
+                                        <span class="font-bold text-slate-900 truncate text-[11px]" title="${cleanName}">${cleanName}</span>
                                     </div>
-                                    <div class="flex items-center gap-1 mt-0.5">
-                                        <span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded font-mono">${personnelBadge}</span>
-                                        ${schemeFitBadge}
+                                    <div class="text-[10px] text-slate-600 truncate mt-0.5">${meta.summary}</div>
+                                    <div class="flex items-center gap-2 mt-0.5 text-[9px] font-mono">
+                                        <span class="${isCompatible ? 'text-emerald-700 font-bold' : 'text-amber-700'}">${fitNote}</span>
+                                        <span class="text-slate-400">· ${mastery}% Mst</span>
                                     </div>
                                 </div>
-                                <div class="flex justify-between items-center border-t pt-1">
-                                    <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
+                                <div class="shrink-0" onclick="event.stopPropagation()">
                                     ${isInstalledCustom ? `
-                                        <div class="flex items-center gap-1">
-                                            <span class="text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">✓ In Plan</span>
-                                            <button class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition"
-                                                    onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
-                                                Uninstall
-                                            </button>
-                                        </div>
+                                        <button class="px-2 py-1 rounded text-[9px] font-black uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition"
+                                                onclick="app_toggleInstallPlay('${key}', 'offense')">
+                                            ✓ Remove
+                                        </button>
                                     ` : `
-                                        <button class="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition"
-                                                onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'offense')">
+                                        <button class="px-2.5 py-1 rounded text-[9px] font-black uppercase bg-slate-900 text-white hover:bg-slate-700 transition"
+                                                onclick="app_toggleInstallPlay('${key}', 'offense')">
                                             + Install
                                         </button>
                                     `}
@@ -19603,67 +19730,76 @@ const offAvailable = Object.entries(offensivePlaybook || {}).filter(([k]) => k !
                     `).join('')}
                 </div>
 
-                <!-- Available Library with Category Filter Tabs -->
-                <div class="pt-3 border-t">
-                    <div class="flex flex-wrap justify-between items-center mb-2 gap-2">
-                        <span class="font-bold text-[10px] uppercase text-slate-600 tracking-wider">Defensive Library (Click to Install into Open Slots)</span>
-                        <div class="flex bg-slate-100 p-0.5 rounded border border-slate-300 text-[10px] font-bold">
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'all')">All</button>
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'zone' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'zone')">Zone</button>
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'man' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'man')">Man</button>
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'blitz' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'blitz')">Blitzes</button>
-                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'short' ? 'bg-slate-900 text-white' : 'text-slate-600'}" onclick="app_setPlaybookTab('defense', 'short')">Run Stop / Prevent</button>
+                <!-- Compact Color-Coded Defensive Catalog -->
+                <div class="pt-3 border-t space-y-2">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-[10px] uppercase text-slate-600 tracking-wider">Defensive Library</span>
+                            <input type="search" id="playbook-catalog-search" value="${window._playbookCatalogSearch.replace(/"/g, '&quot;')}"
+                                placeholder="Filter plays..." oninput="app_setPlaybookSearch(this.value)"
+                                class="w-32 sm:w-44 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] outline-none focus:border-rose-500">
+                        </div>
+                        <div class="flex flex-wrap bg-slate-100 p-0.5 rounded border border-slate-300 text-[10px] font-bold gap-0.5">
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'scheme' ? 'bg-rose-700 text-white shadow-sm' : 'text-rose-700 hover:bg-white'}" onclick="app_setPlaybookTab('defense', 'scheme')">⚡ Fits ${team.formations?.defense || '3-2-3'}</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('defense', 'all')">All (${defAvailable.length})</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'zone' ? 'bg-sky-700 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('defense', 'zone')">Zone</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'man' ? 'bg-indigo-700 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('defense', 'man')">Man</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'blitz' ? 'bg-rose-700 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('defense', 'blitz')">Blitzes</button>
+                            <button class="px-2 py-0.5 rounded ${window._activePlaybookTabDef === 'short' ? 'bg-amber-600 text-white' : 'text-slate-600 hover:bg-white'}" onclick="app_setPlaybookTab('defense', 'short')">Run Stop / Prevent</button>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5">
                         ${defAvailable.filter(([k, play]) => {
+                            const isCompatible = !play.compatibleFormations || play.compatibleFormations.includes(team.formations?.defense || '3-2-3');
+                            const q = window._playbookCatalogSearch.trim().toLowerCase();
+                            if (q && !`${getPlayDisplayName(play, k)} ${play.concept || ''} ${(play.tags || []).join(' ')}`.toLowerCase().includes(q)) return false;
+                            if (window._activePlaybookTabDef === 'scheme') return isCompatible;
                             if (window._activePlaybookTabDef === 'zone') return play.concept === 'Zone' && !play.blitz;
                             if (window._activePlaybookTabDef === 'man') return play.concept === 'Man' && !play.blitz;
                             if (window._activePlaybookTabDef === 'blitz') return play.blitz === true;
                             if (window._activePlaybookTabDef === 'short') return play.tags?.includes('runStop') || play.tags?.includes('prevent');
                             return true;
+                        }).sort((a, b) => {
+                            const compA = !a[1].compatibleFormations || a[1].compatibleFormations.includes(team.formations?.defense || '3-2-3');
+                            const compB = !b[1].compatibleFormations || b[1].compatibleFormations.includes(team.formations?.defense || '3-2-3');
+                            return Number(compB) - Number(compA);
                         }).map(([key, play]) => {
                             const isInstalledCustom = team.gameplan.installedDefense.includes(key);
                             const mastery = team.gameplan.mastery[key] || 35;
                             const isCompatible = !play.compatibleFormations ||
                                 play.compatibleFormations.includes(team.formations?.defense || '3-2-3');
-
-                            const schemeFitBadge = !play.compatibleFormations
-                                ? '<span class="text-[8px] bg-slate-100 text-slate-500 px-1 rounded">All Formations</span>'
+                            const cleanName = getPlayDisplayName(play, key);
+                            const meta = getPlayCatalogMeta(play, 'defense');
+                            const fitNote = !play.compatibleFormations
+                                ? 'Universal'
                                 : isCompatible
-                                    ? '<span class="text-[8px] bg-emerald-100 text-emerald-800 px-1 rounded font-bold">✓ Scheme Fit</span>'
-                                    : `<span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded font-bold"
-                                               title="Compatible formations: ${play.compatibleFormations.join(', ')}">
-                                           Fits: ${play.compatibleFormations.join(', ')}
-                                       </span>`;
+                                    ? '✓ Fits Scheme'
+                                    : `Needs: ${play.compatibleFormations.join('/')}`;
 
                             return `
-                            <div class="p-2 rounded border ${isInstalledCustom ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200 bg-white hover:border-red-400'} flex flex-col justify-between transition cursor-pointer group shadow-sm"
+                            <div class="rounded border border-slate-200 border-l-4 ${meta.border} ${isInstalledCustom ? 'bg-emerald-50/50' : isCompatible ? 'bg-white' : 'bg-slate-50/80 opacity-80'} px-2.5 py-2 flex items-center justify-between gap-2 hover:shadow-sm transition cursor-pointer"
                                  onclick="app_previewPlay('${key}', 'defense')">
-                                <div class="truncate mb-1.5">
-                                    <div class="flex justify-between items-start">
-                                        <span class="font-bold text-slate-800 group-hover:text-rose-700 truncate text-[11px]"
-                                              title="${play.name || key}">${play.name || getPlayDisplayName(play, key)} 🔍</span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5 flex-wrap">
+                                        <span class="rounded px-1.5 py-0.2 text-[8px] font-black uppercase ${meta.pill}">${meta.label}</span>
+                                        <span class="font-bold text-slate-900 truncate text-[11px]" title="${cleanName}">${cleanName}</span>
                                     </div>
-                                    <div class="flex items-center gap-1 mt-0.5 flex-wrap">
-                                        <span class="text-[8px] bg-slate-100 text-slate-600 px-1 rounded uppercase font-bold">${play.concept || 'Scheme'}</span>
-                                        ${schemeFitBadge}
+                                    <div class="text-[10px] text-slate-600 truncate mt-0.5">${meta.summary}</div>
+                                    <div class="flex items-center gap-2 mt-0.5 text-[9px] font-mono">
+                                        <span class="${isCompatible ? 'text-emerald-700 font-bold' : 'text-amber-700'}">${fitNote}</span>
+                                        <span class="text-slate-400">· ${mastery}% Mst</span>
                                     </div>
                                 </div>
-                                <div class="flex justify-between items-center border-t pt-1 mt-1">
-                                    <span class="text-[9px] text-slate-400 font-mono">${mastery}% Mst</span>
+                                <div class="shrink-0" onclick="event.stopPropagation()">
                                     ${isInstalledCustom ? `
-                                        <div class="flex items-center gap-1">
-                                            <span class="text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">✓ In Plan</span>
-                                            <button class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition"
-                                                    onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
-                                                Uninstall
-                                            </button>
-                                        </div>
+                                        <button class="px-2 py-1 rounded text-[9px] font-black uppercase bg-rose-100 text-rose-800 hover:bg-rose-200 transition"
+                                                onclick="app_toggleInstallPlay('${key}', 'defense')">
+                                            ✓ Remove
+                                        </button>
                                     ` : `
-                                        <button class="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-900 text-white hover:bg-slate-800 transition"
-                                                onclick="event.stopPropagation(); app_toggleInstallPlay('${key}', 'defense')">
+                                        <button class="px-2.5 py-1 rounded text-[9px] font-black uppercase bg-slate-900 text-white hover:bg-slate-700 transition"
+                                                onclick="app_toggleInstallPlay('${key}', 'defense')">
                                             + Install
                                         </button>
                                     `}

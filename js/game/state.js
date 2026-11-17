@@ -1464,7 +1464,88 @@ function autoWriteStorage(
     }
 }
 
+let scheduledSaveTimer = null;
+let scheduledSaveKey = null;
+
+export function flushScheduledSaveGameState() {
+    if (scheduledSaveTimer !== null) {
+        clearTimeout(scheduledSaveTimer);
+        scheduledSaveTimer = null;
+        const key = scheduledSaveKey || DEFAULT_SAVE_KEY;
+        scheduledSaveKey = null;
+        return saveGameState(key);
+    }
+    return false;
+}
+
+export function scheduleSaveGameState(saveKey = DEFAULT_SAVE_KEY, delayMs = 400) {
+    scheduledSaveKey = typeof saveKey === 'string' ? saveKey : DEFAULT_SAVE_KEY;
+    if (scheduledSaveTimer !== null) {
+        clearTimeout(scheduledSaveTimer);
+    }
+    scheduledSaveTimer = setTimeout(() => {
+        scheduledSaveTimer = null;
+        const key = scheduledSaveKey || DEFAULT_SAVE_KEY;
+        scheduledSaveKey = null;
+        saveGameState(key);
+    }, delayMs);
+}
+
+const EMPTY_PLAYER_STATS = Object.freeze({
+    passYards: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0,
+    rushYards: 0, rushAttempts: 0,
+    recYards: 0, receptions: 0, targets: 0, drops: 0, pancakes: 0,
+    tackles: 0, sacks: 0, interceptions: 0,
+    fumbles: 0, fumblesLost: 0, fumblesRecovered: 0,
+    touchdowns: 0, returnYards: 0, safeties: 0
+});
+
+const TRANSIENT_PLAYER_KEYS = new Set([
+    'gameStats', 'isResting', '_distToCarrier', 'velocity',
+    'scouting', 'gameLog', 'recentPlays'
+]);
+
+const compactNonZeroStats = (stats) => {
+    if (!stats || typeof stats !== 'object') return undefined;
+    const out = {};
+    for (const [k, v] of Object.entries(stats)) {
+        if (v !== 0 && v != null) out[k] = v;
+    }
+    return out;
+};
+
+let scheduledSaveTimer = null;
+let scheduledSaveKey = null;
+
+export function flushScheduledSaveGameState() {
+    if (scheduledSaveTimer !== null) {
+        clearTimeout(scheduledSaveTimer);
+        scheduledSaveTimer = null;
+        const key = scheduledSaveKey || DEFAULT_SAVE_KEY;
+        scheduledSaveKey = null;
+        return saveGameState(key);
+    }
+    return false;
+}
+
+export function scheduleSaveGameState(saveKey = DEFAULT_SAVE_KEY, delayMs = 400) {
+    scheduledSaveKey = typeof saveKey === 'string' ? saveKey : DEFAULT_SAVE_KEY;
+    if (scheduledSaveTimer !== null) clearTimeout(scheduledSaveTimer);
+    scheduledSaveTimer = setTimeout(() => {
+        scheduledSaveTimer = null;
+        const key = scheduledSaveKey || DEFAULT_SAVE_KEY;
+        scheduledSaveKey = null;
+        saveGameState(key);
+    }, delayMs);
+}
+
 export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
+    if (scheduledSaveTimer !== null) {
+        clearTimeout(scheduledSaveTimer);
+        scheduledSaveTimer = null;
+        scheduledSaveKey = null;
+    }
+
     let activeGame = game;
     let saveKey = DEFAULT_SAVE_KEY;
 
@@ -1480,30 +1561,16 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
         return false;
     }
 
-    // Preserve every season's lightweight history, but retain detailed
-    // yearbook snapshots for only the six most recent seasons.
-    // This also releases the larger snapshots from live game memory.
     const runtimeSeasonHistory = activeGame.history?.seasons;
-
     if (Array.isArray(runtimeSeasonHistory)) {
-        const firstDetailedSeasonIndex = Math.max(
-            0,
-            runtimeSeasonHistory.length - 6
-        );
-
+        const firstDetailedSeasonIndex = Math.max(0, runtimeSeasonHistory.length - 6);
         runtimeSeasonHistory.forEach((season, index) => {
-            if (
-                index < firstDetailedSeasonIndex &&
-                season &&
-                typeof season === 'object' &&
-                season.reportSnapshot
-            ) {
+            if (index < firstDetailedSeasonIndex && season && typeof season === 'object' && season.reportSnapshot) {
                 delete season.reportSnapshot;
             }
         });
     }
 
-    // Strictly save primitive fields for matches: prevents attached team objects, results, or telemetry leaks
     const cleanMatchStrict = (m) => {
         if (!m || typeof m !== 'object') return null;
         const homeId = m.home?.id ?? m.homeTeam?.id ?? m.homeId ?? m.homeTeamId;
@@ -1527,101 +1594,81 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
         dataToSave._activeFaMarket = serializeActiveFaMarket(activeGame._activeFaMarket);
         delete dataToSave.relationships;
         delete dataToSave._faMarketCache;
+        delete dataToSave._latestStaffReport;
 
-        // 1. SCHEDULE: Strip attached team objects & play logs (cuts ~5MB)
         if (Array.isArray(dataToSave.schedule)) {
-            dataToSave.schedule = dataToSave.schedule
-                .map(cleanMatchStrict)
-                .filter(Boolean);
+            dataToSave.schedule = dataToSave.schedule.map(cleanMatchStrict).filter(Boolean);
         }
-
-        // 2. DRAFT ORDER & DRAFT CLASS: Store compact IDs instead of full team/player objects (cuts ~3MB)
         if (Array.isArray(dataToSave.draftOrder)) {
-            dataToSave.draftOrder = dataToSave.draftOrder
-                .map(t => (typeof t === 'object' && t !== null ? String(t.id) : String(t)))
-                .filter(Boolean);
+            dataToSave.draftOrder = dataToSave.draftOrder.map(t => (typeof t === 'object' && t !== null ? String(t.id) : String(t))).filter(Boolean);
         }
-
         if (Array.isArray(dataToSave.draftClass)) {
-            dataToSave.draftClass = dataToSave.draftClass
-                .map(p => (typeof p === 'object' && p !== null ? String(p.id) : String(p)))
-                .filter(Boolean);
+            dataToSave.draftClass = dataToSave.draftClass.map(p => (typeof p === 'object' && p !== null ? String(p.id) : String(p))).filter(Boolean);
         }
 
-        // 3. PURGE RETIRED/DEPARTED PLAYERS & COMPACT ACTIVE ONES
         const hofIds = new Set(
             (activeGame.hallOfFame || [])
                 .map(p => (typeof p === 'object' && p !== null ? p.id : p))
                 .filter(id => id != null)
         );
 
-        dataToSave.players = (dataToSave.players || [])
-            .filter(p => {
-                if (!p || p.id == null) return false;
-                const isRetired =
-                    p.status?.type === 'retired' ||
-                    p.status?.type === 'departed' ||
-                    p.status === 'retired' ||
-                    p.retired === true;
-                if (isRetired) {
-                    return hofIds.has(p.id) || hofIds.has(String(p.id));
-                }
-                return true;
-            })
-            .map(p => {
-                const cleanP = { ...p };
-                delete cleanP.gameStats;
-                delete cleanP.fatigue;
-                delete cleanP.isResting;
-                delete cleanP._distToCarrier;
-                delete cleanP.velocity;
-                delete cleanP.scouting;
-                delete cleanP.gameLog;
-                delete cleanP.recentPlays;
+        // Filter player references WITHOUT cloning 1,000+ player objects.
+        const activePlayers = (activeGame.players || []).filter(p => {
+            if (!p || p.id == null) return false;
+            const isRetired =
+                p.status?.type === 'retired' ||
+                p.status?.type === 'departed' ||
+                p.status === 'retired' ||
+                p.retired === true;
+            return !isRetired || hofIds.has(p.id) || hofIds.has(String(p.id));
+        });
+        dataToSave.players = activePlayers;
 
-                if (cleanP.progression && cleanP.progression.length > 5) {
-                    cleanP.progression = cleanP.progression.slice(-5);
-                }
-
-                if (cleanP.status && cleanP.status.type === 'healthy' && cleanP.status.duration === 0) {
-                    delete cleanP.status;
-                }
-                return cleanP;
-            });
-
-        const activePlayerIds = new Set(dataToSave.players.map(p => String(p.id)));
-
-        // 4. MAP OBJECT ARRAYS TO IDS
+        const activePlayerIds = new Set(activePlayers.map(p => String(p.id)));
         const resolvedPlayerTeamId = activeGame.playerTeam?.id ?? activeGame.playerTeam;
-        dataToSave.playerTeam = resolvedPlayerTeamId != null ? String(resolvedPlayerTeamId) : null;
+        const userTeamKey = resolvedPlayerTeamId != null ? String(resolvedPlayerTeamId) : null;
+        dataToSave.playerTeam = userTeamKey;
 
         if (Array.isArray(dataToSave.freeAgents)) {
-            dataToSave.freeAgents = dataToSave.freeAgents
-                .map(p => (typeof p === 'object' && p !== null ? p.id : p))
-                .filter(id => id != null);
+            dataToSave.freeAgents = dataToSave.freeAgents.map(p => (typeof p === 'object' && p !== null ? p.id : p)).filter(id => id != null);
         }
-
         dataToSave.hallOfFame = Array.from(hofIds);
-
         if (Array.isArray(dataToSave.draftPool)) {
-            dataToSave.draftPool = dataToSave.draftPool
-                .map(p => (typeof p === 'object' && p !== null ? p.id : p))
-                .filter(id => id != null);
+            dataToSave.draftPool = dataToSave.draftPool.map(p => (typeof p === 'object' && p !== null ? p.id : p)).filter(id => id != null);
         }
 
-        // 5. TEAMS & SCOUTING COMPACT
+        // Compact teams & strip non-player display prose from AI scouting reports.
         dataToSave.teams = (dataToSave.teams || []).map(team => {
             const cleanTeam = compactTeamCoachAliasesForSave(team);
             delete cleanTeam.recentPlayHistory;
             delete cleanTeam.playCallHistory;
             delete cleanTeam._captainFlavorLogged;
+            delete cleanTeam._lastCoachImprovements;
+            delete cleanTeam._lastPlayerImprovements;
+
+            const isUserTeam = userTeamKey !== null && String(team?.id) === userTeamKey;
+            if (!isUserTeam && activeGame.offseasonState?.phase === 'regular_season') {
+                delete cleanTeam.aiStaffScoutingReports;
+            }
 
             if (cleanTeam.scoutingReports && typeof cleanTeam.scoutingReports === 'object') {
+                const ownRosterIds = new Set((team.roster || []).map(String));
                 const compactReports = {};
                 for (const [pId, rep] of Object.entries(cleanTeam.scoutingReports)) {
-                    if (!rep) continue;
-                    const hasScoutingProgress = (rep.level > 0) || (rep.progressPoints && rep.progressPoints > 0);
-                    if (hasScoutingProgress && activePlayerIds.has(String(pId))) {
+                    if (!rep || ownRosterIds.has(String(pId)) || !activePlayerIds.has(String(pId))) continue;
+                    const hasProgress = (rep.level > 0) || ((Number(rep.progressPoints) || 0) >= 0.5);
+                    if (!hasProgress) continue;
+
+                    if (!isUserTeam && rep.evaluation) {
+                        compactReports[pId] = {
+                            ...rep,
+                            evaluation: {
+                                offenseFit: rep.evaluation.offenseFit,
+                                defenseFit: rep.evaluation.defenseFit,
+                                characterSummary: rep.evaluation.characterSummary
+                            }
+                        };
+                    } else {
                         compactReports[pId] = rep;
                     }
                 }
@@ -1630,11 +1677,27 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
             return cleanTeam;
         });
 
-        // 6. HISTORIES & LOGS
-        if (dataToSave.messages?.length > 15) {
-            dataToSave.messages = dataToSave.messages.slice(0, 15);
+        // Prune bulky recruiting maps once the regular season has begun.
+        if (
+            dataToSave.offseasonState?.phase === 'regular_season' &&
+            activeGame.offseasonFACompleted === true &&
+            dataToSave.offseasonState.recruitingProgress
+        ) {
+            const rp = dataToSave.offseasonState.recruitingProgress;
+            dataToSave.offseasonState = {
+                ...dataToSave.offseasonState,
+                recruitingProgress: {
+                    version: rp.version,
+                    seasonYear: rp.seasonYear,
+                    initialized: rp.initialized,
+                    completed: rp.completed,
+                    completedDay: rp.completedDay,
+                    commitments: rp.commitments || []
+                }
+            };
         }
 
+        if (dataToSave.messages?.length > 15) dataToSave.messages = dataToSave.messages.slice(0, 15);
         if (Array.isArray(dataToSave.gameResults)) {
             dataToSave.gameResults = dataToSave.gameResults.slice(-4).map(res => ({
                 homeTeam: res.homeTeam ? { name: res.homeTeam.name, id: res.homeTeam.id } : null,
@@ -1643,62 +1706,66 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
                 awayScore: res.awayScore
             }));
         }
-
-        if (dataToSave.pickHistory?.length > 60) {
-            dataToSave.pickHistory = dataToSave.pickHistory.slice(-60);
-        }
+        if (dataToSave.pickHistory?.length > 60) dataToSave.pickHistory = dataToSave.pickHistory.slice(-60);
 
         if (Array.isArray(dataToSave.history?.seasons)) {
             const seasonHistory = dataToSave.history.seasons;
-            const firstDetailedSeasonIndex = Math.max(
-                0,
-                seasonHistory.length - 6
-            );
-
-            // Clone the history object and each season. Do not assign a
-            // truncated array back through the shallow game-state clone:
-            // that would silently erase history from the live game.
+            const firstDetailedSeasonIndex = Math.max(0, seasonHistory.length - 6);
             dataToSave.history = {
                 ...dataToSave.history,
                 seasons: seasonHistory.map((season, index) => {
-                    if (!season || typeof season !== 'object') {
-                        return season;
-                    }
-
+                    if (!season || typeof season !== 'object') return season;
                     const cleanSeason = { ...season };
-
                     delete cleanSeason.gameLogs;
                     delete cleanSeason.plays;
                     delete cleanSeason.playByPlay;
-
-                    // Older years retain their champions, standings,
-                    // leaders, promotion/relegation and draft history,
-                    // but not the larger detailed report snapshot.
-                    if (index < firstDetailedSeasonIndex) {
-                        delete cleanSeason.reportSnapshot;
-                    }
-
+                    if (index < firstDetailedSeasonIndex) delete cleanSeason.reportSnapshot;
                     if (Array.isArray(cleanSeason.schedule)) {
-                        cleanSeason.schedule = cleanSeason.schedule
-                            .map(cleanMatchStrict)
-                            .filter(Boolean);
+                        cleanSeason.schedule = cleanSeason.schedule.map(cleanMatchStrict).filter(Boolean);
                     }
-
                     return cleanSeason;
                 })
             };
         }
 
-        const serialized = JSON.stringify(dataToSave);
-        const compressed = compressSaveText(serialized);
+        // Single-pass replacer strips transient keys and 0-valued stats without cloning 1,000 players.
+        const saveReplacer = function(key, value) {
+            if (this && typeof this === 'object' && this.attributes && this.id != null) {
+                if (TRANSIENT_PLAYER_KEYS.has(key)) return undefined;
+                if (key === 'fatigue' && (!value || value === 0)) return undefined;
+                if (key === 'bio' && (userTeamKey === null || String(this.teamId) !== userTeamKey)) return undefined;
+                if (key === 'status' && value && value.type === 'healthy' && !value.duration && !value.description) return undefined;
+                if (key === 'progression' && Array.isArray(value)) {
+                    return value.slice(-5).map(pr => (pr?.stats ? { ...pr, stats: compactNonZeroStats(pr.stats) } : pr));
+                }
+                if (key === 'youthSeasonHistory' && Array.isArray(value)) {
+                    return value.map(ys => (ys?.stats ? { ...ys, stats: compactNonZeroStats(ys.stats) } : ys));
+                }
+                if (key === 'seasonStats' || key === 'careerStats' || key === 'youthCareerStats') {
+                    return compactNonZeroStats(value);
+                }
+            }
+            return value;
+        };
 
+        const serialized = JSON.stringify(dataToSave, saveReplacer);
+
+        // Skip slow LZW compression on normal saves; compress only if large or if quota fails.
+        if (serialized.length <= 1_200_000) {
+            try {
+                localStorage.setItem(saveKey, serialized);
+                return true;
+            } catch (_) {
+                // Fall through to LZW compression if storage quota is tight
+            }
+        }
+
+        const compressed = compressSaveText(serialized);
         if (autoWriteStorage(saveKey, compressed, dataToSave, 'Primary save')) {
             return true;
         }
 
-        throw new Error(
-            'Primary save write failed; attempting emergency compression.'
-        );
+        throw new Error('Primary save write failed; attempting emergency compression.');
     } catch (e) {
         console.error('Primary save failed, attempting emergency fallback save:', e);
         try {
@@ -1855,6 +1922,28 @@ export function loadGameState(saveKey = DEFAULT_SAVE_KEY) {
             game.players.forEach(p => {
                 if (p && p.id != null) {
                     if (!p.status) p.status = { type: 'healthy', description: '', duration: 0 };
+                    if (p.seasonStats) p.seasonStats = { ...EMPTY_PLAYER_STATS, ...p.seasonStats };
+                    if (p.careerStats) {
+                        p.careerStats = {
+                            seasonsPlayed: 0,
+                            snapsThisSeason: 0,
+                            ...EMPTY_PLAYER_STATS,
+                            ...p.careerStats
+                        };
+                    }
+                    if (p.youthCareerStats) {
+                        p.youthCareerStats = { ...EMPTY_PLAYER_STATS, ...p.youthCareerStats };
+                    }
+                    if (Array.isArray(p.youthSeasonHistory)) {
+                        p.youthSeasonHistory.forEach(ys => {
+                            if (ys?.stats) ys.stats = { ...EMPTY_PLAYER_STATS, ...ys.stats };
+                        });
+                    }
+                    if (Array.isArray(p.progression)) {
+                        p.progression.forEach(pr => {
+                            if (pr?.stats) pr.stats = { ...EMPTY_PLAYER_STATS, ...pr.stats };
+                        });
+                    }
                     playerMap.set(String(p.id), p);
                     playerMap.set(p.id, p);
                 }
