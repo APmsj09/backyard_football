@@ -297,23 +297,19 @@ export function getScoutedPlayerInfo(
 
     const reportLevel = Number(report?.level);
 
+    const bestReportedEstimate = [
+        report?.evaluation?.offenseFit,
+        report?.evaluation?.defenseFit
+    ]
+        .filter(f =>
+            f &&
+            Number.isFinite(Number(f.low)) &&
+            Number.isFinite(Number(f.high))
+        )
+        .map(f => (Number(f.low) + Number(f.high)) / 2)
+        .sort((a, b) => b - a)[0] ?? null;
+
     return {
-        id: player.id,
-        name: player.name || 'Unknown Player',
-        age: Number(player.age) || null,
-
-        // Position is public information, not an inferred hidden rating.
-        pos: listedPosition,
-
-        const bestReportedEstimate = [
-            report?.evaluation?.offenseFit,
-            report?.evaluation?.defenseFit
-        ]
-            .filter(f => f && Number.isFinite(Number(f.low)) && Number.isFinite(Number(f.high)))
-            .map(f => (Number(f.low) + Number(f.high)) / 2)
-            .sort((a, b) => b - a)[0] ?? null;
-
-        return {
         id: player.id,
         name: player.name || 'Unknown Player',
         age: Number(player.age) || null,
