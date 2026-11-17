@@ -3184,6 +3184,7 @@ function shouldReleaseFleaFlickerPitch(rb, playState, tick) {
         if (
             defender.isOffense === rb.isOffense ||
             defender.stunnedTicks > 0 ||
+            defender.balanceState === 'downed' ||
             defender.isBlocked ||
             defender.isEngaged
         ) {

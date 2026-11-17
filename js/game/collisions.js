@@ -687,6 +687,7 @@ export function checkTackleCollisions(playState, gameLog) {
         // Additional nearby defenders improve the odds of finishing the tackle.
         const defendersInRange = defenders.filter(d =>
             d.stunnedTicks === 0 &&
+            d.balanceState !== 'downed' &&
             !d.isBlocked &&
             !d.isEngaged &&
             getDistance(d, carrier) < TACKLE_CONTACT_RANGE
@@ -1862,7 +1863,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
     const BASE_CATCH_RADIUS = 0.45;
 
     const playersInRange = playState.activePlayers.filter(p => {
-        if (p.isBlocked || p.isEngaged || p.stunnedTicks > 0) return false;
+        if (p.isBlocked || p.isEngaged || p.stunnedTicks > 0 || p.balanceState === 'downed') return false;
 
         // PHYSICAL COOLDOWN: Replaces permanent lockout. A player who jumped or swiped needs time to land
         if (p._catchCooldownTicks && p._catchCooldownTicks > 0) return false;
@@ -2085,6 +2086,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
         const nearbyAttackers = playState.activePlayers.filter(p =>
             p.isOffense &&
             p.stunnedTicks <= 0 &&
+            p.balanceState !== 'downed' &&
             !p.isEngaged &&
             getDistance(p, ball) <= 2.2
         );

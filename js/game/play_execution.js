@@ -1324,7 +1324,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     }
 
     const allThreats = defenseStates.filter(d => {
-        if (d.isBlocked || d.isEngaged || d.stunnedTicks > 0) return false;
+        if (d.isBlocked || d.isEngaged || d.stunnedTicks > 0 || d.balanceState === 'downed') return false;
 
         if (playType === 'pass' && !isPassCompleted) {
             // PASS PROTECTION: Only rushers, blitzers, or defenders penetrating near the pocket
@@ -1743,6 +1743,8 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 !assignedThreats.has(t.id) &&
                 !t.isEngaged &&
                 !t.isBlocked &&
+                t.balanceState !== 'downed' &&
+                t.stunnedTicks <= 0 &&
                 getDistance(blocker, t) < 14.0 &&
                 t.y > blocker.y - 2.0 &&
                 (
@@ -1778,6 +1780,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     !d.isEngaged &&
                     !assignedThreats.has(d.id) &&
                     d.stunnedTicks === 0 &&
+                    d.balanceState !== 'downed' &&
                     d.y > blocker.y - 0.5 &&
                     d.y < blocker.y + 8.0 &&
                     (
@@ -2196,7 +2199,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 let targetX = pState.x;
                 let targetY = pState.y;
 
-                const nearbyDefenders = defenseStates.filter(d => !d.isBlocked && d.stunnedTicks === 0);
+                const nearbyDefenders = defenseStates.filter(d => !d.isBlocked && d.stunnedTicks === 0 && d.balanceState !== 'downed');
                 const immediateThreat = nearbyDefenders.sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
 
                 if (pState.action === 'trucking') {
@@ -2225,6 +2228,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         !d.isBlocked &&
                         !d.isEngaged &&
                         d.stunnedTicks <= 0 &&
+                        d.balanceState !== 'downed' &&
                         d.y > pState.y &&
                         d.y <= pt.y + 1.0 &&
                         getDistance(d, pt) < 1.4 // Direct penetration into the hole
@@ -2587,6 +2591,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         !d.isBlocked &&
                         !d.isEngaged &&
                         d.stunnedTicks === 0 &&
+                        d.balanceState !== 'downed' &&
                         getDistance(pState, d) < 5.5
                     );
 
@@ -2598,6 +2603,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     // Check unblocked rushers AND collapsing blocks within 5.0 yards.
                     const allThreatsNearPocket = defenseStates.filter(d =>
                         d.stunnedTicks === 0 &&
+                        d.balanceState !== 'downed' &&
                         getDistance(pState, d) < 5.0 &&
                         (
                             (!d.isBlocked && !d.isEngaged) ||
@@ -2709,6 +2715,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     if (mastery < 45 && playState.tick === 12 && pState.currentPathIndex === 0) {
                         if (Math.random() < 0.22) {
                             pState.stunnedTicks = 4;
+                            logPlayDebug('ROUTE_HESITATION', `${pState.name} hesitated on low-mastery route`, {
+                                playKey,
+                                mastery,
+                                stunnedTicks: 4
+                            }, playState.tick, playState.playId);
                             if (gameLog && Math.random() < 0.15) {
                                 pushGameLog(gameLog, `⚠️ [Tick ${playState.tick}] ${pState.name} hesitates on unfamiliar route assignment!`, playState);
                             }
@@ -3552,8 +3563,8 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 setPointIntent(pState, safetyHelp.helpX, safetyHelp.helpY, 0.4);
             }
 
-            if (isBallInAir) pState.action = 'tracking_ball'; 
-            else pState.action = 'pursuit';
+            if (isBallInAir) pState.action = 'tracking_ball';
+            else pState.action = safetyHelp.type || assignment || 'zone_deep_middle';
             return;
         }
     }

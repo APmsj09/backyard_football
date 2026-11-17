@@ -440,6 +440,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const isDynamicPursuer =
         pState.action === 'pursuit' ||
         pState.action === 'tracking_ball' ||
+        pState.action === 'zone_match' ||
+        pState.action === 'man_help' ||
         pState.action?.includes('rush') ||
         pState.action?.includes('blitz') ||
         pState.action?.startsWith('man_cover_');
@@ -557,6 +559,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // They close with full sprint speed until physical tackle range (0.5y) is reached.
     const isAggressiveAttackAction = [
         'run_path', 'run_route', 'tracking_ball', 'pursuit',
+        'zone_match', 'man_help',
         'pass_rush', 'blitz', 'blitz_gap', 'blitz_edge',
         'qb_scramble', 'run_block', 'pass_block', 'lead_block', 'screen_block'
     ].includes(pState.action) ||
@@ -664,9 +667,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             const directX = steeringX;
             const directY = steeringY;
 
-            // Blend forward movement with a stronger lateral sidestep to clear the pile.
-            steeringX = directX + (directY * avoidanceSide * 1.15);
-            steeringY = directY - (directX * avoidanceSide * 1.15);
+            // Keep perpendicular blend <= 0.65 (~33 deg) so diagonal paths
+            // never rotate past 90 deg and reverse away from the target.
+            steeringX = directX + (directY * avoidanceSide * 0.65);
+            steeringY = directY - (directX * avoidanceSide * 0.65);
 
             const steeringMagnitude = Math.hypot(steeringX, steeringY);
             if (steeringMagnitude > 0.001) {
@@ -679,7 +683,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // ROUTE-RUNNER RECOVERY:
     // If a receiver has persistently stalled while approaching a route
     // waypoint, temporarily steer around an opposing player occupying
-    // the direct path. Keep the original waypoint intact.
+    // the direct path. Hold the avoidance commitment briefly so one tick
+    // of progress does not snap the receiver right back into the defender.
     const isRouteRunner =
         pState.isOffense &&
         pState.action === 'run_route' &&
@@ -690,10 +695,13 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         pState.action === 'tracking_ball' &&
         pState.movementMode === 'POINT';
 
+    const routeStallTriggered = (Number(pState._routeWaypointStallTicks) || 0) >= 4;
+    const isHoldingRouteAvoidance = (Number(pState._routeAvoidanceHoldTicks) || 0) > 0;
+
     if (
         (isRouteRunner || isPassTargetTracker) &&
         distToTarget > 1.5 &&
-        (Number(pState._routeWaypointStallTicks) || 0) >= 4
+        (routeStallTriggered || isHoldingRouteAvoidance)
     ) {
         const pathLengthSquared = distToTarget * distToTarget;
 
@@ -702,11 +710,12 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         let avoidanceSide = 0;
 
         for (const other of allPlayers) {
-            // Only react to opposing players. Ignore self and ghost
-            // players that do not participate in physical collisions.
+            // Only react to opposing, upright players. Ignore self, downed,
+            // and ghost players that do not participate in physical collisions.
             if (
                 other.id === pState.id ||
                 other.isOffense === pState.isOffense ||
+                other.balanceState === 'downed' ||
                 other.ghostTicks > 0
             ) {
                 continue;
@@ -744,25 +753,31 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             nearestAlongPath = alongPath;
             routeObstacle = other;
 
-            // Choose the side opposite the defender's position relative
-            // to the intended route. Use a consistent fallback when the
-            // defender is almost exactly on the route centerline.
-            const cross = (dx * offsetY) - (dy * offsetX);
-
-            avoidanceSide =
-                Math.abs(cross) > (0.15 * safeDist)
-                    ? (cross < 0 ? -1 : 1)
-                    : (pState.x < other.x ? -1 : 1);
+            if (isHoldingRouteAvoidance && pState._routeAvoidanceSide) {
+                avoidanceSide = pState._routeAvoidanceSide;
+            } else {
+                const cross = (dx * offsetY) - (dy * offsetX);
+                avoidanceSide =
+                    Math.abs(cross) > (0.15 * safeDist)
+                        ? (cross < 0 ? -1 : 1)
+                        : (pState.x < other.x ? -1 : 1);
+            }
         }
 
         if (routeObstacle && avoidanceSide !== 0) {
+            if (routeStallTriggered && !isHoldingRouteAvoidance) {
+                pState._routeAvoidanceHoldTicks = 8;
+                pState._routeAvoidanceSide = avoidanceSide;
+            } else if (isHoldingRouteAvoidance) {
+                pState._routeAvoidanceHoldTicks--;
+            }
+
             const directX = steeringX;
             const directY = steeringY;
 
-            // Blend forward progress with a lateral sidestep.
-            // Steering remains subject to normal agility, acceleration,
-            // speed limits, and physical collision resolution.
-            const sidestepStrength = 0.95;
+            // Blend forward progress with a lateral sidestep without
+            // turning backwards relative to the route direction.
+            const sidestepStrength = 0.70;
 
             steeringX =
                 directX +
@@ -810,9 +825,13 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
             pState._lastRouteAvoidanceDefenderId = routeObstacle.id;
         } else {
+            pState._routeAvoidanceHoldTicks = 0;
+            pState._routeAvoidanceSide = 0;
             pState._lastRouteAvoidanceDefenderId = null;
         }
     } else {
+        pState._routeAvoidanceHoldTicks = 0;
+        pState._routeAvoidanceSide = 0;
         pState._lastRouteAvoidanceDefenderId = null;
     }
 

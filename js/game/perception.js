@@ -116,6 +116,8 @@ export function getPerceptionContext(
         (
             observer.action?.startsWith('zone_') ||
             observer.assignment?.startsWith('zone_') ||
+            observer.action === 'zone_match' ||
+            observer.action === 'man_help' ||
             observer.action === 'spy_QB' ||
             observer.action === 'idle'
         );
