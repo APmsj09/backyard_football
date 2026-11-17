@@ -1404,7 +1404,7 @@ export const offensivePlaybook = {
         compatibleFormations: ['Balanced', 'Pistol', 'SplitBacks'],
         assignments: {
             'QB': 'qb_setup', 'RB': 'run_toss_l',
-            'X': 'Fly', 'Z': 'Fly', 'Y': 'lead_left_wide', 'OL': 'pass_block'
+            'X': 'Fly', 'Z': 'Fly', 'Y': 'pull_left_wide', 'OL': 'pass_block'
         }
     },
     'Pistol_Zone_Read_Keep': {

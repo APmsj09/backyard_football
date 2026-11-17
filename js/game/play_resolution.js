@@ -3809,8 +3809,14 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                             
                         handoffTarget.action = 'run_path';
                         } else if (isTossPlay) {
-                            qb1.targetX = qb1.initialX + (handoffTarget.initialX > qb1.initialX ? 0.8 : -0.8);
-                            qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.2) : (qb1.initialY + 0.8);
+                            if (playState.playKey === 'Trick_Statue_Of_Liberty') {
+                                qb1.action = 'qb_setup';
+                                qb1.targetX = qb1.initialX;
+                                qb1.targetY = Math.max(1.0, qb1.initialY - 1.5);
+                            } else {
+                                qb1.targetX = qb1.initialX + (handoffTarget.initialX > qb1.initialX ? 0.8 : -0.8);
+                                qb1.targetY = qbDepth < 4.0 ? (playState.lineOfScrimmage - 4.2) : (qb1.initialY + 0.8);
+                            }
 
                             const pt = handoffTarget.routePath?.[handoffTarget.currentPathIndex] || { x: handoffTarget.x + (handoffTarget.assignment.includes('r') ? 5 : -5), y: handoffTarget.y + 0.5 };
                             handoffTarget.targetX = pt.x;

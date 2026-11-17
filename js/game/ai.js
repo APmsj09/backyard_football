@@ -160,9 +160,22 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         };
     }
 
+    // If the defender sees the QB reset in passing posture (e.g. Flea Flicker return),
+    // clear the latched live-runner commitment and stale run momentum so turning back
+    // toward coverage never snaps them back to confidence 1.0 run pursuit.
+    const isTrickPass = isObservablePassReset;
+    if (isTrickPass && pState._sawLiveRunnerTick) {
+        pState._sawLiveRunnerTick = null;
+        pState._hasCommittedToLiveRunner = false;
+        pState._pursuitLockTicks = 0;
+        pState._diagPassEvidenceTicks = 0;
+        pState._diagPassEvidenceLastTick = tick;
+        pState._smoothedRunScore = undefined;
+        pState._smoothedPassScore = undefined;
+    }
+
     // Once ANY defender confirms a live runner carrying the ball on a designed run,
     // they NEVER revert to 'pass' unless a trick play pitch/flea-flicker return occurs!
-    const isTrickPass = isObservablePassReset;
     if (pState._diagnosedGuess === 'run' && pState._sawLiveRunnerTick && !isTrickPass) {
         return { guess: 'run', confidence: 1.0, direction: pState._diagnosedDirection || 'center', dirConfidence: 1.0 };
     }
@@ -344,7 +357,7 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
             const hasStrongPassRead =
                 hasCrediblePassEvidence &&
                 (
-                    finalPassScore > finalRunScore + 25 ||
+                    finalPassScore > finalRunScore + (isTrickPass ? 10 : 25) ||
                     (qb?.hasCompletedDropback === true && finalPassScore > finalRunScore - 15)
                 );
 
@@ -402,8 +415,15 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
         dirConfidence = centerScore / totalDirScore;
     }
 
-    // Committed reads maintain a minimum confidence floor of 0.30
-    const finalConfidence = (guess === 'read') ? confidence : Math.max(0.30, confidence);
+    const agreesWithScores =
+        (guess === 'run' && finalRunScore >= finalPassScore) ||
+        (guess === 'pass' && finalPassScore >= finalRunScore);
+
+    // Committed reads maintain a minimum confidence floor of 0.30,
+    // and never report high confidence while current evidence contradicts the held read.
+    const finalConfidence = (guess === 'read')
+        ? confidence
+        : (agreesWithScores ? Math.max(0.30, confidence) : 0.30);
 
     pState._diagnosedDirection = direction;
     pState._diagnosedDirConfidence = dirConfidence;
@@ -1490,6 +1510,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         if (
             defender.isBlocked ||
             defender.stunnedTicks > 0 ||
+            defender.balanceState === 'downed' ||
             defender.y <= runner.y - 1
         ) {
             continue;
@@ -1573,6 +1594,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
     defenseStates.forEach(def => {
         if (
             def.stunnedTicks > 0 ||
+            def.balanceState === 'downed' ||
             def.y < runner.y - 1.0
         ) {
             return;
@@ -1718,7 +1740,7 @@ export function getSmartCarrierTarget(runner, defenseStates, offenseStates, fiel
         });
 
         defenseStates.forEach(def => {
-            if (def.stunnedTicks > 0 || def.y < runner.y - 1.0) return;
+            if (def.stunnedTicks > 0 || def.balanceState === 'downed' || def.y < runner.y - 1.0) return;
 
             const perceptionWeight = getPerceptionWeight(
                 visionContext,
@@ -3548,11 +3570,11 @@ export function updateThrowoffDecision(playState, offenseStates, gameLog) {
     const qb = offenseStates.find(p => p.slot === 'QB1');
     if (!qb || !qb.hasBall) return;
 
-    // Simulate a deep 7-step dropback to heave the ball
+    // Hold/settle at punt depth while catching the snap and winding up to kick
     if (playState.tick < 35) {
         qb.targetX = qb.initialX;
-        qb.targetY = playState.lineOfScrimmage - 7.0;
-        qb.action = 'qb_setup';
+        qb.targetY = Math.max(0.5, Math.min(qb.initialY, playState.lineOfScrimmage - 12.0));
+        qb.action = 'punt_kick';
         playState.ballState.x = qb.x;
         playState.ballState.y = qb.y;
         playState.ballState.z = 1.8;

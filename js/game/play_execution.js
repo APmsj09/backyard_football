@@ -286,6 +286,22 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
         const coveredOffensiveSlots = new Set();
         const usedDefensivePlayersThisSnap = new Set();
+        const explicitlyCoveredSlots = new Set();
+
+        if (!isOffense) {
+            const offMap = offenseFormationData?.mapping || {};
+            Object.values(defAssignments).forEach(defAssign => {
+                if (typeof defAssign === 'string' && defAssign.startsWith('man_cover_')) {
+                    let mapped = defAssign.replace('man_cover_', '');
+                    if (offMap[mapped]) {
+                        mapped = Array.isArray(offMap[mapped]) ? offMap[mapped][0] : offMap[mapped];
+                    }
+                    if (initialOffenseStates.some(o => o.slot === mapped)) {
+                        explicitlyCoveredSlots.add(mapped);
+                    }
+                }
+            });
+        }
 
         const gameDayRoster = getGameDayRosterObjects(team);
 
@@ -648,7 +664,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                         routePath = calculateRoutePath(assignment, startX, startY);
                         targetX = startX;
                         targetY = startY;
-                    } else if (assignment.startsWith('lead_')) {
+                    } else if (assignment.startsWith('lead_') || assignment.startsWith('pull_')) {
                         action = 'run_path';
                         routePath = calculateRoutePath(assignment, startX, startY);
                         if (routePath && routePath.length) {
@@ -723,15 +739,20 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             o.slot === 'FB'
                         );
 
-                        // Give priority to threats without a primary assignment.
+                        // Give priority to threats without an active or explicit primary assignment.
                         // If every threat already has coverage, allow a helper.
+                        const unreservedThreats = offensiveThreats.filter(
+                            threat =>
+                                !coveredOffensiveSlots.has(threat.slot) &&
+                                !explicitlyCoveredSlots.has(threat.slot)
+                        );
                         const uncoveredThreats = offensiveThreats.filter(
                             threat => !coveredOffensiveSlots.has(threat.slot)
                         );
 
-                        const candidates = uncoveredThreats.length > 0
-                            ? uncoveredThreats
-                            : offensiveThreats;
+                        const candidates = unreservedThreats.length > 0
+                            ? unreservedThreats
+                            : (uncoveredThreats.length > 0 ? uncoveredThreats : offensiveThreats);
 
                         const getTargetScore = threat => {
                             const targetPosition = threat.slot.replace(/\d+/g, '');
@@ -1058,6 +1079,8 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     playState.isRPO = true;
                     playState.rpoPhase = 'mesh';
                     snapTaker.action = 'qb_rpo_read';
+                } else if (play.tags?.includes('trick') && snapTaker.assignment === 'qb_setup') {
+                    snapTaker.action = 'qb_setup';
                 } else {
                     snapTaker.action = 'handoff_setup';
                 }
@@ -1142,7 +1165,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
     }
 
     if (ballCarrierState && !ballCarrierState.isOffense) {
+        const claimedEscortTargets = new Set();
+
         playState.activePlayers.forEach(pState => {
+            if (pState.stunnedTicks > 0) return;
+            if (pState.isBlocked || pState.isEngaged) return;
             if (pState.stunnedTicks > 0) return;
             if (pState.isBlocked || pState.isEngaged) return;
 
@@ -1174,33 +1201,46 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 setLaneIntent(pState, pState.targetX, pState.targetY, 8);
             } else if (!pState.isOffense) {
                 // Latch onto an escort target with a timer to prevent 25Hz flickering
-                if (pState._escortLockTicks > 0) {
+                if ((pState._escortLockTicks || 0) > 0) {
                     pState._escortLockTicks--;
+                } else {
+                    pState._escortLockTicks = 0;
                 }
 
                 let targetThreat = null;
                 if (pState.escortTargetId) {
-                    targetThreat = offenseStates.find(o => 
-                        o.id === pState.escortTargetId && 
+                    targetThreat = offenseStates.find(o =>
+                        o.id === pState.escortTargetId &&
                         o.balanceState !== 'downed' &&
+                        !o.isBlocked &&
                         getDistance(pState, o) < 15.0
                     );
                 }
 
                 if (!targetThreat && pState._escortLockTicks <= 0) {
-                    targetThreat = offenseStates
+                    const eligibleThreats = offenseStates
                         .filter(o =>
                             o.balanceState !== 'downed' &&
                             !o.isEngaged &&
-                            o.y < pState.y + 5 &&
-                            o.y > pState.y - 18
+                            !o.isBlocked &&
+                            o.y < pState.y + 6 &&
+                            o.y > pState.y - 24
                         )
-                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
+                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+
+                    targetThreat =
+                        eligibleThreats.find(o => !claimedEscortTargets.has(o.id)) ||
+                        eligibleThreats[0] ||
+                        null;
 
                     if (targetThreat) {
                         pState.escortTargetId = targetThreat.id;
                         pState._escortLockTicks = 14;
                     }
+                }
+
+                if (targetThreat) {
+                    claimedEscortTargets.add(targetThreat.id);
                 }
 
                 if (targetThreat) {
@@ -1414,7 +1454,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
              p.id !== ballCarrierState?.id &&
              (
                  p.action?.includes('block') ||
-                 (playType === 'run' && p.assignment?.startsWith('lead_')) ||
+                 (playType === 'run' && (p.assignment?.startsWith('lead_') || p.assignment?.startsWith('pull_'))) ||
                  (isScreenPlay && (p.assignment?.includes('Wall') || p.assignment?.includes('screen_block'))) ||
                  isReadyScreenLeadBlocker(p)
              )
@@ -1473,9 +1513,15 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             blocker._screenReleased
         );
 
+        const isTrickPassFake = Boolean(
+            playState.handoffRequired &&
+            !playState.handoffOccurred &&
+            blocker.assignment === 'pass_block'
+        );
+
         // INITIALIZE HERE: Prevents Temporal Dead Zone ReferenceError
         const isPassPlay =
-            playType === 'pass' &&
+            (playType === 'pass' || isTrickPassFake) &&
             !isPassCompleted &&
             !isScreenLeadBlocker &&
             !isScreenReleasedOL;
@@ -1493,7 +1539,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     blocker._escortSide = blocker.initialX <= ballCarrierState.x ? -2.2 : 2.2;
                 }
                 blocker.targetX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, ballCarrierState.x + blocker._escortSide));
-                blocker.targetY = Math.min(115.0, ballCarrierState.y + 4.5);
+                const minClimbY = (!isScreenPlay && playType === 'run')
+                    ? Math.max(blocker.y, LOS + 1.5)
+                    : blocker.y;
+                blocker.targetY = Math.min(115.0, Math.max(minClimbY, ballCarrierState.y + 4.5));
                 setPointIntent(blocker, blocker.targetX, blocker.targetY, 0.45);
             }
             return;
@@ -1663,14 +1712,23 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             const gapResponsibilityA = isPassPlay ? (laneDiffA * 3.5) : (laneDiffA * 3.0);
             const gapResponsibilityB = isPassPlay ? (laneDiffB * 3.5) : (laneDiffB * 3.0);
 
+            const runDepthPenaltyA = !isPassPlay
+                ? (Math.max(0, a.y - blocker.y) * 2.5) + ((a.y - LOS > 7.5) ? 15 : 0)
+                : 0;
+            const runDepthPenaltyB = !isPassPlay
+                ? (Math.max(0, b.y - blocker.y) * 2.5) + ((b.y - LOS > 7.5) ? 15 : 0)
+                : 0;
+
             return (
                 gapResponsibilityA +
+                runDepthPenaltyA +
                 dangerPriorityA +
                 pocketPriorityA +
                 lanePriorityA +
                 doubleTeamPenaltyA
             ) - (
                 gapResponsibilityB +
+                runDepthPenaltyB +
                 dangerPriorityB +
                 pocketPriorityB +
                 lanePriorityB +
@@ -1870,8 +1928,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         assignBlockerTarget(blocker, threats);
     };
 
-    linemen.forEach(ol => assignWithLock(ol, allThreats));
-    otherBlockers.forEach(b => assignWithLock(b, allThreats));
+    if (playType !== 'punt') {
+        linemen.forEach(ol => assignWithLock(ol, allThreats));
+        otherBlockers.forEach(b => assignWithLock(b, allThreats));
+    }
 
     playState.activePlayers.forEach(pState => {
         if (pState.stunnedTicks > 0) return;
@@ -1884,17 +1944,33 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             const returnerHasBall = ballCarrierState && !ballCarrierState.isOffense;
 
             if (isKickingTeam) {
-                if (!ballInAir && !returnerHasBall && playState.tick < 26) {
-                    if (pState.slot === 'QB1') return;
-                    const nearestRusher = defenseStates.find(d => getDistance(pState, d) < 5);
+                if (!ballInAir && !returnerHasBall) {
+                    if (pState.slot === 'QB1') {
+                        setHoldIntent(pState, pState.targetX, pState.targetY);
+                        return;
+                    }
+
+                    // Gunners release downfield immediately instead of backing up
+                    if (pState.slot === 'WR1' || pState.slot === 'WR2') {
+                        pState.action = 'run_path';
+                        pState.targetX = pState.initialX;
+                        pState.targetY = Math.min(110.0, LOS + 18.0);
+                        setPointIntent(pState, pState.targetX, pState.targetY, 0.5);
+                        return;
+                    }
+
+                    const nearestRusher = defenseStates
+                        .filter(d => getDistance(pState, d) < 5.5)
+                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b))[0];
                     if (nearestRusher) {
                         pState.targetX = nearestRusher.x;
-                        pState.targetY = Math.min(LOS, nearestRusher.y - 1);
+                        pState.targetY = Math.min(LOS, nearestRusher.y - 0.8);
                     } else {
                         pState.targetX = pState.initialX;
-                        pState.targetY = LOS - 1;
+                        pState.targetY = Math.min(pState.initialY, LOS - 1.0);
                     }
-                    setPointIntent(pState, pState.targetX, pState.targetY, 0.35); // FIX: Added missing intent
+                    pState.action = 'pass_block';
+                    setPointIntent(pState, pState.targetX, pState.targetY, 0.35);
                     return;
                 }
                 pState.action = 'pursuit';
@@ -1919,10 +1995,16 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 // the blocking wall, then looks for a kick-coverage defender.
                 if (pState.isBallCarrier) return;
 
-                // FIX: Before the ball is kicked, hold positions near the line of scrimmage
+                // Before the ball is kicked, rushers pressure the punter while return blockers hold
                 if (!ballInAir && !returnerHasBall) {
                     const isDeepReturner = pState.slot === 'PR' || pState.slot === 'DB3' || pState.slot === 'DB4';
-                    if (!isDeepReturner) {
+                    if (pState.assignment === 'pass_rush' && qbState) {
+                        pState.targetX = qbState.x;
+                        pState.targetY = qbState.y;
+                        pState.action = 'pass_rush';
+                        setPointIntent(pState, qbState.x, qbState.y, 0.45);
+                        return;
+                    } else if (!isDeepReturner) {
                         pState.targetX = pState.initialX;
                         pState.targetY = Math.max(LOS + 2.0, pState.initialY);
                         pState.action = 'run_block';
@@ -2445,9 +2527,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                         if (nextPt) {
                             setRouteIntent(pState, nextPt.x, nextPt.y, 0.6);
-                        } else if (pState.slot?.startsWith('OL') || pState.assignment?.startsWith('lead_')) {
+                        } else if (pState.slot?.startsWith('OL') || pState.assignment?.startsWith('lead_') || pState.assignment?.startsWith('pull_')) {
                             // Puller or lead blocker has reached his designed path and transitions to blocking.
-                            if (pState.assignment?.startsWith('lead_')) {
+                            if (pState.assignment?.startsWith('lead_') || pState.assignment?.startsWith('pull_')) {
                                 pState.action = 'run_block';
                             }
                             setPointIntent(
@@ -2823,7 +2905,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 case 'route_complete': {
                     // On designed runs, a lead route is only the approach to the block.
                     // Once the landmark is reached, let the blocker select a defender.
-                    if (playType === 'run' && pState.assignment?.startsWith('lead_')) {
+                    if (playType === 'run' && (pState.assignment?.startsWith('lead_') || pState.assignment?.startsWith('pull_'))) {
                         pState.action = 'run_block';
                         pState.dynamicTargetId = null;
                         setHoldIntent(pState, pState.x, pState.y);
@@ -3446,9 +3528,9 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
     const isBallInAir = playState.ballState.inAir;
     const qbState = offenseStates.find(o => o.formationRole === 'QB' || o.slot?.startsWith('QB'));
 
-    // Clear stale ball-tracking state before resolving the current assignment.
-    // A reachable interception below can explicitly restore tracking_ball.
-    if (pState.action === 'tracking_ball') {
+    // Clear stale ball-tracking/pursuit state before resolving the current assignment.
+    // A reachable interception or coverage help call below can explicitly restore it.
+    if (pState.action === 'tracking_ball' || pState.action === 'pursuit') {
         pState.action = assignment || 'idle';
     }
 

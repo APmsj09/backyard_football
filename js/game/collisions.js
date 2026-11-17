@@ -1879,6 +1879,11 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             return false;
         }
 
+        // Prevent airborne laterals from being caught on the same tick they leave the thrower's hand
+        if (ball.isLateral && ball.inAir && !ball.isLoose && ticksSinceKick < 4) {
+            return false;
+        }
+
         // PHYSICAL COOLDOWN: Replaces permanent lockout. A player who leaped or swiped needs time to land
         if (p._catchCooldownTicks && p._catchCooldownTicks > 0) {
             return false;
@@ -2751,6 +2756,12 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                             ball.targetX = ball.x + (ball.vx * tLand);
                             ball.targetY = ball.y + (ball.vy * tLand);
                             ball.targetPlayerId = null;
+                            logPlayDebug('PASS_DEFLECTED', `${bestCandidate.name} tipped the pass`, {
+                                type: 'tip',
+                                newTargetX: Number(ball.targetX.toFixed(2)),
+                                newTargetY: Number(ball.targetY.toFixed(2)),
+                                ballHeight: Number((ball.z || 0).toFixed(2))
+                            }, playState.tick, playState.playId);
                         } else {
                             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 🚫 ${bestCandidate.name} swats the pass away!`, playState);
                             ball.vz = -8.0;
@@ -2760,6 +2771,12 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
                             ball.lastInteraction = { tick: playState.tick, playerId: bestCandidate.id, type: 'swat' };
                             ball.targetX = ball.x + (ball.vx * 0.2);
                             ball.targetY = ball.y + (ball.vy * 0.2);
+                            logPlayDebug('PASS_DEFLECTED', `${bestCandidate.name} swatted the pass`, {
+                                type: 'swat',
+                                newTargetX: Number(ball.targetX.toFixed(2)),
+                                newTargetY: Number(ball.targetY.toFixed(2)),
+                                ballHeight: Number((ball.z || 0).toFixed(2))
+                            }, playState.tick, playState.playId);
                         }
                     }
                     // CRITICAL: If defender failed to touch the ball, DO NOT corrupt ball.targetX/Y!
