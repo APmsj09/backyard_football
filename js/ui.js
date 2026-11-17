@@ -20351,6 +20351,8 @@ export function renderLiveFieldLineup(frameData, gameState) {
           .sort((a, b) => (b.suit * 0.65 + b.energy * 0.35) - (a.suit * 0.65 + a.energy * 0.35))
           .slice(0, 4);
         const isDrawerOpen = openLiveSubDrawerPlayerId === String(fullPlayer.id);
+
+        html += `
             <div class="p-2 hover:bg-slate-800/40 transition-colors flex items-center justify-between text-xs cursor-pointer select-none" onclick="window.app_toggleLiveSubDrawer('${fullPlayer.id}')">
                 <div class="flex items-center gap-2 truncate pr-2">
                     <span class="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${p.isOffense ? 'bg-blue-950 text-blue-300 border border-blue-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">
