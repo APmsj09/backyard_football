@@ -423,6 +423,60 @@ export const offenseFormations = {
             OL3: [1.5, -0.2]
         }
     },
+    'TwinTE': {
+        name: 'Ace Twin TE',
+        slots: ['QB1', 'RB1', 'WR1', 'TE1', 'TE2', 'OL1', 'OL2', 'OL3'],
+        personnel: { QB: 1, RB: 1, WR: 1, TE: 2, OL: 3 },
+        mapping: { QB: 'QB1', RB: 'RB1', X: 'WR1', Y: 'TE1', H: 'TE2', OL: ['OL1', 'OL2', 'OL3'] },
+        coordinates: {
+            QB1: [0, -4.5],
+            RB1: [0, -7.2],
+            WR1: [-15.5, -0.2],
+            TE1: [-3.0, -0.2],
+            TE2: [3.0, -0.2],
+            OL1: [-1.5, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.5, -0.2]
+        },
+        slotPriorities: {
+            QB1: { throwingAccuracy: 3, throwPower: 2, playbookIQ: 2 },
+            RB1: { speed: 2, strength: 2, carrying: 3, playbookIQ: 1 },
+            WR1: { speed: 3, catchingHands: 3 },
+            TE1: { blocking: 3, catchingHands: 2, strength: 2 },
+            TE2: { blocking: 2, catchingHands: 3, speed: 2 },
+            OL1: { strength: 3, blocking: 3 },
+            OL2: { strength: 3, blocking: 3 },
+            OL3: { strength: 3, blocking: 3 }
+        }
+    },
+
+    'SplitBacks': {
+        name: 'Pro Split Backs',
+        slots: ['QB1', 'RB1', 'RB2', 'WR1', 'WR2', 'OL1', 'OL2', 'OL3'],
+        personnel: { QB: 1, RB: 2, WR: 2, OL: 3 },
+        mapping: { QB: 'QB1', RB: 'RB1', RB2: 'RB2', X: 'WR1', Z: 'WR2', OL: ['OL1', 'OL2', 'OL3'] },
+        coordinates: {
+            QB1: [0, -5.5],
+            RB1: [-2.6, -5.8],
+            RB2: [2.6, -5.8],
+            WR1: [-15.5, -0.2],
+            WR2: [15.5, -1.2],
+            OL1: [-1.5, -0.2],
+            OL2: [0, -0.2],
+            OL3: [1.5, -0.2]
+        },
+        slotPriorities: {
+            QB1: { throwingAccuracy: 3, playbookIQ: 2, agility: 1 },
+            RB1: { speed: 3, agility: 2, catchingHands: 2, carrying: 2 },
+            RB2: { blocking: 2, catchingHands: 3, speed: 2, strength: 2 },
+            WR1: { speed: 3, catchingHands: 3 },
+            WR2: { speed: 3, catchingHands: 3 },
+            OL1: { strength: 3, blocking: 3 },
+            OL2: { strength: 3, blocking: 3 },
+            OL3: { strength: 3, blocking: 3 }
+        }
+    },
+
     'Punt': {
         name: 'Punt',
         personnel: { OL: 3, WR: 2, QB: 1, RB: 1, TE: 1 },
@@ -1197,10 +1251,169 @@ export const offensivePlaybook = {
         compatibleFormations: ['Power', 'Jumbo'],
         assignments: {
             'QB': 'run_power_o_r',
-            'RB1': 'lead_right_wide',
+            'RB': 'lead_right_wide',
             'RB2': 'lead_right',
             'OL1': 'pull_right', 'OL2': 'run_block', 'OL3': 'run_block',
             'Y': 'run_block', 'X': 'run_block'
+        }
+    },
+    'TripsLeft_Weakside_Counter': {
+        name: 'Trips Left Weakside Counter',
+        type: 'run', tags: ['run', 'counter', 'misdirection', 'trips'],
+        compatibleFormations: ['TripsLeft'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_counter_r',
+            'OL1': 'pull_right', 'OL2': 'run_block', 'OL3': 'run_block',
+            'X': 'run_block', 'H': 'run_block', 'Y': 'run_block'
+        }
+    },
+    // --- Bringing unused routeTree routes (Angle, Whip, Sluggo, Out_And_Up, Scissors) to life ---
+    'Balanced_HB_Angle_Wheel': {
+        name: 'Texas Angle & Corner',
+        type: 'pass', tags: ['pass', 'short', 'medium'],
+        compatibleFormations: ['Balanced', 'Pistol', 'SplitBacks'],
+        readProgression: ['RB', 'Y', 'X', 'Z'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'Angle', 'Y': 'Corner',
+            'X': 'Drag', 'Z': 'Fly', 'OL': 'pass_block'
+        }
+    },
+    'Spread_Whip_Seam': {
+        name: 'Spread Whip & Seam',
+        type: 'pass', tags: ['pass', 'quick', 'man-beater', 'spread'],
+        compatibleFormations: ['Spread', 'Empty', 'Trips', 'TripsLeft'],
+        readProgression: ['H', 'Y', 'X', 'Z'],
+        assignments: {
+            'QB': 'qb_setup', 'H': 'Whip', 'Y': 'Seam',
+            'X': 'Corner', 'Z': 'Drag', 'OL': 'pass_block'
+        }
+    },
+    'Balanced_Sluggo_Shot': {
+        name: 'Sluggo Double-Move Shot',
+        type: 'pass', tags: ['pass', 'deep', 'double-move'],
+        compatibleFormations: ['Balanced', 'Pistol', 'Spread'],
+        readProgression: ['X', 'Z', 'Y', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 'X': 'Sluggo', 'Z': 'Out_And_Up',
+            'Y': 'Drag', 'RB': 'Flat', 'OL': 'pass_block'
+        }
+    },
+    'Trips_Scissors_Deep': {
+        name: 'Trips Deep Scissors Switch',
+        type: 'pass', tags: ['pass', 'deep', 'trips'],
+        compatibleFormations: ['Trips', 'TripsLeft'],
+        readProgression: ['H', 'Y', 'X', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 'H': 'Scissors_Corner', 'Y': 'Scissors_Post',
+            'X': 'Drag', 'RB': 'CheckRelease', 'OL': 'pass_block'
+        }
+    },
+    // --- Heavy4OL Bully Ball Package ---
+    'Heavy4OL_Bully_Power': {
+        name: 'Heavy 4-OL Bully Power',
+        type: 'run', tags: ['run', 'power', 'inside'],
+        compatibleFormations: ['Heavy4OL'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_power_o_r',
+            'OL1': 'pull_right', 'OL2': 'run_block', 'OL3': 'run_block', 'OL4': 'run_block',
+            'Y': 'run_block', 'X': 'run_block'
+        }
+    },
+    'Heavy4OL_Counter_Bash': {
+        name: 'Heavy 4-OL Weak Counter',
+        type: 'run', tags: ['run', 'counter', 'power'],
+        compatibleFormations: ['Heavy4OL'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_counter_l',
+            'OL1': 'run_block', 'OL2': 'run_block', 'OL3': 'run_block', 'OL4': 'pull_left',
+            'Y': 'run_block', 'X': 'run_block'
+        }
+    },
+    'Heavy4OL_PA_TE_Seam': {
+        name: 'Heavy PA TE Seam Shot',
+        type: 'pass', tags: ['pass', 'pa', 'deep'],
+        compatibleFormations: ['Heavy4OL'],
+        readProgression: ['Y', 'X', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_dive',
+            'Y': 'Seam', 'X': 'Post', 'OL': 'pass_block'
+        }
+    },
+    // --- TwinTE & SplitBacks Packages ---
+    'TwinTE_Dual_Seam_PA': {
+        name: 'Twin TE Double Seam PA',
+        type: 'pass', tags: ['pass', 'pa', 'deep'],
+        compatibleFormations: ['TwinTE', 'Jumbo'],
+        readProgression: ['Y', 'H', 'X', 'RB'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_dive',
+            'Y': 'Seam', 'H': 'Deep_Over', 'X': 'Comeback', 'OL': 'pass_block'
+        }
+    },
+    'TwinTE_Split_Zone': {
+        name: 'Twin TE Split Zone Cutback',
+        type: 'run', tags: ['run', 'inside', 'power'],
+        compatibleFormations: ['TwinTE'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_iso_l',
+            'H': 'lead_left', 'Y': 'run_block', 'X': 'run_block', 'OL': 'run_block'
+        }
+    },
+    'SplitBacks_Dual_Flat_Wheel': {
+        name: 'Split Backs Dual Wheel',
+        type: 'pass', tags: ['pass', 'medium', 'deep'],
+        compatibleFormations: ['SplitBacks'],
+        readProgression: ['RB', 'RB2', 'X', 'Z'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'Wheel', 'RB2': 'FB_Flat',
+            'X': 'Post', 'Z': 'Dig', 'OL': 'pass_block'
+        }
+    },
+    'SplitBacks_Counter_Toss': {
+        name: 'Split Backs Misdirection Toss',
+        type: 'run', tags: ['run', 'outside', 'toss', 'misdirection'],
+        compatibleFormations: ['SplitBacks'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_toss_r', 'RB2': 'lead_right_wide',
+            'X': 'run_block', 'Z': 'run_block', 'OL': 'run_block'
+        }
+    },
+    // --- Wildcat & Sandlot Trick Plays ---
+    'Wildcat_Jet_Sweep': {
+        name: 'Wildcat QB-Fake Jet Sweep',
+        type: 'run', tags: ['run', 'outside', 'wildcat', 'misdirection'],
+        compatibleFormations: ['Wildcat'],
+        assignments: {
+            'QB': 'run_toss_r', 'RB': 'Jet_Motion_Left',
+            'X': 'run_block', 'Z': 'run_block', 'Y': 'run_block', 'OL': 'run_block'
+        }
+    },
+    'Wildcat_HB_Jump_Pass': {
+        name: 'Wildcat Jump Pass Pop',
+        type: 'pass', tags: ['trick', 'pa', 'wildcat'],
+        compatibleFormations: ['Wildcat'],
+        readProgression: ['Y', 'Z', 'X'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'Flat',
+            'Y': 'Seam', 'Z': 'Post', 'X': 'Fly', 'OL': 'pass_block'
+        }
+    },
+    'Trick_Statue_Of_Liberty': {
+        name: 'Statue of Liberty Reverse',
+        type: 'run', tags: ['trick', 'outside', 'misdirection'],
+        compatibleFormations: ['Balanced', 'Pistol', 'SplitBacks'],
+        assignments: {
+            'QB': 'qb_setup', 'RB': 'run_toss_l',
+            'X': 'Fly', 'Z': 'Fly', 'Y': 'lead_left_wide', 'OL': 'pass_block'
+        }
+    },
+    'Pistol_Zone_Read_Keep': {
+        name: 'Pistol QB Zone Read Keep',
+        type: 'run', tags: ['run', 'qb', 'outside'],
+        compatibleFormations: ['Pistol', 'Spread'],
+        assignments: {
+            'QB': 'run_stretch_r', 'RB': 'run_dive',
+            'X': 'run_block', 'Z': 'run_block', 'Y': 'lead_right', 'OL': 'run_block'
         }
     },
     'Punt_Punt': {
@@ -1375,6 +1588,32 @@ export const defenseFormations = {
         }
     },
 
+    '2-2-4': {
+        name: '2-2-4 (Big Nickel)',
+        slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'DB3', 'DB4'],
+        personnel: { DL: 2, LB: 2, DB: 4 },
+        coordinates: {
+            DL1: [-1.6, 1.1],
+            DL2: [1.6, 1.1],
+            LB1: [-3.2, 4.0],
+            LB2: [3.2, 4.0],
+            DB1: [-14.0, 5.5],
+            DB2: [14.0, 5.5],
+            DB3: [-6.5, 11.5],
+            DB4: [6.5, 11.5]
+        },
+        slotPriorities: {
+            'DL1': { strength: 3, blockShedding: 3, weight: 2 },
+            'DL2': { strength: 3, blockShedding: 3, weight: 2 },
+            'LB1': { tackling: 3, speed: 2, coverage: 2 },
+            'LB2': { tackling: 3, speed: 2, coverage: 2 },
+            'DB1': { speed: 3, coverage: 3, agility: 2 },
+            'DB2': { speed: 3, coverage: 3, agility: 2 },
+            'DB3': { coverage: 3, playbookIQ: 3, tackling: 2 },
+            'DB4': { coverage: 2, tackling: 3, strength: 2 }
+        }
+    },
+
     'Punt_Return': {
         name: 'Punt Return',
         slots: ['DL1', 'DL2', 'LB1', 'LB2', 'DB1', 'DB2', 'PR', 'DB4'],
@@ -1447,6 +1686,15 @@ const DEFENSIVE_FORMATION_SLOT_LABELS = {
         DB3: 'NB-L',
         DB4: 'NB-R',
         DB5: 'FS'
+    },
+
+    '2-2-4': {
+        DL1: 'DT-L',
+        DL2: 'DT-R',
+        DB1: 'CB-L',
+        DB2: 'CB-R',
+        DB3: 'FS',
+        DB4: 'SS'
     },
 
     'Punt_Return': {
@@ -1893,6 +2141,43 @@ export const defensivePlaybook = {
     // ===================================
     // --- Special Teams
     // ===================================
+    'BigNickel_Cover_4_Palms': {
+        name: 'Big Nickel Cover 4',
+        concept: 'Zone', blitz: false,
+        compatibleFormations: ['2-2-4'],
+        tags: ['zone', 'cover4', 'anti-deep'],
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush',
+            'LB1': 'zone_hook_curl_left', 'LB2': 'zone_hook_curl_right',
+            'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right',
+            'DB3': 'zone_deep_half_left', 'DB4': 'zone_deep_half_right'
+        }
+    },
+    'BigNickel_Trap_Blitz': {
+        name: 'Big Nickel Slot Blitz',
+        concept: 'Man', blitz: true,
+        compatibleFormations: ['2-2-4'],
+        tags: ['man', 'blitz', 'aggro'],
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush',
+            'LB1': 'man_cover_RB', 'LB2': 'blitz_gap',
+            'DB1': 'man_cover_X', 'DB2': 'man_cover_Z',
+            'DB3': 'zone_deep_middle', 'DB4': 'blitz_edge'
+        }
+    },
+    'BigNickel_Cover_2_Invert': {
+        name: 'Big Nickel Cover 2 Invert',
+        concept: 'Zone', blitz: false,
+        compatibleFormations: ['2-2-4'],
+        tags: ['zone', 'cover2', 'safeZone'],
+        assignments: {
+            'DL1': 'pass_rush', 'DL2': 'pass_rush',
+            'LB1': 'zone_hook_curl_middle', 'LB2': 'zone_flat_right',
+            'DB1': 'zone_flat_left', 'DB2': 'zone_flat_right',
+            'DB3': 'zone_deep_half_left', 'DB4': 'zone_deep_half_right'
+        }
+    },
+
     'PuntReturn_Classic': {
         name: 'Punt Return', concept: 'Special', blitz: false,
         compatibleFormations: ['Punt_Return'],

@@ -1994,14 +1994,22 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
     };
 
     const isYouthFocus = focus === 'youth';
+    const includesYouth = isYouthFocus || focus === 'watchlist' || focus === 'all';
 
-    const minAge = isYouthFocus
+    const minAge = includesYouth
         ? 8
         : Number.isFinite(team.ageMin) ? team.ageMin : 12;
 
     const maxAge = isYouthFocus
         ? 11
         : Number.isFinite(team.ageMax) ? team.ageMax : 18;
+
+    const watchlistOrder = new Map(
+        (Array.isArray(team.scoutingWatchlist) ? team.scoutingWatchlist : [])
+            .map(item => typeof item === 'object' ? item?.playerId ?? item?.id : item)
+            .filter(id => id != null)
+            .map((id, idx) => [String(id), idx])
+    );
 
     const candidates = [];
 
@@ -2074,6 +2082,12 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
     }
 
     candidates.sort((a, b) => {
+        if (focus === 'watchlist') {
+            const aIdx = watchlistOrder.get(String(a.player.id)) ?? 9999;
+            const bIdx = watchlistOrder.get(String(b.player.id)) ?? 9999;
+            if (aIdx !== bIdx) return aIdx - bIdx;
+        }
+
         // GM prospect and position priorities come first.
         if (
             a.instructionPriority.rank !==
@@ -2751,68 +2765,118 @@ export function processWeeklyScoutingAssignments(
             continue;
         }
 
-        const candidates = getScoutingCandidates(
-            team,
-            gameState,
-            assignment,
-            year,
-            week
-        );
+        const scoutingDept = team.teamInstructions?.departments?.scouting || {};
+        const shortlistMode = scoutingDept.shortlistMode || 'prioritize';
+        const delegatedFocus = scoutingDept.delegatedFocus || assignment.focus || 'all';
+        const shortlistItems = ensureScoutingShortlist(team);
+        const shortlistShareMap = {
+            shortlist_only: 1.0,
+            prioritize: 0.70,
+            balanced: 0.50,
+            general_only: 0.0
+        };
+        const shortlistShare = assignment.focus === 'watchlist'
+            ? 1.0
+            : (shortlistShareMap[shortlistMode] ?? 0.70);
 
-        if (candidates.length === 0) {
+        let shortlistHours = shortlistItems.length > 0 && shortlistShare > 0
+            ? Math.round(allocatedHours * shortlistShare * 10) / 10
+            : 0;
+        let generalHours = Math.max(0, allocatedHours - shortlistHours);
+
+        const runScoutingPass = (passFocus, passHours, passMaxTargets) => {
+            if (passHours <= 0) return { targeted: 0, spent: 0 };
+            const passAssignment = { ...assignment, focus: passFocus };
+            const passCandidates = getScoutingCandidates(
+                team,
+                gameState,
+                passAssignment,
+                year,
+                week
+            );
+            if (passCandidates.length === 0) return { targeted: 0, spent: 0 };
+
+            const defaultCount = Math.max(1, Math.floor(passHours / 3));
+            const targetCount = Math.min(
+                passCandidates.length,
+                12,
+                Number.isInteger(passMaxTargets) && passMaxTargets > 0
+                    ? Math.max(passMaxTargets, defaultCount)
+                    : defaultCount
+            );
+            const selected = passCandidates.slice(0, targetCount);
+            const hoursPerTarget = passHours / selected.length;
+
+            if (!Array.isArray(team.scoutingInbox)) team.scoutingInbox = [];
+
+            for (const { player } of selected) {
+                const beforeLevel = Number(getTeamScoutingReport(team, player.id)?.level) || 0;
+                const reportProgressed = Boolean(
+                    advanceTeamScoutingReport(team, player, coach, hoursPerTarget, year, week)
+                );
+                const afterReport = getTeamScoutingReport(team, player.id);
+                const afterLevel = Number(afterReport?.level) || 0;
+
+                if (reportProgressed && afterLevel > beforeLevel) {
+                    team.scoutingInbox.unshift({
+                        playerId: String(player.id),
+                        playerName: player.name || 'Player',
+                        coachName: coach.name || 'Staff',
+                        previousLevel: beforeLevel,
+                        level: afterLevel,
+                        year,
+                        week,
+                        source: passFocus === 'watchlist' ? 'shortlist' : 'delegated'
+                    });
+                }
+
+                assignmentResult.targetPlayers.push({
+                    playerId: String(player.id),
+                    playerName: player.name || 'Player',
+                    reportProgressed
+                });
+
+                if (reportProgressed) {
+                    playersUpdated++;
+                    assignmentResult.playersUpdated++;
+                }
+            }
+
+            if (team.scoutingInbox.length > 30) {
+                team.scoutingInbox.length = 30;
+            }
+            return { targeted: selected.length, spent: passHours };
+        };
+
+        const requestedTargetCount = Number(assignment.maxTargets);
+        const shortlistResult = runScoutingPass('watchlist', shortlistHours, shortlistItems.length);
+        // Any unused shortlist hours roll back into delegated general scouting.
+        if (shortlistResult.spent < shortlistHours) {
+            generalHours += (shortlistHours - shortlistResult.spent);
+        }
+
+        const generalFocus = assignment.focus === 'watchlist'
+            ? (shortlistMode === 'shortlist_only' ? null : delegatedFocus)
+            : (delegatedFocus === 'draft' ? 'all' : delegatedFocus);
+        const generalResult = generalFocus
+            ? runScoutingPass(generalFocus, generalHours, requestedTargetCount)
+            : { targeted: 0, spent: 0 };
+
+        const totalTargeted = shortlistResult.targeted + generalResult.targeted;
+        const totalApplied = shortlistResult.spent + generalResult.spent;
+
+        if (totalTargeted === 0) {
             assignmentResult.status = 'no_eligible_targets';
             continue;
         }
 
-        const defaultTargetCount = Math.max(
-            1,
-            Math.floor(allocatedHours / 4)
-        );
-
-        const requestedTargetCount = Number(assignment.maxTargets);
-
-        const targetCount = Math.min(
-            candidates.length,
-            12,
-            Number.isInteger(requestedTargetCount) && requestedTargetCount > 0
-                ? requestedTargetCount
-                : defaultTargetCount
-        );
-
-        const selected = candidates.slice(0, targetCount);
-        const hoursPerTarget = allocatedHours / selected.length;
-
-        for (const { player } of selected) {
-            const reportProgressed = Boolean(
-                advanceTeamScoutingReport(
-                    team,
-                    player,
-                    coach,
-                    hoursPerTarget,
-                    year,
-                    week
-                )
-            );
-
-            assignmentResult.targetPlayers.push({
-                playerId: String(player.id),
-                playerName: player.name || 'Player',
-                reportProgressed
-            });
-
-            if (reportProgressed) {
-                playersUpdated++;
-                assignmentResult.playersUpdated++;
-            }
-        }
-
-        assignmentResult.playersTargeted = selected.length;
-        assignmentResult.hoursApplied = allocatedHours;
+        assignmentResult.playersTargeted = totalTargeted;
+        assignmentResult.hoursApplied = totalApplied;
         assignmentResult.status = assignmentResult.playersUpdated > 0
             ? 'reports_advanced'
             : 'targets_reviewed';
 
-        hoursUsed += allocatedHours;
+        hoursUsed += totalApplied;
     }
 
     const requestedHoursTotal = assignmentResults.reduce(
@@ -3263,4 +3327,98 @@ export function initializeInheritedScoutingReports(
     }
 
     return { initialized, skipped, byLevel };
+}
+
+export function ensureScoutingShortlist(team) {
+    if (!team) return [];
+    if (!Array.isArray(team.scoutingWatchlist)) {
+        team.scoutingWatchlist = [];
+    }
+
+    const seen = new Set();
+    const cleaned = [];
+    for (const item of team.scoutingWatchlist) {
+        const id = typeof item === 'object' ? (item?.playerId ?? item?.id) : item;
+        if (id == null) continue;
+        const key = String(id);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        cleaned.push(
+            typeof item === 'object' && item !== null
+                ? { ...item, playerId: key }
+                : { playerId: key, addedYear: null, addedWeek: null }
+        );
+    }
+    team.scoutingWatchlist = cleaned;
+    return team.scoutingWatchlist;
+}
+
+export function isPlayerOnScoutingShortlist(team, playerId) {
+    if (!team || playerId == null) return false;
+    const key = String(playerId);
+    return ensureScoutingShortlist(team).some(item => String(item.playerId) === key);
+}
+
+export function toggleScoutingShortlistPlayer(team, playerId, gameState = null) {
+    if (!team || playerId == null) return { added: false, list: [] };
+    const list = ensureScoutingShortlist(team);
+    const key = String(playerId);
+    const idx = list.findIndex(item => String(item.playerId) === key);
+
+    if (idx >= 0) {
+        list.splice(idx, 1);
+        return { added: false, list };
+    }
+
+    list.push({
+        playerId: key,
+        addedYear: Number(gameState?.year) || null,
+        addedWeek: Number(gameState?.currentWeek) ?? null
+    });
+    return { added: true, list };
+}
+
+export function moveScoutingShortlistPlayer(team, playerId, direction) {
+    if (!team || playerId == null) return false;
+    const list = ensureScoutingShortlist(team);
+    const idx = list.findIndex(item => String(item.playerId) === String(playerId));
+    const next = idx + Number(direction);
+    if (idx < 0 || next < 0 || next >= list.length) return false;
+    [list[idx], list[next]] = [list[next], list[idx]];
+    return true;
+}
+
+export function setScoutingDelegationSettings(team, updates = {}) {
+    if (!team) return null;
+    if (!team.teamInstructions || typeof team.teamInstructions !== 'object') {
+        team.teamInstructions = {};
+    }
+    if (!team.teamInstructions.departments || typeof team.teamInstructions.departments !== 'object') {
+        team.teamInstructions.departments = {};
+    }
+    const scouting = team.teamInstructions.departments.scouting ||= {};
+
+    const validFoci = new Set(['all', 'youth', 'draft', 'freeAgents', 'opponents']);
+    const validModes = new Set(['prioritize', 'balanced', 'shortlist_only', 'general_only']);
+    const validAutonomy = new Set(['delegate', 'guided', 'direct']);
+
+    if (validFoci.has(updates.delegatedFocus)) {
+        scouting.delegatedFocus = updates.delegatedFocus;
+    }
+    if (validModes.has(updates.shortlistMode)) {
+        scouting.shortlistMode = updates.shortlistMode;
+    }
+    if (validAutonomy.has(updates.autonomy)) {
+        scouting.autonomy = updates.autonomy;
+    }
+
+    // Keep active general scouting work rows aligned with the user's chosen focus.
+    if (updates.delegatedFocus && Array.isArray(team.staffWorkPlan?.assignments)) {
+        team.staffWorkPlan.assignments.forEach(a => {
+            if (a?.task === 'scouting' && !['watchlist', 'draft'].includes(a.focus)) {
+                a.focus = updates.delegatedFocus;
+            }
+        });
+    }
+    return scouting;
 }

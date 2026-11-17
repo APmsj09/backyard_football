@@ -12,6 +12,7 @@ import { calculateOverall, estimateBestPosition } from './player.js';
 import {
     isPlayerNaturalForPosition,
     isPlayerViableForPosition,
+    populateNaturalDepthOrder,
     rebuildDepthChartFromOrder
 } from './depth_chart.js';
 
@@ -2166,7 +2167,10 @@ function evaluateActivePlayerPromise(
     const snaps = Math.max(0, Number(snapsThisSeason) || 0);
 
     if (promise.role === 'STARTER') {
-        if (!isPlayerStarterAtPosition(player, team, position)) {
+        // An injured starter temporarily rotated off Week 9's depth chart shouldn't
+        // trigger a broken promise if he actually started and logged regular snaps.
+        const wasRegularStarter = snaps >= 120;
+        if (!isPlayerStarterAtPosition(player, team, position) && !wasRegularStarter) {
             return markPermanentDeparture(
                 `Broken promise: Guaranteed ${position} starting role was not delivered.`
             );
@@ -2893,13 +2897,8 @@ export function discussPositionChange(player, targetPos, team, useToken = false)
                 }
             }
 
-            // Rebuild depth order so the player is immediately ranked in their new room
-            import('./depth_chart.js').then(dc => {
-                dc.populateNaturalDepthOrder(team);
-                dc.rebuildDepthChartFromOrder(team);
-            }).catch(() => {
-                rebuildDepthChartFromOrder(team);
-            });
+            populateNaturalDepthOrder(team);
+        rebuildDepthChartFromOrder(team);
 
         if (useToken) {
             team.socialProfile.favorTokens = availableTokens - 1;

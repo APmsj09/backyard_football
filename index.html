@@ -797,9 +797,24 @@
 
                     <!-- 4. Player Database & Scouting Intelligence -->
                     <div id="tab-content-free-agents" class="tab-pane hidden flex flex-col h-full min-h-0">
-                        <div class="p-2 px-3 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-2 items-center justify-between shrink-0">
+                        <div class="px-3 py-1.5 border-b border-slate-200 bg-white flex flex-wrap items-center justify-between gap-2 shrink-0">
+                            <div class="flex items-center gap-1 rounded border border-slate-200 bg-slate-100 p-0.5 text-xs font-bold">
+                                <button type="button" id="player-db-tab-browse"
+                                    onclick="window.app_setPlayerDbView('database')"
+                                    class="px-3 py-1 rounded bg-slate-900 text-white shadow-sm">
+                                    🔍 Player Database
+                                </button>
+                                <button type="button" id="player-db-tab-scouting"
+                                    onclick="window.app_setPlayerDbView('scouting')"
+                                    class="px-3 py-1 rounded text-slate-600 hover:bg-white">
+                                    🔭 Scouting Hub (<span id="scouting-shortlist-count">0</span>)
+                                </button>
+                            </div>
+                            <span class="text-[10px] text-slate-500">Shortlist players from League Stats, Team Pages, or Database to prioritize scouting</span>
+                        </div>
+                        <div id="player-db-filters-bar" class="p-2 px-3 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-2 items-center justify-between shrink-0">
                             <div class="flex items-center gap-2">
-                                <h3 class="text-sm font-black uppercase tracking-wider text-slate-800 hidden sm:block">Player Database</h3>
+                                <h3 class="text-sm font-black uppercase tracking-wider text-slate-800 hidden sm:block">Filters</h3>
                                 
                                 <!-- Search & Scope Dropdown -->
                                 <input type="search" id="player-db-search" placeholder="Search player name..."
@@ -833,6 +848,7 @@
                             </div>
                         </div>
                         <div id="free-agents-container" class="flex-grow overflow-y-auto p-0 min-h-0 bg-white"></div>
+                        <div id="scouting-hub-container" class="hidden flex-grow overflow-y-auto p-4 min-h-0 bg-slate-50"></div>
                     </div>
 
                     <!-- 5. League Hub -->

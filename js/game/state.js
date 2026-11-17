@@ -305,8 +305,24 @@ export function getScoutedPlayerInfo(
         // Position is public information, not an inferred hidden rating.
         pos: listedPosition,
 
-        height: player.height ?? null,
-        weight: player.weight ?? null,
+        const bestReportedEstimate = [
+            report?.evaluation?.offenseFit,
+            report?.evaluation?.defenseFit
+        ]
+            .filter(f => f && Number.isFinite(Number(f.low)) && Number.isFinite(Number(f.high)))
+            .map(f => (Number(f.low) + Number(f.high)) / 2)
+            .sort((a, b) => b - a)[0] ?? null;
+
+        return {
+        id: player.id,
+        name: player.name || 'Unknown Player',
+        age: Number(player.age) || null,
+
+        // Position is public information, not an inferred hidden rating.
+        pos: listedPosition,
+
+        height: player.attributes?.physical?.height ?? player.height ?? null,
+        weight: player.attributes?.physical?.weight ?? player.weight ?? null,
 
         attributes: safeAttributes,
 
@@ -322,7 +338,10 @@ export function getScoutedPlayerInfo(
                 ? reportLevel
                 : 0,
 
-        scoutingConfidence: confidence
+        scoutingConfidence: confidence,
+        estimatedOverall: bestReportedEstimate,
+        offenseFit: report?.evaluation?.offenseFit || null,
+        defenseFit: report?.evaluation?.defenseFit || null
     };
 }
 
@@ -1023,9 +1042,55 @@ export function finalizeGameResults(homeTeam, awayTeam, homeScore, awayScore) {
         masterAway.ties = (masterAway.ties || 0) + 1;
     }
 
+    const homeRosterPlayers = getGameDayRosterObjects(homeTeam);
+    const awayRosterPlayers = getGameDayRosterObjects(awayTeam);
+
+    const sumTeamStat = (players, key) => players.reduce(
+        (sum, p) => sum + Math.max(0, Number(p?.gameStats?.[key]) || 0),
+        0
+    );
+
+    const homePassYds = sumTeamStat(homeRosterPlayers, 'passYards');
+    const homeRushYds = sumTeamStat(homeRosterPlayers, 'rushYards');
+    const awayPassYds = sumTeamStat(awayRosterPlayers, 'passYards');
+    const awayRushYds = sumTeamStat(awayRosterPlayers, 'rushYards');
+
+    const ensureSeasonTeamStats = team => {
+        if (!team.seasonTeamStats || typeof team.seasonTeamStats !== 'object') {
+            team.seasonTeamStats = {
+                pointsFor: 0,
+                pointsAgainst: 0,
+                passYards: 0,
+                rushYards: 0,
+                passYardsAllowed: 0,
+                rushYardsAllowed: 0,
+                gamesPlayed: 0
+            };
+        }
+        return team.seasonTeamStats;
+    };
+
+    const hStats = ensureSeasonTeamStats(masterHome);
+    hStats.pointsFor += Number(homeScore) || 0;
+    hStats.pointsAgainst += Number(awayScore) || 0;
+    hStats.passYards += homePassYds;
+    hStats.rushYards += homeRushYds;
+    hStats.passYardsAllowed += awayPassYds;
+    hStats.rushYardsAllowed += awayRushYds;
+    hStats.gamesPlayed += 1;
+
+    const aStats = ensureSeasonTeamStats(masterAway);
+    aStats.pointsFor += Number(awayScore) || 0;
+    aStats.pointsAgainst += Number(homeScore) || 0;
+    aStats.passYards += awayPassYds;
+    aStats.rushYards += awayRushYds;
+    aStats.passYardsAllowed += homePassYds;
+    aStats.rushYardsAllowed += homeRushYds;
+    aStats.gamesPlayed += 1;
+
     const allPlayerIds = [
-        ...getGameDayRosterObjects(homeTeam).map(player => player.id),
-        ...getGameDayRosterObjects(awayTeam).map(player => player.id)
+        ...homeRosterPlayers.map(player => player.id),
+        ...awayRosterPlayers.map(player => player.id)
     ];
     allPlayerIds.forEach(id => {
         const p = getPlayer(id);
@@ -1518,8 +1583,8 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
                 delete cleanP.gameLog;
                 delete cleanP.recentPlays;
 
-                if (cleanP.progression && cleanP.progression.length > 3) {
-                    cleanP.progression = cleanP.progression.slice(-3);
+                if (cleanP.progression && cleanP.progression.length > 5) {
+                    cleanP.progression = cleanP.progression.slice(-5);
                 }
 
                 if (cleanP.status && cleanP.status.type === 'healthy' && cleanP.status.duration === 0) {

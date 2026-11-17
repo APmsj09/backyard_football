@@ -277,9 +277,11 @@ export function renderDepthOrderPane(gameState) {
 
                                 <div class="min-w-0 space-y-1">
                                     <div class="flex items-center gap-1.5 flex-wrap min-w-0">
-                                        <span class="font-bold text-xs text-slate-900 truncate">
+                                        <button type="button"
+                                            onclick="event.stopPropagation(); app.openPlayerCard('${playerIdArg}')"
+                                            class="font-bold text-xs text-slate-900 hover:text-blue-700 hover:underline truncate text-left">
                                             ${player.name}
-                                        </span>
+                                        </button>
 
                                         ${starterSlot ? `
                                             <span class="text-[9px] ${starterBadgeClass} rounded px-1.5 py-0.5 font-black shrink-0">
@@ -314,24 +316,34 @@ export function renderDepthOrderPane(gameState) {
                                         </span>
                                     </div>
 
-                                    <div class="flex flex-col gap-0.5">
+                                    <div class="flex items-center gap-0.5">
                                         <button
                                             type="button"
-                                            class="w-6 h-5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-200 disabled:opacity-25 disabled:cursor-not-allowed text-[10px] font-black"
+                                            class="w-6 h-10 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-amber-100 hover:text-amber-900 disabled:opacity-25 disabled:cursor-not-allowed text-[10px] font-black"
                                             ${index === 0 ? 'disabled' : ''}
-                                            onclick="event.stopPropagation(); window.movePositionDepthOrder('${pos}', '${playerIdArg}', -1)"
-                                            title="Move up">
-                                            ▲
+                                            onclick="event.stopPropagation(); window.movePositionDepthOrder('${pos}', '${playerIdArg}', -${index})"
+                                            title="Move directly to #1 starter spot">
+                                            ⏫
                                         </button>
+                                        <div class="flex flex-col gap-0.5">
+                                            <button
+                                                type="button"
+                                                class="w-6 h-5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-200 disabled:opacity-25 disabled:cursor-not-allowed text-[10px] font-black"
+                                                ${index === 0 ? 'disabled' : ''}
+                                                onclick="event.stopPropagation(); window.movePositionDepthOrder('${pos}', '${playerIdArg}', -1)"
+                                                title="Move up">
+                                                ▲
+                                            </button>
 
-                                        <button
-                                            type="button"
-                                            class="w-6 h-5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 disabled:opacity-25 disabled:cursor-not-allowed text-[10px] font-black"
-                                            ${index === players.length - 1 ? 'disabled' : ''}
-                                            onclick="event.stopPropagation(); window.movePositionDepthOrder('${pos}', '${playerIdArg}', 1)"
-                                            title="Move down">
-                                            ▼
-                                        </button>
+                                            <button
+                                                type="button"
+                                                class="w-6 h-5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 disabled:opacity-25 disabled:cursor-not-allowed text-[10px] font-black"
+                                                ${index === players.length - 1 ? 'disabled' : ''}
+                                                onclick="event.stopPropagation(); window.movePositionDepthOrder('${pos}', '${playerIdArg}', 1)"
+                                                title="Move down">
+                                                ▼
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>`;
@@ -409,7 +421,9 @@ export function renderDepthOrderPane(gameState) {
                     </div>
                     <div class="min-w-0">
                         <div class="flex items-center gap-1.5 flex-wrap">
-                            <span class="font-bold text-slate-900 text-xs truncate">${player.name}</span>
+                            <button type="button"
+                                onclick="event.stopPropagation(); app.openPlayerCard('${player.id}')"
+                                class="font-bold text-slate-900 text-xs truncate hover:text-blue-700 hover:underline text-left">${player.name}</button>
                             ${isLocked ? '<span class="text-[9px] bg-amber-100 text-amber-800 px-1 rounded font-bold">🔒 Locked</span>' : ''}
                             ${isIronman ? '<span class="text-[9px] bg-indigo-100 text-indigo-800 px-1 rounded font-bold">⚡ Two-Way</span>' : ''}
                         </div>
@@ -1058,7 +1072,9 @@ window.openSlotPicker = function(arg1, arg2) {
                             <!-- Top row: Name, physicals -->
                             <div class="flex items-center justify-between gap-2 flex-wrap mb-1.5">
                                 <div class="flex items-center gap-2">
-                                    <span class="font-black text-slate-900 text-sm">${player.name}</span>
+                                    <button type="button"
+                                        onclick="event.stopPropagation(); app.openPlayerCard('${player.id}')"
+                                        class="font-black text-slate-900 text-sm hover:text-blue-700 hover:underline text-left">${player.name}</button>
                                     <span class="text-[10px] text-slate-500 font-mono border-l border-slate-300 pl-2">#${player.number || '--'} • Nat: ${natPos}</span>
                                 </div>
                                 <div class="text-[10px] text-slate-500 font-mono font-semibold">

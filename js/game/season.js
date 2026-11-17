@@ -33,7 +33,8 @@ import {
     processWeeklyCoachDevelopment, ensureTeamStaffWorkPlan,
     getEffectiveStaffWorkHours, processWeeklyStaffPreparation,
     processCoachOffseasonRetention, resolveCoachCarousel,
-    processStaffMarketDecay, getStaffBehaviorTendency
+    processStaffMarketDecay, getStaffBehaviorTendency,
+    buildRecruitingTeamAppealSnapshot, buildAutomatedStaffAssignmentsForTeam
 } from './staff.js';
 import {
     evaluatePlayerRetention,
@@ -2900,6 +2901,15 @@ export function simulateHistoricalSeason(yearNum, gameInstance) {
         team.wins = 0;
         team.losses = 0;
         team.ties = 0;
+        team.seasonTeamStats = {
+            pointsFor: 0,
+            pointsAgainst: 0,
+            passYards: 0,
+            rushYards: 0,
+            passYardsAllowed: 0,
+            rushYardsAllowed: 0,
+            gamesPlayed: 0
+        };
     });
 
     gameInstance.players.forEach(player => {
@@ -3805,11 +3815,27 @@ export function processEndOfWeek({ financesOnly = false } = {}) {
 
         // Establish each team's workload before the gameplan is rebuilt.
         if (t.id === game.playerTeam?.id) {
-            ensureTeamStaffWorkPlan(
+            const plan = ensureTeamStaffWorkPlan(
                 t,
                 game.year,
                 game.currentWeek
             );
+            const staffAutonomy = String(
+                t.teamInstructions?.departments?.staff?.autonomy ||
+                t.teamInstructions?.autonomy ||
+                'guided'
+            ).toLowerCase();
+
+            // When staff workload is set to Delegate, refresh assignments weekly
+            // from current priorities while preserving accepted community favors.
+            if (staffAutonomy === 'delegate' && plan && Array.isArray(plan.assignments)) {
+                const communityAssignments = plan.assignments.filter(
+                    a => a?.task === 'communityService'
+                );
+                const automated = buildAutomatedStaffAssignmentsForTeam(t, game)
+                    .filter(a => a?.task !== 'communityService');
+                plan.assignments = [...automated, ...communityAssignments];
+            }
         } else {
             ensureAiStaffWorkPlan(
                 t,
@@ -7151,7 +7177,13 @@ export function resolveRecruitingDay(gameState = game) {
                 const team = getEligibleTeam(teamId, player);
                 const interest = getInterest(record, teamId);
 
-                
+                if (team) {
+                    if (!record.teamAppealByTeam || typeof record.teamAppealByTeam !== 'object') {
+                        record.teamAppealByTeam = {};
+                    }
+                    record.teamAppealByTeam[String(team.id)] =
+                        buildRecruitingTeamAppealSnapshot(team, player, day);
+                }
 
                 const playerFit = team
                     ? calculatePlayerRecruitingFit(
@@ -11725,6 +11757,15 @@ export function advanceToOffseason() {
         }
 
         team.wins = 0; team.losses = 0; team.ties = 0;
+        team.seasonTeamStats = {
+            pointsFor: 0,
+            pointsAgainst: 0,
+            passYards: 0,
+            rushYards: 0,
+            passYardsAllowed: 0,
+            rushYardsAllowed: 0,
+            gamesPlayed: 0
+        };
 
         if (team.socialProfile) {
             team.socialProfile.favorTokens = 3 + (team.socialProfile.streetCred >= 75 ? 1 : 0);

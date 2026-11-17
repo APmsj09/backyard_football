@@ -31,7 +31,9 @@ import {
     initializeInheritedScoutingReports,
     recordScoutingReportOutcome,
     processWeeklyScoutingAssignments,
-    advanceRecruitingTryoutScoutingReport
+    advanceRecruitingTryoutScoutingReport,
+    isPlayerOnScoutingShortlist,
+    toggleScoutingShortlistPlayer
 } from './game/scouting.js';
 
 import {
@@ -250,6 +252,9 @@ function getPickTimeScoutingSnapshot(player, team) {
 
 async function startNewGame() {
     activeSaveKey = 'backyardFootballGameState';
+    selectedPlayerId = null;
+    UI.resetDraftWatchlist();
+    UI.clearRecruitingSelections();
     let startupStage = 'opening loading screen';
 
     try {
@@ -447,10 +452,18 @@ function renderTeamChooser(gameState) {
                         </span>
                     </div>
 
-                    <p class="text-xs text-slate-500 mb-2">Coach: <b>${team.coach?.name || 'Coach'}</b> (${team.coach?.type || 'Standard'})</p>
+                    <p class="text-xs text-slate-500 mb-2">
+                        Coach: ${team.coach?.id != null
+                            ? `<button type="button" onclick="app.openCoachCard('${escapeHtml(team.coach.id)}')" class="font-bold text-slate-800 hover:text-blue-700 hover:underline">${escapeHtml(team.coach.name || 'Coach')}</button>`
+                            : `<b>${escapeHtml(team.coach?.name || 'Coach')}</b>`}
+                        (${escapeHtml(team.coach?.type || 'Standard')})
+                    </p>
                     
                     <div class="text-[11px] bg-slate-50 p-2 rounded-sm border border-slate-100 mb-3 space-y-1 text-slate-700">
-                        <p>Roster: <b>${roster.length} Players</b> | Street Cred: <b>${team.socialProfile?.streetCred || 50}</b></p>
+                        <div class="flex items-center justify-between gap-2">
+                            <span>Roster: <b>${roster.length} Players</b> | Cred: <b>${team.socialProfile?.streetCred || 50}</b></span>
+                            <button type="button" onclick="app.openTeamCard('${escapeHtml(team.id)}')" class="text-[10px] font-bold text-blue-700 hover:underline">Full Roster →</button>
+                        </div>
                         ${titles > 0 ? `<p class="text-amber-600 font-bold">🏆 ${titles}x Premier Champion</p>` : ''}
                         ${t2Titles > 0 ? `<p class="text-blue-600 font-bold">🥇 ${t2Titles}x Sandlot Champion</p>` : ''}
                     </div>
@@ -2814,6 +2827,8 @@ async function handleLoadGame(saveKey) {
         gameState = loadedState;
         selectedPlayerId = null;
         activeSaveKey = keyToLoad;
+        UI.resetDraftWatchlist();
+        UI.clearRecruitingSelections();
 
         if (gameState.playerTeam) {
             Game.rebuildDepthChartFromOrder(gameState.playerTeam);
@@ -4291,9 +4306,16 @@ export function openCoachCard(coachId) {
     let coach = null;
     let team = null;
 
-    // Prefer the canonical team.coaches record.
+    // Prefer the canonical team.coaches record, with fallback to legacy staff slots.
     for (const candidateTeam of teams) {
-        const match = candidateTeam?.coaches?.find(
+        const pool = [
+            ...(Array.isArray(candidateTeam?.coaches) ? candidateTeam.coaches : []),
+            candidateTeam?.coach,
+            candidateTeam?.staff?.coach,
+            candidateTeam?.staff?.scout,
+            candidateTeam?.staff?.trainer
+        ];
+        const match = pool.find(
             member =>
                 member?.id != null &&
                 String(member.id) === String(coachId)
@@ -4814,7 +4836,9 @@ export function openCoachCard(coachId) {
                             ${escapeCoachText(coach.name || 'Unnamed Coach')}
                         </h3>
                         <p class="mt-1 text-xs text-slate-300">
-                            ${escapeCoachText(teamName)}
+                            ${team
+                                ? `<button type="button" onclick="app.openTeamCard('${escapeCoachText(team.id)}')" class="font-bold text-amber-300 hover:underline">${escapeCoachText(teamName)} →</button>`
+                                : escapeCoachText(teamName)}
                         </p>
                         <span class="mt-2 inline-block rounded bg-slate-800 border border-slate-600 px-2 py-1 text-[10px] font-bold uppercase text-amber-300">
                             ${escapeCoachText(roleLabel)}
@@ -5303,6 +5327,288 @@ export function openCoachCard(coachId) {
     `;
 
     UI.showModal('Coach Profile', modalHtml);
+}
+
+window.app_toggleScoutingShortlistFromCard = (playerId) => {
+    const gs = Game.getGameState();
+    if (!gs?.playerTeam || !playerId) return;
+    toggleScoutingShortlistPlayer(gs.playerTeam, playerId, gs);
+    UI.syncDraftWatchlistFromTeam?.(gs.playerTeam);
+    Game.saveGameState(activeSaveKey);
+    openPlayerCard(playerId);
+};
+
+export function openTeamCard(teamId) {
+    const gs = Game.getGameState();
+    if (!gs || teamId == null || String(teamId) === 'undefined') return;
+
+    const team = (gs.teams || []).find(t => String(t?.id) === String(teamId)) ||
+        (String(gs.playerTeam?.id) === String(teamId) ? gs.playerTeam : null);
+    if (!team) return;
+
+    const isUserTeam = Boolean(
+        gs.playerTeam && String(team.id) === String(gs.playerTeam.id)
+    );
+    const leagueLabel = team.leagueType === 'youth'
+        ? 'Pee-Wee League (Youth)'
+        : Number(team.tier) === 1
+            ? 'Premier Parks (Tier 1)'
+            : 'Sandlot Circuit (Tier 2)';
+
+    const wins = Number(team.wins) || 0;
+    const losses = Number(team.losses) || 0;
+    const ties = Number(team.ties) || 0;
+    const teamOvr = Game.getTeamOverall ? Game.getTeamOverall(team) : '--';
+    const streetCred = team.socialProfile?.streetCred ?? 50;
+
+    // Unique active coaching staff
+    const coachPool = [
+        ...(Array.isArray(team.coaches) ? team.coaches : []),
+        team.staff?.coach,
+        team.coach,
+        team.staff?.scout,
+        team.staff?.trainer
+    ].filter(c => c && c.id != null);
+
+    const seenCoachIds = new Set();
+    const uniqueCoaches = coachPool.filter(c => {
+        const key = String(c.id);
+        if (seenCoachIds.has(key)) return false;
+        seenCoachIds.add(key);
+        return true;
+    });
+    const headCoachId = team.staff?.coach?.id ?? team.coach?.id ?? null;
+
+    const coachesHtml = uniqueCoaches.length > 0
+        ? uniqueCoaches.map(c => {
+            const roleLabel = c.isUserCoach
+                ? 'GM / User Coach'
+                : headCoachId != null && String(c.id) === String(headCoachId)
+                    ? 'Head Coach'
+                    : c.role === 'scout'
+                        ? 'Scout'
+                        : c.role === 'trainer'
+                            ? 'Trainer'
+                            : 'Assistant Coach';
+            return `
+                <button type="button"
+                    onclick="app.openCoachCard('${escapeHtml(c.id)}')"
+                    class="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50/40 transition">
+                    <div class="min-w-0">
+                        <span class="block truncate text-xs font-black text-slate-900">${escapeHtml(c.name || 'Coach')}</span>
+                        <span class="block text-[10px] text-slate-500">${escapeHtml(roleLabel)}</span>
+                    </div>
+                    <span class="shrink-0 text-[10px] font-bold text-blue-700">Profile →</span>
+                </button>`;
+        }).join('')
+        : '<p class="text-xs text-slate-400 italic">No coaching staff recorded.</p>';
+
+    const championships = (gs.history?.seasons || []).filter(s =>
+        s.champion === team.name || s.tier2Champion === team.name || s.youthChampion === team.name
+    );
+
+    const roster = Game.getRosterObjects(team) || [];
+    const offStarterIds = new Set(Object.values(team.depthChart?.offense || {}).filter(Boolean).map(String));
+    const defStarterIds = new Set(Object.values(team.depthChart?.defense || {}).filter(Boolean).map(String));
+
+    const sortedRoster = [...roster].sort((a, b) => {
+        if (isUserTeam) return getTwoWayFitScore(b) - getTwoWayFitScore(a);
+        const repA = Game.getTeamScoutingReport?.(gs.playerTeam, a.id);
+        const repB = Game.getTeamScoutingReport?.(gs.playerTeam, b.id);
+        return (Number(repB?.level) || 0) - (Number(repA?.level) || 0) ||
+            (Number(b.seasonStats?.touchdowns) || 0) - (Number(a.seasonStats?.touchdowns) || 0) ||
+            String(a.name || '').localeCompare(String(b.name || ''));
+    });
+
+    const rosterRowsHtml = sortedRoster.length > 0
+        ? sortedRoster.map(p => {
+            const pid = String(p.id);
+            const isOff = offStarterIds.has(pid);
+            const isDef = defStarterIds.has(pid);
+            const roleBadge = isOff && isDef
+                ? '<span class="bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded text-[9px] font-bold">2-Way</span>'
+                : isOff
+                    ? '<span class="bg-blue-50 text-blue-800 px-1.5 py-0.5 rounded text-[9px] font-bold">OFF</span>'
+                    : isDef
+                        ? '<span class="bg-rose-50 text-rose-800 px-1.5 py-0.5 rounded text-[9px] font-bold">DEF</span>'
+                        : '<span class="text-slate-400 text-[9px]">Bench</span>';
+
+            let fitDisplay = '<span class="text-slate-400 italic">Unscouted</span>';
+            if (isUserTeam) {
+                const fits = getBestTwoWayFits(p);
+                fitDisplay = `
+                    <span class="text-emerald-700 font-bold">${fits.offense.position} ${fits.offense.ovr}</span>
+                    <span class="text-slate-300 mx-1">/</span>
+                    <span class="text-blue-700 font-bold">${fits.defense.position} ${fits.defense.ovr}</span>`;
+            } else {
+                const report = Game.getTeamScoutingReport?.(gs.playerTeam, p.id);
+                const offFit = report?.evaluation?.offenseFit;
+                const defFit = report?.evaluation?.defenseFit;
+                if ((Number(report?.level) || 0) > 0 && offFit && defFit) {
+                    fitDisplay = `
+                        <span class="text-emerald-700 font-bold">${escapeHtml(offFit.position)} ${offFit.low}–${offFit.high}</span>
+                        <span class="text-slate-300 mx-1">/</span>
+                        <span class="text-blue-700 font-bold">${escapeHtml(defFit.position)} ${defFit.low}–${defFit.high}</span>`;
+                }
+            }
+
+            const stats = p.seasonStats || {};
+            const keyStat = (stats.passYards || 0) > 0
+                ? `${stats.passYards} Pass Yds`
+                : (stats.rushYards || 0) > 0
+                    ? `${stats.rushYards} Rush Yds`
+                    : (stats.recYards || 0) > 0
+                        ? `${stats.recYards} Rec Yds`
+                        : (stats.tackles || 0) > 0
+                            ? `${stats.tackles} Tackles`
+                            : '—';
+
+            return `
+                <tr class="hover:bg-slate-50 cursor-pointer border-b border-slate-100"
+                    onclick="app.openPlayerCard('${escapeHtml(p.id)}')">
+                    <td class="py-2 px-3 font-semibold text-slate-900">
+                        <span class="font-mono text-[10px] text-slate-400 mr-1">#${p.number || '--'}</span>
+                        ${escapeHtml(p.name)}
+                    </td>
+                    <td class="py-2 px-2 text-center font-mono">${escapeHtml(p.pos || 'ATH')}</td>
+                    <td class="py-2 px-2 text-center font-mono text-slate-600">${p.age ?? '—'}</td>
+                    <td class="py-2 px-2 text-center">${roleBadge}</td>
+                    <td class="py-2 px-2 text-center font-mono text-[11px]">${fitDisplay}</td>
+                    <td class="py-2 px-3 text-right font-mono text-[11px] text-slate-600">${keyStat}</td>
+                </tr>`;
+        }).join('')
+        : '<tr><td colspan="6" class="p-6 text-center text-slate-400 italic">No players currently rostered.</td></tr>';
+
+    const gamesPerWeek = Math.max(1, Math.floor((gs.teams?.length || 20) / 2));
+    const teamSchedule = [];
+    (gs.schedule || []).forEach((match, idx) => {
+        if (!match) return;
+        const isHome = String(match.home?.id) === String(team.id);
+        const isAway = String(match.away?.id) === String(team.id);
+        if (!isHome && !isAway) return;
+        const opp = isHome ? match.away : match.home;
+        const weekNum = Math.floor(idx / gamesPerWeek) + 1;
+        const myScore = isHome ? match.homeScore : match.awayScore;
+        const oppScore = isHome ? match.awayScore : match.homeScore;
+        const played = Boolean(match.played || (match.homeScore != null && match.awayScore != null));
+        teamSchedule.push({ weekNum, isHome, opp, myScore, oppScore, played });
+    });
+
+    const scheduleRowsHtml = teamSchedule.length > 0
+        ? teamSchedule.map(g => {
+            const outcome = !g.played
+                ? '<span class="text-slate-400">Upcoming</span>'
+                : g.myScore > g.oppScore
+                    ? `<span class="font-black text-emerald-700">W ${g.myScore}-${g.oppScore}</span>`
+                    : g.myScore < g.oppScore
+                        ? `<span class="font-black text-rose-700">L ${g.myScore}-${g.oppScore}</span>`
+                        : `<span class="font-black text-amber-700">T ${g.myScore}-${g.oppScore}</span>`;
+            return `
+                <div class="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-xs">
+                    <span class="font-mono text-[10px] font-bold text-slate-400 w-12">WK ${g.weekNum}</span>
+                    <button type="button"
+                        onclick="app.openTeamCard('${escapeHtml(g.opp?.id)}')"
+                        class="flex-1 text-left font-bold text-slate-800 hover:text-blue-700 hover:underline truncate">
+                        ${g.isHome ? 'vs' : '@'} ${escapeHtml(g.opp?.name || 'Opponent')}
+                    </button>
+                    <span class="font-mono text-xs shrink-0">${outcome}</span>
+                </div>`;
+        }).join('')
+        : '<p class="text-xs text-slate-400 italic p-4 text-center">No schedule generated yet.</p>';
+
+    const statCategories = [
+        ['Passing Yards', 'passYards'],
+        ['Rushing Yards', 'rushYards'],
+        ['Receiving Yards', 'recYards'],
+        ['Touchdowns', 'touchdowns'],
+        ['Tackles', 'tackles'],
+        ['Sacks', 'sacks']
+    ];
+    const leadersHtml = statCategories.map(([label, key]) => {
+        const leader = [...roster]
+            .filter(p => (Number(p.seasonStats?.[key]) || 0) > 0)
+            .sort((a, b) => (Number(b.seasonStats?.[key]) || 0) - (Number(a.seasonStats?.[key]) || 0))[0];
+        return `
+            <div class="rounded border border-slate-200 bg-white p-2.5">
+                <span class="block text-[9px] font-bold uppercase text-slate-400">${label}</span>
+                ${leader ? `
+                    <button type="button"
+                        onclick="app.openPlayerCard('${escapeHtml(leader.id)}')"
+                        class="mt-1 flex w-full items-center justify-between gap-2 text-left hover:text-blue-700">
+                        <span class="truncate text-xs font-bold text-slate-900">${escapeHtml(leader.name)}</span>
+                        <span class="font-mono text-sm font-black text-slate-900">${Number(leader.seasonStats[key])}</span>
+                    </button>
+                ` : '<span class="mt-1 block text-xs text-slate-400 italic">No stats yet</span>'}
+            </div>`;
+    }).join('');
+
+    window.app_switchTeamCardTab = (tab) => {
+        document.querySelectorAll('.tcard-tab-btn').forEach(btn => {
+            const active = btn.dataset.ttab === tab;
+            btn.className = `tcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition ${active ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 bg-slate-100'}`;
+        });
+        document.querySelectorAll('.tcard-pane').forEach(p => p.classList.add('hidden'));
+        document.getElementById(`tcard-pane-${tab}`)?.classList.remove('hidden');
+    };
+
+    const modalHtml = `
+        <div class="flex flex-col gap-3 text-left">
+            <div class="bg-slate-900 text-white p-4 rounded shadow-sm flex flex-wrap justify-between items-center gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="w-5 h-5 rounded-full border-2 border-white shrink-0" style="background-color: ${escapeHtml(team.primaryColor || '#334155')}"></span>
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <h3 class="text-xl font-black uppercase tracking-wide truncate">${escapeHtml(team.name)}</h3>
+                            ${isUserTeam ? '<span class="rounded bg-amber-400 text-slate-950 px-1.5 py-0.5 text-[9px] font-black uppercase">Your Team</span>' : ''}
+                        </div>
+                        <p class="text-xs text-slate-300 mt-0.5">
+                            ${escapeHtml(leagueLabel)} · Offense: <b>${escapeHtml(team.formations?.offense || 'Balanced')}</b> · Defense: <b>${escapeHtml(team.formations?.defense || '3-2-3')}</b>
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 text-right shrink-0">
+                    <div><span class="block text-[9px] uppercase text-slate-400">Record</span><b class="text-lg font-mono">${wins}-${losses}${ties ? `-${ties}` : ''}</b></div>
+                    <div><span class="block text-[9px] uppercase text-slate-400">Power</span><b class="text-lg font-mono text-amber-400">${teamOvr}</b></div>
+                    <div><span class="block text-[9px] uppercase text-slate-400">Cred</span><b class="text-lg font-mono text-emerald-400">${streetCred}</b></div>
+                </div>
+            </div>
+
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-[10px] font-black uppercase tracking-wider text-slate-600">Coaching Staff</span>
+                    ${championships.length > 0 ? `<span class="text-[10px] font-bold text-amber-700">🏆 ${championships.length}x Champion</span>` : ''}
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">${coachesHtml}</div>
+            </div>
+
+            <div class="flex flex-wrap gap-1 bg-slate-100 p-1 rounded border border-slate-200 text-xs">
+                <button class="tcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider bg-slate-900 text-white shadow-sm" data-ttab="roster" onclick="app_switchTeamCardTab('roster')">Roster (${roster.length})</button>
+                <button class="tcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider text-slate-500 bg-slate-100" data-ttab="schedule" onclick="app_switchTeamCardTab('schedule')">Schedule & Results</button>
+                <button class="tcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider text-slate-500 bg-slate-100" data-ttab="leaders" onclick="app_switchTeamCardTab('leaders')">Season Leaders</button>
+            </div>
+
+            <div id="tcard-pane-roster" class="tcard-pane max-h-80 overflow-y-auto border border-slate-200 rounded bg-white">
+                <table class="min-w-full text-xs">
+                    <thead class="bg-slate-800 text-white uppercase text-[10px] sticky top-0">
+                        <tr>
+                            <th class="py-2 px-3 text-left">Player</th>
+                            <th class="py-2 px-2 text-center">Pos</th>
+                            <th class="py-2 px-2 text-center">Age</th>
+                            <th class="py-2 px-2 text-center">Role</th>
+                            <th class="py-2 px-2 text-center">${isUserTeam ? 'OFF / DEF OVR' : 'Scouted Fit'}</th>
+                            <th class="py-2 px-3 text-right">Season Highlight</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rosterRowsHtml}</tbody>
+                </table>
+            </div>
+
+            <div id="tcard-pane-schedule" class="tcard-pane hidden max-h-80 overflow-y-auto space-y-1.5">${scheduleRowsHtml}</div>
+            <div id="tcard-pane-leaders" class="tcard-pane hidden grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">${leadersHtml}</div>
+        </div>
+    `;
+
+    UI.showModal(`Team Page: ${team.name}`, modalHtml, null, 'Confirm', null, 'Close', 'wide');
 }
 
 export function openPlayerCard(playerId) {
@@ -5898,9 +6204,22 @@ export function openPlayerCard(playerId) {
                             </span>
                         ` : ''}
                         <span class="text-xs bg-slate-800 text-amber-400 font-mono px-2 py-0.5 rounded border border-slate-700">#${player.number || '--'}</span>
+                        ${!isMyTeam ? `
+                            <button type="button"
+                                onclick="window.app_toggleScoutingShortlistFromCard('${escapeHtml(sourcePlayer.id)}')"
+                                class="rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                                    isPlayerOnScoutingShortlist(gs.playerTeam, sourcePlayer.id)
+                                        ? 'bg-indigo-500 text-white'
+                                        : 'bg-slate-800 text-indigo-300 border border-indigo-400/50 hover:bg-indigo-600 hover:text-white'
+                                }">
+                                ${isPlayerOnScoutingShortlist(gs.playerTeam, sourcePlayer.id) ? '★ On Scouting List' : '🔭 + Scouting List'}
+                            </button>
+                        ` : ''}
                     </div>
                     <p class="text-xs text-slate-400 mt-0.5 font-sans">
-                        ${teamName} • ${player.age}yo • ${formatHeight(phys.height)} • ${phys.weight} lbs
+                        ${team
+                            ? `<button type="button" onclick="app.openTeamCard('${escapeHtml(team.id)}')" class="font-bold text-amber-300 hover:underline">${escapeHtml(teamName)}</button>`
+                            : escapeHtml(teamName)} • ${player.age}yo • ${formatHeight(phys.height)} • ${phys.weight} lbs
                     </p>
                 </div>
                 <div class="flex flex-col items-end gap-1 shrink-0">
@@ -6044,7 +6363,12 @@ export function openPlayerCard(playerId) {
                 <div class="bg-slate-50 p-2.5 rounded border border-slate-200 text-xs text-slate-700">
                     <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Neighborhood Network</span>
                     Clique: <b class="text-indigo-600">${player.personality?.clique || 'Regular'}</b> |
-                    Best Friend: <b>${player.social?.bestFriendId ? (Game.getPlayer(player.social.bestFriendId)?.name || 'None') : 'None'}</b>
+                    Best Friend: ${(() => {
+                        const bf = player.social?.bestFriendId ? Game.getPlayer(player.social.bestFriendId) : null;
+                        return bf
+                            ? `<button type="button" onclick="app.openPlayerCard('${escapeHtml(bf.id)}')" class="font-bold text-indigo-700 hover:underline">${escapeHtml(bf.name)}</button>`
+                            : '<b>None</b>';
+                    })()}
                 </div>
                 ` : ''}
             </div>
@@ -6306,6 +6630,7 @@ window.app = {
     startNewGame,
     handleLoadGame,
     handleLoadTestRoster,
+    openTeamCard,
     openCoachCard,
     renderSocialNetworkTab: () => {
         if (gameState) {
@@ -8496,6 +8821,49 @@ window.app = {
         if (!gs?.playerTeam) return;
 
         gameState = gs;
+
+        // Keep the user inside the draft war room if opened mid-draft.
+        const draftScreenEl = document.getElementById('draft-screen');
+        const isInDraft = gs.offseasonState?.phase === OFFSEASON_PHASES.DRAFT ||
+            (draftScreenEl && !draftScreenEl.classList.contains('hidden'));
+
+        if (isInDraft) {
+            const roster = Game.getRosterObjects(gs.playerTeam) || [];
+            const candidates = roster
+                .filter(p => Game.isPlayerViableForPosition(p, pos))
+                .map(p => ({
+                    player: p,
+                    ovr: Game.calculateOverall(p, pos),
+                    isPrimary: (p.pos || estimateBestPosition(p)) === pos
+                }))
+                .sort((a, b) => b.ovr - a.ovr);
+
+            const modalHtml = `
+                <div class="space-y-2 text-left text-xs">
+                    <p class="text-slate-600">
+                        Viable players on your roster for <b>${escapeHtml(pos)}</b> (${candidates.length} total). Click any player for their full dossier.
+                    </p>
+                    <div class="divide-y divide-slate-100 border border-slate-200 rounded bg-white max-h-80 overflow-y-auto">
+                        ${candidates.length > 0 ? candidates.map((c, idx) => `
+                            <button type="button"
+                                onclick="app.openPlayerCard('${escapeHtml(c.player.id)}')"
+                                class="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-slate-50">
+                                <div class="min-w-0">
+                                    <span class="font-mono text-[10px] text-slate-400 mr-1.5">#${idx + 1}</span>
+                                    <span class="font-bold text-slate-900">${escapeHtml(c.player.name)}</span>
+                                    <span class="ml-1 text-[10px] text-slate-500">(${c.player.age}yo)</span>
+                                    ${!c.isPrimary ? `<span class="ml-1 rounded bg-indigo-100 px-1 py-0.5 text-[8px] font-bold text-indigo-800">2-Way (${escapeHtml(c.player.pos || 'ATH')})</span>` : ''}
+                                </div>
+                                <span class="font-mono font-black text-slate-900 shrink-0">${c.ovr} OVR</span>
+                            </button>
+                        `).join('') : '<p class="p-4 text-center text-slate-400 italic">No viable players at this position yet.</p>'}
+                    </div>
+                </div>`;
+
+            UI.showModal(`${pos} Room Depth`, modalHtml, null, 'Confirm', null, 'Back to Draft');
+            return;
+        }
+
         UI.hideModal();
 
         // Navigate to the Strategy screen.

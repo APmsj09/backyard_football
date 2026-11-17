@@ -3227,7 +3227,7 @@ function buildDefaultAutomatedStaffAssignments(
 
                 ...(allocation.task === 'scouting'
                     ? {
-                        focus: 'all',
+                        focus: departments.scouting?.delegatedFocus || 'all',
                         maxTargets: 2
                     }
                     : {}),
@@ -3680,7 +3680,7 @@ export function ensureTeamInstructions(team) {
         : 10.00;
 
     // Scouting has its own priorities and information objectives.
-    ensureDepartment(
+    const scoutingDept = ensureDepartment(
         'scouting',
         {
             philosophy: 'roster_needs',
@@ -3690,6 +3690,12 @@ export function ensureTeamInstructions(team) {
             ]
         }
     );
+    if (!['all', 'youth', 'draft', 'freeAgents', 'opponents'].includes(scoutingDept.delegatedFocus)) {
+        scoutingDept.delegatedFocus = 'all';
+    }
+    if (!['prioritize', 'balanced', 'shortlist_only', 'general_only'].includes(scoutingDept.shortlistMode)) {
+        scoutingDept.shortlistMode = 'prioritize';
+    }
 
     // Player development is distinct from weekly practice planning.
     ensureDepartment(
@@ -4201,7 +4207,8 @@ export function buildAutomatedStaffAssignmentsForTeam(
 
     // Preserve the recruiting/scouting stage behavior used by the staff UI.
     if (gameState) {
-        const scoutingFocus = !gameState.draftCompleted
+        const configuredFocus = instructions?.departments?.scouting?.delegatedFocus;
+        const stageFocus = !gameState.draftCompleted
             ? 'draft'
             : !gameState.offseasonFACompleted
                 ? 'freeAgents'
@@ -4209,7 +4216,9 @@ export function buildAutomatedStaffAssignmentsForTeam(
 
         assignments.forEach(assignment => {
             if (assignment.task === 'scouting') {
-                assignment.focus = scoutingFocus;
+                assignment.focus = (configuredFocus && configuredFocus !== 'all')
+                    ? configuredFocus
+                    : stageFocus;
             }
         });
     }

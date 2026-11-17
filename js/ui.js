@@ -35,7 +35,12 @@ import {
     initializeInheritedScoutingReports,
     recordScoutingReportOutcome,
     processWeeklyScoutingAssignments,
-    advanceRecruitingTryoutScoutingReport
+    advanceRecruitingTryoutScoutingReport,
+    ensureScoutingShortlist,
+    isPlayerOnScoutingShortlist,
+    toggleScoutingShortlistPlayer,
+    moveScoutingShortlistPlayer,
+    setScoutingDelegationSettings
 } from './game/scouting.js';
 
 let elements = {};
@@ -71,6 +76,9 @@ export let draftWatchlist = new Set();
 let currentDraftOnSelect = null;
 let currentDraftSortCol = 'potential';
 let currentDraftSortDir = 'desc';
+let activeStaffHubTab = 'overview';
+let activePlayerDbView = 'database';
+let activeStaffHubTab = 'overview';
 
 // Standings league sub-tab state
 let activeStandingsLeague = 'tier1'; // 'tier1', 'tier2', 'youth'
@@ -1842,7 +1850,14 @@ export function setDraftView(view) {
 
 export function toggleWatchlistPlayer(playerId) {
     if (!playerId) return;
-    if (draftWatchlist.has(playerId)) {
+    const gs = getGameState();
+    if (gs?.playerTeam) {
+        const res = toggleScoutingShortlistPlayer(gs.playerTeam, playerId, gs);
+        syncDraftWatchlistFromTeam(gs.playerTeam);
+        saveGameState();
+        const badge = document.getElementById('scouting-shortlist-count');
+        if (badge) badge.textContent = res.list.length;
+    } else if (draftWatchlist.has(playerId)) {
         draftWatchlist.delete(playerId);
     } else {
         draftWatchlist.add(playerId);
@@ -1851,7 +1866,6 @@ export function toggleWatchlistPlayer(playerId) {
     const countEl = document.getElementById('draft-watchlist-count');
     if (countEl) countEl.textContent = draftWatchlist.size;
 
-    const gs = getGameState();
     if (gs) {
         renderDraftPool(gs, currentDraftOnSelect || window.app?.onDraftSelect, currentDraftSortCol, currentDraftSortDir);
     }
@@ -2223,6 +2237,22 @@ export function resetDraftWatchlist() {
     draftWatchlist.clear();
 }
 
+export function clearRecruitingSelections() {
+    recruitingQuickSelectedIds.clear();
+    recruitingTryoutSelectedIds.clear();
+}
+
+export function syncDraftWatchlistFromTeam(team) {
+    draftWatchlist.clear();
+    ensureScoutingShortlist(team).forEach(item => draftWatchlist.add(String(item.playerId)));
+}
+
+window.app_jumpToRecruitingPositionNeed = function(position) {
+    if (!position) return;
+    window.app_setRecruitingTab?.('prospects');
+    window.app_setRecruitingPositionFilter?.(position);
+};
+
 let activeDraftTeamTab = 'roster';
 
 window.app_switchDraftTeamTab = function(tab) {
@@ -2526,8 +2556,10 @@ export function renderDashboard(gameState) {
             if (myGame) {
                 const isHome = myGame.home?.id === playerTeam.id;
                 const opp = isHome ? myGame.away : myGame.home;
-                matchupEl.textContent = `${isHome ? 'vs' : '@'} ${opp?.name || 'Opponent'}`;
-                matchupEl.title = `Next Game: ${isHome ? 'Home vs' : 'Away @'} ${opp?.name || 'Opponent'}`;
+                matchupEl.innerHTML = opp?.id != null
+                    ? `<button type="button" onclick="app.openTeamCard('${opp.id}')" class="hover:text-amber-300 hover:underline">${isHome ? 'vs' : '@'} ${opp.name || 'Opponent'}</button>`
+                    : `${isHome ? 'vs' : '@'} ${opp?.name || 'Opponent'}`;
+                matchupEl.title = `Click to view opponent: ${isHome ? 'Home vs' : 'Away @'} ${opp?.name || 'Opponent'}`;
             } else {
                 matchupEl.textContent = 'Next: Bye Week';
             }
@@ -3389,9 +3421,263 @@ window.app_updatePlayerDbFilter = function () {
     if (gs) renderFreeAgentsTab(gs);
 };
 
+window.app_setPlayerDbView = function(view) {
+    if (!['database', 'scouting'].includes(view)) return;
+    activePlayerDbView = view;
+    const gs = getGameState();
+    if (gs) renderFreeAgentsTab(gs);
+};
+
+window.app_toggleScoutingShortlist = function(playerId, refreshSource = null) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team || playerId == null) return;
+
+    toggleScoutingShortlistPlayer(team, playerId, gs);
+    syncDraftWatchlistFromTeam(team);
+    saveGameState();
+
+    const countEl = document.getElementById('scouting-shortlist-count');
+    if (countEl) countEl.textContent = ensureScoutingShortlist(team).length;
+
+    if (refreshSource === 'stats') renderPlayerStatsTab(gs);
+    else if (refreshSource === 'scouting') renderScoutingHub(gs);
+    else if (refreshSource === 'teamCard') window.app?.openTeamCard?.(team._lastViewedTeamId);
+    else renderFreeAgentsTab(gs);
+};
+
+window.app_moveScoutingShortlist = function(playerId, dir) {
+    const gs = getGameState();
+    if (!gs?.playerTeam) return;
+    moveScoutingShortlistPlayer(gs.playerTeam, playerId, dir);
+    saveGameState();
+    renderScoutingHub(gs);
+};
+
+window.app_setScoutingDelegation = function(field, value) {
+    const gs = getGameState();
+    if (!gs?.playerTeam) return;
+    setScoutingDelegationSettings(gs.playerTeam, { [field]: value });
+    saveGameState();
+    renderScoutingHub(gs);
+};
+
+export function renderScoutingHub(gameState) {
+    const container = document.getElementById('scouting-hub-container');
+    const team = gameState?.playerTeam;
+    if (!container || !team) return;
+
+    const shortlist = ensureScoutingShortlist(team);
+    const scoutingDept = team.teamInstructions?.departments?.scouting || {};
+    const autonomy = scoutingDept.autonomy || 'guided';
+    const delegatedFocus = scoutingDept.delegatedFocus || 'all';
+    const shortlistMode = scoutingDept.shortlistMode || 'prioritize';
+
+    const totalScoutingHours = (team.staffWorkPlan?.assignments || [])
+        .filter(a => a?.task === 'scouting')
+        .reduce((sum, a) => sum + Math.max(0, Number(a.hours) || 0), 0);
+
+    const teamsById = new Map((gameState.teams || []).map(t => [String(t.id), t]));
+    const isRecruiting = gameState.offseasonState?.phase === 'recruiting' && !gameState.offseasonState?.completed;
+    const recruitingListIds = new Set(
+        (gameState.offseasonState?.recruitingProgress?.teamRecruitingLists?.[String(team.id)] || [])
+            .map(e => String(e?.playerId))
+    );
+
+    const inbox = Array.isArray(team.scoutingInbox) ? team.scoutingInbox.slice(0, 8) : [];
+
+    container.innerHTML = `
+        <div class="space-y-4 text-xs">
+            <!-- FM-Style Delegation & General Focus Controls -->
+            <section class="rounded-lg border border-slate-300 bg-white p-4 shadow-sm space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                    <div>
+                        <h4 class="font-black text-sm uppercase tracking-wide text-slate-900">Scouting Department Controls</h4>
+                        <p class="text-[11px] text-slate-500">Delegate general scouting to staff while prioritizing players you discover across the league.</p>
+                    </div>
+                    <span class="rounded border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-[11px] font-bold text-slate-800">
+                        Weekly Scouting Hours Scheduled: <b>${totalScoutingHours}h</b>
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                    <div>
+                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">Scouting Control</span>
+                        <div class="flex rounded border border-slate-300 bg-slate-100 p-0.5">
+                            ${[
+                                ['delegate', 'Delegate'],
+                                ['guided', 'Guided'],
+                                ['direct', 'Manual']
+                            ].map(([val, lbl]) => `
+                                <button type="button" onclick="window.app_setScoutingDelegation('autonomy', '${val}')"
+                                    class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold ${autonomy === val ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}">${lbl}</button>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div>
+                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">General Scouting Focus</span>
+                        <div class="flex flex-wrap gap-1 rounded border border-slate-300 bg-slate-100 p-0.5">
+                            ${[
+                                ['all', 'All'],
+                                ['youth', 'Pee-Wee'],
+                                ['draft', 'Draft'],
+                                ['freeAgents', 'Free Agents'],
+                                ['opponents', 'Opponents']
+                            ].map(([val, lbl]) => `
+                                <button type="button" onclick="window.app_setScoutingDelegation('delegatedFocus', '${val}')"
+                                    class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold whitespace-nowrap ${delegatedFocus === val ? 'bg-indigo-700 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}">${lbl}</button>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div>
+                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">Shortlist vs. General Split</span>
+                        <div class="flex flex-wrap gap-1 rounded border border-slate-300 bg-slate-100 p-0.5">
+                            ${[
+                                ['prioritize', '70% List'],
+                                ['balanced', '50/50'],
+                                ['shortlist_only', '100% List'],
+                                ['general_only', 'General Only']
+                            ].map(([val, lbl]) => `
+                                <button type="button" onclick="window.app_setScoutingDelegation('shortlistMode', '${val}')"
+                                    class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold whitespace-nowrap ${shortlistMode === val ? 'bg-emerald-700 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}">${lbl}</button>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Two-Column Grid: Priority Shortlist (Left) + Scout Inbox (Right) -->
+            <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+                <section class="xl:col-span-8 rounded-lg border border-slate-300 bg-white shadow-sm overflow-hidden">
+                    <div class="px-3 py-2 bg-slate-900 text-white flex justify-between items-center">
+                        <span class="font-black uppercase tracking-wide text-xs">Priority Scouting Shortlist (${shortlist.length})</span>
+                        <span class="text-[10px] text-slate-300">Scouts work top-to-bottom until Level 4</span>
+                    </div>
+                    ${shortlist.length > 0 ? `
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full text-xs">
+                                <thead class="bg-slate-100 text-[10px] uppercase text-slate-600">
+                                    <tr>
+                                        <th class="py-2 px-2 text-center">#</th>
+                                        <th class="py-2 px-3 text-left">Player</th>
+                                        <th class="py-2 px-2 text-center">Team</th>
+                                        <th class="py-2 px-2 text-left">Scout Progress</th>
+                                        <th class="py-2 px-2 text-center">OFF / DEF Est.</th>
+                                        <th class="py-2 px-2 text-center">Pot</th>
+                                        <th class="py-2 px-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100">
+                                    ${shortlist.map((entry, idx) => {
+                                        const p = (gameState.players || []).find(pl => String(pl?.id) === String(entry.playerId));
+                                        if (!p) return '';
+                                        const pTeam = p.teamId ? teamsById.get(String(p.teamId)) : null;
+                                        const scouting = getFreeAgentScoutingView(team, p);
+                                        const report = Game.getTeamScoutingReport?.(team, p.id);
+                                        const pot = report?.potentialRange
+                                            ? `${report.potentialRange.bestPossible}–${report.potentialRange.worstPossible}`
+                                            : '?';
+
+                                        return `
+                                            <tr class="hover:bg-slate-50 cursor-pointer" onclick="app.openPlayerCard('${p.id}')">
+                                                <td class="py-2 px-2 text-center font-mono font-bold text-slate-400">${idx + 1}</td>
+                                                <td class="py-2 px-3">
+                                                    <span class="font-bold text-slate-900">${p.name}</span>
+                                                    <span class="block text-[10px] text-slate-500">Age ${p.age} · ${getFreeAgentDisplayPosition(team, p)}</span>
+                                                </td>
+                                                <td class="py-2 px-2 text-center" onclick="event.stopPropagation()">
+                                                    ${pTeam
+                                                        ? `<button type="button" onclick="app.openTeamCard('${pTeam.id}')" class="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:text-blue-700">${pTeam.name}</button>`
+                                                        : '<span class="text-[10px] font-bold text-emerald-700">Free Agent</span>'}
+                                                </td>
+                                                <td class="py-2 px-2 min-w-[140px]">
+                                                    <span class="font-bold ${scouting.level >= 3 ? 'text-emerald-700' : scouting.level > 0 ? 'text-blue-700' : 'text-amber-700'}">${scouting.status}</span>
+                                                    <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1">
+                                                        <div class="h-full bg-indigo-500 rounded-full" style="width:${scouting.progressToNextPercent}%"></div>
+                                                    </div>
+                                                    <span class="block text-[9px] text-slate-400 mt-0.5">${scouting.progressLabel}</span>
+                                                </td>
+                                                <td class="py-2 px-2 text-center font-mono">
+                                                    <div>${formatFreeAgentScoutingFit(scouting.offense)}</div>
+                                                    <div>${formatFreeAgentScoutingFit(scouting.defense)}</div>
+                                                </td>
+                                                <td class="py-2 px-2 text-center font-bold text-amber-700">${pot}</td>
+                                                <td class="py-2 px-3 text-right whitespace-nowrap" onclick="event.stopPropagation()">
+                                                    <div class="inline-flex items-center gap-1">
+                                                        ${isRecruiting && p.teamId == null && !recruitingListIds.has(String(p.id))
+                                                            ? `<button type="button" onclick="window.app_addPlayerToRecruitingList('${p.id}')" class="rounded bg-emerald-700 px-2 py-1 text-[9px] font-bold text-white hover:bg-emerald-800">+Recruit</button>`
+                                                            : ''}
+                                                        <button type="button" ${idx === 0 ? 'disabled' : ''} onclick="window.app_moveScoutingShortlist('${p.id}', -1)" class="rounded border border-slate-300 px-1.5 py-0.5 font-bold disabled:opacity-30">↑</button>
+                                                        <button type="button" ${idx === shortlist.length - 1 ? 'disabled' : ''} onclick="window.app_moveScoutingShortlist('${p.id}', 1)" class="rounded border border-slate-300 px-1.5 py-0.5 font-bold disabled:opacity-30">↓</button>
+                                                        <button type="button" onclick="window.app_toggleScoutingShortlist('${p.id}', 'scouting')" class="rounded border border-rose-200 px-1.5 py-0.5 font-bold text-rose-700 hover:bg-rose-50">×</button>
+                                                    </div>
+                                                </td>
+                                            </tr>`;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    ` : `
+                        <div class="p-8 text-center text-slate-400">
+                            <p class="font-bold text-slate-600">Your Scouting Shortlist is empty</p>
+                            <p class="text-[11px] mt-1">Click <b>+Scout</b> on any player in League Leaders, Player Database, or Team Pages to prioritize them here.</p>
+                        </div>
+                    `}
+                </section>
+
+                <section class="xl:col-span-4 rounded-lg border border-slate-300 bg-white shadow-sm overflow-hidden">
+                    <div class="px-3 py-2 bg-slate-800 text-white font-black uppercase tracking-wide text-xs">
+                        Latest Scout Reports
+                    </div>
+                    <div class="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                        ${inbox.length > 0 ? inbox.map(rep => `
+                            <button type="button" onclick="app.openPlayerCard('${rep.playerId}')"
+                                class="w-full p-2.5 text-left hover:bg-slate-50 flex items-center justify-between gap-2">
+                                <div class="min-w-0">
+                                    <span class="block font-bold text-slate-900 truncate">${rep.playerName}</span>
+                                    <span class="text-[10px] text-slate-500">By ${rep.coachName} · Y${rep.year} W${(rep.week ?? 0) + 1} · ${rep.source === 'shortlist' ? 'Shortlist' : 'General'}</span>
+                                </div>
+                                <span class="shrink-0 rounded bg-indigo-100 text-indigo-800 px-2 py-0.5 font-bold text-[10px]">
+                                    Lvl ${rep.previousLevel} → ${rep.level}
+                                </span>
+                            </button>
+                        `).join('') : '<p class="p-6 text-center text-slate-400 italic text-[11px]">No scouting breakthroughs logged yet. Advance a week to receive reports.</p>'}
+                    </div>
+                </section>
+            </div>
+        </div>
+    `;
+}
+
 export function renderFreeAgentsTab(gameState) {
     const container = document.getElementById('free-agents-container');
+    const scoutingContainer = document.getElementById('scouting-hub-container');
+    const filtersBar = document.getElementById('player-db-filters-bar');
+    const browseBtn = document.getElementById('player-db-tab-browse');
+    const scoutBtn = document.getElementById('player-db-tab-scouting');
+    const shortlistBadge = document.getElementById('scouting-shortlist-count');
     if (!container || !gameState) return;
+
+    if (shortlistBadge && gameState.playerTeam) {
+        shortlistBadge.textContent = ensureScoutingShortlist(gameState.playerTeam).length;
+    }
+
+    const showScouting = activePlayerDbView === 'scouting';
+    container.classList.toggle('hidden', showScouting);
+    filtersBar?.classList.toggle('hidden', showScouting);
+    scoutingContainer?.classList.toggle('hidden', !showScouting);
+
+    if (browseBtn && scoutBtn) {
+        browseBtn.className = `px-3 py-1 rounded ${!showScouting ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`;
+        scoutBtn.className = `px-3 py-1 rounded ${showScouting ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`;
+    }
+
+    if (showScouting) {
+        renderScoutingHub(gameState);
+        return;
+    }
 
     const userTeam = gameState.playerTeam;
     const posFilter = document.getElementById('fa-filter-pos')?.value || '';
@@ -3533,7 +3819,19 @@ export function renderFreeAgentsTab(gameState) {
                         recruitingRecord?.status === 'available' &&
                         recruitingRecord?.committedTeamId == null;
 
+                    const isShortlisted = !isMyPlayer && isPlayerOnScoutingShortlist(userTeam, p.id);
+                    const scoutToggleBtn = !isMyPlayer
+                        ? `<button type="button"
+                            onclick="window.app_toggleScoutingShortlist('${p.id}', 'database')"
+                            class="${isShortlisted
+                                ? 'bg-indigo-700 text-white hover:bg-indigo-800'
+                                : 'bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100'} font-bold px-2 py-1 rounded text-[10px] uppercase tracking-wider transition mr-1">
+                            ${isShortlisted ? '★ Shortlisted' : '🔭 +Scout'}
+                           </button>`
+                        : '';
+
                     let actionButton = `
+                        ${scoutToggleBtn}
                         <button
                             class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider transition"
                             onclick="app.openPlayerCard('${p.id}')">
@@ -3577,9 +3875,9 @@ export function renderFreeAgentsTab(gameState) {
                     }
 
                     const teamBadge = isMyPlayer
-                        ? `<span class="bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded text-[9px]">YOUR ROSTER</span>`
+                        ? `<button type="button" onclick="event.stopPropagation(); app.openTeamCard('${userTeam.id}')" class="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded text-[9px]">YOUR ROSTER</button>`
                         : assignedTeam
-                            ? `<span class="bg-slate-100 text-slate-700 border border-slate-200 font-semibold px-1.5 py-0.5 rounded text-[9px] truncate max-w-[110px] inline-block">${assignedTeam.name}</span>`
+                            ? `<button type="button" onclick="event.stopPropagation(); app.openTeamCard('${assignedTeam.id}')" class="bg-slate-100 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-800 text-slate-700 border border-slate-200 font-semibold px-1.5 py-0.5 rounded text-[9px] truncate max-w-[110px] inline-block">${assignedTeam.name}</button>`
                             : `<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-1.5 py-0.5 rounded text-[9px]">FREE AGENT</span>`;
 
                     return `
@@ -4690,6 +4988,51 @@ export function renderOffseasonFAPool(gameState) {
         coach => coach.remainingHours >= 2
     );
 
+    const myRosterObjects = getUIRosterObjects(gameState.playerTeam);
+    const rosterDepthAnalysis = calculateTwoWayDepthAnalysis(myRosterObjects);
+    const depthByPosition = new Map(rosterDepthAnalysis.map(item => [item.pos, item]));
+    const recruitingRosterLimit = getCurrentRosterLimit(gameState) || 18;
+    const openRosterSpots = Math.max(0, recruitingRosterLimit - myRosterObjects.length);
+    const totalActiveOffersByTeam = Object.values(progress.recruits || {}).reduce(
+        (sum, rec) => sum + (rec?.offersByTeam?.[playerTeamKey]?.status === 'active' ? 1 : 0),
+        0
+    );
+
+    const rosterNeedStripHtml = `
+        <div class="mb-3 rounded-lg border border-slate-300 bg-white p-2.5 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div class="flex flex-wrap items-center gap-2 text-[10px]">
+                    <span class="font-black uppercase tracking-wide text-slate-700">Roster Capacity & Needs</span>
+                    <span class="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono font-bold text-slate-800">
+                        Roster: ${myRosterObjects.length}/${recruitingRosterLimit} (${openRosterSpots} open)
+                    </span>
+                    <span class="rounded border ${
+                        totalActiveOffersByTeam > openRosterSpots
+                            ? 'border-amber-300 bg-amber-50 text-amber-900'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    } px-2 py-0.5 font-mono font-bold">
+                        Active Offers Out: ${totalActiveOffersByTeam}
+                    </span>
+                </div>
+                <span class="text-[9px] text-slate-500">Click any position room to filter matching prospects</span>
+            </div>
+            <div class="grid grid-cols-4 sm:grid-cols-8 gap-1.5 font-mono text-[10px]">
+                ${rosterDepthAnalysis.map(item => `
+                    <button type="button"
+                        onclick="window.app_jumpToRecruitingPositionNeed('${item.pos}')"
+                        title="${item.pos}: ${item.viableCount}/${item.ideal} viable · Starter Avg ${item.starterAvg || '--'} · ${item.status}"
+                        class="rounded border px-2 py-1 text-left transition hover:border-slate-500 ${item.badgeColor}">
+                        <div class="flex items-center justify-between gap-1">
+                            <span class="font-black font-sans">${item.pos}</span>
+                            <span class="font-bold">${item.viableCount}/${item.ideal}</span>
+                        </div>
+                        <span class="block text-[8px] font-sans truncate">${item.status}</span>
+                    </button>
+                `).join('')}
+            </div>
+        </div>
+    `;
+
     const userRecruitingListHtml = userRecruitingList.map(
         (entry, index) => {
             const playerId = String(entry?.playerId ?? '');
@@ -4819,6 +5162,20 @@ export function renderOffseasonFAPool(gameState) {
                     player
                 )
                 : entry?.position || '—';
+
+            const scouting = player
+                ? getFreeAgentScoutingView(gameState.playerTeam, player)
+                : null;
+            const intel = player
+                ? Game.getPlayerMarketIntel(player, gameState)
+                : null;
+            const rivalSuitors = Array.isArray(intel?.suitorNames) ? intel.suitorNames : [];
+            const rivalActiveOffers = Object.entries(record?.offersByTeam || {}).filter(
+                ([tid, offer]) => String(tid) !== playerTeamKey && offer?.status === 'active'
+            ).length;
+            const offNeed = scouting?.offense ? depthByPosition.get(scouting.offense.position) : null;
+            const defNeed = scouting?.defense ? depthByPosition.get(scouting.defense.position) : null;
+            const primaryNeed = depthByPosition.get(position) || offNeed || defNeed;
 
             const assignedCoachId =
                 entry?.assignedCoachId == null
@@ -5074,62 +5431,88 @@ export function renderOffseasonFAPool(gameState) {
                         </span>
                     </td>
 
-                    <!-- Prospect -->
-                    <td class="min-w-[155px] px-3 py-3">
-                        <div class="text-xs font-black text-slate-900">
+                    <!-- Prospect & Team Need -->
+                    <td class="min-w-[165px] px-3 py-3 align-top">
+                        <button type="button"
+                            onclick="app.openPlayerCard('${quickEscapeHtml(playerId)}')"
+                            class="text-left text-xs font-black text-slate-900 hover:text-blue-700 hover:underline">
                             ${quickEscapeHtml(
                                 player?.name ||
                                 entry?.playerName ||
                                 'Unknown prospect'
                             )}
-                        </div>
+                        </button>
 
-                        <div class="mt-1 flex items-center gap-2">
+                        <div class="mt-1 flex flex-wrap items-center gap-1.5">
                             <span class="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-700">
                                 ${quickEscapeHtml(position)}
                             </span>
-
                             <span class="text-[9px] text-slate-500">
-                                ${player?.age != null
-                                    ? `Age ${quickEscapeHtml(player.age)}`
-                                    : ''}
+                                ${player?.age != null ? `Age ${quickEscapeHtml(player.age)}` : ''}
                             </span>
+                            ${primaryNeed ? `
+                                <span class="rounded border px-1 py-0.5 text-[8px] font-bold ${primaryNeed.badgeColor}"
+                                    title="Your ${primaryNeed.pos} room: ${primaryNeed.viableCount}/${primaryNeed.ideal} viable · Starter Avg ${primaryNeed.starterAvg || '--'}">
+                                    Need ${primaryNeed.pos} (${primaryNeed.viableCount}/${primaryNeed.ideal})
+                                </span>
+                            ` : ''}
                         </div>
 
-                        <div class="mt-1 text-[9px] text-slate-500">
+                        <div class="mt-1 text-[9px] ${
+                            statusLabel === 'Committed to your team'
+                                ? 'font-bold text-emerald-700'
+                                : statusLabel === 'Committed elsewhere'
+                                    ? 'font-bold text-rose-700'
+                                    : 'text-slate-500'
+                        }">
                             ${quickEscapeHtml(statusLabel)}
                         </div>
                     </td>
 
-                    <!-- Interest -->
-                    <td class="w-36 px-3 py-3">
-                        <div class="flex items-center justify-between gap-2">
-                            <span class="text-[9px] font-bold uppercase text-slate-500">
-                                Interest
-                            </span>
-
-                            <span class="font-mono text-xs font-black ${
-                                interest >= 70
+                    <!-- Scouting & Fits -->
+                    <td class="min-w-[155px] px-2.5 py-3 align-top">
+                        ${scouting ? `
+                            <div class="text-[10px] font-bold ${
+                                scouting.level >= 3
                                     ? 'text-emerald-700'
-                                    : interest >= 35
-                                        ? 'text-amber-700'
-                                        : 'text-slate-700'
+                                    : scouting.level > 0
+                                        ? 'text-blue-700'
+                                        : 'text-amber-700'
+                            }">
+                                ${quickEscapeHtml(scouting.status)}
+                            </div>
+                            <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                                <div class="h-full rounded-full bg-indigo-500" style="width: ${scouting.progressToNextPercent}%"></div>
+                            </div>
+                            <div class="mt-1.5 space-y-0.5 font-mono text-[10px] text-slate-700">
+                                <div><span class="font-bold text-emerald-700">OFF:</span> ${quickEscapeHtml(formatFreeAgentScoutingFit(scouting.offense))}</div>
+                                <div><span class="font-bold text-blue-700">DEF:</span> ${quickEscapeHtml(formatFreeAgentScoutingFit(scouting.defense))}</div>
+                            </div>
+                            ${scouting.projectedRole ? `<div class="mt-0.5 text-[9px] text-slate-500">${quickEscapeHtml(scouting.projectedRole)}</div>` : ''}
+                        ` : '<span class="text-[10px] text-slate-400">Scouting unavailable</span>'}
+                    </td>
+
+                    <!-- Interest & Market -->
+                    <td class="min-w-[155px] px-3 py-3 align-top">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-[9px] font-bold uppercase text-slate-500">Interest</span>
+                            <span class="font-mono text-xs font-black ${
+                                interest >= 70 ? 'text-emerald-700' : interest >= 35 ? 'text-amber-700' : 'text-slate-700'
                             }">
                                 ${interest}/100
                             </span>
                         </div>
-
                         <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-200">
-                            <div
-                                class="h-full rounded-full ${
-                                    interest >= 70
-                                        ? 'bg-emerald-600'
-                                        : interest >= 35
-                                            ? 'bg-amber-500'
-                                            : 'bg-slate-500'
-                                }"
-                                style="width: ${interest}%">
-                            </div>
+                            <div class="h-full rounded-full ${
+                                interest >= 70 ? 'bg-emerald-600' : interest >= 35 ? 'bg-amber-500' : 'bg-slate-500'
+                            }" style="width: ${interest}%"></div>
+                        </div>
+                        <div class="mt-2 text-[9px]">
+                            ${rivalActiveOffers > 0
+                                ? `<span class="inline-block rounded border border-rose-200 bg-rose-100 px-1.5 py-0.5 font-bold text-rose-800">⚠️ ${rivalActiveOffers} Rival Offer${rivalActiveOffers === 1 ? '' : 's'}</span>`
+                                : rivalSuitors.length > 0
+                                    ? `<span class="font-bold text-amber-700">Suitors: ${quickEscapeHtml(rivalSuitors.map(n => n.replace('The ', '')).join(', '))}</span>`
+                                    : `<span class="text-slate-400">No known suitors</span>`}
                         </div>
                     </td>
 
@@ -5227,6 +5610,7 @@ export function renderOffseasonFAPool(gameState) {
     ).join('');
 
     const userRecruitingListPanel = `
+        ${rosterNeedStripHtml}
         <section class="mb-3 overflow-hidden rounded-lg border border-slate-300 bg-white">
             <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
                 <div>
@@ -5301,8 +5685,9 @@ export function renderOffseasonFAPool(gameState) {
                                     <tr class="text-[9px] font-black uppercase tracking-wide text-slate-500">
                                         <th class="px-3 py-2 text-center">Tryout</th>
                                         <th class="px-3 py-2 text-center">Rank</th>
-                                        <th class="px-3 py-2">Prospect</th>
-                                        <th class="px-3 py-2">Interest</th>
+                                        <th class="px-3 py-2">Prospect & Need</th>
+                                        <th class="px-2.5 py-2">Scouting & Fit</th>
+                                        <th class="px-3 py-2">Interest & Market</th>
                                         <th class="px-3 py-2">7-Day Staff Work</th>
                                         <th class="px-3 py-2">Recruiting Coach</th>
                                         <th class="px-3 py-2">Latest Activity</th>
@@ -5609,6 +5994,7 @@ export function renderOffseasonFAPool(gameState) {
             : 'No momentum estimate';
 
         return {
+            playerId: player.id,
             playerName: player.name || 'Unknown Prospect',
             position: getFreeAgentDisplayPosition(
                 gameState.playerTeam,
@@ -5795,9 +6181,11 @@ export function renderOffseasonFAPool(gameState) {
                                     return `
                                         <tr class="align-top hover:bg-slate-50">
                                             <td class="px-3 py-3">
-                                                <div class="text-xs font-black text-slate-900">
+                                                <button type="button"
+                                                    onclick="app.openPlayerCard('${quickEscapeHtml(entry.playerId)}')"
+                                                    class="text-left text-xs font-black text-slate-900 hover:text-blue-700 hover:underline">
                                                     ${quickEscapeHtml(entry.playerName)}
-                                                </div>
+                                                </button>
 
                                                 <div class="mt-1 flex flex-wrap items-center gap-1">
                                                     <span class="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-700">
@@ -5912,6 +6300,8 @@ export function renderOffseasonFAPool(gameState) {
         <div
             id="fa-recruiting-prospects-panel"
             class="${recruitingActiveTab === 'prospects' ? '' : 'hidden'}">
+
+            ${rosterNeedStripHtml}
 
             <!-- Contextual Filters Toolbar (Only visible in Prospects tab) -->
             <div class="mb-3 p-2.5 rounded-lg border border-slate-200 bg-slate-50 flex flex-wrap justify-between items-center gap-2">
@@ -6033,7 +6423,7 @@ export function renderOffseasonFAPool(gameState) {
                     <th class="py-2 px-2 text-center">Scout Status</th>
                     <th class="py-2 px-2 text-center">OFF Estimate</th>
                     <th class="py-2 px-2 text-center">DEF Estimate</th>
-                    <th class="py-2 px-3 text-left font-sans">Your Program</th>
+                    <th class="py-2 px-3 text-left font-sans">Your Program & Quick Actions</th>
                     <th class="py-2 px-3 text-left font-sans">Market Intel & Suitors</th>
                 </tr>
             </thead>
@@ -6138,17 +6528,28 @@ export function renderOffseasonFAPool(gameState) {
                             ? 'bg-amber-100 text-amber-900 border-amber-300'
                             : 'bg-slate-100 text-slate-600 border-slate-200';
 
+                    const onListAlready = userRecruitingListIds.has(String(p.id));
                     const marketStatusHtml = `
                         <div class="flex flex-col items-start gap-1.5">
                             <div class="flex items-center gap-1.5 flex-wrap">
                                 <span class="border ${interestColor} font-black px-1.5 py-0.5 rounded text-[9px]">
-                                    Your Interest: ${userInterest}/100
+                                    Interest: ${userInterest}/100
                                 </span>
+                                ${offerStatusHtml}
                             </div>
                             <span class="text-[9px] text-slate-500">
                                 ${investmentSummary}
                             </span>
-                            ${offerStatusHtml}
+                            <div class="flex flex-wrap gap-1 pt-0.5" onclick="event.stopPropagation()">
+                                ${onListAlready
+                                    ? `<button type="button" onclick="window.app_setRecruitingTab('list')" class="rounded border border-slate-300 bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-700 hover:bg-slate-200">On List →</button>`
+                                    : `<button type="button" onclick="window.app_quickAddOneToRecruitingList('${p.id}')" class="rounded bg-slate-900 px-2 py-0.5 text-[9px] font-bold text-white hover:bg-slate-700">+ List</button>`}
+                                <button type="button"
+                                    onclick="window.app_setRecruitingOffer('${p.id}', '${hasActiveOffer ? 'withdraw' : 'extend'}')"
+                                    class="rounded px-2 py-0.5 text-[9px] font-bold ${hasActiveOffer ? 'border border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100' : 'bg-emerald-700 text-white hover:bg-emerald-800'}">
+                                    ${hasActiveOffer ? 'Withdraw' : 'Offer Spot'}
+                                </button>
+                            </div>
                         </div>
                     `;
 
@@ -6453,18 +6854,6 @@ window.app_setRecruitingOffer = function(
     Game.saveGameState?.('backyardFootballGameState');
 
     renderOffseasonFAScreen(getGameState());
-
-    showModal(
-        action === 'extend'
-            ? 'Roster Spot Offered'
-            : 'Roster Invitation Withdrawn',
-        `<p>${escapeHtml(
-            result.message ||
-            'The recruiting offer has been updated.'
-        )}</p>`,
-        null,
-        'Continue'
-    );
 };
 
 window.app_setRecruitingTab = function(tab) {
@@ -7159,6 +7548,24 @@ function savePlayerRecruitingList(context) {
         getGameState() || context.gs
     );
 }
+
+window.app_quickAddOneToRecruitingList = function(playerId) {
+    const context = getPlayerRecruitingListContext();
+    if (!context) return;
+    const id = String(playerId ?? '');
+    if (!id || context.list.some(e => String(e?.playerId) === id)) return;
+
+    const currentDay = Math.max(1, Math.floor(Number(context.gs.offseasonState?.recruitingDay) || 1));
+    context.list.push({
+        playerId: id,
+        assignedCoachId: null,
+        addedDay: currentDay,
+        lastWorkedDay: null,
+        lastCoachId: null,
+        lastAction: null
+    });
+    savePlayerRecruitingList(context);
+};
 
 window.app_addPlayerToRecruitingList = function(playerId) {
     const context = getPlayerRecruitingListContext();
@@ -10027,50 +10434,63 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         `;
     };
 
+    window.app_openDeptPositionPriorityModal = department => {
+        const modalHtml = `
+            <div class="space-y-2 text-left text-xs">
+                <p class="text-slate-600">Set priority levels for each position group in <b>${department}</b>.</p>
+                <div class="space-y-1.5">
+                    ${strategyPositions.map(position => {
+                        const current = getStrategyPriority(department, position);
+                        return `
+                            <div class="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white p-2">
+                                <span class="font-black text-slate-900 w-8">${position}</span>
+                                <div class="flex flex-1 gap-1">
+                                    ${strategyPriorityOptions.map(([val, lbl]) => `
+                                        <button type="button"
+                                            onclick="app_setTeamStrategySetting('${department}', 'positionPriority', '${position}', '${val}'); window.app_openDeptPositionPriorityModal('${department}');"
+                                            class="flex-1 rounded border px-2 py-1 text-[10px] font-bold ${
+                                                current === val
+                                                    ? (val === 'must' ? 'bg-emerald-700 text-white border-emerald-700'
+                                                        : val === 'ignore' ? 'bg-rose-700 text-white border-rose-700'
+                                                        : 'bg-slate-900 text-white border-slate-900')
+                                                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                            }">${lbl.replace(' priority', '').replace(' prioritize', '')}</button>
+                                    `).join('')}
+                                </div>
+                            </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        showModal(`${department.toUpperCase()} Position Priorities`, modalHtml, null, null, null, 'Done');
+    };
+
     const renderStrategyPositionControls = department => {
-        const shortLabels = {
-            must: 'Must',
-            high: 'High',
-            normal: 'Norm',
-            monitor: 'Mon',
-            ignore: 'Skip'
+        const styleByVal = {
+            must: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+            high: 'border-blue-300 bg-blue-50 text-blue-900',
+            normal: 'border-slate-200 bg-slate-50 text-slate-600',
+            monitor: 'border-amber-300 bg-amber-50 text-amber-900',
+            ignore: 'border-rose-300 bg-rose-50 text-rose-800'
         };
 
         return `
-            <div class="grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
-                ${strategyPositions.map(position => {
-                    const currentValue = getStrategyPriority(
-                        department,
-                        position
-                    );
-
-                    return `
-                        <div class="flex items-center justify-between gap-1.5 rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
-                            <span class="text-[10px] font-black text-slate-800 w-7 shrink-0">${position}</span>
-                            <div class="flex flex-1 rounded border border-slate-200 bg-white p-0.5 gap-0.5" role="group" aria-label="${position} priority">
-                                ${strategyPriorityOptions.map(([value, fullLabel]) => {
-                                    const active = currentValue === value;
-                                    return `
-                                        <button type="button"
-                                            title="${fullLabel}"
-                                            aria-pressed="${active}"
-                                            onclick="app_setTeamStrategySetting('${department}', 'positionPriority', '${position}', '${value}')"
-                                            class="flex-1 rounded-sm px-1 py-0.5 text-[9px] font-bold transition ${
-                                                active
-                                                    ? (value === 'must'
-                                                        ? 'bg-emerald-700 text-white'
-                                                        : value === 'ignore'
-                                                            ? 'bg-rose-700 text-white'
-                                                            : 'bg-slate-900 text-white')
-                                                    : 'text-slate-500 hover:bg-slate-100'
-                                            }">
-                                            ${shortLabels[value] || value}
-                                        </button>`;
-                                }).join('')}
-                            </div>
-                        </div>
-                    `;
-                }).join('')}
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex flex-wrap gap-1.5">
+                    ${strategyPositions.map(pos => {
+                        const val = getStrategyPriority(department, pos);
+                        return `
+                            <button type="button"
+                                onclick="window.app_openDeptPositionPriorityModal('${department}')"
+                                class="rounded border px-2 py-1 text-[10px] font-bold ${styleByVal[val] || styleByVal.normal}">
+                                ${pos}: <span class="uppercase">${val}</span>
+                            </button>`;
+                    }).join('')}
+                </div>
+                <button type="button"
+                    onclick="window.app_openDeptPositionPriorityModal('${department}')"
+                    class="rounded border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-800 hover:bg-slate-100">
+                    Edit All →
+                </button>
             </div>
         `;
     };
@@ -11252,11 +11672,15 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         }
     };
 
-    let activeStaffHubTab =
-        container.querySelector(
-            '.staff-hub-tab-btn.bg-slate-900'
-        )?.dataset.staffTab || 'overview';
-    if (activeStaffHubTab === 'staff') activeStaffHubTab = 'overview';
+    const domActiveStaffTab = container.querySelector(
+        '.staff-hub-tab-btn.bg-slate-900'
+    )?.dataset.staffTab;
+    if (domActiveStaffTab) {
+        activeStaffHubTab = domActiveStaffTab === 'staff' ? 'overview' : domActiveStaffTab;
+    }
+    if (!['overview', 'priorities', 'advanced'].includes(activeStaffHubTab)) {
+        activeStaffHubTab = 'overview';
+    }
 
     window.app_switchStaffTab = tab => {
         const normalizedTab = tab === 'staff' ? 'overview' : tab;
@@ -16163,6 +16587,10 @@ window.app_changeFormation = function(side, newKey) {
     renderDepthChartSide(side, gs);
     renderDepthOrderPane(gs);
     renderPositionalOveralls();
+    const playbookPane = document.getElementById('playbook-manager-container');
+    if (playbookPane && !playbookPane.classList.contains('hidden')) {
+        renderPlaybookManager(gs);
+    }
 };
 
 function renderPositionalOveralls() {
@@ -16642,10 +17070,10 @@ export function renderScheduleTab(gameState) {
                     const centerBadge = isPlayed
                         ? `<span class="text-[9px] bg-slate-200 text-slate-700 font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">Final</span>`
                         : `<span class="text-gray-400 font-mono text-[10px]">@</span>`;
-                    return `<div class="bg-white p-2 rounded border border-gray-200 shadow-sm flex justify-between items-center">
-                        <span class="font-semibold text-gray-800 flex items-center">${g.away.name}${awayScoreBadge}</span>
+                    return `<div class="bg-white p-2 rounded border border-gray-200 shadow-sm flex justify-between items-center gap-2">
+                        <button type="button" onclick="app.openTeamCard('${g.away?.id}')" class="font-semibold text-gray-800 hover:text-blue-700 hover:underline flex items-center text-left">${g.away.name}${awayScoreBadge}</button>
                         ${centerBadge}
-                        <span class="font-semibold text-gray-800 flex items-center">${g.home.name}${homeScoreBadge}</span>
+                        <button type="button" onclick="app.openTeamCard('${g.home?.id}')" class="font-semibold text-gray-800 hover:text-blue-700 hover:underline flex items-center text-right">${g.home.name}${homeScoreBadge}</button>
                     </div>`;
                 }).join('')}
             </div></div>`;
@@ -16704,12 +17132,77 @@ export function renderStandingsTab(gameState) {
         return g > 0 ? (w + ties * 0.5) / g : 0;
     };
 
+    // Build PF, PA, and per-tier statistical ranks (with fallback for older mid-season saves)
+    const teamMetricsMap = new Map();
+    const playedSchedule = Array.isArray(gameState.schedule)
+        ? gameState.schedule.filter(m => m && (m.played || (m.homeScore != null && m.awayScore != null)))
+        : [];
+
+    activeTier.teams.forEach(t => {
+        const stored = t.seasonTeamStats;
+        const hasStored = (stored?.gamesPlayed || 0) > 0;
+        let pf = stored?.pointsFor || 0;
+        let pa = stored?.pointsAgainst || 0;
+        let passYds = stored?.passYards || 0;
+        let rushYds = stored?.rushYards || 0;
+        const passAllowed = hasStored ? (stored?.passYardsAllowed || 0) : null;
+        const rushAllowed = hasStored ? (stored?.rushYardsAllowed || 0) : null;
+
+        if (!hasStored) {
+            playedSchedule.forEach(m => {
+                if (String(m.home?.id) === String(t.id)) {
+                    pf += Number(m.homeScore) || 0;
+                    pa += Number(m.awayScore) || 0;
+                } else if (String(m.away?.id) === String(t.id)) {
+                    pf += Number(m.awayScore) || 0;
+                    pa += Number(m.homeScore) || 0;
+                }
+            });
+            const roster = (gameState.players || []).filter(p => String(p?.teamId) === String(t.id));
+            passYds = roster.reduce((s, p) => s + (Number(p?.seasonStats?.passYards) || 0), 0);
+            rushYds = roster.reduce((s, p) => s + (Number(p?.seasonStats?.rushYards) || 0), 0);
+        }
+
+        teamMetricsMap.set(String(t.id), {
+            pf,
+            pa,
+            diff: pf - pa,
+            passYds,
+            rushYds,
+            passAllowed,
+            rushAllowed
+        });
+    });
+
+    const hasGamesPlayed = activeTier.teams.some(
+        t => ((t.wins || 0) + (t.losses || 0) + (t.ties || 0)) > 0
+    );
+
+    const computeRanks = (getter, ascending = false) => {
+        const map = new Map();
+        if (!hasGamesPlayed) return map;
+        const entries = activeTier.teams
+            .map(t => ({ id: String(t.id), val: getter(teamMetricsMap.get(String(t.id))) }))
+            .filter(e => e.val !== null && e.val !== undefined);
+        entries.sort((a, b) => ascending ? a.val - b.val : b.val - a.val);
+        entries.forEach((e, idx) => map.set(e.id, idx + 1));
+        return map;
+    };
+
+    const passOffRanks = computeRanks(m => m.passYds, false);
+    const rushOffRanks = computeRanks(m => m.rushYds, false);
+    const passDefRanks = computeRanks(m => m.passAllowed, true);
+    const rushDefRanks = computeRanks(m => m.rushAllowed, true);
+
     const sortedTeams = [...activeTier.teams].sort((a, b) => {
         const pctDiff = getWinPct(b) - getWinPct(a);
         if (Math.abs(pctDiff) > 0.0001) return pctDiff;
         const winsDiff = (b.wins || 0) - (a.wins || 0);
         if (winsDiff !== 0) return winsDiff;
-        return (a.losses || 0) - (b.losses || 0);
+        const mA = teamMetricsMap.get(String(a.id));
+        const mB = teamMetricsMap.get(String(b.id));
+        if ((mB?.diff || 0) !== (mA?.diff || 0)) return (mB?.diff || 0) - (mA?.diff || 0);
+        return (mB?.pf || 0) - (mA?.pf || 0);
     });
 
     // 1. Find Standout Players in this specific league
@@ -16752,8 +17245,12 @@ export function renderStandingsTab(gameState) {
     const leaderTeam = sortedTeams[0];
     let parkChatter = "Preseason buzz is building across the blacktop.";
     if (leaderTeam && (leaderTeam.wins || 0) > 0) {
-        parkChatter = `🔥 <b>${leaderTeam.name}</b> are setting the pace in the ${activeTier.subtitle}, coached by <b>${leaderTeam.coach?.name || 'Coach'}</b>!`;
-    } else if (leaderTeam) {
+        const teamBtn = `<button type="button" onclick="app.openTeamCard('${leaderTeam.id}')" class="font-bold underline hover:text-amber-200">${leaderTeam.name}</button>`;
+        const coachBtn = leaderTeam.coach?.id != null
+            ? `<button type="button" onclick="app.openCoachCard('${leaderTeam.coach.id}')" class="font-bold underline hover:text-amber-200">${leaderTeam.coach.name || 'Coach'}</button>`
+            : `<b>${leaderTeam.coach?.name || 'Coach'}</b>`;
+        parkChatter = `🔥 ${teamBtn} are setting the pace in the ${activeTier.subtitle}, coached by ${coachBtn}!`;
+    }else if (leaderTeam) {
         parkChatter = `Every team in <b>${activeTier.name}</b> starts with a clean slate. Who will claim the playground throne?`;
     }
 
@@ -16803,15 +17300,23 @@ export function renderStandingsTab(gameState) {
                     <span class="text-[10px] text-slate-300 font-mono">${sortedTeams.length} Franchises</span>
                 </div>
                 <table class="min-w-full text-xs font-mono">
+                    <div class="overflow-x-auto">
+                <table class="min-w-full text-xs font-mono">
                     <thead class="bg-slate-100 text-slate-700 uppercase text-[10px] select-none">
                         <tr>
                             <th class="py-2 px-3 text-left">Team</th>
-                            <th class="py-2 px-2 text-center">W</th>
-                            <th class="py-2 px-2 text-center">L</th>
-                            <th class="py-2 px-2 text-center">T</th>
-                            <th class="py-2 px-2 text-center">PCT</th>
-                            <th class="py-2 px-2 text-center text-slate-800 font-sans">Power (OVR)</th>
-                            <th class="py-2 px-2 text-center text-slate-800 font-sans">Cred</th>
+                            <th class="py-2 px-1.5 text-center">W</th>
+                            <th class="py-2 px-1.5 text-center">L</th>
+                            <th class="py-2 px-1.5 text-center">T</th>
+                            <th class="py-2 px-1.5 text-center">PCT</th>
+                            <th class="py-2 px-1.5 text-center" title="Points For">PF</th>
+                            <th class="py-2 px-1.5 text-center" title="Points Against">PA</th>
+                            <th class="py-2 px-1.5 text-center" title="Point Differential">DIFF</th>
+                            <th class="py-2 px-1.5 text-center text-blue-700" title="Passing Offense Rank (Yards)">PASS</th>
+                            <th class="py-2 px-1.5 text-center text-amber-700" title="Rushing Offense Rank (Yards)">RUSH</th>
+                            <th class="py-2 px-1.5 text-center text-emerald-700" title="Pass Defense Rank (Fewest Yards Allowed)">P-DEF</th>
+                            <th class="py-2 px-1.5 text-center text-indigo-700" title="Rush Defense Rank (Fewest Yards Allowed)">R-DEF</th>
+                            <th class="py-2 px-1.5 text-center text-slate-800 font-sans">OVR</th>
                             <th class="py-2 px-3 text-right font-sans">Status</th>
                         </tr>
                     </thead>
@@ -16821,6 +17326,18 @@ export function renderStandingsTab(gameState) {
         const total = (t.wins || 0) + (t.losses || 0) + (t.ties || 0);
         const pct = total > 0 ? getWinPct(t).toFixed(3).replace(/^0+/, '') : '.000';
         const teamOvr = Game.getTeamOverall(t);
+        const m = teamMetricsMap.get(String(t.id)) || { pf: 0, pa: 0, diff: 0, passYds: 0, rushYds: 0 };
+        const diffSign = m.diff > 0 ? `+${m.diff}` : `${m.diff}`;
+        const formatRankCell = (rank, rawVal, unit) => {
+            if (!rank) return '<span class="text-slate-300">—</span>';
+            const tierSize = activeTier.teams.length || 10;
+            const cls = rank <= 3
+                ? 'bg-emerald-50 text-emerald-800 font-black border border-emerald-200'
+                : rank >= tierSize - 2
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                    : 'text-slate-700 font-bold';
+            return `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] ${cls}" title="${rawVal ?? 0} ${unit}">#${rank}</span>`;
+        };
 
         let borderIndicator = '';
         let statusBadge = '<span class="text-slate-400 font-sans text-[10px]">-</span>';
@@ -16836,20 +17353,26 @@ export function renderStandingsTab(gameState) {
         }
 
         return `
-                            <tr class="${borderIndicator} ${isMe ? 'bg-amber-50 font-bold' : 'hover:bg-slate-50 transition'}">
-                                <td class="py-2 px-3 font-sans truncate flex items-center gap-2">
-                                    <span class="w-4 font-mono text-[10px] text-slate-400">${i + 1}.</span>
+                            <tr class="${borderIndicator} ${isMe ? 'bg-amber-50 font-bold' : 'hover:bg-slate-50 transition'} cursor-pointer" onclick="app.openTeamCard('${t.id}')">
+                                <td class="py-2 px-3 font-sans truncate flex items-center gap-2 max-w-[175px]">
+                                    <span class="w-4 font-mono text-[10px] text-slate-400 shrink-0">${i + 1}.</span>
                                     <span class="w-2.5 h-2.5 rounded-full shrink-0 border border-slate-300" style="background-color: ${t.primaryColor || '#333'}"></span>
                                     <span class="truncate ${isMe ? 'text-amber-900 font-black' : 'text-slate-900 font-semibold'}">${t.name}</span>
-                                    ${isMe ? '<span class="bg-amber-200 text-amber-900 px-1 rounded text-[8px] font-black uppercase">YOU</span>' : ''}
+                                    ${isMe ? '<span class="bg-amber-200 text-amber-900 px-1 rounded text-[8px] font-black uppercase shrink-0">YOU</span>' : ''}
                                 </td>
-                                <td class="py-2 px-2 text-center font-black ${t.wins > 0 ? 'text-slate-900' : 'text-slate-400'}">${t.wins || 0}</td>
-                                <td class="py-2 px-2 text-center text-slate-500">${t.losses || 0}</td>
-                                <td class="py-2 px-2 text-center text-slate-500">${t.ties || 0}</td>
-                                <td class="py-2 px-2 text-center font-bold text-slate-700">${pct}</td>
-                                <td class="py-2 px-2 text-center font-bold text-slate-800">${teamOvr}</td>
-                                <td class="py-2 px-2 text-center text-slate-600">${t.socialProfile?.streetCred || 50}</td>
-                                <td class="py-2 px-3 text-right">${statusBadge}</td>
+                                <td class="py-2 px-1.5 text-center font-black ${t.wins > 0 ? 'text-slate-900' : 'text-slate-400'}">${t.wins || 0}</td>
+                                <td class="py-2 px-1.5 text-center text-slate-500">${t.losses || 0}</td>
+                                <td class="py-2 px-1.5 text-center text-slate-500">${t.ties || 0}</td>
+                                <td class="py-2 px-1.5 text-center font-bold text-slate-700">${pct}</td>
+                                <td class="py-2 px-1.5 text-center text-slate-800 font-semibold">${m.pf}</td>
+                                <td class="py-2 px-1.5 text-center text-slate-600">${m.pa}</td>
+                                <td class="py-2 px-1.5 text-center font-bold ${m.diff > 0 ? 'text-emerald-700' : m.diff < 0 ? 'text-rose-700' : 'text-slate-500'}">${diffSign}</td>
+                                <td class="py-2 px-1.5 text-center">${formatRankCell(passOffRanks.get(String(t.id)), m.passYds, 'Pass Yds')}</td>
+                                <td class="py-2 px-1.5 text-center">${formatRankCell(rushOffRanks.get(String(t.id)), m.rushYds, 'Rush Yds')}</td>
+                                <td class="py-2 px-1.5 text-center">${formatRankCell(passDefRanks.get(String(t.id)), m.passAllowed, 'Pass Yds Allowed')}</td>
+                                <td class="py-2 px-1.5 text-center">${formatRankCell(rushDefRanks.get(String(t.id)), m.rushAllowed, 'Rush Yds Allowed')}</td>
+                                <td class="py-2 px-1.5 text-center font-bold text-slate-800">${teamOvr}</td>
+                                <td class="py-2 px-3 text-right whitespace-nowrap">${statusBadge}</td>
                             </tr>`;
     }).join('')}
                     </tbody>
@@ -16870,33 +17393,33 @@ export function renderStandingsTab(gameState) {
 
                     <div class="space-y-2.5 text-xs">
                         <!-- Top Passer -->
-                        <div class="p-2 bg-slate-50 rounded border border-slate-200 cursor-pointer hover:border-amber-400 transition" onclick="app.openPlayerCard('${topPasser?.id}')">
+                        <div class="p-2 bg-slate-50 rounded border border-slate-200 ${topPasser ? 'cursor-pointer hover:border-amber-400' : ''} transition" ${topPasser ? `onclick="app.openPlayerCard('${topPasser.id}')"` : ''}>
                             <span class="text-[9px] font-black uppercase text-blue-600 block mb-0.5">${hasPlayedGames ? 'Air General (Passing)' : '⭐ Preseason QB to Watch'}</span>
                             <div class="flex justify-between items-center">
                                 <span class="font-bold text-slate-900 truncate">${topPasser?.name || 'No player'}</span>
                                 <span class="font-mono font-bold text-slate-700">${passerMetricLabel}</span>
                             </div>
-                            <span class="text-[10px] text-slate-500">${topPasser ? gameState.teams.find(t => t.id === topPasser.teamId)?.name : '-'}</span>
+                            ${topPasser?.teamId ? `<button type="button" onclick="event.stopPropagation(); app.openTeamCard('${topPasser.teamId}')" class="text-[10px] text-slate-500 hover:text-blue-700 hover:underline">${gameState.teams.find(t => t.id === topPasser.teamId)?.name || '-'}</button>` : '<span class="text-[10px] text-slate-500">-</span>'}
                         </div>
 
                         <!-- Top Rusher -->
-                        <div class="p-2 bg-slate-50 rounded border border-slate-200 cursor-pointer hover:border-amber-400 transition" onclick="app.openPlayerCard('${topRusher?.id}')">
+                        <div class="p-2 bg-slate-50 rounded border border-slate-200 ${topRusher ? 'cursor-pointer hover:border-amber-400' : ''} transition" ${topRusher ? `onclick="app.openPlayerCard('${topRusher.id}')"` : ''}>
                             <span class="text-[9px] font-black uppercase text-amber-600 block mb-0.5">${hasPlayedGames ? 'Ground Enforcer (Rushing)' : '⭐ Preseason RB to Watch'}</span>
                             <div class="flex justify-between items-center">
                                 <span class="font-bold text-slate-900 truncate">${topRusher?.name || 'No player'}</span>
                                 <span class="font-mono font-bold text-slate-700">${rusherMetricLabel}</span>
                             </div>
-                            <span class="text-[10px] text-slate-500">${topRusher ? gameState.teams.find(t => t.id === topRusher.teamId)?.name : '-'}</span>
+                            ${topRusher?.teamId ? `<button type="button" onclick="event.stopPropagation(); app.openTeamCard('${topRusher.teamId}')" class="text-[10px] text-slate-500 hover:text-blue-700 hover:underline">${gameState.teams.find(t => t.id === topRusher.teamId)?.name || '-'}</button>` : '<span class="text-[10px] text-slate-500">-</span>'}
                         </div>
 
                         <!-- Top Defender -->
-                        <div class="p-2 bg-slate-50 rounded border border-slate-200 cursor-pointer hover:border-amber-400 transition" onclick="app.openPlayerCard('${topDefender?.id}')">
+                        <div class="p-2 bg-slate-50 rounded border border-slate-200 ${topDefender ? 'cursor-pointer hover:border-amber-400' : ''} transition" ${topDefender ? `onclick="app.openPlayerCard('${topDefender.id}')"` : ''}>
                             <span class="text-[9px] font-black uppercase text-rose-600 block mb-0.5">${hasPlayedGames ? 'Defensive Anchor (Tackles)' : '⭐ Preseason Defender to Watch'}</span>
                             <div class="flex justify-between items-center">
                                 <span class="font-bold text-slate-900 truncate">${topDefender?.name || 'No player'}</span>
                                 <span class="font-mono font-bold text-slate-700">${defenderMetricLabel}</span>
                             </div>
-                            <span class="text-[10px] text-slate-500">${topDefender ? gameState.teams.find(t => t.id === topDefender.teamId)?.name : '-'}</span>
+                            ${topDefender?.teamId ? `<button type="button" onclick="event.stopPropagation(); app.openTeamCard('${topDefender.teamId}')" class="text-[10px] text-slate-500 hover:text-blue-700 hover:underline">${gameState.teams.find(t => t.id === topDefender.teamId)?.name || '-'}</button>` : '<span class="text-[10px] text-slate-500">-</span>'}
                         </div>
                     </div>
                 </div>
@@ -17228,6 +17751,8 @@ export function renderPlayerStatsTab(gameState) {
             const stats = player.seasonStats || {};
             const team = teamById.get(String(player.teamId));
             const pos = player.pos || estimateBestPosition(player);
+            const isOwnPlayer = gameState.playerTeam && String(player.teamId) === String(gameState.playerTeam.id);
+            const isShortlisted = !isOwnPlayer && isPlayerOnScoutingShortlist(gameState.playerTeam, player.id);
 
             const leagueName = !team
                 ? '—'
@@ -17251,10 +17776,22 @@ export function renderPlayerStatsTab(gameState) {
                 <tr class="hover:bg-slate-50 cursor-pointer transition"
                     onclick="app.openPlayerCard('${player.id}')">
                     <td class="py-1.5 px-3 font-semibold text-slate-900 whitespace-nowrap">
-                        ${player.name}
+                        <div class="flex items-center justify-between gap-2">
+                            <span>${player.name}</span>
+                            ${!isOwnPlayer ? `
+                                <button type="button"
+                                    onclick="event.stopPropagation(); window.app_toggleScoutingShortlist('${player.id}', 'stats')"
+                                    title="${isShortlisted ? 'Remove from Scouting Shortlist' : 'Prioritize in Scouting Shortlist'}"
+                                    class="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold ${isShortlisted ? 'bg-indigo-700 text-white' : 'border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100'}">
+                                    ${isShortlisted ? '★ Scout' : '+Scout'}
+                                </button>
+                            ` : ''}
+                        </div>
                     </td>
                     <td class="py-1.5 px-3 text-slate-700 whitespace-nowrap">
-                        ${team?.name || '—'}
+                        ${team
+                            ? `<button type="button" onclick="event.stopPropagation(); app.openTeamCard('${team.id}')" class="hover:text-blue-700 hover:underline text-left font-medium">${team.name}</button>`
+                            : '—'}
                     </td>
                     <td class="py-1.5 px-3 text-slate-500 whitespace-nowrap text-[11px]">
                         ${leagueName}
@@ -18699,10 +19236,16 @@ export function renderPlaybookManager(gameState) {
     const activeOffKeys = [...BASICS_OFF, ...team.gameplan.installedOffense];
     const activeDefKeys = [...BASICS_DEF, ...team.gameplan.installedDefense];
 
-    // Active Unit Switcher ('offense' vs 'defense') & Library Filter State
+    // Active View ('plays' vs 'clipboard'), Unit ('offense' vs 'defense') & Filter State
+    window._activePlaybookView = window._activePlaybookView || 'plays';
     window._activePlaybookUnit = window._activePlaybookUnit || 'offense';
     window._activePlaybookTabOff = window._activePlaybookTabOff || 'all';
     window._activePlaybookTabDef = window._activePlaybookTabDef || 'all';
+
+    window.app_setPlaybookView = (view) => {
+        window._activePlaybookView = view;
+        renderPlaybookManager(gameState);
+    };
 
     window.app_setPlaybookUnit = (unit) => {
         window._activePlaybookUnit = unit;
@@ -18741,12 +19284,62 @@ export function renderPlaybookManager(gameState) {
         saveGameState();
     };
 
-    const offAvailable = Object.entries(offensivePlaybook || {}).filter(([k]) => k !== 'Punt_Punt' && !BASICS_OFF.includes(k));
+const offAvailable = Object.entries(offensivePlaybook || {}).filter(([k]) => k !== 'Punt_Punt' && !BASICS_OFF.includes(k));
     const defAvailable = Object.entries(defensivePlaybook || {}).filter(([k]) => k !== 'PuntReturn_Classic' && !BASICS_DEF.includes(k));
 
+    const showClipboard = window._activePlaybookView === 'clipboard';
+    const activeFormationMap = isOffense ? offenseFormations : defenseFormations;
+    const activeFormationKey = isOffense ? (team.formations?.offense || 'Balanced') : (team.formations?.defense || '3-2-3');
+
+    const formationBarHtml = Object.entries(activeFormationMap)
+        .filter(([k]) => k !== 'Punt' && k !== 'Punt_Return')
+        .map(([k, form]) => `
+            <button type="button"
+                onclick="window.app_changeFormation('${isOffense ? 'offense' : 'defense'}', '${k}')"
+                class="px-2 py-1 rounded text-[10px] font-bold border transition ${
+                    k === activeFormationKey
+                        ? (isOffense ? 'bg-blue-900 text-white border-blue-950 shadow-sm' : 'bg-rose-900 text-white border-rose-950 shadow-sm')
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                }">
+                ${form.name || k}
+            </button>
+        `).join('');
+
+    const gpAutonomy = String(
+        team.teamInstructions?.departments?.gameplan?.autonomy ??
+        (team.gameplan?.delegateGameplan ? 'delegate' : 'guided')
+    ).toLowerCase();
+
     container.innerHTML = `
-        <div class="space-y-4 text-xs font-sans pb-6">
-            
+        <div class="space-y-3 text-xs font-sans pb-6">
+            <!-- Compact Top Toolbar -->
+            <div class="bg-slate-900 text-white p-3 rounded flex flex-wrap justify-between items-center gap-2 shadow-sm">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <div class="flex bg-slate-950 p-0.5 rounded border border-slate-700 gap-0.5">
+                        <button type="button" onclick="app_setPlaybookView('plays')"
+                            class="px-3 py-1.5 rounded text-xs font-black uppercase ${!showClipboard ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-300 hover:text-white'}">
+                            📖 Playbook (12)
+                        </button>
+                        <button type="button" onclick="app_setPlaybookView('clipboard')"
+                            class="px-3 py-1.5 rounded text-xs font-black uppercase ${showClipboard ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-300 hover:text-white'}">
+                            🎛️ Situational Sliders
+                        </button>
+                    </div>
+                    <span class="text-[11px] text-slate-400 hidden sm:inline">4 Locked Fundamentals + 8 Custom Napkin Slots</span>
+                </div>
+
+                ${!showClipboard ? `
+                <div class="flex bg-slate-950 p-0.5 rounded border border-slate-700 gap-1">
+                    <button type="button" class="px-3 py-1.5 rounded text-xs font-black uppercase tracking-wider transition ${isOffense ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}" onclick="app_setPlaybookUnit('offense')">
+                        🏈 Offense (${4 + team.gameplan.installedOffense.length}/12)
+                    </button>
+                    <button type="button" class="px-3 py-1.5 rounded text-xs font-black uppercase tracking-wider transition ${!isOffense ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}" onclick="app_setPlaybookUnit('defense')">
+                        🛡️ Defense (${4 + team.gameplan.installedDefense.length}/12)
+                    </button>
+                </div>` : ''}
+            </div>
+
+            ${showClipboard ? `
             <!-- SIDELINE CLIPBOARD (SITUATIONAL TENDENCIES) -->
             <div class="bg-white border border-slate-300 rounded p-4 shadow-sm space-y-4">
                 <div class="flex justify-between items-center border-b border-slate-200 pb-2">
@@ -18759,103 +19352,49 @@ export function renderPlaybookManager(gameState) {
                         <button type="button" aria-pressed="${isGM}" onclick="app_updateClipboard('playcaller', 'GM')" class="rounded-sm px-2 py-1.5 text-[10px] font-bold ${isGM ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">GM</button>
                     </div>
                 </div>
-
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 ${sliderOpac}">
-                    <!-- Offense Early Downs -->
                     <div>
-                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1">
-                            <span>Air it Out</span>
-                            <span>Early Downs (1st & 2nd)</span>
-                            <span>Ground & Pound</span>
-                        </div>
-                        <input type="range" min="0" max="100" value="${sit.earlyDownTendency}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-500" ${disabledAttr}
-                            onchange="app_updateClipboard('earlyDownTendency', this.value)" oninput="document.getElementById('val-edt').textContent = this.value + '% Run'">
+                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1"><span>Air it Out</span><span>Early Downs (1st &amp; 2nd)</span><span>Ground &amp; Pound</span></div>
+                        <input type="range" min="0" max="100" value="${sit.earlyDownTendency}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-500" ${disabledAttr} onchange="app_updateClipboard('earlyDownTendency', this.value)" oninput="document.getElementById('val-edt').textContent = this.value + '% Run'">
                         <div class="text-center text-[10px] font-mono text-slate-600 mt-0.5" id="val-edt">${sit.earlyDownTendency}% Run</div>
                     </div>
-
-                    <!-- Offense 3rd Down -->
                     <div>
-                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1">
-                            <span>Safe / Draws</span>
-                            <span>3rd & Long Aggression</span>
-                            <span>Playground Hero</span>
-                        </div>
-                        <input type="range" min="0" max="100" value="${sit.thirdAndLongAggressiveness}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-500" ${disabledAttr}
-                            onchange="app_updateClipboard('thirdAndLongAggressiveness', this.value)" oninput="document.getElementById('val-3rd').textContent = this.value + '% Aggro'">
+                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1"><span>Safe / Draws</span><span>3rd &amp; Long Aggression</span><span>Playground Hero</span></div>
+                        <input type="range" min="0" max="100" value="${sit.thirdAndLongAggressiveness}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-500" ${disabledAttr} onchange="app_updateClipboard('thirdAndLongAggressiveness', this.value)" oninput="document.getElementById('val-3rd').textContent = this.value + '% Aggro'">
                         <div class="text-center text-[10px] font-mono text-slate-600 mt-0.5" id="val-3rd">${sit.thirdAndLongAggressiveness}% Aggro</div>
                     </div>
-
-                    <!-- 4th Down Bravery -->
                     <div>
-                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1">
-                            <span>Always Punt</span>
-                            <span>4th Down Bravery</span>
-                            <span>Riverboat Gambler</span>
-                        </div>
-                        <input type="range" min="0" max="100" value="${sit.fourthDownBravery}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500" ${disabledAttr}
-                            onchange="app_updateClipboard('fourthDownBravery', this.value)" oninput="document.getElementById('val-4th').textContent = this.value + '% Gambler'">
+                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1"><span>Always Punt</span><span>4th Down Bravery</span><span>Riverboat Gambler</span></div>
+                        <input type="range" min="0" max="100" value="${sit.fourthDownBravery}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500" ${disabledAttr} onchange="app_updateClipboard('fourthDownBravery', this.value)" oninput="document.getElementById('val-4th').textContent = this.value + '% Gambler'">
                         <div class="text-center text-[10px] font-mono text-slate-600 mt-0.5" id="val-4th">${sit.fourthDownBravery}% Gambler</div>
                     </div>
-
-                    <!-- Defense Aggressiveness -->
                     <div>
-                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1">
-                            <span>Soft Zone / Prevent</span>
-                            <span>Defense Aggression</span>
-                            <span>Heavy Blitz / Man</span>
-                        </div>
-                        <input type="range" min="0" max="100" value="${sit.defenseAggressiveness}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-rose-500" ${disabledAttr}
-                            onchange="app_updateClipboard('defenseAggressiveness', this.value)" oninput="document.getElementById('val-def').textContent = this.value + '% Blitz'">
+                        <div class="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-1"><span>Soft Zone / Prevent</span><span>Defense Aggression</span><span>Heavy Blitz / Man</span></div>
+                        <input type="range" min="0" max="100" value="${sit.defenseAggressiveness}" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-rose-500" ${disabledAttr} onchange="app_updateClipboard('defenseAggressiveness', this.value)" oninput="document.getElementById('val-def').textContent = this.value + '% Blitz'">
                         <div class="text-center text-[10px] font-mono text-slate-600 mt-0.5" id="val-def">${sit.defenseAggressiveness}% Blitz</div>
                     </div>
                 </div>
             </div>
-
-            ${(() => {
-                const gpAutonomy = String(
-                    team.teamInstructions?.departments?.gameplan?.autonomy ??
-                    (team.gameplan?.delegateGameplan ? 'delegate' : 'guided')
-                ).toLowerCase();
-                if (gpAutonomy === 'direct') {
-                    return `
-                        <div class="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-950">
-                            <span><b>Direct Playbook Control:</b> Your installed plays &amp; formations stay locked in on game day.</span>
-                            <button type="button"
-                                onclick="window.app_setUnifiedControl('gameplan', 'guided', 'playbook')"
-                                class="rounded border border-emerald-300 bg-white px-2.5 py-1 text-[10px] font-bold text-emerald-800 hover:bg-emerald-100">
-                                Hand Off to Coaches
-                            </button>
-                        </div>`;
-                }
-                return `
-                    <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-950">
-                        <div>
-                            <b>🤖 Coach-Managed Installs (${gpAutonomy.toUpperCase()}):</b> Your staff rebuilds formations &amp; the 8 custom napkin slots each week using your priorities. Manual edits here will be updated at week's end.
-                        </div>
-                        <button type="button"
-                            onclick="window.app_setUnifiedControl('gameplan', 'direct', 'playbook')"
-                            class="shrink-0 rounded bg-slate-900 px-3 py-1.5 text-[10px] font-bold text-white hover:bg-slate-800">
-                            Switch to Direct Control
-                        </button>
-                    </div>`;
-            })()}
-
-            <!-- Strategic Header & Unit Toggle Bar -->
-            <div class="bg-slate-900 text-white p-3.5 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-sm">
-                <div>
-                    <h4 class="font-black text-sm uppercase tracking-wider text-amber-400">Cafeteria Napkin Playbook (12 Plays Total)</h4>
-                    <p class="text-slate-400 text-[11px] mt-0.5">4 Standard Fundamentals (Locked) + 8 Custom Gameplan Napkin slots.</p>
-                </div>
-                
-                <!-- The Primary Offense / Defense Toggle Bar -->
-                <div class="flex bg-slate-950 p-1 rounded border border-slate-700 gap-1 w-full sm:w-auto">
-                    <button class="flex-1 sm:flex-none px-4 py-2 rounded text-xs font-black uppercase tracking-wider transition ${isOffense ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white bg-slate-800/80'}" onclick="app_setPlaybookUnit('offense')">
-                        🏈 Offense (${4 + team.gameplan.installedOffense.length}/12)
-                    </button>
-                    <button class="flex-1 sm:flex-none px-4 py-2 rounded text-xs font-black uppercase tracking-wider transition ${!isOffense ? 'bg-rose-600 text-white shadow-md' : 'text-slate-400 hover:text-white bg-slate-800/80'}" onclick="app_setPlaybookUnit('defense')">
-                        🛡️ Defense (${4 + team.gameplan.installedDefense.length}/12)
+            ` : `
+            <!-- 1-Click Base Formation Bar + Control Status -->
+            <div class="bg-white border border-slate-300 rounded p-2.5 flex flex-col gap-2 shadow-sm">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="text-[10px] font-black uppercase tracking-wider text-slate-600">
+                        Active ${isOffense ? 'Offensive' : 'Defensive'} Base Scheme (Updates Compatible Plays Below)
+                    </span>
+                    <button type="button"
+                        onclick="window.app_setUnifiedControl('gameplan', '${gpAutonomy === 'direct' ? 'guided' : 'direct'}', 'playbook')"
+                        class="rounded border px-2 py-0.5 text-[10px] font-bold ${
+                            gpAutonomy === 'direct'
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                                : 'border-amber-300 bg-amber-50 text-amber-900'
+                        }">
+                        ${gpAutonomy === 'direct'
+                            ? '🔒 Direct Control (Locked In — Click to Delegate)'
+                            : `🤖 Coach-Managed (${gpAutonomy.toUpperCase()} — Click for Direct Control)`}
                     </button>
                 </div>
+                <div class="flex flex-wrap gap-1">${formationBarHtml}</div>
             </div>
 
             ${isOffense ? `
@@ -19136,6 +19675,7 @@ export function renderPlaybookManager(gameState) {
                 </div>
             </div>
             `}
+            `}
         </div>
     `;
 }
@@ -19414,13 +19954,20 @@ export function renderPracticeManager(gameState) {
             <div class="bg-slate-900 text-white p-3.5 rounded flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shadow-sm">
                 <div>
                     <h4 class="font-black text-sm uppercase tracking-wider text-emerald-400">After-School Sandlot Practice Schedule</h4>
-                    <p class="text-slate-400 text-[11px] mt-0.5">Set weekly focus or delegate to Coach ${coach?.name || 'Coach'} according to your organizational directive.</p>
+                    <p class="text-slate-400 text-[11px] mt-0.5">Set weekly focus or delegate to ${coach?.id != null ? `<button type="button" onclick="app.openCoachCard('${coach.id}')" class="font-bold text-amber-300 hover:underline">Coach ${coach.name || 'Coach'}</button>` : `Coach ${coach?.name || 'Coach'}`} according to your organizational directive.</p>
                 </div>
-                <div class="flex items-center gap-3 bg-slate-800 p-2 rounded border border-slate-700">
-                    <label class="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-amber-400">
-                        <input type="checkbox" ${isDelegated ? 'checked' : ''} onchange="app_togglePracticeDelegation(this.checked)" class="rounded text-amber-500">
-                        <span>Delegate to Head Coach</span>
-                    </label>
+                <div class="flex items-center gap-1 rounded border border-slate-700 bg-slate-950 p-1 text-[10px] font-bold" role="group" aria-label="Practice control mode">
+                    ${[
+                        ['delegate', 'Delegate'],
+                        ['guided', 'Guided'],
+                        ['direct', 'Direct']
+                    ].map(([mode, lbl]) => `
+                        <button type="button"
+                            onclick="window.app_setUnifiedControl('practice', '${mode}', 'practice')"
+                            class="rounded-sm px-2.5 py-1 transition ${practiceAutonomy === mode ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}">
+                            ${lbl}
+                        </button>
+                    `).join('')}
                 </div>
             </div>
 
@@ -19866,12 +20413,43 @@ export function renderDraftTeamView(gameState) {
     }
 
     const team = selectedTeam;
+    if (!team) {
+        rosterDiv.innerHTML = '<p class="text-xs text-slate-400 italic py-2">No team selected.</p>';
+        return;
+    }
+
     const roster = getUIRosterObjects(team);
-    rosterDiv.innerHTML = roster.map(p => `
-        <div class="flex justify-between py-1 border-b text-xs">
-            <span>${p.name}</span><span class="text-gray-500">${estimateBestPosition(p)} (${calculateOverall(p, estimateBestPosition(p))})</span>
+    const isUserTeam = String(team.id) === String(gameState.playerTeam?.id);
+
+    rosterDiv.innerHTML = `
+        <div class="flex items-center justify-between gap-2 pb-2 mb-1 border-b border-slate-200">
+            <span class="text-[10px] text-slate-500">
+                ${team.coach?.id != null
+                    ? `<button type="button" onclick="app.openCoachCard('${team.coach.id}')" class="font-bold text-slate-700 hover:text-blue-700 hover:underline">Coach ${team.coach.name}</button>`
+                    : `Coach ${team.coach?.name || '—'}`}
+            </span>
+            <button type="button" onclick="app.openTeamCard('${team.id}')" class="text-[10px] font-bold text-blue-700 hover:underline">
+                Team Page →
+            </button>
         </div>
-    `).join('');
+        ${roster.map(p => {
+            const view = getScoutingAwarePlayerView(p, gameState.playerTeam);
+            const fits = getBestTwoWayFits(view);
+            const fitSummary = isUserTeam
+                ? `${fits.offense.position} ${fits.offense.ovr} / ${fits.defense.position} ${fits.defense.ovr}`
+                : fits.offense.available !== false
+                    ? `${fits.offense.position} ~${fits.offense.ovr} / ${fits.defense.position} ~${fits.defense.ovr}`
+                    : `${p.pos || 'ATH'} · Unscouted`;
+
+            return `
+                <button type="button"
+                    onclick="app.openPlayerCard('${p.id}')"
+                    class="w-full flex justify-between items-center gap-2 py-1.5 border-b border-slate-100 text-xs text-left hover:bg-slate-50">
+                    <span class="font-semibold text-slate-800 truncate hover:text-blue-700">${p.name}</span>
+                    <span class="text-[10px] font-mono text-gray-500 shrink-0">${fitSummary}</span>
+                </button>`;
+        }).join('') || '<p class="text-xs text-slate-400 italic py-2">No players rostered.</p>'}
+    `;
 }
 
 window.app_toggleDraftTeamPicker = function() {
@@ -20767,9 +21345,9 @@ function drawPlayDiagram(canvas, playKey, side, team) {
                 };
             });
 
-        // Draw Offensive Linemen with proper pulling & screen release diagrams
-        ['OL1', 'OL2', 'OL3'].forEach(olSlot => {
-            const pt = coords[olSlot] || [0, -1.5];
+        // Draw Offensive Linemen (supports 3-OL and 4-OL sets like Heavy4OL)
+        ['OL1', 'OL2', 'OL3', 'OL4'].filter(olSlot => coords[olSlot]).forEach(olSlot => {
+            const pt = coords[olSlot];
             const px = toX(pt[0]);
             const py = toY(pt[1]);
 
@@ -20832,7 +21410,7 @@ function drawPlayDiagram(canvas, playKey, side, team) {
                 (label === 'FB' ? assignments.FB : null);
             if (!assign) return;
 
-            // Route Path tracing
+            const isMotion = assign.startsWith('Jet_Motion');
             const route = routeTree[assign];
             if (route && route.path) {
                 const mirror = (route.mirror !== false && sx < 0) ? -1 : 1;
