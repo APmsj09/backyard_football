@@ -5531,7 +5531,7 @@ export function recordRecruitingStaffAssignment(
  * public team information, and relationship evidence already known
  * through that team's scouting report.
  */
-function buildRecruitingTeamAppealSnapshot(team, player, day = null) {
+export function buildRecruitingTeamAppealSnapshot(team, player, day = null) {
     if (!team || !player) return null;
 
     const clamp = value =>
