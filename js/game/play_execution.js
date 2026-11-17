@@ -1235,8 +1235,9 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             o.balanceState !== 'downed' &&
                             !o.isEngaged &&
                             !o.isBlocked &&
-                            o.y < pState.y + 6 &&
-                            o.y > pState.y - 24 &&
+                            // Only target threats positioned in front of or near the returner
+                            o.y < (ballCarrierState.y + 3.0) &&
+                            o.y > (ballCarrierState.y - 22.0) &&
                             getDistance(pState, o) < 26.0
                         )
                         .sort((a, b) =>

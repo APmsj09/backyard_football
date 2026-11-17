@@ -1056,11 +1056,15 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     defender.assignment?.includes('blitz')
                 );
 
-            if (playState.type === 'run' || (ballCarrier && ballCarrier.y > playState.lineOfScrimmage)) {
-                // If the runner has blown past this block by 7+ yards, or is past and within pursuit range,
-                // disengage immediately so the defender can pursue and the blocker can climb/escort.
-                const carrierSeparationY = ballCarrier.y - defender.y;
-                if (carrierSeparationY > 7.0 || (carrierIsPastDefender && distToCarrier <= 6.0)) {
+            if (playState.type === 'run' || (ballCarrier && !playState.ballState.inAir)) {
+                // Direction-aware separation:
+                // Offense runs toward y = 110 (increasing Y).
+                // Defense returns run toward y = 0 (decreasing Y).
+                const runnerAheadDistance = ballCarrier.isOffense
+                    ? (ballCarrier.y - defender.y)
+                    : (defender.y - ballCarrier.y);
+
+                if (runnerAheadDistance > 7.0 || (carrierIsPastDefender && distToCarrier <= 6.0)) {
                     if (isRunBlock) {
                         logPlayDebug(
                             'RUN_BLOCK_PURSUIT_RELEASE',
