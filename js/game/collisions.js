@@ -1089,7 +1089,18 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     blocker.engagedWith = null;
                     blocker.isEngaged = false;
                     blocker.dynamicTargetId = null;
-                    block
+                    blocker.reengageCooldown = 25; // Long cooldown so they don't re-lock while chasing downfield
+
+                    defender.isBlocked = false;
+                    defender.blockedBy = null;
+                    defender.isEngaged = false;
+                    defender.action = 'pursuit';
+
+                    battle.status = 'disengaged';
+                    battlesToRemove.push(index);
+                    return;
+                }
+            } else {
                 const isQBInPocket =
                     (ballCarrier.formationRole === 'QB' || ballCarrier.role === 'QB') &&
                     ballCarrier.action === 'qb_setup' &&
