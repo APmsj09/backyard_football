@@ -1478,19 +1478,6 @@ export function flushScheduledSaveGameState() {
     return false;
 }
 
-export function scheduleSaveGameState(saveKey = DEFAULT_SAVE_KEY, delayMs = 400) {
-    scheduledSaveKey = typeof saveKey === 'string' ? saveKey : DEFAULT_SAVE_KEY;
-    if (scheduledSaveTimer !== null) {
-        clearTimeout(scheduledSaveTimer);
-    }
-    scheduledSaveTimer = setTimeout(() => {
-        scheduledSaveTimer = null;
-        const key = scheduledSaveKey || DEFAULT_SAVE_KEY;
-        scheduledSaveKey = null;
-        saveGameState(key);
-    }, delayMs);
-}
-
 const EMPTY_PLAYER_STATS = Object.freeze({
     passYards: 0, passAttempts: 0, passCompletions: 0, interceptionsThrown: 0,
     rushYards: 0, rushAttempts: 0,
