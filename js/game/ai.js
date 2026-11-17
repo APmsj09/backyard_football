@@ -2192,7 +2192,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         ? getDistance(qbState, pressureDefender)
         : Infinity;
 
-    const isPressured = pressureDistance < 4.5;
+    const isPressured = pressureDistance < 3.6;
     // Match tackle contact proximity (1.75y) so a defender closing in for a sack
     // cannot be negated by an instant zero-windup throwaway at 1.25y.
     const imminentSackDefender =
@@ -2528,8 +2528,12 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 const yardsBehindLOS = Math.abs(distanceBeyondLOS);
 
                 if (isPressured) {
-                    // Under pressure, an open checkdown behind the line is a high-value safety valve
-                    score += Math.max(8, 22 - (yardsBehindLOS * 2.5));
+                    // Under pressure, only an open checkdown behind the line is a viable safety valve
+                    if (minProjectedSeparation >= 1.5) {
+                        score += Math.max(4, 12 - (yardsBehindLOS * 2.0));
+                    } else {
+                        score -= 6;
+                    }
                 } else if (down === 4 && yardsToGo >= 4) {
                     // In a clean pocket on 4th & medium/long, throwing behind the LOS is almost an automatic turnover on downs
                     const depthPenalty = 32 + Math.min(28, yardsBehindLOS * 4.0);
@@ -2583,9 +2587,11 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 (0.75 + deficitUrgency * 0.25);
         }
 
-        // Pressure adjustments
+        // Pressure adjustments: favor genuinely open quick outlets without inflating covered routes
         if (isPressured) {
-            if (targetDepth >= 0 && targetDepth <= 8) score += 25;
+            if (targetDepth >= 0 && targetDepth <= 8 && minProjectedSeparation >= 1.4) {
+                score += 8;
+            }
             if (targetDepth > 14) score -= 15;
         }
 

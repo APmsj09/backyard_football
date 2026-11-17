@@ -1918,11 +1918,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         const isPullingNow = b.routePath && b.currentPathIndex < b.routePath.length;
         const isWaitingScreen = (b.assignment?.includes('screen_block') || b.assignment?.includes('Wall')) && playState.tick < 25;
         if (b.dynamicTargetId && !b.isEngaged && !(b.reengageCooldown > 0) && !isPullingNow && !isWaitingScreen) {
+            const maxReserveRange = playType === 'run' ? 5.5 : 10.0;
             const lockedThreat = allThreats.find(t =>
                 t.id === b.dynamicTargetId &&
                 !t.isEngaged &&
                 !t.isBlocked &&
-                getDistance(b, t) < 12.0 &&
+                t.balanceState !== 'downed' &&
+                getDistance(b, t) < maxReserveRange &&
                 t.y > b.y - 1.5
             );
             if (lockedThreat && !reservedOwner.has(lockedThreat.id)) {
@@ -3585,9 +3587,8 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
     const isBallInAir = playState.ballState.inAir;
     const qbState = offenseStates.find(o => o.formationRole === 'QB' || o.slot?.startsWith('QB'));
 
-    // Clear stale ball-tracking/pursuit state before resolving the current assignment.
-    // A reachable interception or coverage help call below can explicitly restore it.
-    if (pState.action === 'tracking_ball' || pState.action === 'pursuit') {
+    // Clear stale ball-tracking/pursuit/help state before resolving the current assignment.
+    if (['tracking_ball', 'pursuit', 'help', 'zone_match', 'man_help'].includes(pState.action)) {
         pState.action = assignment || 'idle';
     }
 
@@ -4199,6 +4200,22 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                     const rushDepth = Math.max(qb.y - 0.5, pState.y - 0.6);
 
                     setTrackIntent(pState, { id: qb.id, x: qb.x + (escapeAngle * rushWidth), y: rushDepth }, 0, 0.5);
+                } else if (assignment === 'blitz_gap' && pState.y > LOS - 0.5) {
+                    // Shoot the cleanest nearby A/B gap rather than running into the back of engaged linemen
+                    const candidateGaps = [qb.x - 2.3, qb.x - 0.9, qb.x + 0.9, qb.x + 2.3];
+                    const blockersNearLOS = offenseStates.filter(o => o.y >= LOS - 2.0 && o.y <= LOS + 1.5);
+                    const bestGapX = candidateGaps
+                        .map(gx => {
+                            const nearestBlockerDist = blockersNearLOS.reduce(
+                                (minD, o) => Math.min(minD, Math.abs(o.x - gx)),
+                                Infinity
+                            );
+                            const shiftPenalty = Math.abs(gx - pState.initialX) * 0.25;
+                            return { gx, score: nearestBlockerDist - shiftPenalty };
+                        })
+                        .sort((a, b) => b.score - a.score)[0]?.gx ?? qb.x;
+
+                    setPointIntent(pState, bestGapX, LOS - 1.0, 0.45);
                 } else {
                     // Flatten angle and close directly on the QB
                     setPointIntent(pState, qb.x, qb.y, 0.55);

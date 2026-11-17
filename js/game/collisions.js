@@ -159,7 +159,14 @@ export function checkBlockCollisions(playState, gameLog = null) {
 
         let target = null;
         const imminentThreat = eligibleDefenders
-            .filter(d => getDistance(blocker, d) < 1.8 && d.y > blocker.y - 1.5)
+            .filter(d => {
+                const dist = getDistance(blocker, d);
+                if (d.y <= blocker.y - 1.5) return false;
+                if (blocker.dynamicTargetId === d.id) return dist < 1.8;
+                // Do not let an adjacent TE/skill blocker vacuum-steal an OL's DL off the snap
+                if ((d.snapReactionTimer > 0 || playState.tick < 10) && dist >= 1.25) return false;
+                return dist < 1.45;
+            })
             .sort((a, b) => getDistance(blocker, a) - getDistance(blocker, b))[0];
 
         if (imminentThreat && !imminentThreat.isEngaged && !imminentThreat.isBlocked) {
