@@ -3705,7 +3705,9 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                         playState.playKey?.startsWith('PA_') ||
                         playState.playKey?.includes('_PA_');
 
-                    const isBootleg = /boot|rollout/i.test(playState.playKey || '');
+                    const isBootleg =
+                        qb1?.assignment === 'qb_scramble' ||
+                        /boot|rollout|leak/i.test(playState.playKey || '');
 
                     const playActionReady = !isPlayAction
                         ? true

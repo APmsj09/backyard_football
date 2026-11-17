@@ -1213,8 +1213,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         o.id === pState.escortTargetId &&
                         o.balanceState !== 'downed' &&
                         !o.isBlocked &&
-                        getDistance(pState, o) < 15.0
+                        getDistance(pState, o) < 28.0
                     );
+                    if (!targetThreat) {
+                        pState.escortTargetId = null;
+                        pState._escortLockTicks = 0;
+                    }
                 }
 
                 if (!targetThreat && pState._escortLockTicks <= 0) {
@@ -1224,9 +1228,13 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             !o.isEngaged &&
                             !o.isBlocked &&
                             o.y < pState.y + 6 &&
-                            o.y > pState.y - 24
+                            o.y > pState.y - 24 &&
+                            getDistance(pState, o) < 26.0
                         )
-                        .sort((a, b) => getDistance(pState, a) - getDistance(pState, b));
+                        .sort((a, b) =>
+                            (getDistance(ballCarrierState, a) * 0.6 + getDistance(pState, a) * 0.4) -
+                            (getDistance(ballCarrierState, b) * 0.6 + getDistance(pState, b) * 0.4)
+                        );
 
                     targetThreat =
                         eligibleThreats.find(o => !claimedEscortTargets.has(o.id)) ||
@@ -2268,17 +2276,26 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     setRouteIntent(pState, targetX, targetY, 0.6);
                 } else if (pState.role === 'QB' && pState.action === 'qb_scramble' && pState.y < LOS) {
                     // 2. QB Scramble behind LOS: Angle wide to escape the pocket.
-                    const isDesignedBootleg = /boot|rollout/i.test(playState.playKey || '');
+                    const isDesignedBootleg =
+                        pState.assignment === 'qb_scramble' ||
+                        /boot|rollout|leak/i.test(playState.playKey || '');
                     if (isDesignedBootleg) {
-                        const rollDir = /left|_l/i.test(playState.playKey) ? -1 : 1;
+                        const explicitLeft = /left|_l/i.test(playState.playKey || '');
+                        const explicitRight = /right|_r/i.test(playState.playKey || '');
+                        const rollDir = explicitLeft
+                            ? -1
+                            : explicitRight
+                                ? 1
+                                : (primaryRunTarget?.assignment?.includes('_r') ? -1 : 1);
                         const rolloutTargetX = Math.max(
                             3,
-                            Math.min(FIELD_WIDTH - 3, pState.initialX + (rollDir * 5.5))
+                            Math.min(FIELD_WIDTH - 3, pState.initialX + (rollDir * 6.5))
                         );
 
-                        const rolloutTargetY = Math.min(
-                            LOS - 1.2,
-                            pState.initialY + 2.0
+                        // Drop to realistic bootleg pocket depth (4.5-5.5y behind LOS) away from edge rushers
+                        const rolloutTargetY = Math.max(
+                            2.0,
+                            Math.min(LOS - 4.5, pState.initialY - 3.5)
                         );
 
                         const rolloutDistance = Math.hypot(
@@ -2299,10 +2316,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             setPointIntent(pState, targetX, targetY, 0.5);
                         }
                     } else {
-                        // Preserve the existing behavior for ordinary scrambles.
+                        // Angle out and upfield (~45 deg) toward the LOS instead of drifting sideways into edge rushers.
                         const rollDir = pState.rolloutDir || (pState.x > CENTER_X ? 1 : -1);
-                        targetX = Math.max(3, Math.min(FIELD_WIDTH - 3, pState.x + (rollDir * 8)));
-                        targetY = pState.y + 1.0;
+                        targetX = Math.max(3, Math.min(FIELD_WIDTH - 3, pState.x + (rollDir * 6.0)));
+                        targetY = pState.y + 3.0;
                         pState.action = 'qb_scramble';
                         setPointIntent(pState, targetX, targetY, 0.5);
                     }
@@ -2494,14 +2511,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     if (playState.tick >= 25) {
                         pState.action = 'run_route';
                         if (pState.routePath && pState.routePath.length > 0) {
+                            while (
+                                (pState.currentPathIndex || 0) < pState.routePath.length - 1 &&
+                                pState.y > pState.routePath[pState.currentPathIndex || 0].y + 0.5
+                            ) {
+                                pState.currentPathIndex = (pState.currentPathIndex || 0) + 1;
+                            }
                             const pt = pState.routePath[pState.currentPathIndex || 0];
                             setRouteIntent(pState, pt.x, pt.y, 0.6);
                         }
                         break;
                     }
 
-                    // 3. HOLD STATION: Stay anchored in pocket posture protecting the QB's blindside
-                    const holdY = Math.max(qbY + 0.8, pState.initialY);
+                    // 3. HOLD STATION: Stay anchored near initial alignment without overshooting route waypoints
+                    const holdY = Math.min(qbY + 0.4, pState.initialY + 0.5);
                     setHoldIntent(pState, pState.initialX, holdY);
                     break;
                 }
@@ -2600,49 +2623,45 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     );
 
                     // REALISTIC POCKET COLLAPSE & EARLY ESCAPE:
-                    // Check unblocked rushers AND collapsing blocks within 5.0 yards.
-                    const allThreatsNearPocket = defenseStates.filter(d =>
+                    // Give mobile QBs time to react BEFORE a free rusher enters 1.85y tackle range,
+                    // while slow pocket passers (< 52 mobility) stay put and risk getting sacked.
+                    const freeThreatsNearPocket = defenseStates.filter(d =>
                         d.stunnedTicks === 0 &&
                         d.balanceState !== 'downed' &&
-                        getDistance(pState, d) < 5.0 &&
-                        (
-                            (!d.isBlocked && !d.isEngaged) ||
-                            (d.isEngaged && (d.strength || d.str || 50) > 65) // Collapsing bull-rusher
-                        )
+                        !d.isBlocked &&
+                        !d.isEngaged &&
+                        getDistance(pState, d) < 5.0
                     );
 
-                    const nearestThreat = allThreatsNearPocket.sort(
+                    const nearestFreeThreat = freeThreatsNearPocket.sort(
                         (a, b) => getDistance(pState, a) - getDistance(pState, b)
                     )[0];
 
-                    const threatDist = nearestThreat ? getDistance(pState, nearestThreat) : Infinity;
+                    const threatDist = nearestFreeThreat ? getDistance(pState, nearestFreeThreat) : Infinity;
                     const qbMobility = ((pState.agility || 50) * 0.55) + ((pState.speed || 50) * 0.45);
 
-                    // Escape only when pressure is genuinely imminent.
-                    // Mobile QBs get slightly more room to react, but should
-                    // not abandon a functioning pocket just because pressure is nearby.
                     const scrambleTriggerDist =
-                        qbMobility >= 75 ? 2.0 :
-                        qbMobility >= 55 ? 1.6 :
-                        1.25;
+                        qbMobility >= 75 ? 3.2 :
+                        qbMobility >= 60 ? 2.7 :
+                        qbMobility >= 50 ? 2.2 :
+                        0; // Low-mobility pocket statues do not auto-escape before contact
 
                     const shouldEmergencyScramble = Boolean(
-                        nearestThreat &&
+                        nearestFreeThreat &&
+                        threatDist >= 1.85 && // Once inside tackle range, let tackle/sack collision resolve it
                         threatDist <= scrambleTriggerDist
                     );
 
                     if (shouldEmergencyScramble) {
-                        // Roll away from the incoming rusher toward open sideline grass
-                        const escapeSide = nearestThreat.x > pState.x ? -1 : 1;
+                        const escapeSide = nearestFreeThreat.x > pState.x ? -1 : 1;
                         pState.rolloutDir = escapeSide;
 
                         pState.action = 'qb_scramble';
                         pState.isBallCarrier = true;
                         playState.qbIntent = 'scramble';
 
-                        // Angle wide outside the tackle box
-                        const escapeX = Math.max(3.0, Math.min(FIELD_WIDTH - 3.0, pState.x + (escapeSide * 8.5)));
-                        const escapeY = pState.y + 1.5;
+                        const escapeX = Math.max(3.0, Math.min(FIELD_WIDTH - 3.0, pState.x + (escapeSide * 6.5)));
+                        const escapeY = pState.y + 3.0;
 
                         setPointIntent(pState, escapeX, escapeY, 0.5);
 
@@ -2659,41 +2678,64 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         break;
                     }
 
-                    // ACTIVE POCKET FOOTWORK & SLIDING:
-                    // Step up when edge rushers loop deep, or slide horizontally away from actual pocket pressure.
-                    const edgePressureLeft = defenseStates.some(d => d.y < LOS && d.x < pState.x - 2.0 && getDistance(pState, d) < 5.0);
-                    const edgePressureRight = defenseStates.some(d => d.y < LOS && d.x > pState.x + 2.0 && getDistance(pState, d) < 5.0);
-                    const interiorThreat = defenseStates.find(d => d.y < LOS - 0.5 && Math.abs(d.x - pState.x) <= 2.2 && d.y > pState.y && getDistance(pState, d) < 5.0);
+                    // ACTIVE POCKET FOOTWORK, HITCHING & SLIDING:
+                    // Exclude downed defenders and sense edge bending slightly wider (6.5y, LOS + 1.0).
+                    const isActivePocketThreat = d =>
+                        d.stunnedTicks === 0 &&
+                        d.balanceState !== 'downed';
+
+                    const edgePressureLeft = defenseStates.some(d =>
+                        isActivePocketThreat(d) &&
+                        d.y < LOS + 1.0 &&
+                        d.x < pState.x - 2.0 &&
+                        getDistance(pState, d) < 6.5
+                    );
+                    const edgePressureRight = defenseStates.some(d =>
+                        isActivePocketThreat(d) &&
+                        d.y < LOS + 1.0 &&
+                        d.x > pState.x + 2.0 &&
+                        getDistance(pState, d) < 6.5
+                    );
+                    const interiorThreat = defenseStates.find(d =>
+                        isActivePocketThreat(d) &&
+                        d.y < LOS - 0.5 &&
+                        Math.abs(d.x - pState.x) <= 2.4 &&
+                        d.y > pState.y &&
+                        getDistance(pState, d) < 6.0
+                    );
                     const interiorPressure = Boolean(interiorThreat);
 
                     let slideX = idealX;
                     let slideY = idealY;
 
-                    // 1. Step up into the pocket when edge rushers bend around the tackles
+                    const ticksSinceSet = playState.tick - (pState.dropbackCompleteTick ?? playState.tick);
+
+                    // 1. Climb cleanly into the pocket on edge bend or natural progression hitch
                     if ((edgePressureLeft || edgePressureRight) && !interiorPressure) {
-                        slideY = Math.min(LOS - 1.5, pState.dropbackTargetY + 2.5);
+                        slideY = Math.min(LOS - 2.0, idealY + 2.2);
+                    } else if (ticksSinceSet >= 8 && !interiorPressure) {
+                        slideY = Math.min(LOS - 2.5, idealY + 1.2);
                     }
 
-                    // 2. Slide laterally away from collapsing side
+                    // 2. Slide laterally away from collapsing edge
                     if (edgePressureLeft && !edgePressureRight) {
-                        slideX = Math.min(pState.initialX + 3.0, pState.x + 1.8);
+                        slideX = Math.min(pState.initialX + 2.8, idealX + 1.6);
                     } else if (edgePressureRight && !edgePressureLeft) {
-                        slideX = Math.max(pState.initialX - 3.0, pState.x - 1.8);
+                        slideX = Math.max(pState.initialX - 2.8, idealX - 1.6);
                     }
 
-                    // 3. Step back or give ground if interior DTs actually penetrate into the pocket
+                    // 3. Give ground or step off the spot if interior DTs collapse the middle
                     if (interiorThreat) {
-                        slideY = Math.max(LOS - 10.0, pState.y - 1.5);
+                        slideY = Math.max(LOS - 10.0, idealY - 1.2);
                         const awayDir = pState.x >= interiorThreat.x ? 1 : -1;
                         slideX = Math.max(
-                            pState.initialX - 3.0,
-                            Math.min(pState.initialX + 3.0, idealX + (awayDir * 2.0))
+                            pState.initialX - 2.8,
+                            Math.min(pState.initialX + 2.8, idealX + (awayDir * 1.8))
                         );
                     }
 
-                    const hasMovedPocket = Math.hypot(slideX - pState.x, slideY - pState.y) > 0.4;
+                    const hasMovedPocket = Math.hypot(slideX - pState.x, slideY - pState.y) > 0.35;
                     if (hasMovedPocket) {
-                        // Smoothly step and slide in the pocket with fluid intent
                         setPointIntent(pState, slideX, slideY, 0.4);
                         pState.movementMode = 'POINT';
                     } else {
@@ -3201,8 +3243,12 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 const carrierPastLOS = ballCarrierState && ballCarrierState.y > LOS + 0.5;
                 const carrierCommittedRun = ballCarrierState?.role !== 'QB' || playState.qbRunCommitted || carrierPastLOS;
                 const carrierIsClose = ballCarrierState && carrierCommittedRun && getDistance(pState, ballCarrierState) < 8.0;
-                const isHandoffRun = playState.type === 'run' && playState.handoffOccurred;
-                const isConfidentRun = (isRunRead && diagConfidence >= 0.60) || isHandoffRun;
+                // Do not leak playState.type === 'run' across the field, and do not abandon
+                // a man assignment 18y away while a QB still holds the ball behind the LOS.
+                const isConfidentRun =
+                    isRunRead &&
+                    diagConfidence >= 0.60 &&
+                    ballCarrierState?.role !== 'QB';
 
                 if (carrierSlot !== targetSlot && !isConfidentRun && !(qbScrambling && carrierPastLOS) && !carrierPastLOS && !carrierIsClose && !receiverIsBlocking) {
                     shouldPursue = false;
@@ -3741,7 +3787,15 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 const readMultiplier = Math.max(0, (defIQ - 50) / 50);
 
                 perfectX += latMovement * readMultiplier * 0.60;
-                perfectY += longMovement * readMultiplier * 0.25;
+
+                // On lateral/slant breaks or inside the 6-yard line, stay tight rather than
+                // stacking extra vertical cushion into the back of the end zone.
+                const isLateralBreak = Math.abs(latMovement) > 2.0;
+                if (distanceToGoal > 6.0 && !isLateralBreak) {
+                    perfectY += longMovement * readMultiplier * 0.25;
+                } else if (distanceToGoal <= 6.0) {
+                    perfectY = Math.min(perfectY, targetRec.y + 0.85);
+                }
 
                 const agiDiff = wrAgility - dbAgility;
                 if (agiDiff > 0) {

@@ -147,7 +147,7 @@ export const routeTree = {
     'FB_Flat': { path: [{ x: 3, y: 0.5 }, { x: 7, y: 2.0 }] },
     'FB_Flat_Left': { path: [{ x: -3, y: 0.5 }, { x: -7, y: 2.0 }], mirror: false },
     'FB_Wheel': { path: [{ x: 3.5, y: 0.5 }, { x: 6, y: 4.0 }, { x: 6, y: 22.0 }] },
-    'FB_Leak': { path: [{ x: -2, y: 1.0 }, { x: -5, y: 2.0 }, { x: -6, y: 10.0 }] },
+    'FB_Leak': { path: [{ x: -2.5, y: 1.0 }, { x: -6.5, y: 3.0 }, { x: -7.5, y: 11.0 }], mirror: false },
 
     // --- RB Run Designs (Initial Paths) ---
     'run_dive': { path: [{ x: 0, y: 2 }, { x: 0, y: 5 }] },

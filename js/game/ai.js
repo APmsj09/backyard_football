@@ -136,9 +136,17 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     }
 
     if (observedRunCarrier || qbScramble) {
-        // Deep safeties maintain coverage depth early; they do not crash the line within 0.5s of the snap
-        const isDeepSafety = pState.role === 'DB' && pState.assignment?.includes('deep') && pState.y > (playState?.lineOfScrimmage || 60) + 12.0;
-        const confidenceLevel = (isDeepSafety && tick < 25) ? 0.40 : 1.0;
+        // Deep safeties and far perimeter DBs keep early coverage discipline instead of
+        // teleport-crashing an interior handoff mesh from 12+ yards away at 0.3s.
+        const los = playState?.lineOfScrimmage || 60;
+        const isDeepSafety = pState.role === 'DB' && pState.assignment?.includes('deep') && pState.y > los + 12.0;
+        const isFarPerimeterDBOnBackfieldMesh =
+            pState.role === 'DB' &&
+            observedCarrier &&
+            observedCarrier.y < los - 1.0 &&
+            Math.abs(observedCarrier.x - pState.x) > 10.0 &&
+            tick < 22;
+        const confidenceLevel = ((isDeepSafety && tick < 25) || isFarPerimeterDBOnBackfieldMesh) ? 0.45 : 1.0;
 
         pState._diagnosedGuess = 'run';
         pState._diagnosedConfidence = confidenceLevel;
@@ -2185,8 +2193,10 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         : Infinity;
 
     const isPressured = pressureDistance < 4.5;
+    // Match tackle contact proximity (1.75y) so a defender closing in for a sack
+    // cannot be negated by an instant zero-windup throwaway at 1.25y.
     const imminentSackDefender =
-        isPressured && pressureDistance < 1.2;
+        isPressured && pressureDistance < 1.75;
 
     // Ordinary pressure does not automatically create a hot-read situation.
     // The threat must close to within 2.5 yards of the QB.
@@ -2726,14 +2736,26 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const LOS = playState.lineOfScrimmage;
         const distToFirstDown = (LOS + (playState.yardsToGo || 10)) - qbState.y;
 
-        let closestDefenderDistanceAhead = 30;
-        defenseStates.forEach(d => {
-            if (d.stunnedTicks > 0 || d.isBlocked) return;
-            const lateralOffset = Math.abs(d.x - qbState.x);
-            const downfieldDist = d.y - qbState.y;
-
-            if (lateralOffset < 3.5 && downfieldDist > 0 && downfieldDist < closestDefenderDistanceAhead) {
-                closestDefenderDistanceAhead = downfieldDist;
+        // Scan straight ahead plus left/right escape lanes so an engaged DT in the A-gap
+        // does not blind a scrambling QB to an open B-gap or perimeter lane.
+        const escapeLanes = [
+            qbState.x,
+            Math.max(3, qbState.x - 3.5),
+            Math.min(FIELD_WIDTH - 3, qbState.x + 3.5)
+        ];
+        let closestDefenderDistanceAhead = 0;
+        escapeLanes.forEach(laneX => {
+            let laneClearance = 30;
+            defenseStates.forEach(d => {
+                if (d.stunnedTicks > 0 || d.balanceState === 'downed' || d.isBlocked) return;
+                const lateralOffset = Math.abs(d.x - laneX);
+                const downfieldDist = d.y - qbState.y;
+                if (lateralOffset < 3.0 && downfieldDist > 0 && downfieldDist < laneClearance) {
+                    laneClearance = downfieldDist;
+                }
+            });
+            if (laneClearance > closestDefenderDistanceAhead) {
+                closestDefenderDistanceAhead = laneClearance;
             }
         });
 
@@ -2775,7 +2797,9 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         });
 
-        const isBootleg = /boot|rollout/i.test(playState.playKey || '');
+        const isBootleg =
+            qbState.assignment === 'qb_scramble' ||
+            /boot|rollout|leak/i.test(playState.playKey || '');
         const minScrambleThrowTicks = isBootleg ? 45 : 30;
         const immediateThreatToQB = defenseStates.some(d => !d.isBlocked && !d.isEngaged && d.stunnedTicks === 0 && getDistance(qbState, d) < 2.5);
         const bootlegReadyToDecide = !isBootleg || playState.tick >= minScrambleThrowTicks || qbState._bootlegRolloutReady || immediateThreatToQB;
@@ -2806,10 +2830,19 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             return;
         }
 
-        const immediateThreat = defenseStates.find(d => !d.isBlocked && !d.isEngaged && getDistance(qbState, d) < 2.5);
+        const immediateThreat = defenseStates.find(d =>
+            !d.isBlocked &&
+            !d.isEngaged &&
+            d.stunnedTicks === 0 &&
+            d.balanceState !== 'downed' &&
+            getDistance(qbState, d) < 3.2
+        );
+        const threatDist = immediateThreat ? getDistance(qbState, immediateThreat) : Infinity;
+        const isOutsidePocket = Math.abs(qbState.x - (qbState.initialX ?? CENTER_X)) >= 4.0;
         const throwAwayInstinct = qbIQ + (Math.random() * 40 - 15);
-        
-        if (immediateThreat && throwAwayInstinct > 55) {
+
+        // Only allow a throw-away if outside the pocket AND before the rusher is already wrapping up (>= 2.0y).
+        if (immediateThreat && threatDist >= 2.0 && isOutsidePocket && throwAwayInstinct > 55) {
             if (gameLog) pushGameLog(gameLog, `[Tick ${playState.tick}] 👋 ${qbState.name} throws it away under pressure.`, playState);
             if (debugEnabled) {
                 logPlayDebug('QB_THROW_AWAY', `${qbState.name} threw ball away to avoid sack`, {
@@ -2963,21 +2996,19 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             THROW_THRESHOLD -= 8;
         }
 
-        // Pressure forces quicker decisions.
+        // Pressure speeds up the QB's trigger slightly without forcing blind panic throws.
         if (isPressured) {
-            THROW_THRESHOLD -= 12;
+            THROW_THRESHOLD -= 7;
         }
 
-        // Hot read: get the ball out, but don't completely remove
-        // the concept of a bad throw.
         if (isHotReadSituation) {
-            THROW_THRESHOLD -= 8;
+            THROW_THRESHOLD -= 4;
         }
 
         // Smarter QBs can recognize good opportunities slightly earlier.
         THROW_THRESHOLD -= ((qbDecision - 50) * 0.12);
 
-        THROW_THRESHOLD = Math.max(2, Math.min(45, THROW_THRESHOLD));
+        THROW_THRESHOLD = Math.max(12, Math.min(45, THROW_THRESHOLD));
 
         // Now checks bestTargetEval across BOTH primary and secondary receivers!
         if (bestTargetEval && bestTargetEval.score > THROW_THRESHOLD) {
@@ -3062,63 +3093,60 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             ? getDistance(qbState, pressureDefender)
             : Infinity;
 
-        // A clean pocket is not pressure. Early escapes require a defender
-        // actually closing within three yards.
+        // Pressure escapes begin around 3.8y->1.8y before the rusher wraps the QB up.
         const immediatePressureEscape =
-            isPressured && pressureDistance <= 3.0;
+            isPressured && pressureDistance <= 3.8 && pressureDistance >= 1.8;
 
-        // Estimate the available straight-ahead running room.
-        let nearestDefenderAhead = Infinity;
+        // Scan pocket escape lanes (straight ahead, left B-gap/edge, right B-gap/edge).
+        const escapeLaneXs = [
+            qbState.x,
+            Math.max(3, qbState.x - 3.5),
+            Math.min(FIELD_WIDTH - 3, qbState.x + 3.5)
+        ];
+        let bestLaneClearance = 0;
 
-        defenseStates.forEach(defender => {
-            if (
-                defender.isBlocked ||
-                defender.isEngaged ||
-                defender.stunnedTicks > 0
-            ) {
-                return;
-            }
+        escapeLaneXs.forEach(laneX => {
+            let laneAhead = 30;
+            defenseStates.forEach(defender => {
+                if (
+                    defender.isBlocked ||
+                    defender.isEngaged ||
+                    defender.stunnedTicks > 0 ||
+                    defender.balanceState === 'downed'
+                ) {
+                    return;
+                }
 
-            const lateralDistance = Math.abs(defender.x - qbState.x);
-            const forwardDistance = defender.y - qbState.y;
+                const lateralDistance = Math.abs(defender.x - laneX);
+                const forwardDistance = defender.y - qbState.y;
 
-            if (
-                lateralDistance <= 3.5 &&
-                forwardDistance > 0.5
-            ) {
-                nearestDefenderAhead = Math.min(
-                    nearestDefenderAhead,
-                    forwardDistance
-                );
+                if (lateralDistance <= 3.0 && forwardDistance > 0.5) {
+                    laneAhead = Math.min(laneAhead, forwardDistance);
+                }
+            });
+            if (laneAhead > bestLaneClearance) {
+                bestLaneClearance = laneAhead;
             }
         });
 
-        const openRunningYards = Math.max(
-            0,
-            (Number.isFinite(nearestDefenderAhead)
-                ? nearestDefenderAhead
-                : 30) - 1.5
-        );
+        const openRunningYards = Math.max(0, bestLaneClearance - 1.5);
 
-        // Without immediate pressure, stay in the pocket longer.
-        // Only consider a scramble late, with every read exhausted and
-        // a useful amount of open field ahead.
+        // Once all reads are exhausted (after ~2.6s), QBs can tuck and run into open lanes.
         const lateCleanPocketEscape =
             allReadsExhausted &&
-            playState.tick >= 90 &&
-            openRunningYards >= 5.0;
+            playState.tick >= 65 &&
+            openRunningYards >= 4.0;
 
         if (
             !decisionMade &&
             (immediatePressureEscape || lateCleanPocketEscape)
         ) {
             let scrambleChance =
-                mobilityDesire * 0.006 * personalityUrgency;
+                Math.pow(mobilityDesire, 1.5) * 0.065 * personalityUrgency;
 
             if (immediatePressureEscape) {
-                scrambleChance *= 2.0;
+                scrambleChance *= 1.4;
             } else {
-                // A clean-pocket scramble remains possible, but is less likely.
                 scrambleChance *= 0.8;
             }
 
@@ -3207,12 +3235,17 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             Math.random() < forcedThrowChance
         );
 
-        // Throw Away: ONLY allowed when under pressure or scrambling outside the pocket!
-        // A QB in a clean pocket NEVER throws the ball out of bounds.
+        // Throw Away: NEVER allowed when a rusher is already in grasp (< 2.0y),
+        // and inside the pocket the QB must try to escape/take the sack instead of
+        // magically throwing it away without grounding.
+        const isOutsideTackleBox = Math.abs(qbState.x - (qbState.initialX ?? CENTER_X)) >= 4.5;
+        const hasSpaceToThrowAway = pressureDistance >= 2.0;
         const throwAwaySkill = (decisionQuality * 0.7) + (qbIQ * 0.3);
-        const willThrowAway = (isPressured || qbState.action === 'qb_scramble') &&
+        const willThrowAway =
+            hasSpaceToThrowAway &&
+            (qbState.action === 'qb_scramble' || isOutsideTackleBox) &&
             (throwAwaySkill > 45) &&
-            (Math.random() < (throwAwaySkill / 100) / riskTolerance);
+            (Math.random() < ((throwAwaySkill / 100) * 0.65) / riskTolerance);
 
         if (shouldForceThrow) {
             targetPlayerState = bestAvailableOption.info.state;
@@ -3239,14 +3272,21 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                     playState.playId
                 );
             }
+        } else if (
+            !imminentSackDefender &&
+            qbAgility > 55 &&
+            (pocketTimeExpired || isPressured) &&
+            Math.random() < (0.45 + (qbAgility / 220))
+        ) {
+            // Try to escape the pocket before resorting to a throw-away or taking the sack
+            qbState.action = 'qb_scramble';
+            qbState.isBallCarrier = true;
+            playState.qbIntent = 'scramble';
+            return;
         } else if (willThrowAway) {
             actionTaken = "Throw Away";
-        } else if (
-            qbAgility > 60 &&
-            (imminentSackDefender || pocketTimeExpired || isPressured) &&
-            Math.random() < 0.60
-        ) {
-            // Escape pressure or scramble when pocket time expires
+        } else if (imminentSackDefender && qbAgility >= 75 && Math.random() < 0.25) {
+            // Elite athletes occasionally slip a wrap-up attempt to scramble
             qbState.action = 'qb_scramble';
             qbState.isBallCarrier = true;
             playState.qbIntent = 'scramble';

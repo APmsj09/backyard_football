@@ -1047,11 +1047,17 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             Boolean(pState.isBallCarrier) ||
             (pState.action && (pState.action.startsWith('zone_') || pState.action.startsWith('man_cover_')));
 
+        const isDeceleratingTurnaround =
+            isBraking &&
+            currentVelocityMagnitude > 0.5 &&
+            targetDirectionAlignment < 0;
+
         const isStalled =
             distToTarget > 2.0 &&
             !isMakingProgress &&
             !isDynamicAction &&
             !isOffBalanceThisTick &&
+            !isDeceleratingTurnaround &&
             !pState._intent?.settled;
 
         if (isStalled) {

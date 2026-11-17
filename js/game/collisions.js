@@ -1066,10 +1066,12 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                     }
 
                     // This is a pursuit release, not a DL victory.
-                    // The blocker stays balanced and can look for another target.
+                    // Give the blocker a short cooldown so checkBlockCollisions does not
+                    // immediately re-latch onto the same fleeing defender on the next tick.
                     blocker.engagedWith = null;
                     blocker.isEngaged = false;
                     blocker.dynamicTargetId = null;
+                    blocker.reengageCooldown = 14;
 
                     defender.isBlocked = false;
                     defender.blockedBy = null;
