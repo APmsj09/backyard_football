@@ -6712,8 +6712,10 @@ window.app = {
             })[character]
         );
 
-        // Recruiting wire rendering is handled consistently by UI.renderRecruitingWirePanel
-        // via UI.renderOffseasonFAScreen so Days 1-7 and save/load match identically.
+        // Populate the daily wire only when its panel exists.
+        const dailyWire = document.getElementById('fa-daily-wire-list');
+
+        if (dailyWire) {
             const dailyActivity = (
                 Array.isArray(progress.dailyActivity)
                     ? progress.dailyActivity
