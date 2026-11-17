@@ -38,6 +38,7 @@ import {
     getEffectiveStaffWorkHours,
     applyRecruitingSweetener,
     buildAutomatedStaffAssignmentsForTeam,
+    setDepartmentControlMode
 } from './game/staff.js';
 import {
     acceptCommunityFavor as acceptCommunityFavorAction
@@ -4927,6 +4928,162 @@ export function openCoachCard(coachId) {
                     </div>
                 </div>
 
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div class="bg-white p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Preferred Offense
+                        </span>
+                        <b class="text-blue-800">
+                            ${escapeCoachText(coach.preferredOffense || 'Flexible')}
+                        </b>
+                        ${tactical?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(tactical.desc)}</p>` : ''}
+                    </div>
+
+                    <div class="bg-white p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Preferred Defense
+                        </span>
+                        <b class="text-rose-800">
+                            ${escapeCoachText(coach.preferredDefense || 'Flexible')}
+                        </b>
+                        ${personality?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(personality.desc)}</p>` : ''}
+                    </div>
+                </div>
+
+                ${team && Array.isArray(team.staffWorkPlan?.assignments) ? (() => {
+                    const coachTasks = team.staffWorkPlan.assignments.filter(
+                        a => String(a?.coachId) === currentCoachId && Number(a?.hours) > 0
+                    );
+                    const taskNames = {
+                        scouting: 'Scouting',
+                        training: 'Player Development',
+                        offensePrep: 'Offense Prep',
+                        defensePrep: 'Defense Prep',
+                        communityService: 'Community Service'
+                    };
+                    return `
+                        <section class="rounded border border-slate-200 bg-white p-3">
+                            <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-2">
+                                This Week's Assigned Work
+                            </h5>
+                            ${coachTasks.length > 0 ? `
+                                <div class="space-y-1">
+                                    ${coachTasks.map(a => `
+                                        <div class="flex justify-between items-center text-xs bg-slate-50 px-2.5 py-1.5 rounded border border-slate-100">
+                                            <span class="font-semibold text-slate-800">${escapeCoachText(taskNames[a.task] || a.task)}${a.focus && a.focus !== 'all' ? ` · ${escapeCoachText(a.focus)}` : ''}</span>
+                                            <span class="font-mono font-bold text-slate-700">${Number(a.hours)}h</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : `<p class="text-xs text-slate-500 italic">No weekly workload tasks currently assigned.</p>`}
+                        </section>
+                    `;
+                })() : ''}
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div class="bg-white p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Preferred Offense
+                        </span>
+                        <b class="text-blue-800">
+                            ${escapeCoachText(coach.preferredOffense || 'Flexible')}
+                        </b>
+                        ${tactical?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(tactical.desc)}</p>` : ''}
+                    </div>
+
+                    <div class="bg-white p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Preferred Defense
+                        </span>
+                        <b class="text-rose-800">
+                            ${escapeCoachText(coach.preferredDefense || 'Flexible')}
+                        </b>
+                        ${personality?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(personality.desc)}</p>` : ''}
+                    </div>
+                </div>
+
+                ${team && Array.isArray(team.staffWorkPlan?.assignments) ? (() => {
+                    const coachTasks = team.staffWorkPlan.assignments.filter(
+                        a => String(a?.coachId) === currentCoachId && Number(a?.hours) > 0
+                    );
+                    const taskNames = {
+                        scouting: 'Scouting',
+                        training: 'Player Development',
+                        offensePrep: 'Offense Prep',
+                        defensePrep: 'Defense Prep',
+                        communityService: 'Community Service'
+                    };
+                    return `
+                        <section class="rounded border border-slate-200 bg-white p-3">
+                            <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-2">
+                                This Week's Assigned Work
+                            </h5>
+                            ${coachTasks.length > 0 ? `
+                                <div class="space-y-1">
+                                    ${coachTasks.map(a => `
+                                        <div class="flex justify-between items-center text-xs bg-slate-50 px-2.5 py-1.5 rounded border border-slate-100">
+                                            <span class="font-semibold text-slate-800">${escapeCoachText(taskNames[a.task] || a.task)}${a.focus && a.focus !== 'all' ? ` · ${escapeCoachText(a.focus)}` : ''}</span>
+                                            <span class="font-mono font-bold text-slate-700">${Number(a.hours)}h</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : `<p class="text-xs text-slate-500 italic">No weekly workload tasks currently assigned.</p>`}
+                        </section>
+                    `;
+                })() : ''}
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div class="bg-white p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Preferred Offense
+                        </span>
+                        <b class="text-blue-800">
+                            ${escapeCoachText(coach.preferredOffense || 'Flexible')}
+                        </b>
+                        ${tactical?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(tactical.desc)}</p>` : ''}
+                    </div>
+
+                    <div class="bg-white p-3 rounded border border-slate-200">
+                        <span class="block text-[9px] font-bold uppercase text-slate-400">
+                            Preferred Defense
+                        </span>
+                        <b class="text-rose-800">
+                            ${escapeCoachText(coach.preferredDefense || 'Flexible')}
+                        </b>
+                        ${personality?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(personality.desc)}</p>` : ''}
+                    </div>
+                </div>
+
+                ${team && Array.isArray(team.staffWorkPlan?.assignments) ? (() => {
+                    const coachTasks = team.staffWorkPlan.assignments.filter(
+                        a => String(a?.coachId) === currentCoachId && Number(a?.hours) > 0
+                    );
+                    const taskNames = {
+                        scouting: 'Scouting',
+                        training: 'Player Development',
+                        offensePrep: 'Offense Prep',
+                        defensePrep: 'Defense Prep',
+                        communityService: 'Community Service'
+                    };
+                    return `
+                        <section class="rounded border border-slate-200 bg-white p-3">
+                            <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-2">
+                                This Week's Assigned Work
+                            </h5>
+                            ${coachTasks.length > 0 ? `
+                                <div class="space-y-1">
+                                    ${coachTasks.map(a => `
+                                        <div class="flex justify-between items-center text-xs bg-slate-50 px-2.5 py-1.5 rounded border border-slate-100">
+                                            <span class="font-semibold text-slate-800">${escapeCoachText(taskNames[a.task] || a.task)}${a.focus && a.focus !== 'all' ? ` · ${escapeCoachText(a.focus)}` : ''}</span>
+                                            <span class="font-mono font-bold text-slate-700">${Number(a.hours)}h</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : `<p class="text-xs text-slate-500 italic">No weekly workload tasks currently assigned.</p>`}
+                        </section>
+                    `;
+                })() : ''}
+
                 ${coach.formerPlayerBio ? `
                     <div class="rounded border border-amber-200 bg-amber-50 p-3">
                         <span class="block text-[9px] font-black uppercase text-amber-800 mb-1">
@@ -5782,8 +5939,18 @@ export function openPlayerCard(playerId) {
             </div>`
         : '<p class="text-xs text-slate-400 italic py-2">No season-by-season history recorded yet.</p>';
 
+    const currentSeasonStatsHtml = (isMyTeam && Number(gs.currentWeek) > 0 && sourcePlayer.seasonStats)
+        ? renderTotalsBlock(
+            `Current Season (Year ${gs.year}, After Week ${gs.currentWeek})`,
+            sourcePlayer.seasonStats,
+            1,
+            'border-emerald-200'
+        )
+        : '';
+
     const statsTableHtml = `
         <div class="space-y-3">
+            ${currentSeasonStatsHtml}
             ${careerTotalsHtml}
             ${seasonStatsTableHtml}
         </div>`;
@@ -5839,6 +6006,59 @@ export function openPlayerCard(playerId) {
             <!-- PANE 1: SUMMARY -->
             <div id="pcard-pane-overview" class="pcard-pane space-y-3">
                 ${scoutingStatusHtml}
+
+                ${isMyTeam && team ? (() => {
+                    const pid = String(sourcePlayer.id);
+                    const offSlots = Object.entries(team.depthChart?.offense || {})
+                        .filter(([, id]) => String(id) === pid)
+                        .map(([slot]) => slot);
+                    const defSlots = Object.entries(team.depthChart?.defense || {})
+                        .filter(([, id]) => String(id) === pid)
+                        .map(([slot]) => slot);
+                    const specSlots = [
+                        ...Object.entries(team.specialTeams || {}).filter(([, id]) => String(id) === pid).map(([slot]) => slot),
+                        ...Object.entries(team.specialists || {}).filter(([, id]) => String(id) === pid).map(([slot]) => slot)
+                    ];
+                    const energy = Math.max(0, Math.round(100 - (sourcePlayer.fatigue || 0)));
+                    const happiness = Math.round(Number(sourcePlayer.expectations?.happiness) || 50);
+                    const ego = Math.round(Number(sourcePlayer.personality?.ego) || 50);
+                    const loyalty = Math.round(Number(sourcePlayer.personality?.loyalty) || 50);
+                    const isInjured = Number(sourcePlayer.status?.duration) > 0;
+
+                    return `
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-white p-3 rounded border border-slate-200">
+                            <div>
+                                <span class="text-slate-400 font-bold uppercase text-[9px] block">Lineup Role</span>
+                                <b class="text-slate-900">
+                                    ${[
+                                        ...offSlots.map(s => `OFF ${s}`),
+                                        ...defSlots.map(s => `DEF ${s}`),
+                                        ...specSlots
+                                    ].join(' · ') || 'Reserve'}
+                                </b>
+                            </div>
+                            <div>
+                                <span class="text-slate-400 font-bold uppercase text-[9px] block">Energy & Health</span>
+                                <b class="${energy < 60 ? 'text-rose-700' : 'text-emerald-700'}">${energy}% Energy</b>
+                                <span class="block text-[10px] ${isInjured ? 'text-rose-600 font-bold' : 'text-slate-500'}">
+                                    ${isInjured ? `Out ${sourcePlayer.status.duration}w (${escapeHtml(sourcePlayer.status.description || 'Injured')})` : 'Healthy'}
+                                </span>
+                            </div>
+                            <div>
+                                <span class="text-slate-400 font-bold uppercase text-[9px] block">Morale / Ego / Loyalty</span>
+                                <b class="${happiness < 50 ? 'text-rose-700' : 'text-slate-900'}">${happiness}</b>
+                                <span class="text-slate-500"> · Ego ${ego} · Loy ${loyalty}</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-400 font-bold uppercase text-[9px] block">Promise & Desired Role</span>
+                                <b class="text-slate-800">${escapeHtml(sourcePlayer.expectations?.desiredRole || 'Any')}</b>
+                                <span class="block text-[10px] ${sourcePlayer.activePromise ? 'text-amber-700 font-bold' : 'text-slate-400'}">
+                                    ${sourcePlayer.activePromise ? 'Active promise recorded' : 'No active promise'}
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                })() : ''}
 
                 <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded border border-slate-200">
                     <p>
@@ -8346,17 +8566,21 @@ window.app = {
         if (!gs?.playerTeam) return;
 
         gameState = gs;
+        UI.hideModal();
 
         // Navigate to the Strategy screen.
         UI.showScreen('dashboard-screen');
         UI.switchTab('depth-chart', gs);
 
-        // Open the positional depth-order view and select the requested room.
+        // Open the positional depth-order view and switch to Offense/Defense.
         document
             .querySelector('.depth-chart-tab[data-sub-tab="depth-order"]')
             ?.click();
 
-        window.app_switchDepthTab?.(pos);
+        const sideTab = ['QB', 'RB', 'WR', 'TE', 'OL'].includes(pos)
+            ? 'offense'
+            : 'defense';
+        window.setDepthChartTab?.(sideTab);
     },
     autoFillRoster: () => {
         gameState = Game.getGameState();
@@ -8449,26 +8673,27 @@ window.app_updateClipboard = (field, value) => {
     const gs = Game.getGameState();
     const team = gs?.playerTeam;
     if (!team || !team.gameplan || !team.gameplan.situational) return;
-    
-    team.gameplan.situational[field] = (value === 'GM' || value === 'COACH') ? value : parseInt(value, 10);
-    
-    // Auto-update Coach UI context if delegating
-    if (field === 'playcaller' && value === 'COACH') {
-        Game.aiSetSituationalGameplan(team);
-    }
-    
-    // Call via the UI namespace since the function is defined in ui.js
+
     if (field === 'playcaller') {
+        setDepartmentControlMode(
+            team,
+            'playcaller',
+            value === 'GM' ? 'direct' : 'guided'
+        );
+        Game.saveGameState(activeSaveKey);
         UI.renderPlaybookManager(gs);
-    } else {
-        // Update the textual clash warning dynamically
-        const clash = Game.calculateSchemeClash(team);
-        const warnEl = document.getElementById('clipboard-clash-warning');
-        if (warnEl) {
-            if (clash === 0) warnEl.innerHTML = `<span class="text-emerald-600 font-bold">Coach is aligned with your gameplan.</span>`;
-            else if (clash < 6) warnEl.innerHTML = `<span class="text-amber-600 font-bold">Coach is annoyed by your scheme (-${clash} IQ Penalty).</span>`;
-            else warnEl.innerHTML = `<span class="text-rose-600 font-bold">Coach is furious! Kids are confused (-${clash} IQ Penalty).</span>`;
-        }
+        return;
+    }
+
+    team.gameplan.situational[field] = parseInt(value, 10);
+    Game.saveGameState(activeSaveKey);
+
+    const clash = Game.calculateSchemeClash(team);
+    const warnEl = document.getElementById('clipboard-clash-warning');
+    if (warnEl) {
+        if (clash === 0) warnEl.innerHTML = `<span class="text-emerald-600 font-bold">Coach is aligned with your gameplan.</span>`;
+        else if (clash < 6) warnEl.innerHTML = `<span class="text-amber-600 font-bold">Coach is annoyed by your scheme (-${clash} IQ Penalty).</span>`;
+        else warnEl.innerHTML = `<span class="text-rose-600 font-bold">Coach is furious! Kids are confused (-${clash} IQ Penalty).</span>`;
     }
 };
 
@@ -9034,6 +9259,56 @@ document.getElementById('sim-speed-faster')
         const playerRow = e.target.closest('tr[data-player-id]');
         if (playerRow?.dataset.playerId) {
             openPlayerCard(playerRow.dataset.playerId);
+        }
+    });
+
+    const closeFloatingPopovers = (target = null) => {
+        const pairs = [
+            ['.stats-popover', '[data-stats-popover-trigger]'],
+            ['#draft-team-popover', '#draft-team-trigger'],
+            ['#finance-ledger-category-popover', '#finance-ledger-category-trigger'],
+            ['.gm-builder-popover', '[aria-controls$="-popover"]'],
+            ['.strategy-list-popover', '[id$="-trigger"]'],
+            ['.strategy-target-popover', '[id$="-trigger"]'],
+            ['[data-strategy-priority-popover]', '[id^="strategy-priority-menu-"][id$="-trigger"]'],
+            ['.staff-work-picker', '[aria-controls^="staff-work-picker-"]'],
+            ['.live-formation-menu', '[aria-controls^="sim-"][aria-controls$="-formation-menu"]'],
+            ['#fa-quick-coach-options', '#fa-quick-coach-trigger'],
+            ['[id^="fa-list-coach-options-"]', '[id^="fa-list-coach-trigger-"]'],
+            ['#staff-replacement-coach-popover', '#staff-replacement-coach-trigger'],
+            ['#staff-carousel-sort-menu', '#staff-carousel-sort-trigger']
+        ];
+
+        pairs.forEach(([popoverSelector, triggerSelector]) => {
+            document.querySelectorAll(popoverSelector).forEach(popover => {
+                if (popover.classList.contains('hidden')) return;
+                if (target && popover.contains(target)) return;
+
+                const trigger = popover.id
+                    ? document.querySelector(`[aria-controls="${popover.id}"]`) ||
+                      document.getElementById(popover.id.replace(/-popover$/, '-trigger').replace(/-options$/, '-trigger').replace(/-menu$/, '-trigger'))
+                    : null;
+                if (target && trigger && trigger.contains(target)) return;
+
+                popover.classList.add('hidden');
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            });
+
+            if (!target) {
+                document.querySelectorAll(triggerSelector).forEach(btn => {
+                    btn.setAttribute('aria-expanded', 'false');
+                });
+            }
+        });
+    };
+
+    document.addEventListener('click', (e) => {
+        closeFloatingPopovers(e.target);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeFloatingPopovers(null);
         }
     });
 

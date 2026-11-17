@@ -17,7 +17,11 @@ import {
     autoAssignTeamStaffDepartments,
     setTeamStaffDepartmentLead,
     setTeamStaffDepartmentSupport,
-    calculateCoachRoleFit
+    calculateCoachRoleFit,
+    ensureTeamInstructions,
+    setDepartmentControlMode,
+    getCoachWeeklyOutlook,
+    aiChooseWeeklyPractice
 } from './game/staff.js';
 import { DEFAULT_PLAYBACK_INTERVAL_MS, getPlaybackIntervalMs } from './game/simulation_config.js';
 import {
@@ -1264,8 +1268,8 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
             thead.innerHTML = `
                 <tr class="text-[9px] uppercase tracking-wide">
                     <th rowspan="2" class="py-2 px-2 text-center w-8 bg-slate-100 border-b border-slate-300">★</th>
-                    <th rowspan="2" class="py-2 px-3 text-left bg-slate-100 border-b border-slate-300">Prospect</th>
-                    <th rowspan="2" class="py-2 px-2 text-center bg-slate-100 border-b border-slate-300">Pos</th>
+                    <th rowspan="2" class="py-2 px-3 text-left bg-slate-100 border-b border-slate-300 cursor-pointer hover:bg-slate-200" data-sort="name">Prospect</th>
+                    <th rowspan="2" class="py-2 px-2 text-center bg-slate-100 border-b border-slate-300 cursor-pointer hover:bg-slate-200" data-sort="position">Pos</th>
 
                     <th colspan="2" class="py-1.5 px-2 text-center bg-indigo-50 text-indigo-700 border-b border-indigo-200">
                         Positional Fit
@@ -1288,21 +1292,21 @@ export function renderDraftPool(gameState, onPlayerSelect, sortColumn = 'potenti
                     <th class="py-2 px-2 text-center bg-indigo-50/60 whitespace-nowrap">Off Fit</th>
                     <th class="py-2 px-2 text-center bg-indigo-50/60 whitespace-nowrap">Def Fit</th>
 
-                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Hgt</th>
-                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Wgt</th>
-                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Speed</th>
-                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Strength</th>
-                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Agility</th>
-                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap">Stamina</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap cursor-pointer hover:bg-emerald-100" data-sort="height">Hgt</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap cursor-pointer hover:bg-emerald-100" data-sort="weight">Wgt</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap cursor-pointer hover:bg-emerald-100" data-sort="speed">Speed</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap cursor-pointer hover:bg-emerald-100" data-sort="strength">Strength</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap cursor-pointer hover:bg-emerald-100" data-sort="agility">Agility</th>
+                    <th class="py-2 px-2 text-center bg-emerald-50/60 whitespace-nowrap cursor-pointer hover:bg-emerald-100" data-sort="stamina">Stamina</th>
 
-                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Acc</th>
-                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Pow</th>
-                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Hands</th>
-                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Block</th>
-                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">Tackle</th>
-                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap">B.Shed</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap cursor-pointer hover:bg-amber-100" data-sort="throwingAccuracy">Acc</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap cursor-pointer hover:bg-amber-100" data-sort="throwPower">Pow</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap cursor-pointer hover:bg-amber-100" data-sort="catchingHands">Hands</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap cursor-pointer hover:bg-amber-100" data-sort="blocking">Block</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap cursor-pointer hover:bg-amber-100" data-sort="tackling">Tackle</th>
+                    <th class="py-2 px-2 text-center bg-amber-50/60 whitespace-nowrap cursor-pointer hover:bg-amber-100" data-sort="blockShedding">B.Shed</th>
 
-                    <th class="py-2 px-2 text-center bg-violet-50/60 whitespace-nowrap">IQ</th>
+                    <th class="py-2 px-2 text-center bg-violet-50/60 whitespace-nowrap cursor-pointer hover:bg-violet-100" data-sort="playbookIQ">IQ</th>
                 </tr>`;
         } else if (activeDraftView === 'youthStats') {
             thead.innerHTML = `
@@ -1895,19 +1899,9 @@ window.app_switchDraftSidebarTab = function(tab) {
     }
 };
 
-let activeDossierTab = 'overview';
-window.app_switchDossierTab = function(tab) {
-    activeDossierTab = tab;
-    document.querySelectorAll('.dossier-tab-btn').forEach(btn => {
-        const isActive = btn.dataset.dtab === tab;
-        btn.className = `dossier-tab-btn px-1.5 py-0.5 rounded text-[10px] font-bold transition ${isActive ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`;
-    });
-    document.querySelectorAll('.dossier-pane').forEach(p => p.classList.add('hidden'));
-    document.getElementById(`dossier-pane-${tab}`)?.classList.remove('hidden');
-};
-
 function renderDraftProspectComparison(player, gameState) {
     const prospectPane = document.getElementById('draft-sidebar-prospect-pane');
+    const selectedCardHost = document.getElementById('selected-player-card');
     if (!prospectPane || !gameState?.playerTeam) return;
 
     // Remove any comparison previously inserted into the Team workspace.
@@ -1915,15 +1909,17 @@ function renderDraftProspectComparison(player, gameState) {
         '#draft-sidebar-team-pane #draft-selected-prospect-comparison'
     )?.remove();
 
-    let comparisonEl = prospectPane.querySelector(
+    const mountTarget = selectedCardHost || prospectPane;
+    let comparisonEl = mountTarget.querySelector(
         '#draft-selected-prospect-comparison'
     );
 
     if (!comparisonEl) {
+        if (selectedCardHost) selectedCardHost.innerHTML = '';
         comparisonEl = document.createElement('div');
         comparisonEl.id = 'draft-selected-prospect-comparison';
         comparisonEl.className = 'w-full max-w-[32rem] mx-auto p-2 bg-white border border-slate-200 rounded';
-        prospectPane.prepend(comparisonEl);
+        mountTarget.prepend(comparisonEl);
     }
 
     if (!player) {
@@ -2920,7 +2916,7 @@ window.app_acceptCommunityFavor = function(favorId) {
 
     const absoluteWeek = ((year - 1) * 9) + week;
 
-    const acceptedFavor = acceptCommunityFavor(
+    const acceptedFavor = acceptCommunityFavorAction(
         gs,
         favorId,
         team.id,
@@ -3348,6 +3344,20 @@ function matchesFreeAgentPositionFilter(team, player, requestedPosition) {
         String(scouting.defense?.position || '').toUpperCase() === requested
     );
 }
+
+window.app_setPlayerDbScope = function (scope) {
+    const input = document.getElementById('player-db-scope');
+    if (!input) return;
+
+    input.value = scope;
+    document.querySelectorAll('[data-player-db-scope]').forEach(btn => {
+        const selected = btn.dataset.playerDbScope === scope;
+        btn.setAttribute('aria-pressed', String(selected));
+        btn.className = `position-filter-button ${selected ? 'is-active' : ''}`;
+    });
+
+    window.app_updatePlayerDbFilter();
+};
 
 window.app_updatePlayerDbFilter = function () {
     const gs = getGameState();
@@ -5064,30 +5074,20 @@ export function renderOffseasonFAPool(gameState) {
                     </td>
 
                     <!-- Recruiting coach -->
-                    <td class="relative min-w-[190px] px-3 py-3">
+                    <td class="min-w-[180px] px-3 py-3">
                         <button
                             type="button"
-                            id="fa-list-coach-trigger-${quickEscapeHtml(playerId)}"
-                            aria-expanded="false"
-                            onclick="window.app_toggleRecruitingListCoachPicker('${quickEscapeHtml(playerId)}')"
-                            class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-2 text-left text-[10px] font-bold text-slate-700 hover:border-emerald-600">
+                            onclick="window.app_openRecruitingListCoachModal('${quickEscapeHtml(playerId)}')"
+                            class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2.5 py-2 text-left text-[10px] font-bold text-slate-700 hover:border-emerald-600 hover:bg-emerald-50/40">
 
                             <span class="truncate">
                                 ${quickEscapeHtml(assignedCoachLabel)}
                             </span>
 
-                            <span class="shrink-0 text-slate-400">
-                                Change
+                            <span class="shrink-0 text-emerald-700 font-black uppercase">
+                                Assign
                             </span>
                         </button>
-
-                        <div
-                            id="fa-list-coach-options-${quickEscapeHtml(playerId)}"
-                            class="absolute left-3 top-full z-30 hidden max-h-64 w-[220px] overflow-y-auto rounded border border-slate-300 bg-white p-1 shadow-xl">
-
-                            ${coachPickerOptionsHtml}
-
-                        </div>
                     </td>
 
                     <!-- Actual recorded recruiting activity -->
@@ -7188,38 +7188,61 @@ window.app_addPlayerToRecruitingList = function(playerId) {
     );
 };
 
-window.app_toggleRecruitingListCoachPicker = function(playerId) {
-    const picker = document.getElementById(
-        `fa-list-coach-options-${playerId}`
+window.app_openRecruitingListCoachModal = function(playerId) {
+    const context = getPlayerRecruitingListContext();
+    if (!context) return;
+
+    const entry = context.list.find(candidate =>
+        String(candidate?.playerId) === String(playerId)
     );
+    if (!entry) return;
 
-    const trigger = document.getElementById(
-        `fa-list-coach-trigger-${playerId}`
+    const player = context.gs.players?.find(candidate =>
+        String(candidate?.id) === String(playerId)
     );
+    const assignedId = entry.assignedCoachId == null ? '' : String(entry.assignedCoachId);
+    const budget = Game.getRecruitingStaffHourBudget?.(context.team, context.gs) || [];
 
-    if (!picker || !trigger) return;
+    const esc = val => String(val ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
 
-    const shouldOpen = picker.classList.contains('hidden');
+    const modalHtml = `
+        <div class="space-y-2 text-left text-xs">
+            <p class="text-slate-600">
+                Choose which coach works <b>${esc(player?.name || 'this prospect')}</b> on your recruiting list.
+            </p>
+            <div class="space-y-1.5">
+                <button type="button"
+                    onclick="window.app_setRecruitingListCoach('${esc(playerId)}', ''); document.getElementById('modal-default-close')?.click();"
+                    class="w-full rounded border p-2.5 text-left flex justify-between items-center ${assignedId === '' ? 'border-emerald-600 bg-emerald-50' : 'border-slate-200 bg-white hover:bg-slate-50'}">
+                    <div>
+                        <span class="font-bold text-slate-900 block">Any Available Coach</span>
+                        <span class="text-[10px] text-slate-500">Staff delegates automatically based on availability</span>
+                    </div>
+                    ${assignedId === '' ? '<span class="text-[10px] font-black text-emerald-700 uppercase">Selected</span>' : ''}
+                </button>
+                ${budget.map(coach => {
+                    const cid = String(coach.coachId);
+                    const isSelected = cid === assignedId;
+                    const rem = Math.max(0, Number(coach.remainingHours) || 0);
+                    return `
+                        <button type="button"
+                            ${rem <= 0 && !isSelected ? 'disabled' : ''}
+                            onclick="window.app_setRecruitingListCoach('${esc(playerId)}', '${esc(cid)}'); document.getElementById('modal-default-close')?.click();"
+                            class="w-full rounded border p-2.5 text-left flex justify-between items-center disabled:opacity-40 disabled:cursor-not-allowed ${isSelected ? 'border-emerald-600 bg-emerald-50' : 'border-slate-200 bg-white hover:bg-slate-50'}">
+                            <div>
+                                <span class="font-bold text-slate-900 block">${esc(coach.coachName)}</span>
+                                <span class="text-[10px] text-slate-500">${esc(coach.role || 'Staff')} · ${rem}h recruiting remaining</span>
+                            </div>
+                            ${isSelected ? '<span class="text-[10px] font-black text-emerald-700 uppercase">Assigned</span>' : ''}
+                        </button>`;
+                }).join('')}
+            </div>
+        </div>
+    `;
 
-    // Close any other prospect's coach picker first.
-    document.querySelectorAll(
-        '[id^="fa-list-coach-options-"]'
-    ).forEach(element => {
-        element.classList.add('hidden');
-    });
-
-    document.querySelectorAll(
-        '[id^="fa-list-coach-trigger-"]'
-    ).forEach(element => {
-        element.setAttribute('aria-expanded', 'false');
-    });
-
-    picker.classList.toggle('hidden', !shouldOpen);
-
-    trigger.setAttribute(
-        'aria-expanded',
-        String(shouldOpen)
-    );
+    showModal(`Assign Recruiting Coach`, modalHtml, null, null, null, 'Close');
 };
 
 window.app_setRecruitingListCoach = function(playerId, coachId) {
@@ -8036,19 +8059,29 @@ window.app_openRecruitingTryoutBatchModal = function(playerIds) {
             </div>
 
             <div>
-                <label for="recruiting-tryout-coach"
-                    class="mb-1 block font-black uppercase tracking-wide text-slate-600">
+                <span class="mb-1 block font-black uppercase tracking-wide text-slate-600">
                     Host Coach
-                </label>
-                <select
-                    id="recruiting-tryout-coach"
-                    class="w-full rounded-sm border border-slate-300 bg-white p-2 text-xs">
-                    ${coaches.map(coach => `
-                        <option value="${escapeHtml(coach.coachId)}">
-                            ${escapeHtml(coach.coachName)} · ${escapeHtml(coach.role)} · ${coach.remainingHours}h remaining
-                        </option>
+                </span>
+                <input type="hidden" id="recruiting-tryout-coach" value="${escapeHtml(coaches[0].coachId)}">
+                <div class="grid grid-cols-1 gap-1.5 sm:grid-cols-2" role="group" aria-label="Choose host coach">
+                    ${coaches.map((coach, idx) => `
+                        <button type="button"
+                            data-tryout-coach-btn="${escapeHtml(coach.coachId)}"
+                            aria-pressed="${idx === 0}"
+                            onclick="
+                                document.getElementById('recruiting-tryout-coach').value = '${escapeHtml(coach.coachId)}';
+                                document.querySelectorAll('[data-tryout-coach-btn]').forEach(b => {
+                                    const active = b.dataset.tryoutCoachBtn === '${escapeHtml(coach.coachId)}';
+                                    b.setAttribute('aria-pressed', String(active));
+                                    b.className = 'rounded-sm border px-2.5 py-2 text-left ' + (active ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50');
+                                });
+                            "
+                            class="rounded-sm border px-2.5 py-2 text-left ${idx === 0 ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                            <span class="block text-xs font-black">${escapeHtml(coach.coachName)}</span>
+                            <span class="block text-[10px] opacity-75">${escapeHtml(coach.role)} · ${coach.remainingHours}h remaining</span>
+                        </button>
                     `).join('')}
-                </select>
+                </div>
             </div>
 
             <p class="text-[10px] text-slate-500">
@@ -8871,41 +8904,34 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                 ${isHeadCoach && !hasOpenCoachingSlot ? `
                 <div class="rounded border border-blue-200 bg-blue-50 p-3">
-                    <label
-                        for="staff-replacement-coach"
-                        class="block text-[10px] font-black uppercase tracking-wider text-blue-900 mb-1">
+                    <span class="block text-[10px] font-black uppercase tracking-wider text-blue-900 mb-1.5">
                         Replace Which Coach?
-                    </label>
+                    </span>
 
                     <input type="hidden" id="staff-replacement-coach" value="${currentStaffCoaches[0]?.id || ''}">
-                    <button
-                        type="button"
-                        id="staff-replacement-coach-trigger"
-                        aria-expanded="false"
-                        aria-controls="staff-replacement-coach-popover"
-                        onclick="window.app_toggleStaffReplacementPicker()"
-                        class="flex w-full items-center justify-between gap-3 rounded border border-blue-300 bg-white px-2 py-2 text-left text-xs font-bold text-slate-800 hover:border-blue-500">
-                        <span id="staff-replacement-coach-label" class="truncate">${overviewEscape(currentStaffCoaches[0]?.name || 'Choose a coach to replace')}</span>
-                        <span aria-hidden="true" class="text-slate-400">▾</span>
-                    </button>
-                    <div id="staff-replacement-coach-popover" class="absolute left-3 right-3 z-30 mt-1 hidden max-h-56 overflow-y-auto rounded border border-blue-300 bg-white p-2 shadow-xl">
-                        <div class="overflow-hidden rounded-sm border border-slate-200">
-                            <div class="grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] gap-2 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
-                                <span>Coach</span><span class="text-right">Skill avg</span><span class="text-right">General fit</span>
-                            </div>
-                            ${currentStaffCoaches.map((coach, index) => {
+                    <div class="grid grid-cols-1 gap-1.5" role="group" aria-label="Choose coach to replace">
+                        ${currentStaffCoaches.map((coach, index) => {
                             const skillAverage = getCoachSkillAverage(coach);
                             const generalFit = getCoachRoleFit(coach, 'general');
-
+                            const active = index === 0;
                             return `
-                                <button type="button" data-replacement-coach-id="${overviewEscape(coach.id)}" data-replacement-coach-name="${overviewEscape(coach.name || `Staff Coach ${index + 1}`)}" aria-pressed="${index === 0}" onclick="window.app_selectStaffReplacementCoach(this)" class="grid w-full grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] gap-2 border-t border-slate-100 px-2 py-2 text-left text-[10px] ${index === 0 ? 'bg-blue-50' : 'hover:bg-slate-50'}">
-                                    <span class="truncate font-semibold">${overviewEscape(coach.name || `Staff Coach ${index + 1}`)}</span>
-                                    <span class="text-right">${skillAverage ?? '—'}</span>
-                                    <span class="text-right">${generalFit ?? '—'}</span>
+                                <button type="button"
+                                    data-replacement-coach-id="${String(coach.id ?? '').replace(/"/g, '&quot;')}"
+                                    aria-pressed="${active}"
+                                    onclick="
+                                        document.getElementById('staff-replacement-coach').value = this.dataset.replacementCoachId;
+                                        document.querySelectorAll('[data-replacement-coach-id]').forEach(b => {
+                                            const sel = b === this;
+                                            b.setAttribute('aria-pressed', String(sel));
+                                            b.className = 'flex items-center justify-between gap-2 rounded border px-2.5 py-2 text-left text-xs ' + (sel ? 'border-blue-700 bg-white ring-1 ring-blue-600 font-bold text-slate-900' : 'border-blue-200 bg-white/70 text-slate-700 hover:bg-white');
+                                        });
+                                    "
+                                    class="flex items-center justify-between gap-2 rounded border px-2.5 py-2 text-left text-xs ${active ? 'border-blue-700 bg-white ring-1 ring-blue-600 font-bold text-slate-900' : 'border-blue-200 bg-white/70 text-slate-700 hover:bg-white'}">
+                                    <span class="truncate">${String(coach.name || `Staff Coach ${index + 1}`)}</span>
+                                    <span class="shrink-0 font-mono text-[10px] text-slate-500">Avg ${skillAverage ?? '—'} · Fit ${generalFit ?? '—'}</span>
                                 </button>
                             `;
                         }).join('')}
-                        </div>
                     </div>
 
                     <p class="text-[10px] text-blue-800 mt-2">
@@ -9634,62 +9660,118 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         }, "Submit Contract Offer");
     };
 
+    ensureTeamInstructions(team);
+    const staffOutlooks = new Map(
+        (Array.isArray(team.coaches) ? team.coaches.filter(Boolean) : []).map(c => [
+            String(c.id),
+            getCoachWeeklyOutlook(c, team, gameState)
+        ])
+    );
+    const totalWeeklyStaffHours = [...staffOutlooks.values()].reduce(
+        (sum, o) => sum + (Number(o?.weeklyCapacity) || 0),
+        0
+    );
+    const totalAssignedStaffHours = [...staffOutlooks.values()].reduce(
+        (sum, o) => sum + (Number(o?.assignedHours) || 0),
+        0
+    );
+
+    window.app_setUnifiedControl = (area, mode, stayOnScreen = null) => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+        if (!currentTeam) return;
+
+        setDepartmentControlMode(currentTeam, area, mode);
+        saveGameState();
+
+        if (stayOnScreen === 'playbook') {
+            renderPlaybookManager(gs);
+        } else if (stayOnScreen === 'practice') {
+            renderPracticeManager(gs);
+        } else {
+            renderStaffTab(gs);
+        }
+    };
+
+    window.app_setGmDirectiveFromStaff = directive => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+        if (!currentTeam) return;
+        if (!currentTeam.gameplan) currentTeam.gameplan = {};
+        currentTeam.gameplan.gmDirective = directive;
+
+        const practiceAutonomy = String(
+            currentTeam.teamInstructions?.departments?.practice?.autonomy ??
+            (currentTeam.gameplan.delegatePractice ? 'delegate' : 'guided')
+        ).toLowerCase();
+
+        if (practiceAutonomy !== 'direct') {
+            currentTeam.gameplan.weeklyPractice = aiChooseWeeklyPractice(
+                currentTeam,
+                null,
+                directive
+            );
+        }
+        saveGameState();
+        renderStaffTab(gs);
+    };
+
+    window.app_adoptCoachPractice = practiceKey => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+        if (!currentTeam) return;
+
+        setDepartmentControlMode(currentTeam, 'practice', 'direct');
+        if (!currentTeam.gameplan) currentTeam.gameplan = {};
+        currentTeam.gameplan.weeklyPractice = practiceKey;
+        saveGameState();
+        renderStaffTab(gs);
+    };
+
+    window.app_adoptCoachScheme = (offKey, defKey) => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+        if (!currentTeam) return;
+
+        if (!currentTeam.formations) currentTeam.formations = {};
+        if (offKey && offenseFormations[offKey]) currentTeam.formations.offense = offKey;
+        if (defKey && defenseFormations[defKey]) currentTeam.formations.defense = defKey;
+
+        rebuildDepthChartFromOrder(currentTeam);
+        saveGameState();
+        renderStaffTab(gs);
+    };
+
+    window.app_removeStrategyOverride = (department, mapName, key) => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+        const map = currentTeam?.teamInstructions?.departments?.[department]?.[mapName];
+        if (!map || typeof map !== 'object') return;
+
+        delete map[key];
+        saveGameState();
+        renderStaffTab(gs);
+    };
+
     let html = `
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-white px-3 py-2">
             <div class="min-w-0">
                 <h3 class="text-sm font-black uppercase tracking-wide text-slate-900">
-                    Coaching Staff
+                    Coaching Staff &amp; Control
                 </h3>
                 <p class="text-[10px] text-slate-500">
-                    Compare coaches, monitor development, and manage weekly workloads.
+                    See what your coaches want to run, choose how much control you take, and assign weekly hours.
                 </p>
             </div>
-            <div class="shrink-0 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-mono text-slate-600">
-                Budget: <b class="text-slate-900">${team.socialProfile?.favorTokens ?? 3} Tokens</b>
+            <div class="flex items-center gap-2 shrink-0">
+                <span class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-mono text-slate-700">
+                    Weekly Time: <b class="text-slate-900">${totalAssignedStaffHours}/${totalWeeklyStaffHours}h</b>
+                </span>
+                <span class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-mono text-slate-600">
+                    Tokens: <b class="text-slate-900">${team.socialProfile?.favorTokens ?? 3}</b>
+                </span>
             </div>
         </div>
-
-        <!-- Compact Automation Controls -->
-        <section id="staff-hub-automation" class="mb-3 hidden flex flex-col gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-            <div class="flex items-center gap-2">
-                <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-700">
-                    Automation
-                </h4>
-                <span class="text-[10px] text-slate-400">Optional</span>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
-                <label
-                    class="inline-flex cursor-pointer items-center gap-2"
-                    title="Let your coaches choose the weekly practice focus.">
-                    <input
-                        type="checkbox"
-                        class="h-4 w-4 accent-blue-600"
-                        ${team.gameplan?.delegatePractice ? 'checked' : ''}
-                        onchange="app_setManagementAutomation('delegatePractice', this.checked)"
-                    >
-                    <span class="text-xs font-semibold text-slate-700">
-                        Delegate practice
-                    </span>
-                </label>
-
-                <label
-                    class="inline-flex cursor-pointer items-center gap-2"
-                    title="Let your coaches manage the weekly offensive and defensive game plan.">
-                    <input
-                        type="checkbox"
-                        class="h-4 w-4 accent-blue-600"
-                        ${team.gameplan?.delegateGameplan ? 'checked' : ''}
-                        onchange="app_setManagementAutomation('delegateGameplan', this.checked)"
-                    >
-                    <span class="text-xs font-semibold text-slate-700">
-                        Delegate game planning
-                    </span>
-                </label>
-            </div>
-        </section>
-
-        <!-- 1. Current Coaching Group -->
     `;
 
     Game.ensureTeamCoachingStaff?.(team);
@@ -9849,43 +9931,45 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     };
 
     const renderStrategyPositionControls = department => {
+        const shortLabels = {
+            must: 'Must',
+            high: 'High',
+            normal: 'Norm',
+            monitor: 'Mon',
+            ignore: 'Skip'
+        };
+
         return `
-            <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div class="grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
                 ${strategyPositions.map(position => {
                     const currentValue = getStrategyPriority(
                         department,
                         position
                     );
 
-                    const menuId = `strategy-priority-menu-${department}-${position}`;
-                    const currentLabel = strategyPriorityOptions.find(
-                        ([value]) => value === currentValue
-                    )?.[1] || 'Normal';
-
                     return `
-                        <div class="relative min-w-0">
-                            <span class="mb-1 block text-[9px] font-black uppercase text-slate-500">
-                                ${position}
-                            </span>
-                            <button
-                                type="button"
-                                id="${menuId}-trigger"
-                                aria-expanded="false"
-                                aria-controls="${menuId}"
-                                onclick="window.app_toggleStrategyPriorityMenu('${menuId}')"
-                                class="flex w-full items-center justify-between gap-1 rounded-sm border border-slate-300 bg-white px-2 py-1.5 text-left text-[10px] font-semibold text-slate-700 hover:border-slate-500">
-                                <span class="truncate">${currentLabel}</span>
-                                <span aria-hidden="true" class="text-slate-400">▾</span>
-                            </button>
-                            <div id="${menuId}" data-strategy-priority-popover class="absolute left-0 top-full z-30 mt-1 hidden min-w-40 rounded-sm border border-slate-300 bg-white p-1 shadow-xl">
-                                ${strategyPriorityOptions.map(([value, label]) => `
-                                    <button
-                                        type="button"
-                                        onclick="app_setTeamStrategySetting('${department}', 'positionPriority', '${position}', '${value}')"
-                                        class="block w-full rounded-sm px-2 py-1.5 text-left text-[10px] font-semibold ${currentValue === value ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}">
-                                        ${label}
-                                    </button>
-                                `).join('')}
+                        <div class="flex items-center justify-between gap-1.5 rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                            <span class="text-[10px] font-black text-slate-800 w-7 shrink-0">${position}</span>
+                            <div class="flex flex-1 rounded border border-slate-200 bg-white p-0.5 gap-0.5" role="group" aria-label="${position} priority">
+                                ${strategyPriorityOptions.map(([value, fullLabel]) => {
+                                    const active = currentValue === value;
+                                    return `
+                                        <button type="button"
+                                            title="${fullLabel}"
+                                            aria-pressed="${active}"
+                                            onclick="app_setTeamStrategySetting('${department}', 'positionPriority', '${position}', '${value}')"
+                                            class="flex-1 rounded-sm px-1 py-0.5 text-[9px] font-bold transition ${
+                                                active
+                                                    ? (value === 'must'
+                                                        ? 'bg-emerald-700 text-white'
+                                                        : value === 'ignore'
+                                                            ? 'bg-rose-700 text-white'
+                                                            : 'bg-slate-900 text-white')
+                                                    : 'text-slate-500 hover:bg-slate-100'
+                                            }">
+                                            ${shortLabels[value] || value}
+                                        </button>`;
+                                }).join('')}
                             </div>
                         </div>
                     `;
@@ -10071,86 +10155,146 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         `;
     };
 
-    const renderStrategyTargetPicker = (
-        id,
-        players,
-        selectedId,
-        targetType,
-        label
-    ) => {
-        const selectedPlayer = players.find(player =>
-            String(player.id) === String(selectedId)
-        );
+    window.app_openIndividualPriorityModal = (targetType, initialQuery = '') => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+        if (!currentTeam) return;
 
-        const getStrategyTargetDisplayLabel = player => {
-            if (!player) return label;
+        ensureTeamInstructions(currentTeam);
+        const depts = currentTeam.teamInstructions.departments;
+        const isPlayerMode = targetType === 'player';
+        const pool = isPlayerMode ? strategyRosterPlayers : strategyProspects;
 
-            const baseLabel = getStrategyProspectLabel(player);
-
-            // Only actual team players may display their recorded archetype.
-            return targetType === 'player'
-                ? `${baseLabel} · ${strategyEscape(player.archetypeName || 'Athlete')}`
-                : baseLabel;
+        const getPriority = (dept, mapName, id) => {
+            const val = depts[dept]?.[mapName]?.[String(id)];
+            return val || 'inherit';
         };
 
-        return `
-            <input type="hidden" id="${id}" value="${strategyEscape(selectedId)}">
-            <div class="relative">
-                <button
-                    type="button"
-                    id="${id}-trigger"
-                    aria-expanded="false"
-                    aria-controls="${id}-popover"
-                    onclick="window.app_toggleStrategyListPicker('${id}')"
-                    class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-2 text-left text-xs font-semibold text-slate-800 hover:border-slate-500">
-                    <span id="${id}-label" class="truncate">
-                        ${getStrategyTargetDisplayLabel(selectedPlayer)}
-                    </span>
-                    <span aria-hidden="true" class="text-slate-400">▾</span>
-                </button>
-                <div
-                    id="${id}-popover"
-                    class="strategy-list-popover absolute left-0 top-full z-30 mt-1 hidden max-h-80 w-full min-w-64 overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
-                    <input
-                        type="search"
-                        data-strategy-list-search="${id}"
-                        placeholder="Search ${label.toLowerCase()}..."
-                        oninput="window.app_filterStrategyList('${id}')"
-                        class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
-                    <div class="overflow-hidden rounded-sm border border-slate-200" role="listbox" aria-label="${label}">
-                        <div class="grid grid-cols-[minmax(0,1fr)_3.25rem_3.5rem] gap-2 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
-                            <span>Player</span>
-                            <span>Pos</span>
-                            <span>Age</span>
+        const hasAnyOverride = p => isPlayerMode
+            ? getPriority('development', 'playerPriorities', p.id) !== 'inherit'
+            : (getPriority('recruiting', 'prospectPriorities', p.id) !== 'inherit' ||
+               getPriority('scouting', 'prospectPriorities', p.id) !== 'inherit');
+
+        const query = String(initialQuery || '').trim().toLowerCase();
+        const sortedPool = [...pool].sort((a, b) =>
+            Number(hasAnyOverride(b)) - Number(hasAnyOverride(a)) ||
+            String(a.name || '').localeCompare(String(b.name || ''))
+        );
+        const filtered = query
+            ? sortedPool.filter(p =>
+                `${p.name || ''} ${p.pos || ''} ${isPlayerMode ? (p.archetypeName || '') : ''}`
+                    .toLowerCase()
+                    .includes(query)
+              )
+            : sortedPool;
+        const visible = filtered.slice(0, 50);
+
+        const priorityBtns = (dept, mapName, targetId, currentVal) => {
+            const choices = [
+                ['must', 'Must'],
+                ['high', 'High'],
+                ['normal', 'Norm'],
+                ['monitor', 'Mon'],
+                ['ignore', 'Skip'],
+                ['inherit', 'Reset']
+            ];
+            return `
+                <div class="flex flex-wrap gap-1">
+                    ${choices.map(([val, lbl]) => {
+                        const active = currentVal === val;
+                        return `
+                            <button type="button"
+                                onclick="window.app_setIndividualPriorityFromModal('${targetType}', '${dept}', '${mapName}', '${strategyEscape(targetId)}', '${val}')"
+                                class="rounded border px-1.5 py-0.5 text-[9px] font-bold ${
+                                    active
+                                        ? (val === 'inherit' ? 'border-slate-300 bg-slate-100 text-slate-600' : 'border-slate-900 bg-slate-900 text-white')
+                                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                                }">
+                                ${lbl}
+                            </button>`;
+                    }).join('')}
+                </div>`;
+        };
+
+        const modalHtml = `
+            <div class="space-y-3 text-left text-xs">
+                <input id="individual-priority-modal-search" type="search"
+                    value="${strategyEscape(initialQuery)}"
+                    placeholder="Search by name or position..."
+                    oninput="window.app_openIndividualPriorityModal('${targetType}', this.value)"
+                    class="w-full rounded border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:border-slate-500">
+                <p class="text-[10px] text-slate-500">
+                    Showing ${visible.length} of ${filtered.length} matching ${isPlayerMode ? 'roster players' : 'prospects'} (prioritized entries appear first).
+                </p>
+                <div class="max-h-[55vh] overflow-y-auto space-y-2 pr-1">
+                    ${visible.map(p => `
+                        <div class="rounded border border-slate-200 bg-white p-2.5 space-y-2">
+                            <div class="flex items-center justify-between gap-2">
+                                <div>
+                                    <span class="font-bold text-slate-900">${strategyEscape(p.name)}</span>
+                                    <span class="ml-1.5 text-[10px] text-slate-500">${strategyEscape(String(p.pos || 'ATH').toUpperCase())} · Age ${p.age ?? '—'}</span>
+                                    ${isPlayerMode ? `<span class="ml-1 text-[10px] text-indigo-700 font-semibold">· ${strategyEscape(p.archetypeName || 'Athlete')}</span>` : ''}
+                                </div>
+                            </div>
+                            ${isPlayerMode ? `
+                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                    <span class="text-[9px] font-black uppercase text-slate-500">Development:</span>
+                                    ${priorityBtns('development', 'playerPriorities', p.id, getPriority('development', 'playerPriorities', p.id))}
+                                </div>
+                            ` : `
+                                <div class="space-y-1.5">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="text-[9px] font-black uppercase text-slate-500">Recruiting:</span>
+                                        ${priorityBtns('recruiting', 'prospectPriorities', p.id, getPriority('recruiting', 'prospectPriorities', p.id))}
+                                    </div>
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="text-[9px] font-black uppercase text-slate-500">Scouting:</span>
+                                        ${priorityBtns('scouting', 'prospectPriorities', p.id, getPriority('scouting', 'prospectPriorities', p.id))}
+                                    </div>
+                                </div>
+                            `}
                         </div>
-                        ${players.map(player => `
-                            <button
-                                type="button"
-                                data-strategy-list-option="${id}"
-                                data-strategy-list-value="${strategyEscape(player.id)}"
-                                data-strategy-list-label="${getStrategyTargetDisplayLabel(player)}"
-                                data-strategy-list-search-text="${getStrategyTargetDisplayLabel(player)}"
-                                aria-pressed="${String(player.id) === String(selectedId)}"
-                                onclick="window.app_selectStrategyListTarget(this, '${targetType}')"
-                                class="grid w-full grid-cols-[minmax(0,1fr)_3.25rem_3.5rem] gap-2 border-t border-slate-100 px-2 py-1.5 text-left text-xs ${String(player.id) === String(selectedId) ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}">
-                                <span class="flex min-w-0 flex-col">
-                                    <span class="truncate font-semibold">
-                                        ${strategyEscape(player.name || 'Unnamed player')}
-                                    </span>
-                                    ${targetType === 'player' ? `
-                                        <span class="text-[9px] text-indigo-600 font-semibold truncate">
-                                            ${strategyEscape(player.archetypeName || 'Athlete')}
-                                        </span>
-                                    ` : ''}
-                                </span>
-                                <span class="text-[10px]">${strategyEscape(String(player.pos || 'ATH').toUpperCase())}</span>
-                                <span class="text-[10px]">${Number.isFinite(Number(player.age)) ? `Age ${Number(player.age)}` : '—'}</span>
-                            </button>
-                        `).join('')}
-                    </div>
+                    `).join('') || '<p class="text-center text-slate-400 py-6">No matching players found.</p>'}
                 </div>
             </div>
         `;
+
+        showModal(
+            isPlayerMode ? 'Set Player Development Priorities' : 'Set Prospect Recruiting & Scouting Priorities',
+            modalHtml,
+            null,
+            null,
+            null,
+            'Done'
+        );
+
+        const searchEl = document.getElementById('individual-priority-modal-search');
+        if (searchEl && initialQuery !== '') {
+            searchEl.focus();
+            searchEl.setSelectionRange(searchEl.value.length, searchEl.value.length);
+        }
+    };
+
+    window.app_setIndividualPriorityFromModal = (targetType, dept, mapName, targetId, value) => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+        if (!currentTeam) return;
+
+        ensureTeamInstructions(currentTeam);
+        const deptObj = currentTeam.teamInstructions.departments[dept];
+        if (!deptObj) return;
+        if (!deptObj[mapName] || typeof deptObj[mapName] !== 'object') deptObj[mapName] = {};
+
+        if (value === 'inherit') {
+            delete deptObj[mapName][String(targetId)];
+        } else {
+            deptObj[mapName][String(targetId)] = value;
+        }
+
+        saveGameState();
+        const currentQuery = document.getElementById('individual-priority-modal-search')?.value || '';
+        renderStaffTab(gs);
+        window.app_openIndividualPriorityModal(targetType, currentQuery);
     };
 
     const strategyEmphasisPriorityOptions = [
@@ -10278,131 +10422,121 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         return instructions[mapName] || {};
     };
 
-    const renderStrategyEmphasisEditor = (
-        department,
-        side
-    ) => {
-        const targetId =
-            `strategy-emphasis-target-${department}-${side}`;
+    window.app_openEmphasisModal = (department, side, initialQuery = '') => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+        if (!currentTeam) return;
 
-        const priorityId =
-            `strategy-emphasis-priority-${department}-${side}`;
+        ensureTeamInstructions(currentTeam);
+        const mapName = side === 'offense' ? 'offenseEmphasis' : 'defenseEmphasis';
+        const priorityMap = currentTeam.teamInstructions.departments?.[department]?.[mapName] || {};
+        const groups = getStrategyEmphasisOptions(side);
+        const query = String(initialQuery || '').trim().toLowerCase();
 
-        const optionGroups = getStrategyEmphasisOptions(side);
+        const choices = [
+            ['must', 'Must'],
+            ['high', 'High'],
+            ['normal', 'Norm'],
+            ['monitor', 'Mon'],
+            ['ignore', 'Skip'],
+            ['inherit', 'Clear']
+        ];
 
-        const priorityMap = getStrategyEmphasisMap(
-            department,
-            side
-        );
-
-        const savedTarget = Object.keys(priorityMap).find(key =>
-            optionGroups.some(group =>
-                group.options.some(option =>
-                    option.value === String(key).toLowerCase()
-                )
-            )
-        );
-
-        const hasOptions = optionGroups.length > 0;
-
-        const selectedTargetOption = optionGroups
-            .flatMap(group => group.options)
-            .find(option =>
-                String(option.value) === String(savedTarget || '').toLowerCase()
+        const groupsHtml = groups.map(group => {
+            const visibleOptions = group.options.filter(opt =>
+                !query || `${group.label} ${opt.label}`.toLowerCase().includes(query)
             );
+            if (visibleOptions.length === 0) return '';
 
-        const targetOptionsHtml = optionGroups.map(group => `
-            <section class="mb-2 last:mb-0">
-                <h5 class="px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-400">
-                    ${strategyEscape(group.label)}
-                </h5>
-                <div class="grid grid-cols-1 gap-0.5 sm:grid-cols-2">
-                    ${group.options.map(option => `
-                        <button
-                            type="button"
-                            data-strategy-target-option="${targetId}"
-                            data-strategy-target-value="${strategyEscape(option.value)}"
-                            data-strategy-target-label="${strategyEscape(option.label)}"
-                            data-strategy-target-search="${strategyEscape(`${group.label} ${option.label}`)}"
-                            aria-pressed="${String(option.value) === String(savedTarget || '').toLowerCase()}"
-                            onclick="window.app_selectStrategyTargetFromButton(this)"
-                            class="rounded-sm px-2 py-1.5 text-left text-[10px] ${String(option.value) === String(savedTarget || '').toLowerCase() ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}">
-                            ${strategyEscape(option.label)}
-                        </button>
-                    `).join('')}
+            return `
+                <section class="space-y-1.5">
+                    <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-1">
+                        ${strategyEscape(group.label)}
+                    </h5>
+                    <div class="space-y-1">
+                        ${visibleOptions.map(opt => {
+                            const current = String(priorityMap[opt.value] || 'inherit').toLowerCase();
+                            return `
+                                <div class="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2.5 py-2">
+                                    <span class="font-bold text-slate-800 text-xs">${strategyEscape(opt.label)}</span>
+                                    <div class="flex flex-wrap gap-1">
+                                        ${choices.map(([val, lbl]) => {
+                                            const active = current === val;
+                                            return `
+                                                <button type="button"
+                                                    onclick="window.app_setEmphasisFromModal('${department}', '${side}', '${strategyEscape(opt.value)}', '${val}')"
+                                                    class="rounded border px-1.5 py-0.5 text-[9px] font-bold ${
+                                                        active
+                                                            ? (val === 'inherit' ? 'border-slate-300 bg-slate-100 text-slate-600' : 'border-slate-900 bg-slate-900 text-white')
+                                                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                                                    }">
+                                                    ${lbl}
+                                                </button>`;
+                                        }).join('')}
+                                    </div>
+                                </div>`;
+                        }).join('')}
+                    </div>
+                </section>`;
+        }).filter(Boolean).join('');
+
+        showModal(
+            `${side === 'offense' ? 'Offensive' : 'Defensive'} Emphasis (${department})`,
+            `
+                <div class="space-y-3 text-left text-xs">
+                    <input id="emphasis-modal-search" type="search"
+                        value="${strategyEscape(initialQuery)}"
+                        placeholder="Search plays, concepts, or tags..."
+                        oninput="window.app_openEmphasisModal('${department}', '${side}', this.value)"
+                        class="w-full rounded border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:border-slate-500">
+                    <div class="max-h-[55vh] overflow-y-auto space-y-3 pr-1">
+                        ${groupsHtml || '<p class="text-center text-slate-400 py-6">No concepts or plays match your search.</p>'}
+                    </div>
                 </div>
-            </section>
-        `).join('');
+            `,
+            null,
+            null,
+            null,
+            'Done'
+        );
 
-        const selectedPriority = savedTarget != null
-            ? String(priorityMap[savedTarget] || 'normal')
-                .trim()
-                .toLowerCase()
-            : 'inherit';
+        const searchEl = document.getElementById('emphasis-modal-search');
+        if (searchEl && initialQuery !== '') {
+            searchEl.focus();
+            searchEl.setSelectionRange(searchEl.value.length, searchEl.value.length);
+        }
+    };
 
+    window.app_setEmphasisFromModal = (department, side, targetKey, value) => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+        if (!currentTeam) return;
+
+        ensureTeamInstructions(currentTeam);
+        const deptObj = currentTeam.teamInstructions.departments[department];
+        if (!deptObj) return;
+        const mapName = side === 'offense' ? 'offenseEmphasis' : 'defenseEmphasis';
+        if (!deptObj[mapName] || typeof deptObj[mapName] !== 'object') deptObj[mapName] = {};
+
+        if (value === 'inherit') {
+            delete deptObj[mapName][targetKey];
+        } else {
+            deptObj[mapName][targetKey] = value;
+        }
+
+        saveGameState();
+        const currentQuery = document.getElementById('emphasis-modal-search')?.value || '';
+        renderStaffTab(gs);
+        window.app_openEmphasisModal(department, side, currentQuery);
+    };
+
+    const renderStrategyEmphasisEditor = (department, side) => {
         return `
-            <div class="space-y-2">
-                <div class="relative">
-                    <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
-                        Concept or play
-                    </span>
-                    <input type="hidden" id="${targetId}" value="${strategyEscape(savedTarget || '')}">
-                    <button
-                        type="button"
-                        id="${targetId}-trigger"
-                        aria-expanded="false"
-                        aria-controls="${targetId}-popover"
-                        onclick="window.app_toggleStrategyTargetPopover('${targetId}')"
-                        class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-[10px] font-semibold text-slate-700 hover:border-slate-500 disabled:opacity-50"
-                        ${hasOptions ? '' : 'disabled'}>
-                        <span id="${targetId}-label" class="truncate">
-                            ${strategyEscape(selectedTargetOption?.label || 'Choose a concept or play...')}
-                        </span>
-                        <span aria-hidden="true" class="text-slate-400">▾</span>
-                    </button>
-                    <div
-                        id="${targetId}-popover"
-                        class="strategy-target-popover absolute left-0 top-full z-30 mt-1 hidden max-h-80 w-full min-w-64 overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
-                        <input
-                            type="search"
-                            data-strategy-target-search-input="${targetId}"
-                            placeholder="Search concepts and plays..."
-                            oninput="window.app_filterStrategyTargets('${targetId}')"
-                            class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
-                        <div data-strategy-target-options="${targetId}" role="listbox" aria-label="Choose a concept or play">
-                            ${targetOptionsHtml || '<p class="p-2 text-xs text-slate-500">No concepts or plays available.</p>'}
-                        </div>
-                    </div>
-                </div>
-
-                <label class="block">
-                    <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
-                        Priority
-                    </span>
-                    <input type="hidden" id="${priorityId}" value="${selectedPriority}">
-                    <div class="grid grid-cols-3 gap-1" role="group" aria-label="Concept priority">
-                        ${strategyEmphasisPriorityOptions.map(([value, label]) => `
-                            <button
-                                type="button"
-                                data-strategy-emphasis-control="${priorityId}"
-                                data-strategy-emphasis-value="${value}"
-                                aria-pressed="${selectedPriority === value}"
-                                ${savedTarget != null ? '' : 'disabled'}
-                                title="${label}"
-                                onclick="window.app_setStrategyEmphasisPriority('${department}', '${side}', '${value}')"
-                                class="rounded-sm border px-1.5 py-1 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${selectedPriority === value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}">
-                                ${value === 'inherit' ? 'Inherit' : label.replace(' priority', '')}
-                            </button>
-                        `).join('')}
-                    </div>
-                </label>
-
-                <p
-                    id="strategy-emphasis-status-${department}-${side}"
-                    class="text-[9px] font-bold text-emerald-700"
-                    aria-live="polite">
-                </p>
-            </div>
+            <button type="button"
+                onclick="window.app_openEmphasisModal('${department}', '${side}')"
+                class="rounded border border-slate-300 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-800 hover:border-slate-500 hover:bg-slate-50">
+                + Manage ${side === 'offense' ? 'Offensive' : 'Defensive'} Emphasis
+            </button>
         `;
     };
 
@@ -10998,12 +11132,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     };
 
     window.app_setTeamStaffAutonomy = value => {
-        window.app_setTeamStrategySetting(
-            'staff',
-            'staffAutonomy',
-            '',
-            value
-        );
+        window.app_setUnifiedControl('staff', value);
     };
 
     window.app_toggleStrategyPriorityMenu = menuId => {
@@ -11030,21 +11159,22 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         container.querySelector(
             '.staff-hub-tab-btn.bg-slate-900'
         )?.dataset.staffTab || 'overview';
+    if (activeStaffHubTab === 'staff') activeStaffHubTab = 'overview';
 
     window.app_switchStaffTab = tab => {
+        const normalizedTab = tab === 'staff' ? 'overview' : tab;
         const allowedTabs = [
             'overview',
-            'staff',
             'priorities',
             'advanced'
         ];
 
-        if (!allowedTabs.includes(tab)) return;
+        if (!allowedTabs.includes(normalizedTab)) return;
 
-        activeStaffHubTab = tab;
+        activeStaffHubTab = normalizedTab;
 
         container.querySelectorAll('.staff-hub-tab-btn').forEach(button => {
-            const active = button.dataset.staffTab === tab;
+            const active = button.dataset.staffTab === normalizedTab;
 
             button.className =
                 `staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide transition ${
@@ -11057,14 +11187,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         container.querySelectorAll('.staff-hub-pane').forEach(pane => {
             pane.classList.toggle(
                 'hidden',
-                pane.dataset.staffPane !== tab
+                pane.dataset.staffPane !== normalizedTab
             );
         });
-
-        container.querySelector('#staff-hub-automation')?.classList.toggle(
-            'hidden',
-            tab !== 'advanced'
-        );
     };
 
     html += `
@@ -11077,15 +11202,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 class="staff-hub-tab-btn flex-1 rounded bg-slate-900 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-sm"
                 data-staff-tab="overview"
                 onclick="app_switchStaffTab('overview')">
-                Overview
-            </button>
-
-            <button
-                type="button"
-                class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
-                data-staff-tab="staff"
-                onclick="app_switchStaffTab('staff')">
-                Staff
+                👔 Coaches &amp; Departments
             </button>
 
             <button
@@ -11093,7 +11210,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
                 data-staff-tab="priorities"
                 onclick="app_switchStaffTab('priorities')">
-                Priorities
+                🎛️ Control &amp; Priorities
             </button>
 
             <button
@@ -11101,7 +11218,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
                 data-staff-tab="advanced"
                 onclick="app_switchStaffTab('advanced')">
-                Advanced
+                🕒 Weekly Hours
             </button>
         </nav>
         <div
@@ -11237,204 +11354,279 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </div>
             </section>
 
-            <section class="mb-3 rounded border border-slate-200 bg-white p-3">
-                <div class="mb-2">
-                    <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
-                        Overall Staff Delegation
-                    </h4>
-                    <p class="mt-1 text-[10px] text-slate-500">
-                        Controls how much responsibility the staff receives
-                        when the workload is automatically assigned.
-                    </p>
-                </div>
-
-                <div class="block max-w-sm">
-                    <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
-                        Staff operating mode
-                    </span>
-                    <div class="flex rounded border border-slate-300 bg-white p-0.5" role="group" aria-label="Overall staff operating mode">
-                        ${strategyAutonomyOptions.map(([value, label]) => `
-                            <button
-                                type="button"
-                                aria-pressed="${getStrategyAutonomy('staff') === value}"
-                                onclick="app_setTeamStaffAutonomy('${value}')"
-                                class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold ${getStrategyAutonomy('staff') === value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">
-                                ${label}
-                            </button>
-                        `).join('')}
+            <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
+                <div class="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-900">
+                            Who Controls What? (Single Source of Truth)
+                        </h4>
+                        <p class="mt-0.5 text-[10px] text-slate-500">
+                            Pick how involved you want to be in each area. Changes sync automatically with the Strategy &amp; Playbook screens.
+                        </p>
                     </div>
                 </div>
 
-                <div class="mt-2 grid grid-cols-1 gap-1 text-[10px] text-slate-600 sm:grid-cols-3">
-                    <p><b>Delegate:</b> Staff has more discretion.</p>
-                    <p><b>Guided:</b> Staff follows GM priorities closely.</p>
-                    <p><b>Direct:</b> Keep execution in your hands where supported.</p>
+                <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    ${[
+                        {
+                            area: 'practice',
+                            title: 'Weekly Practice Focus',
+                            current: String(gmStrategyDepartments.practice?.autonomy ?? (team.gameplan?.delegatePractice ? 'delegate' : 'guided')).toLowerCase(),
+                            options: [
+                                ['delegate', 'Delegate', 'Coaches pick freely'],
+                                ['guided', 'Guided', 'Coaches follow your directive'],
+                                ['direct', 'Direct', 'You pick in Strategy → Practice']
+                            ]
+                        },
+                        {
+                            area: 'gameplan',
+                            title: 'Formations & Playbook Installs',
+                            current: String(gmStrategyDepartments.gameplan?.autonomy ?? (team.gameplan?.delegateGameplan ? 'delegate' : 'guided')).toLowerCase(),
+                            options: [
+                                ['delegate', 'Delegate', 'Coaches set schemes & 8 plays'],
+                                ['guided', 'Guided', 'Coaches blend your emphases'],
+                                ['direct', 'Direct', 'You lock formations & plays']
+                            ]
+                        },
+                        {
+                            area: 'playcaller',
+                            title: 'Game-Day Playcalling Sliders',
+                            current: team.gameplan?.situational?.playcaller === 'GM' ? 'direct' : 'guided',
+                            options: [
+                                ['guided', 'Coach Calls', 'Coach sets run/pass & blitzing'],
+                                ['direct', 'GM Calls', 'You control sliders (may clash)']
+                            ]
+                        },
+                        {
+                            area: 'staff',
+                            title: 'Weekly Staff Hours',
+                            current: String(gmStrategyDepartments.staff?.autonomy || team.teamInstructions?.autonomy || 'guided').toLowerCase(),
+                            options: [
+                                ['delegate', 'Delegate', 'Staff distributes freely'],
+                                ['guided', 'Guided', 'Weighted by your priorities'],
+                                ['direct', 'Direct', 'Manual in Weekly Hours tab']
+                            ]
+                        },
+                        {
+                            area: 'recruiting',
+                            title: 'Offseason Recruiting',
+                            current: String(gmStrategyDepartments.recruiting?.autonomy || 'guided').toLowerCase(),
+                            options: [
+                                ['delegate', 'Delegate', 'Staff pursues targets freely'],
+                                ['guided', 'Guided', 'Staff works your ranked list'],
+                                ['direct', 'Direct', '100% manual pitches & offers']
+                            ]
+                        },
+                        {
+                            area: 'scouting',
+                            title: 'Scouting & Player Development',
+                            current: String(gmStrategyDepartments.scouting?.autonomy || 'guided').toLowerCase(),
+                            options: [
+                                ['delegate', 'Delegate', 'Balanced across roster'],
+                                ['guided', 'Guided', 'Follows position priorities below'],
+                                ['direct', 'Direct', 'Skip in auto-assign; set hours']
+                            ]
+                        }
+                    ].map(ctrl => `
+                        <div class="rounded border border-slate-200 bg-slate-50 p-2.5 flex flex-col justify-between gap-2">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="text-xs font-black text-slate-900">${ctrl.title}</span>
+                                <span class="rounded bg-white border border-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase text-slate-600">${ctrl.current}</span>
+                            </div>
+                            <div class="flex rounded border border-slate-300 bg-white p-0.5 gap-0.5">
+                                ${ctrl.options.map(([mode, label, hint]) => {
+                                    const active = ctrl.current === mode;
+                                    return `
+                                        <button type="button"
+                                            title="${hint}"
+                                            aria-pressed="${active}"
+                                            onclick="window.app_setUnifiedControl('${ctrl.area}', '${mode}')"
+                                            class="flex-1 rounded-sm px-2 py-1 text-center transition ${active ? 'bg-slate-900 text-white font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-100'}">
+                                            <span class="block text-[10px] font-bold">${label}</span>
+                                        </button>`;
+                                }).join('')}
+                            </div>
+                            <p class="text-[9px] text-slate-500">
+                                ${(ctrl.options.find(([m]) => m === ctrl.current) || ctrl.options[0])[2]}
+                            </p>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <!-- Unified Season Coaching Directive -->
+                <div class="mt-3 pt-3 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                        <span class="text-[10px] font-black uppercase tracking-wide text-slate-700 block">
+                            Season Staff Directive (When Delegated/Guided)
+                        </span>
+                        <span class="text-[10px] text-slate-500">Guides how coaches prioritize practice focus, depth chart ties, and weekly hours.</span>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-1 shrink-0">
+                        ${[
+                            ['COACH_AUTONOMY', 'Coach Choice'],
+                            ['WIN_NOW', 'Win Now'],
+                            ['DEVELOP_YOUTH', 'Develop Youth'],
+                            ['HARD_CONDITIONING', 'Conditioning']
+                        ].map(([dirVal, dirLabel]) => {
+                            const active = (team.gameplan?.gmDirective || 'COACH_AUTONOMY') === dirVal;
+                            return `
+                                <button type="button"
+                                    onclick="window.app_setGmDirectiveFromStaff('${dirVal}')"
+                                    class="rounded border px-2 py-1 text-[10px] font-bold ${active ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'}">
+                                    ${dirLabel}
+                                </button>`;
+                        }).join('')}
+                    </div>
                 </div>
             </section>
 
             <div class="space-y-3">
-                ${strategyDepartmentCards.map(department => `
+                ${strategyDepartmentCards.map(department => {
+                    const renderActiveOverrideChips = (deptKey, mapName, labelFn) => {
+                        const entries = Object.entries(gmStrategyDepartments[deptKey]?.[mapName] || {})
+                            .filter(([, v]) => v && v !== 'normal' && v !== 'inherit');
+                        if (entries.length === 0) return '';
+                        return `
+                            <div class="mb-2 flex flex-wrap gap-1">
+                                ${entries.map(([k, v]) => `
+                                    <button type="button"
+                                        onclick="window.app_removeStrategyOverride('${deptKey}', '${mapName}', '${strategyEscape(k)}')"
+                                        class="inline-flex items-center gap-1 rounded bg-slate-900 text-white px-2 py-0.5 text-[9px] font-bold hover:bg-rose-700"
+                                        title="Click to clear override">
+                                        <span>${strategyEscape(labelFn(k))}: ${strategyEscape(String(v).toUpperCase())}</span>
+                                        <span aria-hidden="true">×</span>
+                                    </button>
+                                `).join('')}
+                            </div>`;
+                    };
+
+                    return `
                     <section class="rounded border border-slate-200 bg-white p-3">
-                        <div class="mb-3">
+                        <div class="mb-2">
                             <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
-                                ${department.label}
+                                ${department.label} Priorities
                             </h4>
-                            <p class="mt-1 text-[10px] leading-relaxed text-slate-500">
+                            <p class="mt-0.5 text-[10px] leading-relaxed text-slate-500">
                                 ${department.description}
                             </p>
                         </div>
 
-                        ${department.autonomy ? `
-                            <div class="mb-3 max-w-sm">
-                                ${renderStrategyAutonomyControl(department.key)}
-                            </div>
-                        ` : ''}
-
                         ${department.positions ? `
-                            <div class="border-t border-slate-100 pt-3">
-                                <h5 class="mb-2 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                            <div class="border-t border-slate-100 pt-2">
+                                <h5 class="mb-1.5 text-[9px] font-black uppercase tracking-wide text-slate-500">
                                     Position Priorities
                                 </h5>
+                                ${renderActiveOverrideChips(department.key, 'positionPriorities', k => k)}
                                 ${renderStrategyPositionControls(department.key)}
                             </div>
                         ` : ''}
 
                         ${['practice', 'gameplan'].includes(department.key) ? `
-                            <div class="border-t border-slate-100 pt-3">
-                                <h5 class="mb-2 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                            <div class="border-t border-slate-100 pt-2 mt-2">
+                                <h5 class="mb-1.5 text-[9px] font-black uppercase tracking-wide text-slate-500">
                                     Offensive Emphasis
                                 </h5>
+                                ${renderActiveOverrideChips(department.key, 'offenseEmphasis', k => offensivePlaybook[k]?.name || k)}
                                 ${renderStrategyEmphasisEditor(
                                     department.key,
                                     'offense'
                                 )}
                             </div>
 
-                            <div class="mt-3 border-t border-slate-100 pt-3">
-                                <h5 class="mb-2 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                            <div class="mt-2 border-t border-slate-100 pt-2">
+                                <h5 class="mb-1.5 text-[9px] font-black uppercase tracking-wide text-slate-500">
                                     Defensive Emphasis
                                 </h5>
+                                ${renderActiveOverrideChips(department.key, 'defenseEmphasis', k => defensivePlaybook[k]?.name || k)}
                                 ${renderStrategyEmphasisEditor(
                                     department.key,
                                     'defense'
                                 )}
                             </div>
                         ` : ''}
-                    </section>
-                `).join('')}
+                    </section>`;
+                }).join('')}
             </div>
 
-                        <section class="mt-3 rounded border border-slate-200 bg-white p-3">
-                <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
-                    Individual Prospect Priorities
-                </h4>
-                <p class="mt-1 mb-3 text-[10px] leading-relaxed text-slate-500">
-                    Override position priorities for specific players.
-                    Recruiting and scouting can have different instructions
-                    for the same prospect.
-                </p>
-
-                ${strategyProspects.length > 0 ? `
-                    <div class="space-y-3">
-                        <label class="block">
-                            <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
-                                Select prospect
-                            </span>
-                            ${renderStrategyTargetPicker(
-                                'strategy-prospect-target',
-                                strategyProspects,
-                                strategyInitialProspectId,
-                                'prospect',
-                                'Select prospect'
-                            )}
-                        </label>
-
-                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <label class="block">
-                                <span class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500">
-                                    Recruiting priority
-                                </span>
-                                ${renderStrategyIndividualPrioritySelect(
-                                    'strategy-prospect-priority-recruiting',
-                                    'recruiting',
-                                    strategyInitialProspectId,
-                                    'prospectPriorities'
-                                )}
-                            </label>
-
-                            <label class="block">
-                                <span class="mb-1 block text-[9px] font-black uppercase tracking-wide text-slate-500">
-                                    Scouting priority
-                                </span>
-                                ${renderStrategyIndividualPrioritySelect(
-                                    'strategy-prospect-priority-scouting',
-                                    'scouting',
-                                    strategyInitialProspectId,
-                                    'prospectPriorities'
-                                )}
-                            </label>
-                        </div>
-
-                        <p
-                            id="strategy-prospect-priority-status"
-                            class="text-[9px] font-bold text-emerald-700"
-                            aria-live="polite">
+            <section class="mt-3 rounded border border-slate-200 bg-white p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <div>
+                        <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                            Individual Prospect Priorities
+                        </h4>
+                        <p class="mt-0.5 text-[10px] text-slate-500">
+                            Override position priorities for specific external prospects.
                         </p>
                     </div>
-                ` : `
-                    <p class="text-[10px] italic text-slate-500">
-                        No external prospects are currently available.
-                    </p>
-                `}
+                    <button type="button"
+                        ${strategyProspects.length === 0 ? 'disabled' : ''}
+                        onclick="window.app_openIndividualPriorityModal('prospect')"
+                        class="rounded border border-slate-300 bg-slate-900 px-3 py-1.5 text-[10px] font-bold text-white hover:bg-slate-800 disabled:opacity-40">
+                        + Manage Prospect Priorities
+                    </button>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    ${(() => {
+                        const prospectChips = [];
+                        ['recruiting', 'scouting'].forEach(dept => {
+                            const map = gmStrategyDepartments[dept]?.prospectPriorities || {};
+                            Object.entries(map).forEach(([pid, level]) => {
+                                if (!level || level === 'inherit') return;
+                                const p = strategyProspects.find(x => String(x.id) === String(pid));
+                                prospectChips.push(`
+                                    <button type="button"
+                                        onclick="window.app_removeStrategyOverride('${dept}', 'prospectPriorities', '${strategyEscape(pid)}')"
+                                        class="inline-flex items-center gap-1 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-800 hover:bg-rose-50 hover:border-rose-300">
+                                        <span class="uppercase text-[9px] text-indigo-700">${dept === 'recruiting' ? 'REC' : 'SCT'}</span>
+                                        <span>${strategyEscape(p?.name || pid)}: <b>${strategyEscape(String(level).toUpperCase())}</b></span>
+                                        <span aria-hidden="true">×</span>
+                                    </button>`);
+                            });
+                        });
+                        return prospectChips.length > 0
+                            ? prospectChips.join('')
+                            : '<p class="text-[10px] italic text-slate-400">No individual prospect overrides set.</p>';
+                    })()}
+                </div>
             </section>
 
             <section class="mt-3 rounded border border-slate-200 bg-white p-3">
-                <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
-                    Individual Development Priorities
-                </h4>
-                <p class="mt-1 mb-3 text-[10px] leading-relaxed text-slate-500">
-                    Give specific players development priority over the
-                    default position-group setting.
-                </p>
-
-                ${strategyRosterPlayers.length > 0 ? `
-                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <label class="block">
-                            <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
-                                Select player
-                            </span>
-                            ${renderStrategyTargetPicker(
-                                'strategy-player-target',
-                                strategyRosterPlayers,
-                                strategyInitialPlayerId,
-                                'player',
-                                'Select player'
-                            )}
-                        </label>
-
-                        <label class="block">
-                            <span class="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-500">
-                                Development priority
-                            </span>
-                            ${renderStrategyIndividualPrioritySelect(
-                                'strategy-player-priority',
-                                'development',
-                                strategyInitialPlayerId,
-                                'playerPriorities'
-                            )}
-                        </label>
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <div>
+                        <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                            Individual Development Priorities
+                        </h4>
+                        <p class="mt-0.5 text-[10px] text-slate-500">
+                            Give specific roster players higher or lower training priority.
+                        </p>
                     </div>
-
-                    <p
-                        id="strategy-player-priority-status"
-                        class="mt-2 text-[9px] font-bold text-emerald-700"
-                        aria-live="polite">
-                    </p>
-                ` : `
-                    <p class="text-[10px] italic text-slate-500">
-                        No roster players are currently available.
-                    </p>
-                `}
+                    <button type="button"
+                        ${strategyRosterPlayers.length === 0 ? 'disabled' : ''}
+                        onclick="window.app_openIndividualPriorityModal('player')"
+                        class="rounded border border-slate-300 bg-slate-900 px-3 py-1.5 text-[10px] font-bold text-white hover:bg-slate-800 disabled:opacity-40">
+                        + Manage Player Priorities
+                    </button>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    ${(() => {
+                        const map = gmStrategyDepartments.development?.playerPriorities || {};
+                        const playerChips = Object.entries(map)
+                            .filter(([, level]) => level && level !== 'inherit')
+                            .map(([pid, level]) => {
+                                const p = strategyRosterPlayers.find(x => String(x.id) === String(pid));
+                                return `
+                                    <button type="button"
+                                        onclick="window.app_removeStrategyOverride('development', 'playerPriorities', '${strategyEscape(pid)}')"
+                                        class="inline-flex items-center gap-1 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-800 hover:bg-rose-50 hover:border-rose-300">
+                                        <span>${strategyEscape(p?.name || pid)}: <b>${strategyEscape(String(level).toUpperCase())}</b></span>
+                                        <span aria-hidden="true">×</span>
+                                    </button>`;
+                            });
+                        return playerChips.length > 0
+                            ? playerChips.join('')
+                            : '<p class="text-[10px] italic text-slate-400">No individual player overrides set.</p>';
+                    })()}
+                </div>
             </section>
 
             <p class="mt-3 text-[10px] text-slate-500">
@@ -11445,7 +11637,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
         <div
             class="staff-hub-pane"
-            data-staff-pane="staff">
+            data-staff-pane="overview">
 
     `;
 
@@ -12561,115 +12753,135 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
                     <h4 class="text-sm font-black uppercase tracking-wide text-slate-900">
-                        Current Coaching Staff
+                        Your Coaching Staff (${npcCoachCount}/3 Hired + You)
                     </h4>
                     <p class="text-[10px] text-slate-500">
-                        Select a coach to open their individual profile.
+                        Coaches share their preferred schemes, weekly ideas, and tactical alignment. Click any coach for full ratings &amp; career history.
                     </p>
                 </div>
 
-                <span class="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600">
-                    ${npcCoachCount}/3 Staff Positions
+                <span class="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-mono text-slate-600">
+                    Avg Staff Skill: <b class="text-slate-900">${overviewAverage ?? '—'}</b>
                 </span>
             </div>
 
-            <div class="grid grid-cols-1 2xl:grid-cols-[minmax(190px,0.55fr)_minmax(0,2fr)] gap-3">
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                ${overviewCoaches.map(entry => {
+                    const outlook = staffOutlooks.get(String(entry.coach.id));
+                    const isNPC = !outlook?.isUserCoach;
+                    const moraleBadge = isNPC
+                        ? `<span class="rounded border px-1.5 py-0.5 text-[9px] font-bold ${
+                            outlook.happiness >= 70
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                : outlook.happiness >= 45
+                                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                    : 'border-rose-200 bg-rose-50 text-rose-800'
+                        }">Morale ${outlook.happiness}</span>`
+                        : `<span class="rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[9px] font-bold text-indigo-800">GM / Player</span>`;
 
-                <div class="grid grid-cols-1 sm:grid-cols-3 2xl:grid-cols-1 gap-2">
-                    <div class="flex items-center justify-between gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[10px]">
-                        <span class="font-bold text-slate-600">STAFF</span>
-                        <b class="text-slate-900">${npcCoachCount}/3</b>
-                    </div>
+                    const leadsLabel = outlook?.leads?.length
+                        ? outlook.leads.join(', ')
+                        : 'No department lead';
 
-                    <div class="flex items-center justify-between gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[10px]">
-                        <span class="font-bold text-slate-600">AVG SKILLS</span>
-                        <b class="text-slate-900">${overviewAverage ?? '—'}</b>
-                    </div>
+                    const clashBanner = isNPC && outlook.schemeClash > 0
+                        ? `<div class="mt-2 rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[10px] text-amber-950">
+                            <b>⚠️ Tactical Friction (-${outlook.schemeClash} IQ):</b> Your playcalling sliders clash with this coach's ${overviewEscape(outlook.tacticalName)} style.
+                           </div>`
+                        : '';
 
-                    <div class="flex items-center justify-between gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[10px]">
-                        <span class="font-bold text-slate-600">ASSIGNED HOURS</span>
-                        <b class="text-slate-900">${totalAssignedHours}</b>
-                    </div>
-                </div>
+                    const schemeActionsHtml = isNPC && outlook.schemeMismatch
+                        ? `<button type="button"
+                            onclick="event.stopPropagation(); window.app_adoptCoachScheme('${overviewEscape(outlook.preferredOffense || '')}', '${overviewEscape(outlook.preferredDefense || '')}')"
+                            class="rounded border border-blue-200 bg-blue-50 px-2 py-1 text-[9px] font-bold text-blue-800 hover:bg-blue-100">
+                            Try Coach's Schemes (${overviewEscape(outlook.preferredOffense || '—')} / ${overviewEscape(outlook.preferredDefense || '—')})
+                           </button>`
+                        : '';
 
-                <div class="grid grid-cols-1 2xl:grid-cols-2 gap-2">
-                ${overviewCoaches.map(entry => `
-                    <button
-                        type="button"
-                        class="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        onclick="app.openCoachCard('${entry.coachId}')"
-                        aria-label="Open profile for ${overviewEscape(entry.coach.name)}">
+                    const practiceActionHtml = isNPC
+                        ? `<button type="button"
+                            onclick="event.stopPropagation(); window.app_adoptCoachPractice('${overviewEscape(outlook.recommendedPractice)}')"
+                            class="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[9px] font-bold text-emerald-800 hover:bg-emerald-100">
+                            Use Recommendation: ${overviewEscape(outlook.recommendedPracticeLabel)}
+                           </button>`
+                        : '';
 
-                        <div class="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.8fr)_auto] lg:items-center lg:gap-4">
-
-                            <div class="min-w-0">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <span class="text-sm font-black text-slate-900">
-                                        ${overviewEscape(entry.coach.name || 'Unnamed Coach')}
-                                    </span>
-
-                                    <span class="rounded bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase text-slate-600">
-                                        ${overviewEscape(entry.role)}
-                                    </span>
-                                </div>
-
-                                <p class="mt-1 whitespace-normal break-words text-[10px] leading-snug text-slate-500">
-                                    ${overviewEscape(entry.styleSummary)}
-                                </p>
-                            </div>
-
-                            <div class="min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]">
-                                <span class="min-w-0 break-words text-slate-600">
-                                    <b class="uppercase text-emerald-700">Strengths</b>
-                                    ${overviewEscape(entry.strengthsSummary)}
-                                </span>
-
-                                <span class="min-w-0 break-words text-slate-600">
-                                    <b class="uppercase text-amber-700">Lowest</b>
-                                    ${overviewEscape(entry.lowestSkillSummary)}
-                                </span>
-                            </div>
-
-                            <div class="flex items-center justify-between gap-3 sm:justify-end">
-                                <div class="text-right text-[9px] leading-relaxed text-slate-500">
-                                    <span class="block">
-                                        ${entry.workload}h assigned
-                                    </span>
-                                    <span class="block">
-                                        ${overviewEscape(entry.availability)}
-                                    </span>
-                                </div>
-
-                                <div class="flex shrink-0 items-center gap-1">
-                                    <div class="shrink-0 text-right">
-                                        <span class="block text-[9px] uppercase text-slate-400">
-                                            Overall
-                                        </span>
-                                        <span class="text-xl font-black tabular-nums text-slate-900">
-                                            ${entry.overall ?? '—'}
-                                        </span>
+                    return `
+                        <article class="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm flex flex-col justify-between gap-2.5">
+                            <div>
+                                <div class="flex items-start justify-between gap-2">
+                                    <div class="min-w-0">
+                                        <div class="flex flex-wrap items-center gap-1.5">
+                                            <button type="button"
+                                                class="text-sm font-black text-slate-900 hover:text-blue-700 text-left"
+                                                onclick="app.openCoachCard('${entry.coachId}')">
+                                                ${overviewEscape(entry.coach.name || 'Unnamed Coach')}
+                                            </button>
+                                            <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-slate-700">
+                                                ${overviewEscape(entry.role)}
+                                            </span>
+                                            ${moraleBadge}
+                                        </div>
+                                        <p class="mt-0.5 text-[10px] text-slate-500">
+                                            ${overviewEscape(outlook?.personalityName || '')} · ${overviewEscape(outlook?.tacticalName || '')} · ${overviewEscape(outlook?.scheduleLabel || '')}
+                                        </p>
                                     </div>
-                                    <span class="text-lg text-slate-400">›</span>
+                                    <div class="text-right shrink-0">
+                                        <span class="block text-[9px] uppercase text-slate-400">Overall</span>
+                                        <span class="text-xl font-black tabular-nums text-slate-900">${entry.overall ?? '—'}</span>
+                                    </div>
                                 </div>
+
+                                <div class="mt-2 grid grid-cols-2 gap-2 text-[10px] bg-slate-50 rounded border border-slate-100 p-2">
+                                    <div>
+                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Leads</span>
+                                        <span class="font-semibold text-slate-800">${overviewEscape(leadsLabel)}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Weekly Hours</span>
+                                        <span class="font-mono font-bold text-slate-800">${entry.workload}/${outlook?.weeklyCapacity ?? 8}h</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Strengths</span>
+                                        <span class="font-semibold text-emerald-800">${overviewEscape(entry.strengthsSummary)}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Preferred Formations</span>
+                                        <span class="font-semibold text-slate-800">${overviewEscape(outlook?.preferredOffense || 'Flexible')} / ${overviewEscape(outlook?.preferredDefense || 'Flexible')}</span>
+                                    </div>
+                                </div>
+
+                                ${isNPC ? `
+                                    <div class="mt-2 rounded border border-slate-200 bg-slate-50/80 p-2 text-[10px] text-slate-700">
+                                        <span class="font-black uppercase text-[9px] text-slate-500 block">Coach's Weekly Idea</span>
+                                        <p class="mt-0.5 italic">"${overviewEscape(outlook.practiceReason)}"</p>
+                                        <p class="mt-1 text-[9px] text-slate-500 font-mono">
+                                            Prefers ~${outlook.tendencies.earlyDownTendency}% Run · ${outlook.tendencies.defenseAggressiveness}% Blitz · ${outlook.tendencies.fourthDownBravery}% 4th-Down Aggro
+                                        </p>
+                                    </div>
+                                ` : ''}
+
+                                ${clashBanner}
                             </div>
-                        </div>
-                    </button>
-                `).join('')}
-                </div>
+
+                            <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                                <div class="flex flex-wrap gap-1.5">
+                                    ${practiceActionHtml}
+                                    ${schemeActionsHtml}
+                                </div>
+                                <button type="button"
+                                    class="text-[10px] font-bold text-blue-700 hover:text-blue-900 ml-auto"
+                                    onclick="app.openCoachCard('${entry.coachId}')">
+                                    Full Profile &amp; Ratings →
+                                </button>
+                            </div>
+                        </article>
+                    `;
+                }).join('')}
             </div>
         </section>
     `;
 
-    // Close the coach-list pane before adding the career-history pane.
     html += `
-        </div>
-    `;
-
-    html += `
-        <div
-            class="staff-hub-pane hidden"
-            data-staff-pane="staff">
-
             <details class="mb-3 rounded-lg border border-slate-200 bg-white p-3">
                 <summary class="cursor-pointer list-none text-xs font-bold text-slate-800">
                     Coaching Career History
@@ -12775,7 +12987,6 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                 </div>
             </details>
-        </div>
     `;
 
     const staffDepartmentCards = Object.entries(
@@ -12882,10 +13093,6 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     ).length;
 
     html += `
-        <div
-            class="staff-hub-pane"
-            data-staff-pane="overview">
-
             <section class="mb-4 rounded-lg border border-slate-200 bg-white p-4">
 
                 <div class="flex flex-wrap items-center justify-between gap-3">
@@ -13429,95 +13636,77 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             renderStaffTab(gs);
         };
 
-        const renderStaffWorkPicker = (
-            index,
-            field,
-            label,
-            options,
-            selectedValue,
-            detailHeader = 'Details'
-        ) => {
-            const pickerId = `staff-work-picker-${index}-${field}`;
-            const selectedOption = options.find(option =>
-                String(option[0]) === String(selectedValue)
-            );
+        window.app_openStaffWorkModal = (index, field, initialQuery = '') => {
+            const gs = getGameState();
+            const currentTeam = gs?.playerTeam;
+            const currentAssignment = currentTeam?.staffWorkPlan?.assignments?.[index];
+            if (!currentTeam || !currentAssignment) return;
 
-            return `
-                <div class="relative min-w-0">
-                    <span class="mb-1 block text-[9px] font-bold uppercase text-slate-500">${label}</span>
-                    <button
-                        type="button"
-                        id="${pickerId}-trigger"
-                        aria-expanded="false"
-                        aria-controls="${pickerId}"
-                        onclick="window.app_toggleStaffWorkPicker('${pickerId}')"
-                        class="flex w-full items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2 py-2 text-left text-xs hover:border-slate-500">
-                        <span class="truncate font-semibold text-slate-700">${overviewEscape(selectedOption?.[1] || 'Choose...')}</span>
-                        <span aria-hidden="true" class="text-slate-400">▾</span>
-                    </button>
-                    <div id="${pickerId}" class="staff-work-picker absolute left-0 top-full z-30 mt-1 hidden max-h-72 w-80 max-w-[90vw] overflow-y-auto rounded border border-slate-300 bg-white p-2 shadow-xl">
-                        <input type="search" data-staff-work-search="${pickerId}" placeholder="Search ${overviewEscape(label.toLowerCase())}..." oninput="window.app_filterStaffWorkPicker('${pickerId}')" class="mb-2 w-full rounded border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-slate-500">
-                        <div class="overflow-hidden rounded-sm border border-slate-200">
-                            <div class="grid grid-cols-[minmax(0,1fr)_8rem] gap-2 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
-                                <span>${label}</span>
-                                <span>${detailHeader}</span>
-                            </div>
-                            ${options.map(([value, name, detail = '']) => `
-                                <button
-                                    type="button"
-                                    data-staff-work-option="${pickerId}"
-                                    data-staff-work-value="${overviewEscape(value)}"
-                                    data-staff-work-search-text="${overviewEscape(`${name} ${detail}`)}"
-                                    onclick="window.app_selectStaffWorkPicker(${index}, '${field}', this.dataset.staffWorkValue)"
-                                    class="grid w-full grid-cols-[minmax(0,1fr)_8rem] gap-2 border-t border-slate-100 px-2 py-1.5 text-left text-[10px] ${String(value) === String(selectedValue) ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}">
-                                    <span class="truncate font-semibold">${overviewEscape(name)}</span>
-                                    <span class="truncate text-right ${String(value) === String(selectedValue) ? 'text-slate-200' : 'text-slate-500'}">${overviewEscape(detail)}</span>
-                                </button>
-                            `).join('')}
+            const isOpponent = field === 'opponentTeamId';
+            const title = isOpponent ? 'Choose Opponent to Scout' : 'Choose Training Skill Focus';
+            const rawOptions = isOpponent
+                ? [
+                    ['', 'Any opponent', 'No team restriction'],
+                    ...(gs.teams || [])
+                        .filter(other => other && other.id !== currentTeam.id && other.leagueType === currentTeam.leagueType)
+                        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+                        .map(other => {
+                            const league = other.leagueType === 'youth'
+                                ? 'Pee-Wee'
+                                : Number(other.tier) === 1 ? 'Premier' : 'Sandlot';
+                            const record = `${Number(other.wins) || 0}-${Number(other.losses) || 0}-${Number(other.ties) || 0}`;
+                            return [String(other.id), other.name, `${league} · ${record}`];
+                        })
+                ]
+                : skillOptions.map(([value, name]) => [
+                    value,
+                    name,
+                    value ? 'Targeted drill focus' : 'Coach chooses weakest skill'
+                ]);
+
+            const selectedValue = String(currentAssignment[field] || '');
+            const query = String(initialQuery || '').trim().toLowerCase();
+            const filtered = query
+                ? rawOptions.filter(([, name, detail]) =>
+                    `${name} ${detail}`.toLowerCase().includes(query)
+                  )
+                : rawOptions;
+
+            showModal(
+                title,
+                `
+                    <div class="space-y-3 text-left text-xs">
+                        <input id="staff-work-modal-search" type="search"
+                            value="${overviewEscape(initialQuery)}"
+                            placeholder="Search..."
+                            oninput="window.app_openStaffWorkModal(${index}, '${field}', this.value)"
+                            class="w-full rounded border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:border-slate-500">
+                        <div class="max-h-[55vh] overflow-y-auto space-y-1 pr-1">
+                            ${filtered.map(([val, name, detail]) => {
+                                const active = String(val) === selectedValue;
+                                return `
+                                    <button type="button"
+                                        data-work-val="${overviewEscape(val)}"
+                                        onclick="app_updateStaffWorkAssignment(${index}, '${field}', this.dataset.workVal); document.getElementById('modal-default-close')?.click();"
+                                        class="w-full flex items-center justify-between gap-3 rounded border p-2.5 text-left ${active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50'}">
+                                        <span class="font-bold">${overviewEscape(name)}</span>
+                                        <span class="text-[10px] ${active ? 'text-slate-300' : 'text-slate-500'}">${overviewEscape(detail)}</span>
+                                    </button>`;
+                            }).join('') || '<p class="text-center text-slate-400 py-4">No matching options.</p>'}
                         </div>
                     </div>
-                </div>
-            `;
-        };
-
-        window.app_toggleStaffWorkPicker = pickerId => {
-            const picker = document.getElementById(pickerId);
-            const trigger = document.getElementById(`${pickerId}-trigger`);
-            if (!picker || !trigger) return;
-
-            const isOpening = picker.classList.contains('hidden');
-            document.querySelectorAll('.staff-work-picker').forEach(panel =>
-                panel.classList.add('hidden')
-            );
-            document.querySelectorAll('[aria-controls^="staff-work-picker-"]').forEach(button =>
-                button.setAttribute('aria-expanded', 'false')
+                `,
+                null,
+                null,
+                null,
+                'Close'
             );
 
-            if (isOpening) {
-                picker.classList.remove('hidden');
-                trigger.setAttribute('aria-expanded', 'true');
-                picker.querySelector('input[type="search"]')?.focus();
+            const searchEl = document.getElementById('staff-work-modal-search');
+            if (searchEl && initialQuery !== '') {
+                searchEl.focus();
+                searchEl.setSelectionRange(searchEl.value.length, searchEl.value.length);
             }
-        };
-
-        window.app_filterStaffWorkPicker = pickerId => {
-            const query = String(
-                document.querySelector(
-                    `[data-staff-work-search="${pickerId}"]`
-                )?.value || ''
-            ).trim().toLowerCase();
-
-            document.querySelectorAll(
-                `[data-staff-work-option="${pickerId}"]`
-            ).forEach(button => {
-                button.hidden = !String(
-                    button.dataset.staffWorkSearchText || ''
-                ).toLowerCase().includes(query);
-            });
-        };
-
-        window.app_selectStaffWorkPicker = (index, field, value) => {
-            window.app_updateStaffWorkAssignment(index, field, value);
         };
 
         window.app_updateStaffWorkAssignment = (index, field, value) => {
@@ -13738,32 +13927,33 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             0
         );
 
+        const staffMode = String(
+            team.teamInstructions?.departments?.staff?.autonomy ||
+            team.teamInstructions?.autonomy ||
+            'guided'
+        ).toLowerCase();
+
         html += `
-            <details
+            <section
                 id="staff-workload-assignments"
-                class="mt-3 mb-4 rounded border border-slate-300 bg-white shadow-sm"
-                ${staffWorkloadExpanded ? 'open' : ''}>
-                <summary class="flex cursor-pointer list-none flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                class="mb-4 rounded border border-slate-300 bg-white shadow-sm">
+                <div class="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between bg-slate-50 border-b border-slate-200">
                     <div>
                         <h4 class="text-xs font-black uppercase tracking-wide text-slate-900">
-                            Weekly Staff Workload
+                            Weekly Staff Hours (${totalRequestedHours}/${totalWeeklyStaffHours}h Scheduled)
                         </h4>
                         <p class="mt-0.5 text-[10px] text-slate-500">
-                            Edit coaching hours and task assignments.
+                            ${staffMode === 'direct'
+                                ? 'Direct mode active: Assign each coach’s weekly hours below.'
+                                : `Staff hour mode is ${staffMode.toUpperCase()}. Click Auto-assign to rebuild from your Priorities, or tweak any row manually.`}
                         </p>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <span class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-mono text-slate-700">
-                            <b>${totalRequestedHours}</b> hrs ·
-                            <b>${workCoaches.length}</b> coaches
-                        </span>
-                        <span class="text-[10px] font-bold text-blue-700">
-                            ${staffWorkloadExpanded ? 'Collapse ↑' : 'Edit workload ↓'}
-                        </span>
-                    </div>
-                </summary>
+                    <span class="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-mono text-slate-700">
+                        <b>${workCoaches.length}</b> coaches
+                    </span>
+                </div>
 
-                <div class="border-t border-slate-200 p-3">
+                <div class="p-3">
                     <div class="grid grid-cols-1 2xl:grid-cols-[minmax(280px,0.75fr)_minmax(0,2fr)] 2xl:gap-5">
                         <section class="min-w-0">
                             <div class="mb-3 flex justify-end">
@@ -13912,17 +14102,23 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                         </div>
                                     </div>
                                 ` : `
-                                    <label class="block min-w-0">
+                                    <div class="min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Coach</span>
-                                        ${renderStaffWorkPicker(
-                                            index,
-                                            'coachId',
-                                            'Coach',
-                                            coachOptions,
-                                            assignment.coachId,
-                                            'Week hours'
-                                        )}
-                                    </label>
+                                        <div class="grid grid-cols-2 gap-1" role="group" aria-label="Choose coach">
+                                            ${coachOptions.map(([cid, cname, chours]) => {
+                                                const active = String(cid) === String(assignment.coachId);
+                                                return `
+                                                    <button type="button"
+                                                        data-coach-id="${overviewEscape(cid)}"
+                                                        aria-pressed="${active}"
+                                                        onclick="app_updateStaffWorkAssignment(${index}, 'coachId', this.dataset.coachId)"
+                                                        class="rounded-sm border px-2 py-1.5 text-left ${active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">
+                                                        <span class="block truncate text-[10px] font-bold">${overviewEscape(cname)}</span>
+                                                        <span class="block text-[8px] ${active ? 'text-slate-300' : 'text-slate-500'}">${overviewEscape(chours)}</span>
+                                                    </button>`;
+                                            }).join('')}
+                                        </div>
+                                    </div>
                                 `}
 
                                 ${isCommunityService ? `
@@ -13983,17 +14179,15 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                         </div>
                                     </label>
                                 ` : task === 'defensePrep' ? `
-                                    <label class="block min-w-0">
+                                    <div class="min-w-0">
                                         <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Opponent</span>
-                                        ${renderStaffWorkPicker(
-                                            index,
-                                            'opponentTeamId',
-                                            'Opponent',
-                                            opponentOptions,
-                                            assignment.opponentTeamId || '',
-                                            'League · Record'
-                                        )}
-                                    </label>
+                                        <button type="button"
+                                            onclick="window.app_openStaffWorkModal(${index}, 'opponentTeamId')"
+                                            class="w-full flex items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2.5 py-2 text-left text-xs hover:border-slate-500">
+                                            <span class="truncate font-semibold text-slate-800">${overviewEscape(opponentOptions.find(([v]) => String(v) === String(assignment.opponentTeamId || ''))?.[1] || 'Any opponent')}</span>
+                                            <span class="text-[9px] font-black uppercase text-blue-700 shrink-0">Choose</span>
+                                        </button>
+                                    </div>
                                 ` : `
                                     <div class="text-[10px] text-slate-500">
                                         All active offensive plays
@@ -14001,21 +14195,15 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 `}
 
                                 ${task === 'training' ? `
-                                    <label class="block min-w-0">
-                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Skill</span>
-                                        ${renderStaffWorkPicker(
-                                            index,
-                                            'skill',
-                                            'Training skill',
-                                            skillOptions.map(([value, name]) => [
-                                                value,
-                                                name,
-                                                value ? 'Skill focus' : 'Coach chooses'
-                                            ]),
-                                            assignment.skill || '',
-                                            'Focus'
-                                        )}
-                                    </label>
+                                    <div class="min-w-0">
+                                        <span class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Skill Focus</span>
+                                        <button type="button"
+                                            onclick="window.app_openStaffWorkModal(${index}, 'skill')"
+                                            class="w-full flex items-center justify-between gap-2 rounded border border-slate-300 bg-white px-2.5 py-2 text-left text-xs hover:border-slate-500">
+                                            <span class="truncate font-semibold text-slate-800">${overviewEscape(skillOptions.find(([v]) => String(v) === String(assignment.skill || ''))?.[1] || 'Automatic skill focus')}</span>
+                                            <span class="text-[9px] font-black uppercase text-blue-700 shrink-0">Choose</span>
+                                        </button>
+                                    </div>
                                 ` : '<div></div>'}
 
                                 ${showTargets ? `
@@ -14071,18 +14259,21 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                                 Reset to automatic
                                             </button>
                                         </div>
-                                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                            ${prepPlayOptions.map(([key, label]) => `
-                                                <label class="flex items-start gap-2 rounded border border-slate-200 bg-white p-2 cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        class="mt-0.5 accent-blue-600"
-                                                        value="${key}"
-                                                        ${selectedPrepPlayKeys.has(key) ? 'checked' : ''}
-                                                        onchange="app_toggleStaffWorkPlay(${index}, '${key}', this.checked)">
-                                                    <span class="text-[10px] text-slate-700">${label}</span>
-                                                </label>
-                                            `).join('')}
+                                        <div class="flex flex-wrap gap-1.5">
+                                            ${prepPlayOptions.map(([key, label]) => {
+                                                const active = selectedPrepPlayKeys.has(key);
+                                                return `
+                                                    <button type="button"
+                                                        aria-pressed="${active}"
+                                                        onclick="app_toggleStaffWorkPlay(${index}, '${key}', ${!active})"
+                                                        class="rounded border px-2.5 py-1.5 text-[10px] font-bold transition ${
+                                                            active
+                                                                ? 'border-blue-700 bg-blue-700 text-white shadow-sm'
+                                                                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                                                        }">
+                                                        ${active ? '✓ ' : ''}${overviewEscape(label)}
+                                                    </button>`;
+                                            }).join('')}
                                         </div>
                                         ${selectedPrepPlayKeys.size === 0 ? `
                                             <p class="text-[10px] text-amber-700 mt-2">
@@ -14108,7 +14299,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         </section>
                     </div>
                 </div>
-            </details>
+            </section>
         `;
     }
 
@@ -14119,16 +14310,6 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
     // Restore the user's selected destination after any UI refresh.
     window.app_switchStaffTab(activeStaffHubTab);
-
-    const workloadDetails = container.querySelector(
-        '#staff-workload-assignments'
-    );
-
-    if (workloadDetails) {
-        workloadDetails.addEventListener('toggle', () => {
-            staffWorkloadExpanded = workloadDetails.open;
-        });
-    }
 }
 
 let staffCarouselSearch = '';
@@ -15253,7 +15434,7 @@ window.app_setRosterSort = function (col) {
 };
 
 window.app_setMyRosterView = function (view) {
-    if (!['skills', 'season', 'career'].includes(view)) return;
+    if (!['skills', 'morale', 'season', 'career'].includes(view)) return;
 
     myRosterView = view;
     renderMyTeamTab(getGameState());
@@ -15264,6 +15445,42 @@ function renderMyTeamTab(gameState) {
     const roster = getUIRosterObjects(gameState.playerTeam);
 
     const team = gameState.playerTeam;
+    const rosterLimit = getCurrentRosterLimit(gameState);
+    const isOverRosterLimit = Boolean(
+        gameState.draftCompleted &&
+        roster.length > rosterLimit
+    );
+
+    const offFormKey = team.formations?.offense || 'Balanced';
+    const defFormKey = team.formations?.defense || '3-2-3';
+    const offChart = team.depthChart?.offense || {};
+    const defChart = team.depthChart?.defense || {};
+    const stChart = team.specialTeams || team.depthChart?.specialTeams || {};
+    const specChart = team.specialists || {};
+
+    const getPlayerActiveRoles = playerId => {
+        const pid = String(playerId);
+        const offSlots = Object.entries(offChart)
+            .filter(([, id]) => String(id) === pid)
+            .map(([slot]) => getFormationSlotLabel('offense', offFormKey, slot));
+        const defSlots = Object.entries(defChart)
+            .filter(([, id]) => String(id) === pid)
+            .map(([slot]) => getFormationSlotLabel('defense', defFormKey, slot));
+        const stSlots = Object.entries(stChart)
+            .filter(([, id]) => String(id) === pid)
+            .map(([slot]) => slot);
+        const specSlots = Object.entries(specChart)
+            .filter(([, id]) => String(id) === pid)
+            .map(([slot]) => slot);
+
+        return {
+            offSlots,
+            defSlots,
+            specialSlots: [...stSlots, ...specSlots],
+            isTwoWay: offSlots.length > 0 && defSlots.length > 0,
+            isStarter: offSlots.length > 0 || defSlots.length > 0
+        };
+    };
 
     const unavailableCount = roster.filter(
         player => Number(player.status?.duration) > 0
@@ -15272,13 +15489,13 @@ function renderMyTeamTab(gameState) {
     const readyCount = roster.length - unavailableCount;
 
     const offenseStarterIds = new Set(
-        Object.values(team.depthChart?.offense || {})
+        Object.values(offChart)
             .filter(id => id != null)
             .map(id => String(id))
     );
 
     const defenseStarterIds = new Set(
-        Object.values(team.depthChart?.defense || {})
+        Object.values(defChart)
             .filter(id => id != null)
             .map(id => String(id))
     );
@@ -15301,6 +15518,11 @@ function renderMyTeamTab(gameState) {
         )
         : null;
 
+    const rosterById = new Map(roster.map(p => [String(p.id), p]));
+    const waivedDuesSet = new Set(
+        (team.finances?.waivedDues || []).map(String)
+    );
+
     const sortedRoster = [...roster].sort((a, b) => {
         const fitsA = getBestTwoWayFits(a);
         const fitsB = getBestTwoWayFits(b);
@@ -15313,7 +15535,21 @@ function renderMyTeamTab(gameState) {
         else if (rosterSortCol === 'age') { valA = a.age; valB = b.age; }
         else if (rosterSortCol === 'pot') { valA = a.potential || 'C'; valB = b.potential || 'C'; }
         else if (rosterSortCol === 'energy') { valA = 100 - (a.fatigue || 0); valB = 100 - (b.fatigue || 0); }
-        else {
+        else if (rosterSortCol === 'role') {
+            const rA = getPlayerActiveRoles(a.id);
+            const rB = getPlayerActiveRoles(b.id);
+            valA = (rA.offSlots.length + rA.defSlots.length) * 10 + rA.specialSlots.length;
+            valB = (rB.offSlots.length + rB.defSlots.length) * 10 + rB.specialSlots.length;
+        } else if (rosterSortCol === 'happiness') {
+            valA = Number(a.expectations?.happiness) || 50;
+            valB = Number(b.expectations?.happiness) || 50;
+        } else if (['workEthic', 'ego', 'loyalty'].includes(rosterSortCol)) {
+            valA = Number(a.personality?.[rosterSortCol]) || 50;
+            valB = Number(b.personality?.[rosterSortCol]) || 50;
+        } else if (rosterSortCol === 'coverage') {
+            valA = Number(a.attributes?.technical?.coverage ?? a.attributes?.technical?.passCoverage) || 0;
+            valB = Number(b.attributes?.technical?.coverage ?? b.attributes?.technical?.passCoverage) || 0;
+        } else {
             valA = (a.attributes?.physical?.[rosterSortCol] ?? a.attributes?.technical?.[rosterSortCol] ?? a.attributes?.mental?.[rosterSortCol]) || 0;
             valB = (b.attributes?.physical?.[rosterSortCol] ?? b.attributes?.technical?.[rosterSortCol] ?? b.attributes?.mental?.[rosterSortCol]) || 0;
         }
@@ -15327,12 +15563,26 @@ function renderMyTeamTab(gameState) {
     const getIndicator = (col) => rosterSortCol === col ? (rosterSortDir === 'desc' ? ' ▼' : ' ▲') : '';
 
     let rosterNotice = '';
-    if (roster.length < 14) {
+    if (isOverRosterLimit) {
+        const excess = roster.length - rosterLimit;
+        rosterNotice = `
+        <div class="bg-rose-50 border-b border-rose-200 p-2.5 px-4 flex flex-wrap items-center justify-between gap-2 text-xs text-rose-900 shrink-0">
+            <div class="flex items-center gap-2">
+                <span class="text-base">⚠️</span>
+                <span><b>Roster Over Regular-Season Limit (${roster.length}/${rosterLimit}):</b> Cut <b>${excess}</b> player${excess === 1 ? '' : 's'} to advance. Switch to <b>Roles & Morale</b> or click any player to release them.</span>
+            </div>
+            ${myRosterView !== 'morale' ? `
+                <button class="bg-rose-700 hover:bg-rose-800 text-white font-bold px-3 py-1 rounded text-[11px] uppercase tracking-wider transition" onclick="app_setMyRosterView('morale')">
+                    Review & Cut Players →
+                </button>
+            ` : ''}
+        </div>`;
+    } else if (roster.length < 14) {
         rosterNotice = `
         <div class="bg-amber-50 border-b border-amber-200 p-2.5 px-4 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 shrink-0">
             <div class="flex items-center gap-2">
                 <span class="text-base">⚠️</span>
-                <span><b>Roster Depth Low (${roster.length}/18):</b> You need at least 14 players for two-way stamina and backup rotations.</span>
+                <span><b>Roster Depth Low (${roster.length}/${rosterLimit}):</b> You need at least 14 players for two-way stamina and backup rotations.</span>
             </div>
             <div class="flex items-center gap-2">
                 <button class="bg-slate-900 text-white font-bold px-2.5 py-1 rounded text-[11px] uppercase tracking-wider hover:bg-slate-800 transition" onclick="app.switchTab('free-agents')">
@@ -15345,19 +15595,19 @@ function renderMyTeamTab(gameState) {
         </div>`;
     }
 
-        const viewTabs = `
+    const viewTabs = `
         <div class="space-y-2.5 bg-white border-b border-slate-200 p-3">
 
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div class="rounded border border-slate-200 bg-slate-50 px-3 py-1.5">
+                <div class="rounded border ${isOverRosterLimit ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-slate-50'} px-3 py-1.5">
                     <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
                         Rostered
                     </span>
-                    <span class="block text-lg font-black tabular-nums text-slate-900">
-                        ${roster.length}
+                    <span class="block text-lg font-black tabular-nums ${isOverRosterLimit ? 'text-rose-700' : 'text-slate-900'}">
+                        ${roster.length}/${rosterLimit}
                     </span>
-                    <span class="text-[9px] text-slate-500">
-                        Total players
+                    <span class="text-[9px] ${isOverRosterLimit ? 'text-rose-700 font-bold' : 'text-slate-500'}">
+                        ${isOverRosterLimit ? `Cut ${roster.length - rosterLimit} to play` : 'Roster limit'}
                     </span>
                 </div>
 
@@ -15410,6 +15660,11 @@ function renderMyTeamTab(gameState) {
                         Skills
                     </button>
                     <button
+                        class="px-3 py-1 rounded transition ${myRosterView === 'morale' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
+                        onclick="app_setMyRosterView('morale')">
+                        Roles & Morale
+                    </button>
+                    <button
                         class="px-3 py-1 rounded transition ${myRosterView === 'season' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}"
                         onclick="app_setMyRosterView('season')">
                         Season Stats
@@ -15426,6 +15681,101 @@ function renderMyTeamTab(gameState) {
                 </span>
             </div>
         </div>`;
+
+    if (myRosterView === 'morale') {
+        const moraleRows = sortedRoster.length > 0
+            ? sortedRoster.map(p => {
+                const roles = getPlayerActiveRoles(p.id);
+                const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
+                const happiness = Math.round(Number(p.expectations?.happiness) || 50);
+                const workEthic = Math.round(Number(p.personality?.workEthic) || 50);
+                const ego = Math.round(Number(p.personality?.ego) || 50);
+                const loyalty = Math.round(Number(p.personality?.loyalty) || 50);
+                const bestFriend = p.social?.bestFriendId
+                    ? rosterById.get(String(p.social.bestFriendId))
+                    : null;
+                const isWaived = waivedDuesSet.has(String(p.id));
+                const happyClass = happiness >= 75
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : happiness >= 50
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : 'bg-rose-50 text-rose-800 border-rose-200 font-bold';
+
+                return `
+                    <tr data-player-id="${p.id}" class="hover:bg-slate-50 transition cursor-pointer">
+                        <td class="py-2 px-3 font-sans font-semibold text-slate-900 whitespace-nowrap">
+                            <span class="font-mono text-[10px] text-slate-400 mr-1">#${p.number || '--'}</span>
+                            ${p.name}
+                            <span class="block text-[9px] text-slate-400">Age ${p.age} · ${p.pos || estimateBestPosition(p)}</span>
+                        </td>
+                        <td class="py-2 px-2 text-center">
+                            ${roles.offSlots.length
+                                ? roles.offSlots.map(s => `<span class="inline-block bg-blue-50 text-blue-800 border border-blue-200 rounded px-1.5 py-0.5 text-[10px] font-bold">${s}</span>`).join(' ')
+                                : '<span class="text-slate-300">—</span>'}
+                        </td>
+                        <td class="py-2 px-2 text-center">
+                            ${roles.defSlots.length
+                                ? roles.defSlots.map(s => `<span class="inline-block bg-rose-50 text-rose-800 border border-rose-200 rounded px-1.5 py-0.5 text-[10px] font-bold">${s}</span>`).join(' ')
+                                : '<span class="text-slate-300">—</span>'}
+                        </td>
+                        <td class="py-2 px-2 text-center">
+                            ${roles.specialSlots.length
+                                ? roles.specialSlots.map(s => `<span class="inline-block bg-amber-50 text-amber-800 border border-amber-200 rounded px-1.5 py-0.5 text-[10px] font-bold">${s}</span>`).join(' ')
+                                : '<span class="text-slate-300">—</span>'}
+                        </td>
+                        <td class="py-2 px-2 text-center">
+                            <span class="text-[10px] px-1.5 py-0.5 rounded ${getEnergyBadgeStyle(energy)}">${energy}%</span>
+                        </td>
+                        <td class="py-2 px-2 text-center">
+                            <span class="text-[10px] px-1.5 py-0.5 rounded border ${happyClass}">${happiness}</span>
+                        </td>
+                        <td class="py-2 px-2 text-center text-slate-700">${workEthic}</td>
+                        <td class="py-2 px-2 text-center ${ego >= 75 ? 'text-rose-700 font-bold' : 'text-slate-700'}">${ego}</td>
+                        <td class="py-2 px-2 text-center text-slate-700">${loyalty}</td>
+                        <td class="py-2 px-2 font-sans text-[10px] text-slate-600">
+                            <div class="flex flex-wrap gap-1">
+                                <span class="bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">${p.personality?.clique || 'Regular'}</span>
+                                ${bestFriend ? `<span class="bg-indigo-50 text-indigo-800 border border-indigo-200 rounded px-1.5 py-0.5">BFF: ${bestFriend.name.split(' ')[0]}</span>` : ''}
+                                ${p.activePromise ? `<span class="bg-amber-100 text-amber-900 border border-amber-300 rounded px-1.5 py-0.5 font-bold">Promise Active</span>` : ''}
+                                ${isWaived ? `<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 rounded px-1.5 py-0.5">Dues Waived</span>` : ''}
+                            </div>
+                        </td>
+                        <td class="py-2 px-3 text-right">
+                            <button type="button"
+                                class="bg-rose-50 hover:bg-rose-700 text-rose-700 hover:text-white border border-rose-200 font-bold px-2.5 py-1 rounded text-[10px] uppercase transition"
+                                onclick="event.stopPropagation(); app.cutPlayer('${p.id}')">
+                                Cut
+                            </button>
+                        </td>
+                    </tr>`;
+            }).join('')
+            : `<tr><td colspan="11" class="p-6 text-center text-slate-400 italic">Roster empty.</td></tr>`;
+
+        elements.myTeamRoster.innerHTML = rosterNotice + viewTabs + `
+            <div class="overflow-x-auto">
+                <table class="min-w-full bg-white text-xs">
+                    <thead class="bg-slate-900 text-white sticky top-0 z-10 select-none uppercase tracking-wider text-[10px]">
+                        <tr>
+                            <th class="py-2 px-3 text-left cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('name')">Player${getIndicator('name')}</th>
+                            <th class="py-2 px-2 text-center text-blue-300 cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('role')">Off Role${getIndicator('role')}</th>
+                            <th class="py-2 px-2 text-center text-rose-300">Def Role</th>
+                            <th class="py-2 px-2 text-center text-amber-300">Spec</th>
+                            <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('energy')">Energy${getIndicator('energy')}</th>
+                            <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('happiness')">Morale${getIndicator('happiness')}</th>
+                            <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('workEthic')">Ethic${getIndicator('workEthic')}</th>
+                            <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('ego')">Ego${getIndicator('ego')}</th>
+                            <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('loyalty')">Loyalty${getIndicator('loyalty')}</th>
+                            <th class="py-2 px-2 text-left">Locker Room & Promises</th>
+                            <th class="py-2 px-3 text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 font-mono">
+                        ${moraleRows}
+                    </tbody>
+                </table>
+            </div>`;
+        return;
+    }
 
     if (myRosterView === 'season' || myRosterView === 'career') {
         const isCareer = myRosterView === 'career';
@@ -15504,11 +15854,13 @@ function renderMyTeamTab(gameState) {
             <thead class="bg-slate-900 text-white sticky top-0 z-10 select-none uppercase tracking-wider text-[11px]">
                 <tr>
                     <th class="py-2 px-3 text-left sticky left-0 bg-slate-900 z-20 cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('name')">Player${getIndicator('name')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('role')">Role${getIndicator('role')}</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('ovr')">OFF / DEF FIT${getIndicator('ovr')}</th>
                     <th class="py-2 px-2 text-center" title="Team Captain">Cap</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('age')">Age${getIndicator('age')}</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('pot')">Pot${getIndicator('pot')}</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('energy')">Energy${getIndicator('energy')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800 text-amber-300" onclick="app_setRosterSort('stamina')" title="Stamina">STM${getIndicator('stamina')}</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800 text-blue-300" onclick="app_setRosterSort('speed')">SPD${getIndicator('speed')}</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('strength')">STR${getIndicator('strength')}</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('agility')">AGI${getIndicator('agility')}</th>
@@ -15518,19 +15870,23 @@ function renderMyTeamTab(gameState) {
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('catchingHands')">HND${getIndicator('catchingHands')}</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('blocking')">BLK${getIndicator('blocking')}</th>
                     <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800" onclick="app_setRosterSort('tackling')">TKL${getIndicator('tackling')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800 text-rose-300" onclick="app_setRosterSort('coverage')" title="Pass Coverage">COV${getIndicator('coverage')}</th>
+                    <th class="py-2 px-2 text-center cursor-pointer hover:bg-slate-800 text-rose-300" onclick="app_setRosterSort('blockShedding')" title="Block Shedding">BSH${getIndicator('blockShedding')}</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 font-mono">`;
 
     if (sortedRoster.length === 0) {
-        html += `<tr><td colspan="15" class="p-6 text-center text-slate-400 font-sans italic">Roster empty.</td></tr>`;
+        html += `<tr><td colspan="19" class="p-6 text-center text-slate-400 font-sans italic">Roster empty.</td></tr>`;
     } else {
         sortedRoster.forEach(p => {
             const isCap = gameState.playerTeam.captainId === p.id;
             const fits = getBestTwoWayFits(p);
+            const roles = getPlayerActiveRoles(p.id);
             const energy = Math.max(0, Math.round(100 - (p.fatigue || 0)));
             const energyColor = energy >= 75 ? 'bg-emerald-500' : (energy >= 50 ? 'bg-amber-500' : 'bg-rose-500');
 
+            const stm = p.attributes?.physical?.stamina || 0;
             const spd = p.attributes?.physical?.speed || 0;
             const str = p.attributes?.physical?.strength || 0;
             const agi = p.attributes?.physical?.agility || 0;
@@ -15540,9 +15896,17 @@ function renderMyTeamTab(gameState) {
             const hnd = p.attributes?.technical?.catchingHands || 0;
             const blk = p.attributes?.technical?.blocking || 0;
             const tkl = p.attributes?.technical?.tackling || 0;
+            const cov = p.attributes?.technical?.coverage ?? p.attributes?.technical?.passCoverage ?? 0;
+            const bsh = p.attributes?.technical?.blockShedding || 0;
+
+            const roleBadges = [
+                ...roles.offSlots.map(s => `<span class="bg-blue-50 text-blue-800 border border-blue-200 px-1 rounded text-[9px] font-bold">${s}</span>`),
+                ...roles.defSlots.map(s => `<span class="bg-rose-50 text-rose-800 border border-rose-200 px-1 rounded text-[9px] font-bold">${s}</span>`),
+                ...roles.specialSlots.map(s => `<span class="bg-amber-50 text-amber-800 border border-amber-200 px-1 rounded text-[9px] font-bold">${s}</span>`)
+            ];
 
             html += `
-            <tr data-player-id="${p.id}" class="hover:bg-slate-50 transition cursor-pointer group">
+            <tr data-player-id="${p.id}" class="hover:bg-slate-50 transition cursor-pointer group ${roles.isTwoWay ? 'bg-amber-50/30' : ''}">
                 <td class="py-2 px-3 font-semibold text-slate-900 sticky left-0 bg-white group-hover:bg-slate-50 z-10 flex items-center gap-2 font-sans">
                     <span class="text-slate-400 font-mono text-[10px] w-4 shrink-0">#${p.number || '--'}</span>
 
@@ -15556,6 +15920,11 @@ function renderMyTeamTab(gameState) {
                     </span>
 
                     ${p.status?.duration > 0 ? `<span class="text-[9px] bg-rose-100 text-rose-700 px-1 py-0.5 rounded font-bold shrink-0" title="${p.status.description}">🩹 ${p.status.duration}w</span>` : ''}
+                </td>
+                <td class="text-center py-1.5 px-2 font-sans">
+                    <div class="flex flex-wrap justify-center gap-0.5 max-w-[95px]">
+                        ${roleBadges.length ? roleBadges.join('') : '<span class="text-slate-400 text-[10px]">Reserve</span>'}
+                    </div>
                 </td>
                 <td class="text-center py-1.5 px-2">
                     <div class="flex flex-col items-center gap-0.5 text-[10px] leading-tight">
@@ -15578,6 +15947,7 @@ function renderMyTeamTab(gameState) {
                         <span class="text-[10px] px-1 rounded ${getEnergyBadgeStyle(energy)}">${energy}%</span>
                     </div>
                 </td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(stm, true)}">${stm}</td>
                 <td class="text-center py-1.5 px-2 ${getRatingTierStyle(spd, true)}">${spd}</td>
                 <td class="text-center py-1.5 px-2 ${getRatingTierStyle(str, true)}">${str}</td>
                 <td class="text-center py-1.5 px-2 ${getRatingTierStyle(agi, true)}">${agi}</td>
@@ -15587,6 +15957,8 @@ function renderMyTeamTab(gameState) {
                 <td class="text-center py-1.5 px-2 ${getRatingTierStyle(hnd, true)}">${hnd}</td>
                 <td class="text-center py-1.5 px-2 ${getRatingTierStyle(blk, true)}">${blk}</td>
                 <td class="text-center py-1.5 px-2 ${getRatingTierStyle(tkl, true)}">${tkl}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(cov, true)}">${cov}</td>
+                <td class="text-center py-1.5 px-2 ${getRatingTierStyle(bsh, true)}">${bsh}</td>
             </tr>`;
         });
     }
@@ -18333,6 +18705,35 @@ export function renderPlaybookManager(gameState) {
                 </div>
             </div>
 
+            ${(() => {
+                const gpAutonomy = String(
+                    team.teamInstructions?.departments?.gameplan?.autonomy ??
+                    (team.gameplan?.delegateGameplan ? 'delegate' : 'guided')
+                ).toLowerCase();
+                if (gpAutonomy === 'direct') {
+                    return `
+                        <div class="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-950">
+                            <span><b>Direct Playbook Control:</b> Your installed plays &amp; formations stay locked in on game day.</span>
+                            <button type="button"
+                                onclick="window.app_setUnifiedControl('gameplan', 'guided', 'playbook')"
+                                class="rounded border border-emerald-300 bg-white px-2.5 py-1 text-[10px] font-bold text-emerald-800 hover:bg-emerald-100">
+                                Hand Off to Coaches
+                            </button>
+                        </div>`;
+                }
+                return `
+                    <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-950">
+                        <div>
+                            <b>🤖 Coach-Managed Installs (${gpAutonomy.toUpperCase()}):</b> Your staff rebuilds formations &amp; the 8 custom napkin slots each week using your priorities. Manual edits here will be updated at week's end.
+                        </div>
+                        <button type="button"
+                            onclick="window.app_setUnifiedControl('gameplan', 'direct', 'playbook')"
+                            class="shrink-0 rounded bg-slate-900 px-3 py-1.5 text-[10px] font-bold text-white hover:bg-slate-800">
+                            Switch to Direct Control
+                        </button>
+                    </div>`;
+            })()}
+
             <!-- Strategic Header & Unit Toggle Bar -->
             <div class="bg-slate-900 text-white p-3.5 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-sm">
                 <div>
@@ -18655,7 +19056,11 @@ export function renderPracticeManager(gameState) {
     }
 
     const coach = team.staff?.coach;
-    const isDelegated = !!team.gameplan.delegatePractice;
+    const practiceAutonomy = String(
+        team.teamInstructions?.departments?.practice?.autonomy ??
+        (team.gameplan.delegatePractice ? 'delegate' : 'guided')
+    ).toLowerCase();
+    const isDelegated = practiceAutonomy !== 'direct';
     const directive = team.gameplan.gmDirective || 'COACH_AUTONOMY';
     const currentPlan = team.gameplan.weeklyPractice || 'chalk_talk';
 
@@ -18782,7 +19187,11 @@ export function renderPracticeManager(gameState) {
                 : 'Low — normal workload looks reasonable';
 
     window.app_setPracticePlan = (plan) => {
-        if (team.gameplan.delegatePractice) return;
+        const currentPracticeMode = String(
+            team.teamInstructions?.departments?.practice?.autonomy ??
+            (team.gameplan.delegatePractice ? 'delegate' : 'guided')
+        ).toLowerCase();
+        if (currentPracticeMode !== 'direct') return;
         team.gameplan.weeklyPractice = plan;
         saveGameState();
         renderPracticeManager(gameState);
@@ -18848,31 +19257,33 @@ export function renderPracticeManager(gameState) {
     };
 
     window.app_togglePracticeDelegation = (checked) => {
-        team.gameplan.delegatePractice = checked;
+        setDepartmentControlMode(team, 'practice', checked ? 'guided' : 'direct');
         if (checked) {
-            import('./game/staff.js').then(s => {
-                team.gameplan.weeklyPractice = s.aiChooseWeeklyPractice(team, null, team.gameplan.gmDirective);
-                saveGameState();
-                renderPracticeManager(gameState);
-            }).catch(() => {});
-        } else {
-            saveGameState();
-            renderPracticeManager(gameState);
+            team.gameplan.weeklyPractice = aiChooseWeeklyPractice(
+                team,
+                null,
+                team.gameplan.gmDirective
+            );
         }
+        saveGameState();
+        renderPracticeManager(gameState);
     };
 
     window.app_setGmDirective = (newDirective) => {
         team.gameplan.gmDirective = newDirective;
-        if (team.gameplan.delegatePractice) {
-            import('./game/staff.js').then(s => {
-                team.gameplan.weeklyPractice = s.aiChooseWeeklyPractice(team, null, newDirective);
-                saveGameState();
-                renderPracticeManager(gameState);
-            }).catch(() => {});
-        } else {
-            saveGameState();
-            renderPracticeManager(gameState);
+        const currentPracticeMode = String(
+            team.teamInstructions?.departments?.practice?.autonomy ??
+            (team.gameplan.delegatePractice ? 'delegate' : 'guided')
+        ).toLowerCase();
+        if (currentPracticeMode !== 'direct') {
+            team.gameplan.weeklyPractice = aiChooseWeeklyPractice(
+                team,
+                null,
+                newDirective
+            );
         }
+        saveGameState();
+        renderPracticeManager(gameState);
     };
 
     const plans = [

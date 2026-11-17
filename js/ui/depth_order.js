@@ -446,6 +446,47 @@ export function renderDepthOrderPane(gameState) {
     const offenseSlots = offenseFormations[offFormKey]?.slots || [];
     const defenseSlots = defenseFormations[defFormKey]?.slots || [];
 
+    const renderInlineFormationBar = (side, formationMap, selectedKey) => {
+        const entries = Object.entries(formationMap)
+            .filter(([key]) => key !== 'Punt' && key !== 'Punt_Return');
+
+        return `
+            <div class="bg-slate-50 border border-slate-200 rounded p-2 mb-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                    <span class="text-[10px] font-black uppercase tracking-wider text-slate-600">
+                        ${side === 'offense' ? 'Offensive Formation' : 'Defensive Formation'}
+                    </span>
+                    <span class="text-[10px] text-slate-500">
+                        Switching updates the active slots below immediately
+                    </span>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    ${entries.map(([key, form]) => {
+                        const isSelected = key === selectedKey;
+                        const personnel = Object.entries(form?.personnel || {})
+                            .filter(([, count]) => count > 0)
+                            .map(([pos, count]) => `${count}${pos}`)
+                            .join('·');
+
+                        return `
+                            <button
+                                type="button"
+                                onclick="window.app_changeFormation('${side}', '${key}')"
+                                class="px-2.5 py-1 rounded border text-left transition ${
+                                    isSelected
+                                        ? (side === 'offense'
+                                            ? 'bg-blue-900 border-blue-950 text-white shadow-sm'
+                                            : 'bg-rose-900 border-rose-950 text-white shadow-sm')
+                                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                                }">
+                                <span class="text-[11px] font-black">${form.name || key}</span>
+                                <span class="text-[9px] font-mono ml-1 ${isSelected ? 'text-slate-200' : 'text-slate-400'}">${personnel || 'Std'}</span>
+                            </button>`;
+                    }).join('')}
+                </div>
+            </div>`;
+    };
+
     const tabClass = tab => activeDepthChartTab === tab
         ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50';
@@ -527,6 +568,7 @@ export function renderDepthOrderPane(gameState) {
                         </span>
                     </div>
 
+                    ${renderInlineFormationBar('offense', offenseFormations, offFormKey)}
                     ${renderActiveFormationSlots(offenseSlots, 'offense')}
                 </section>
 
@@ -566,6 +608,7 @@ export function renderDepthOrderPane(gameState) {
                         </span>
                     </div>
 
+                    ${renderInlineFormationBar('defense', defenseFormations, defFormKey)}
                     ${renderActiveFormationSlots(defenseSlots, 'defense')}
                 </section>
 
@@ -813,6 +856,13 @@ window.openSlotPicker = function(arg1, arg2) {
     const hasRoleRating = isCoreFormationSlot && displaySlotLabel !== slot;
     const ratingPosition = hasRoleRating ? displaySlotLabel : evalPosKey;
 
+    const isSlotLocked = (side === 'specialTeams' || side === 'specialists')
+        ? Object.prototype.hasOwnProperty.call(
+            team.specialistOverrides || {},
+            slot
+        )
+        : team.slotOverrides?.[side]?.[slot] !== undefined;
+
     const currentStarterId = activeChart[slot];
     const currentStarter = roster.find(p => p && p.id === currentStarterId);
     const currentStarterOvr = currentStarter ? calculateOverall(currentStarter, ratingPosition) : null;
@@ -956,6 +1006,11 @@ window.openSlotPicker = function(arg1, arg2) {
                         <span class="text-[9px] uppercase tracking-wider text-slate-400 block">Current Starter</span>
                         <span class="font-bold text-slate-200 text-xs">${currentStarter.name} (${currentStarterOvr})</span>
                     </div>` : ''}
+                    ${isSlotLocked ? `
+                    <button class="bg-blue-900/60 hover:bg-blue-800 text-blue-100 border border-blue-700 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider"
+                            onclick="window.unlockSlotOverride('${slot}', '${side}')">
+                        🔓 Auto (Unlock)
+                    </button>` : ''}
                     <button class="bg-rose-900/60 hover:bg-rose-800 text-rose-200 border border-rose-700 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider"
                             onclick="window.commitSlotAssignment('', '${slot}', '${side}')">
                         Vacate Slot
@@ -1282,6 +1337,53 @@ window.autoOptimizeLineup = function() {
     team.depthChart.specialTeams = team.specialTeams;
 
     saveGameState();
+    renderDepthOrderPane(gs);
+    document.dispatchEvent(new CustomEvent('refresh-ui'));
+};
+
+window.unlockSlotOverride = function(slot, side) {
+    const gs = getGameState();
+    const team = gs?.playerTeam;
+    if (!team || !slot || !side) return;
+
+    if (side === 'specialTeams' || side === 'specialists') {
+        if (team.specialistOverrides) {
+            delete team.specialistOverrides[slot];
+        }
+        const target = side === 'specialTeams' ? team.specialTeams : team.specialists;
+        if (target) delete target[slot];
+
+        const roster = getGameDayRosterObjects(team);
+        const getR = (p, g, a, fb = 50) => {
+            const v = Number(p.attributes?.[g]?.[a]);
+            return Number.isFinite(v) ? v : fb;
+        };
+        const slotPickers = {
+            PR: ['WR', p => getR(p, 'physical', 'speed') * 0.35 + getR(p, 'physical', 'agility') * 0.25 + getR(p, 'technical', 'catchingHands') * 0.30 + getR(p, 'mental', 'playbookIQ') * 0.10],
+            P: ['QB', p => getR(p, 'technical', 'throwPower', getR(p, 'physical', 'strength')) * 0.45 + getR(p, 'technical', 'throwingAccuracy') * 0.35 + getR(p, 'physical', 'strength') * 0.10 + getR(p, 'mental', 'playbookIQ') * 0.10],
+            FB: ['TE', p => getR(p, 'technical', 'blocking') * 0.45 + getR(p, 'physical', 'strength') * 0.45 + getR(p, 'mental', 'playbookIQ') * 0.10],
+            SLOT: ['WR', p => getR(p, 'physical', 'agility') * 0.30 + getR(p, 'technical', 'catchingHands') * 0.35 + getR(p, 'physical', 'speed') * 0.25 + getR(p, 'mental', 'playbookIQ') * 0.10],
+            NCB: ['DB', p => getR(p, 'technical', 'coverage', getR(p, 'technical', 'passCoverage')) * 0.40 + getR(p, 'physical', 'agility') * 0.25 + getR(p, 'physical', 'speed') * 0.20 + getR(p, 'technical', 'tackling') * 0.15]
+        };
+        const cfg = slotPickers[slot];
+        if (cfg && target) {
+            const best = roster
+                .filter(p => p && isPlayerViableForPosition(p, cfg[0]))
+                .map(p => ({ p, score: cfg[1](p) }))
+                .filter(c => Number.isFinite(c.score) && c.score >= 45)
+                .sort((a, b) => b.score - a.score)[0]?.p;
+            if (best) target[slot] = best.id;
+        }
+        if (team.depthChart) team.depthChart.specialTeams = team.specialTeams;
+    } else {
+        if (team.slotOverrides?.[side]) {
+            delete team.slotOverrides[side][slot];
+        }
+        Game.rebuildDepthChartFromOrder(team);
+    }
+
+    saveGameState();
+    hideModal();
     renderDepthOrderPane(gs);
     document.dispatchEvent(new CustomEvent('refresh-ui'));
 };

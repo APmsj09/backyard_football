@@ -3327,6 +3327,9 @@ export function applyManagementPreset(team, presetKey) {
     if (presetKey === 'custom') return instructions;
 
     const depts = instructions.departments;
+    if (team.gameplan && !team.gameplan.situational) {
+        team.gameplan.situational = { playcaller: 'COACH' };
+    }
 
     if (presetKey === 'casual_gm') {
         instructions.autonomy = 'guided';
@@ -3344,6 +3347,8 @@ export function applyManagementPreset(team, presetKey) {
         if (team.gameplan) {
             team.gameplan.delegatePractice = true;
             team.gameplan.delegateGameplan = true;
+            team.gameplan.situational.playcaller = 'COACH';
+            aiSetSituationalGameplan(team);
         }
     } else if (presetKey === 'hands_on_gm') {
         instructions.autonomy = 'direct';
@@ -3359,6 +3364,7 @@ export function applyManagementPreset(team, presetKey) {
         if (team.gameplan) {
             team.gameplan.delegatePractice = false;
             team.gameplan.delegateGameplan = false;
+            team.gameplan.situational.playcaller = 'GM';
         }
     } else if (presetKey === 'director_of_football_operations') {
         instructions.autonomy = 'delegate';
@@ -3376,9 +3382,180 @@ export function applyManagementPreset(team, presetKey) {
         if (team.gameplan) {
             team.gameplan.delegatePractice = true;
             team.gameplan.delegateGameplan = true;
+            team.gameplan.situational.playcaller = 'COACH';
+            aiSetSituationalGameplan(team);
         }
     }
     return instructions;
+}
+
+/**
+ * Single source of truth for setting GM vs. Coach control.
+ * Keeps teamInstructions.departments, teamInstructions.autonomy,
+ * team.gameplan.delegatePractice/delegateGameplan, and situational.playcaller in sync.
+ */
+export function setDepartmentControlMode(team, area, mode) {
+    if (!team || !TEAM_AUTONOMY_LEVELS.includes(mode)) return null;
+
+    const instructions = ensureTeamInstructions(team);
+    const depts = instructions.departments;
+    if (!team.gameplan) team.gameplan = {};
+    if (!team.gameplan.situational) team.gameplan.situational = { playcaller: 'COACH' };
+
+    if (area === 'staff') {
+        instructions.autonomy = mode;
+        depts.staff.autonomy = mode;
+    } else if (area === 'practice') {
+        depts.practice.autonomy = mode;
+        team.gameplan.delegatePractice = mode !== 'direct';
+    } else if (area === 'gameplan') {
+        depts.gameplan.autonomy = mode;
+        team.gameplan.delegateGameplan = mode !== 'direct';
+    } else if (area === 'playcaller') {
+        const nextCaller = mode === 'direct' ? 'GM' : 'COACH';
+        team.gameplan.situational.playcaller = nextCaller;
+        if (nextCaller === 'COACH') {
+            aiSetSituationalGameplan(team);
+        }
+    } else if (['recruiting', 'scouting', 'development'].includes(area)) {
+        depts[area].autonomy = mode;
+    } else {
+        return instructions;
+    }
+
+    instructions.experiencePreset = 'custom';
+    return instructions;
+}
+
+/**
+ * Produces a deterministic snapshot of a coach's personality, tactical ideas,
+ * preferred schemes, alignment with GM controls, and weekly recommendation.
+ */
+export function getCoachWeeklyOutlook(coach, team, gameState = null) {
+    if (!coach || !team) return null;
+
+    ensureTeamInstructions(team);
+    const deptAssignments = ensureTeamStaffDepartmentAssignments(team) || {};
+    const coachId = String(coach.id);
+
+    const personalityId = getStaffProfileId(coach, 'personality') || 'analytical_planner';
+    const tacticalId = getStaffProfileId(coach, 'tactical') || 'adaptive_strategist';
+    const scoutingId = getStaffProfileId(coach, 'scouting') || 'balanced_evaluator';
+
+    const personalityObj = personalityTraits.find(t => t.id === personalityId) || coach.biases?.personality || {};
+    const tacticalObj = tacticalBiases.find(t => t.id === tacticalId) || coach.biases?.tactical || {};
+    const scoutingObj = scoutingBiases.find(t => t.id === scoutingId) || coach.biases?.scouting || {};
+
+    const leads = Object.entries(STAFF_DEPARTMENT_DEFINITIONS)
+        .filter(([key]) => String(deptAssignments[key]?.leadCoachId ?? '') === coachId)
+        .map(([, def]) => def.label);
+
+    const supports = Object.entries(STAFF_DEPARTMENT_DEFINITIONS)
+        .filter(([, def], idx) => {
+            const key = Object.keys(STAFF_DEPARTMENT_DEFINITIONS)[idx];
+            return Array.isArray(deptAssignments[key]?.supportCoachIds) &&
+                deptAssignments[key].supportCoachIds.some(id => String(id) === coachId);
+        })
+        .map(([, def]) => def.label);
+
+    const weeklyCapacity = getStaffWeeklyWorkCapacity(team, coach, team.staffWorkPlan);
+    const assignedHours = (team.staffWorkPlan?.assignments || [])
+        .filter(a => String(a?.coachId) === coachId)
+        .reduce((sum, a) => sum + Math.max(0, Number(a?.hours) || 0), 0);
+
+    const availability = ensureStaffAvailability(coach);
+    const happiness = Math.round(Number(coach.happiness ?? 75));
+    const preferredOffense = coach.preferredOffense || null;
+    const preferredDefense = coach.preferredDefense || null;
+
+    const currentOffense = team.formations?.offense || 'Balanced';
+    const currentDefense = team.formations?.defense || '3-2-3';
+    const schemeMismatch =
+        (preferredOffense && preferredOffense !== currentOffense) ||
+        (preferredDefense && preferredDefense !== currentDefense);
+
+    // Deterministic practice recommendation (mirrors aiChooseWeeklyPractice without random flicker)
+    const availableRoster = getRosterObjects(team).filter(
+        p => p && !(Number(p.status?.duration) > 0)
+    );
+    const avgFatigue = availableRoster.length > 0
+        ? availableRoster.reduce((sum, p) => sum + Math.max(0, Math.min(100, Number(p.fatigue) || 0)), 0) / availableRoster.length
+        : 0;
+
+    const weekIndex = Number(gameState?.currentWeek);
+    const gamesPerWeek = Math.max(1, Math.floor((gameState?.teams?.length || 20) / 2));
+    const weekGames = (Number.isInteger(weekIndex) && weekIndex >= 0 && weekIndex < 9 && Array.isArray(gameState?.schedule))
+        ? gameState.schedule.slice(weekIndex * gamesPerWeek, (weekIndex + 1) * gamesPerWeek)
+        : [];
+    const nextMatch = weekGames.find(m => String(m?.home?.id) === String(team.id) || String(m?.away?.id) === String(team.id));
+    const upcomingOpponent = nextMatch ? (String(nextMatch.home?.id) === String(team.id) ? nextMatch.away : nextMatch.home) : null;
+
+    const gmDirective = team.gameplan?.gmDirective || 'COACH_AUTONOMY';
+    let recommendedPractice = upcomingOpponent ? 'scouting' : 'chalk_talk';
+    let practiceReason = upcomingOpponent
+        ? `Wants to prep film for ${upcomingOpponent.name}.`
+        : 'Wants to sharpen installed playbook concepts.';
+
+    if (avgFatigue >= 45) {
+        recommendedPractice = 'scrimmage';
+        practiceReason = `Roster fatigue is elevated (${Math.round(avgFatigue)}%) — favors light scrimmage recovery.`;
+    } else if (gmDirective === 'HARD_CONDITIONING') {
+        recommendedPractice = 'conditioning';
+        practiceReason = 'Following your Conditioning directive with stamina sprints.';
+    } else if (gmDirective === 'DEVELOP_YOUTH') {
+        recommendedPractice = 'chalk_talk';
+        practiceReason = 'Following your Youth Development directive with Chalk Talk IQ reps.';
+    } else if (personalityId === 'traditionalist' || personalityId === 'hard_nosed_competitor') {
+        recommendedPractice = avgFatigue >= 35 ? 'scrimmage' : 'conditioning';
+        practiceReason = avgFatigue >= 35
+            ? 'Reluctantly favors lighter scrimmage recovery due to tired legs.'
+            : 'Old-school edge — wants physical Conditioning drills.';
+    } else if (personalityId === 'player_centered') {
+        recommendedPractice = 'scrimmage';
+        practiceReason = 'Wants an upbeat Scrimmage to build chemistry and keep kids fresh.';
+    } else if (personalityId === 'analytical_planner') {
+        recommendedPractice = upcomingOpponent ? 'scouting' : 'chalk_talk';
+        practiceReason = upcomingOpponent
+            ? `Wants detailed Recess Recon against ${upcomingOpponent.name}.`
+            : 'Wants Chalk Talk to raise scheme mastery.';
+    }
+
+    const practiceLabels = {
+        chalk_talk: 'Chalk Talk',
+        conditioning: 'Conditioning',
+        scrimmage: 'Scrimmage',
+        scouting: 'Opponent Scouting',
+        hustle: 'Neighborhood Hustle'
+    };
+
+    const tendencies = previewCoachTendencies(coach, team);
+    const isHeadCoach = [team.coach, team.staff?.coach].some(
+        c => c?.id != null && String(c.id) === coachId
+    );
+    const schemeClash = isHeadCoach ? calculateSchemeClash(team) : 0;
+
+    return {
+        isUserCoach: Boolean(coach.isUserCoach),
+        personalityName: personalityObj.displayName || personalityObj.name || 'Coach',
+        personalityDesc: personalityObj.desc || '',
+        tacticalName: tacticalObj.displayName || tacticalObj.name || 'Adaptive Strategist',
+        tacticalDesc: tacticalObj.desc || '',
+        scoutingName: scoutingObj.displayName || scoutingObj.name || 'Balanced Evaluator',
+        scheduleLabel: availability?.scheduleLabel || 'Flexible schedule',
+        weeklyCapacity,
+        assignedHours,
+        happiness,
+        leads,
+        supports,
+        preferredOffense,
+        preferredDefense,
+        schemeMismatch,
+        schemeClash,
+        tendencies,
+        recommendedPractice,
+        recommendedPracticeLabel: practiceLabels[recommendedPractice] || recommendedPractice,
+        practiceReason
+    };
 }
 
 /**
