@@ -2377,10 +2377,11 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             ? getReachablePassInterceptionPoint(pState, playState.ballState)
                             : null;
 
+                    const wasTrackingBall = pState.action === 'tracking_ball';
                     const canReachDeflectedBall =
                         isDeflectedBall &&
                         !pState.slot.startsWith('OL') &&
-                        (deflectedInterceptPoint || distToLanding < 8.0);
+                        (wasTrackingBall || deflectedInterceptPoint || distToLanding < 15.0);
 
                     if (isIntendedTarget || canReachDeflectedBall) {
                         if (playState.ballState.isLateral && isIntendedTarget) {
@@ -2524,13 +2525,20 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     break;
                 }
 
+                case 'tracking_ball':
+                    if (isBallInAir && !playState.ballState.isThrowAway && Number.isFinite(playState.ballState.targetX)) {
+                        setPointIntent(pState, playState.ballState.targetX, playState.ballState.targetY, 0.4);
+                    } else {
+                        setHoldIntent(pState, pState.x, pState.y);
+                    }
+                    break;
+
                 case 'pass_block':
                 case 'run_block':
                 case 'lead_block':
                 case 'screen_block':
                     setPointIntent(pState, pState.targetX, pState.targetY, 0.35);
                     break;
-
 
                 case 'run_path':
                 case 'run_fake': {
@@ -3669,7 +3677,13 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 }
             }
 
-                        if (targetRec.y < LOS + 3 && getDistance(pState, targetRec) < 3.0) {
+                if (
+                !targetSlot.startsWith('RB') &&
+                playState.tick <= 18 &&
+                targetRec.y >= LOS - 1.0 &&
+                targetRec.y < LOS + 3.0 &&
+                getDistance(pState, targetRec) < 3.0
+            ) {
                 if (typeof pState.jamDecisionMade === 'undefined') {
                     pState.jamDecisionMade = true;
 
