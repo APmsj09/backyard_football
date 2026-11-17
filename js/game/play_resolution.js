@@ -139,9 +139,10 @@ function getScoutedPlaycallAttributeValue(team, player, skill) {
         return null;
     }
 
+    const normalizedConfidence = confidence > 1 ? confidence / 100 : confidence;
     const reportConfidence = Math.max(
         0,
-        Math.min(1, confidence)
+        Math.min(1, normalizedConfidence)
     );
 
     const midpoint = (low + high) / 2;
@@ -4008,7 +4009,10 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                             if (gameLog) gameLog.push(`🎉 TOUCHDOWN ${ballCarrierState.name}!`);
                             playState.statEvents.push({ type: 'touchdown', playerId: ballCarrierState.id });
 
-                            if (playState.type === 'pass' && !playState.fumbleOccurred) {
+                            const caughtPassTD = playState.statEvents.some(
+                                e => e.type === 'completion' && e.receiverId === ballCarrierState.id
+                            );
+                            if (playState.type === 'pass' && !playState.fumbleOccurred && caughtPassTD && playState.ballState.throwerId) {
                                 playState.statEvents.push({ type: 'pass_td', qbId: playState.ballState.throwerId });
                             }
                         }
@@ -4434,7 +4438,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
         if (playState.defensiveTD) {
             playResult.outcome = 'defensive_td';
         } else {
-            playResult.outcome = playState.type === 'run' ? 'rush_td' : 'complete';
+            playResult.outcome = (playState.type === 'run' || playState.isScrambleRun) ? 'rush_td' : 'complete';
         }
         playResult.score = 'TD';
         playResult.defensiveTD = playState.defensiveTD || false;
@@ -4676,8 +4680,6 @@ export function simulateLivePlayStep(gameInstance, mode = 'live', options = {}) 
             ) ||
             defense.formations.defense;
     } else if (determinePuntDecision(gameInstance.down, gameInstance.yardsToGo, gameInstance.ballOn, offense, (offense.id === gameInstance.homeTeam.id ? (gameInstance.homeScore - gameInstance.awayScore) : (gameInstance.awayScore - gameInstance.homeScore)), gameInstance.clock)) {
-        offense.formations.offense = 'Punt';
-        defense.formations.defense = 'Punt_Return';
         offPlayKey = 'Punt_Punt';
         defPlayKey = 'PuntReturn_Classic';
 

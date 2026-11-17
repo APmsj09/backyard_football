@@ -1387,21 +1387,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
         });
     }
 
-    // Ensure all offensive skill players cleanly transition roles immediately upon a completion
-    if (isPassCompleted && ballCarrierState && ballCarrierState.isOffense) {
-        offenseStates.forEach(pState => {
-            if (pState.id !== ballCarrierState.id && !pState.slot.startsWith('OL')) {
-                if (pState.role === 'QB' || pState.formationRole === 'QB' || pState.slot?.startsWith('QB')) {
-                    pState.action = 'idle';
-                    setHoldIntent(pState, pState.x, pState.y);
-                } else if (pState.action !== 'run_block') {
-                    pState.action = 'run_block';
-                    pState.dynamicTargetId = null;
-                }
-            }
-        });
-    }
-
     // Transition skill positions immediately upon catch before blocker assignments run
     if (isPassCompleted && ballCarrierState && ballCarrierState.isOffense) {
         offenseStates.forEach(pState => {
@@ -1722,10 +1707,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             const runDepthPenaltyA = !isPassPlay
                 ? (Math.max(0, a.y - blocker.y) * 2.5) + ((a.y - LOS > 7.5) ? 15 : 0)
-                : 0;
+                : Math.max(0, a.y - blocker.y) * 2.5;
             const runDepthPenaltyB = !isPassPlay
                 ? (Math.max(0, b.y - blocker.y) * 2.5) + ((b.y - LOS > 7.5) ? 15 : 0)
-                : 0;
+                : Math.max(0, b.y - blocker.y) * 2.5;
 
             return (
                 gapResponsibilityA +
@@ -3169,6 +3154,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
             let shouldPursue = false;
 
+            if (playDiagnosis === 'pass' && carrierIsPasser && !qbScrambling && !isBallPastLOS) {
+                pState._pursuitLockTicks = 0;
+            }
+
             const isPersistingPursuit = pState._pursuitLockTicks && pState._pursuitLockTicks > 0;
             if (isPersistingPursuit) {
                 pState._pursuitLockTicks--;
@@ -3182,9 +3171,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
             if (ballCarrierState && !isBallInAir) {
                 const isConfidentRun = isRunRead && diagConfidence >= 0.55;
 
-                // FIX: If a defender confidently reads a run (e.g. from lineman keys), 
-                // they must aggressively pursue the play even if their zone drop 
-                // briefly turned their vision cone away from the backfield.
                 if (isRunReadAtMesh || isConfidentRun) {
                     shouldPursue = true;
                     
@@ -3208,9 +3194,6 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                     if (isRunRead || ballCarrierState.role !== 'QB' || qbScrambling) {
                         shouldPursue = true;
 
-                        // Once a defender has committed to a live runner,
-                        // do not abandon pursuit merely because the runner
-                        // moves outside the defender's perception range.
                         if (
                             ballCarrierState.isOffense &&
                             (
@@ -3224,9 +3207,10 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
 
                         pState._pursuitLockTicks = 25;
                     } else if (
-                        assignment?.includes('blitz') ||
-                        assignment?.includes('rush') ||
-                        isDL
+                        (assignment?.includes('blitz') ||
+                         assignment?.includes('rush') ||
+                         isDL) &&
+                        (!carrierIsPasser || qbScrambling || isBallPastLOS)
                     ) {
                         shouldPursue = true;
                         pState._pursuitLockTicks = 25;
@@ -3722,10 +3706,10 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                 // not directly move the receiver's world coordinates.
                 // Allow brief press contact without continuously crowding
                 // the receiver's movement path.
-                const JAM_SEPARATION = 1.1;
+                const JAM_SEPARATION = 1.45;
 
                 pState.targetX = targetRec.x - (dx / dist) * JAM_SEPARATION;
-                pState.targetY = targetRec.y - (dy / dist) * JAM_SEPARATION;
+                pState.targetY = Math.max(LOS + 0.3, targetRec.y - (dy / dist) * JAM_SEPARATION);
 
                 // Keep movement intent synchronized before the early return.
                 setPointIntent(
@@ -3742,41 +3726,46 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                     pState.jamTicks + 1
                 );
                 return;
-            } else {
-                targetRec.contactReduction = 1.0;
             }
 
             let perfectX = targetRec.x + cushionX;
             let perfectY = targetRec.y + cushionY;
 
             // Transition to hip-to-hip coverage or drive on cuts.
-            // On vertical stems going downfield (vy > 2.0), the DB must stay OVER THE TOP (y >= targetRec.y).
+            // Only treat a receiver as settled once their route is complete or stalled downfield (never during snap acceleration).
             const isBreakingHorizontally = Math.abs(targetRec.vx || 0) > 3.0 && Math.abs(targetRec.vy || 0) < 2.5;
-            const isSettled = targetRec.action === 'route_complete' || (Math.hypot(targetRec.vx || 0, targetRec.vy || 0) < 1.0);
+            const isSettled = targetRec.action === 'route_complete' ||
+                (playState.tick > 15 && targetRec.y > LOS + 1.0 && Math.hypot(targetRec.vx || 0, targetRec.vy || 0) < 1.0);
             const isVerticalStem = (targetRec.vy || 0) > 2.0;
             const isReceiverReleasing = targetRec.y >= (pState.y - 0.4);
             
             if ((isReceiverReleasing || pState.hasPressed || isBreakingHorizontally || isSettled) && !targetSlot.startsWith('RB')) {
+                const insideLeverage = targetRec.x < CENTER_X ? 1.35 : -1.35;
                 if (isBreakingHorizontally || isSettled) {
-                    perfectY = targetRec.y - 0.6; // Drive downhill aggressively on breaks and settled routes
+                    perfectY = targetRec.y - 0.9; // Drive downhill into throwing lane without body-blocking stem
+                    perfectX = targetRec.x + (targetRec.x < CENTER_X ? 0.9 : -0.9);
                 } else if (isVerticalStem) {
                     perfectY = targetRec.y + Math.max(1.2, cushionY * 0.5); // Maintain top leverage without clipping
+                    perfectX = targetRec.x + insideLeverage;
                 } else {
-                    perfectY = targetRec.y + 0.2;
+                    perfectY = targetRec.y + 0.4;
+                    perfectX = targetRec.x + insideLeverage;
                 }
-                perfectX = targetRec.x + (targetRec.x < CENTER_X ? 0.7 : -0.7); // Maintain inside shoulder leverage
             }
 
-            // Keep RB coverage leverage consistent as the back crosses
-            // the line of scrimmage. Toggling this adjustment at LOS causes
-            // the defender's target to jump several yards between ticks.
+            // Hold LOS depth while RB is pass-blocking/in-mesh, then close once RB releases into a route.
             if (targetSlot.startsWith('RB')) {
-                // Maintain a minimum coverage depth on the defensive side.
-                perfectY = Math.max(LOS + 1.2, perfectY);
+                const isRBInRoute = targetRec.action === 'run_route' || targetRec.action === 'route_complete';
+                const isOutsideTackleBox = Math.abs(targetRec.x - CENTER_X) >= 4.0;
+                const outsideDir = targetRec.x < CENTER_X ? -1.1 : 1.1;
 
-                // Maintain outside leverage both before and after the crossing.
-                const outsideDir = targetRec.x < CENTER_X ? -1.5 : 1.5;
-                perfectX += outsideDir;
+                if (!isRBInRoute || (playState.tick < 30 && !isOutsideTackleBox && targetRec.y < LOS)) {
+                    perfectY = Math.max(LOS + 1.2, perfectY);
+                    perfectX = targetRec.x + outsideDir;
+                } else {
+                    perfectY = targetRec.y + (targetRec.action === 'route_complete' ? -0.9 : 1.35);
+                    perfectX = targetRec.x + outsideDir;
+                }
             }
 
             const wrAgility = targetRec.agility || 50;

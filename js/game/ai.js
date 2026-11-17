@@ -335,8 +335,12 @@ export function diagnosePlay(pState, tick, offenseStates, playState = null) {
 
     if (currentGuess === 'read') {
         const hasAnyPlayEvidence = (runScore + passScore) >= 5;
-        if (confidence > commitThreshold || (tick > 35 && hasAnyPlayEvidence)) {
+        const smoothedMargin = Math.abs(finalRunScore - finalPassScore);
+        if (confidence > commitThreshold || (tick > 35 && hasAnyPlayEvidence && smoothedMargin >= 5)) {
             guess = finalRunScore >= finalPassScore ? 'run' : 'pass';
+        } else if (tick > 35 && hasAnyPlayEvidence && Math.abs(rawRunScore - rawPassScore) >= 10) {
+            // If EMA hasn't caught up after a player re-enters the vision cone, trust instantaneous cues over noise
+            guess = rawRunScore >= rawPassScore ? 'run' : 'pass';
         } else if (tick > 35 && !hasAnyPlayEvidence && pState.role === 'DB') {
             guess = 'pass';
         }
@@ -2208,12 +2212,15 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     if (isPressured) {
         const pressureProcessingMod = 1.05 - (qbDecision / 220);
         scanSpeedBase *= Math.max(0.80, pressureProcessingMod);
-    }    
+    }
 
-    if (qbState.effectiveScanTicks === undefined) qbState.effectiveScanTicks = 0;
-    qbState.effectiveScanTicks += qbState.hasCompletedDropback ? 1 : 0.6; // Read slower while dropping back
+    if (qbState.scanProgress === undefined) qbState.scanProgress = 0;
+    const scanStep = qbState.hasCompletedDropback ? 1 : 0.6; // Read slower while dropping back
+    qbState.scanProgress += scanStep / scanSpeedBase;
 
-    const readIndex = Math.min(progression.length - 1, Math.floor(qbState.effectiveScanTicks / scanSpeedBase));
+    const rawReadIndex = Math.min(progression.length - 1, Math.floor(qbState.scanProgress));
+    const readIndex = Math.max(qbState._highestReadIndex ?? 0, rawReadIndex);
+    qbState._highestReadIndex = readIndex;
     
     if (debugEnabled && qbState._lastReadIndex !== readIndex) {
         logPlayDebug('QB_READ_PROGRESSION', `${qbState.name} advances to read #${readIndex + 1} (${progression[readIndex]})`, {
@@ -2432,18 +2439,21 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 minProjectedSeparation = projDist;
             }
 
+            const isCoverageDefender =
+                d.role === 'DB' ||
+                (d.role === 'LB' && !d.assignment?.includes('blitz') && !d.assignment?.includes('rush'));
+            const isSafetyOrDeepDB = d.role === 'DB' && (d.y > playState.lineOfScrimmage + 9);
+            // Recognize coverage defenders sitting deeper than the route as a threat to drive downhill
+            const isOverTheTop =
+                isCoverageDefender &&
+                d.y > (rec.y - 0.5) &&
+                Math.abs(projDefX - projRecX) < 4.5 &&
+                projDist < 7.0;
+
             if (projDist < 2.5) {
                 defendersClosingIn = Math.min(3, defendersClosingIn + 1);
-            }
-
-            // Deep safety over-the-top capping check (caps at max 2)
-            const isSafetyOrDeepDB = d.role === 'DB' && (d.y > playState.lineOfScrimmage + 9);
-            // Recognize any DB sitting deeper than the route as a threat to drive downhill
-            const isOverTheTop = d.y > (rec.y - 1.0) && Math.abs(projDefX - projRecX) < 4.5 && projDist < 7.0;
-
-            // Removed the `depth > 10` requirement so QBs recognize DB cushions on short routes too
-            if (isOverTheTop || (isSafetyOrDeepDB && projDist < 5.0)) {
-                minProjectedSeparation = Math.min(minProjectedSeparation, projDist * 0.75); // Shrink perceived window
+            } else if (isOverTheTop || (isSafetyOrDeepDB && projDist < 5.0)) {
+                minProjectedSeparation = Math.min(minProjectedSeparation, projDist * 0.75); // Shrink perceived window for closing help
                 defendersClosingIn = Math.min(3, defendersClosingIn + 1);
             }
 
@@ -2873,12 +2883,22 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             const ballSpeed = 25;
             const t = Math.max(0.1, dist / ballSpeed);
 
+            playState.ballState.x = qbState.x;
+            playState.ballState.y = qbState.y;
+            playState.ballState.z = 2.2;
+            playState.ballState.isLoose = false;
+            playState.ballState.targetPlayerId = null;
             playState.ballState.vx = dx / t;
             playState.ballState.vy = dy / t;
             playState.ballState.vz = (-0.3 + (4.9 * t * t)) / t;
             playState.ballState.throwTick = playState.tick;
+            playState.ballState.releaseTick = playState.tick;
+
             qbState.hasBall = false;
-            
+            qbState.isBallCarrier = false;
+            qbState.action = 'idle';
+            playState.passAttempted = true;
+
             playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
             return;
         }
@@ -3339,13 +3359,23 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
         const ballSpeed = 25;
         const t = Math.max(0.1, dist / ballSpeed);
 
+        playState.ballState.x = qbState.x;
+        playState.ballState.y = qbState.y;
+        playState.ballState.z = 2.2;
+        playState.ballState.isLoose = false;
+        playState.ballState.targetPlayerId = null;
         playState.ballState.vx = dx / t;
         playState.ballState.vy = dy / t;
         playState.ballState.vz = (-0.3 + (4.9 * t * t)) / t;
 
         playState.ballState.throwTick = playState.tick;
+        playState.ballState.releaseTick = playState.tick;
+
         qbState.hasBall = false;
-        
+        qbState.isBallCarrier = false;
+        qbState.action = 'idle';
+        playState.passAttempted = true;
+
         playState.statEvents.push({ type: 'pass_attempt', qbId: qbState.id });
         return;
     }

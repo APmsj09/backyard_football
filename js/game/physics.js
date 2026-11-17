@@ -700,7 +700,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
     if (
         (isRouteRunner || isPassTargetTracker) &&
-        distToTarget > 1.5 &&
+        distToTarget > 0.85 &&
         (routeStallTriggered || isHoldingRouteAvoidance)
     ) {
         const pathLengthSquared = distToTarget * distToTarget;
@@ -752,15 +752,44 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
             nearestAlongPath = alongPath;
             routeObstacle = other;
+        }
 
+        if (routeObstacle) {
             if (isHoldingRouteAvoidance && pState._routeAvoidanceSide) {
                 avoidanceSide = pState._routeAvoidanceSide;
             } else {
+                const offsetX = routeObstacle.x - pState.x;
+                const offsetY = routeObstacle.y - pState.y;
                 const cross = (dx * offsetY) - (dy * offsetX);
-                avoidanceSide =
+                const preferredSide =
                     Math.abs(cross) > (0.15 * safeDist)
                         ? (cross < 0 ? -1 : 1)
-                        : (pState.x < other.x ? -1 : 1);
+                        : (pState.x < routeObstacle.x ? -1 : 1);
+
+                // Score both sidestep directions so we don't dodge one defender straight into another body
+                const scoreSide = side => {
+                    let candX = steeringX + (steeringY * side * 0.70);
+                    let candY = steeringY - (steeringX * side * 0.70);
+                    const mag = Math.hypot(candX, candY) || 1;
+                    candX /= mag;
+                    candY /= mag;
+
+                    let congestion = 0;
+                    for (const body of allPlayers) {
+                        if (body.id === pState.id || body.balanceState === 'downed' || body.ghostTicks > 0) continue;
+                        const bx = body.x - pState.x;
+                        const by = body.y - pState.y;
+                        const along = (bx * candX) + (by * candY);
+                        if (along <= 0 || along > 3.5) continue;
+                        const lat = Math.abs((bx * candY) - (by * candX));
+                        if (lat < 1.35) congestion += (4.0 - along);
+                    }
+                    return congestion;
+                };
+
+                const prefScore = scoreSide(preferredSide);
+                const altScore = scoreSide(-preferredSide);
+                avoidanceSide = (altScore + 0.5 < prefScore) ? -preferredSide : preferredSide;
             }
         }
 
@@ -992,7 +1021,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
     const isStalledRouteWaypoint =
         isReceiverNavigation &&
-        distToTarget > 2.0 &&
+        distToTarget > 0.65 &&
         routeProgressTowardTarget < 0.03 &&
         !isJammedThisTick &&
         !pState._intent?.settled;

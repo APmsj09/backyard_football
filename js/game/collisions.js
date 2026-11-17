@@ -1634,21 +1634,52 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 Math.hypot(blockerAwayX, blockerAwayY)
             );
 
+            let pushDirX = blockerAwayX / blockerAwayDistance;
+            let pushDirY = blockerAwayY / blockerAwayDistance;
+
+            if (isPassRush) {
+                const qbState =
+                    offenseStates?.find(p => p.formationRole === 'QB' || p.slot?.startsWith?.('QB')) ||
+                    playState.activePlayers.find(p => p.isOffense && (p.formationRole === 'QB' || p.slot?.startsWith?.('QB')));
+
+                const toQBX = qbState ? qbState.x - defender.x : 0;
+                const toQBY = qbState ? qbState.y - defender.y : -1;
+                const toQBDist = Math.max(0.1, Math.hypot(toQBX, toQBY));
+                const rushDirX = toQBX / toQBDist;
+                const rushDirY = toQBY / toQBDist;
+
+                // Throw the blocker laterally off the rush lane instead of backward directly in front of the rusher
+                let perpX = -rushDirY;
+                let perpY = rushDirX;
+                if ((blockerAwayX * perpX) + (blockerAwayY * perpY) < 0) {
+                    perpX = -perpX;
+                    perpY = -perpY;
+                }
+                pushDirX = perpX;
+                pushDirY = perpY;
+
+                // Step the defender past the beaten blocker's shoulder and grant brief slip clearance
+                defender.x = Math.max(0.5, Math.min(FIELD_WIDTH - 0.5, defender.x + rushDirX * 0.55));
+                defender.y = Math.max(0.5, Math.min(FIELD_LENGTH - 0.5, defender.y + rushDirY * 0.55));
+                defender.ghostTicks = Math.max(defender.ghostTicks || 0, 5);
+                blocker.stunnedTicks = Math.max(blocker.stunnedTicks || 0, 4);
+            }
+
             applyImpactDisruption(
                 blocker,
                 isPassRush ? 40 : 30,
-                (blockerAwayX / blockerAwayDistance) * (isPassRush ? 1.5 : 1.0),
-                (blockerAwayY / blockerAwayDistance) * (isPassRush ? 1.5 : 1.0)
+                pushDirX * (isPassRush ? 1.5 : 1.0),
+                pushDirY * (isPassRush ? 1.5 : 1.0)
             );
 
-            blocker.engagedWith = null; 
+            blocker.engagedWith = null;
             blocker.isEngaged = false;
             blocker.dynamicTargetId = null;
-            blocker.reengageCooldown = 12; // 0.48s recovery window so rusher can actually penetrate
+            blocker.reengageCooldown = isPassRush ? 18 : 12;
 
             defender.stunnedTicks = 0;
-            defender.isBlocked = false; 
-            defender.blockedBy = null; 
+            defender.isBlocked = false;
+            defender.blockedBy = null;
             defender.isEngaged = false;
             defender.action = 'pursuit';
             battlesToRemove.push(index);

@@ -22,10 +22,10 @@ export const MOVEMENT_MODEL = Object.freeze({
     speedWeightPenaltyPerLb: 0.0015,
     minimumSpeedWeightFactor: 0.75,
 
-    // Acceleration, in yards per second squared (Tuned down to add weight/inertia)
-    baseAccelerationYPS2: 2.2,
-    explosivenessAccelerationBonusYPS2: 2.6,
-    agilityAccelerationBonusYPS2: 0.45,
+    // Acceleration, in yards per second squared
+    baseAccelerationYPS2: 4.0,
+    explosivenessAccelerationBonusYPS2: 3.6,
+    agilityAccelerationBonusYPS2: 0.65,
 
     // Acceleration penalty for weight above the age-based expectation
     weightAccelerationPenaltyPerLb: 0.0015,
@@ -200,6 +200,5 @@ export function getPlayerAccelerationYPS2(player = {}) {
             MOVEMENT_MODEL.agilityAccelerationBonusYPS2
         );
 
-    // Lowered floor to allow heavy linemen to be slower off the snap
-    return Math.max(1.8, acceleration * weightFactor);
+    return Math.max(3.2, acceleration * weightFactor);
 }
