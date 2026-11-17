@@ -78,7 +78,6 @@ let currentDraftSortCol = 'potential';
 let currentDraftSortDir = 'desc';
 let activeStaffHubTab = 'overview';
 let activePlayerDbView = 'database';
-let activeStaffHubTab = 'overview';
 
 // Standings league sub-tab state
 let activeStandingsLeague = 'tier1'; // 'tier1', 'tier2', 'youth'
