@@ -2302,7 +2302,8 @@ function calculateTwoWayDepthAnalysis(roster) {
 export function renderPlayerRoster(playerTeam) {
     if (!elements.rosterCount || !elements.draftRosterList || !playerTeam) return;
     const roster = getUIRosterObjects(playerTeam);
-    elements.rosterCount.textContent = `${roster.length}/18`;
+    const draftCap = getCurrentRosterLimit(getGameState());
+    elements.rosterCount.textContent = `${roster.length}/${draftCap}`;
 
     // 1. Render roster players with actual position-relevant skills.
     elements.draftRosterList.innerHTML = roster.map(p => {
@@ -2484,7 +2485,19 @@ window.app_openDraftTeamModal = function() {
 export function renderDashboard(gameState) {
     if (!gameState?.playerTeam) return;
     const { playerTeam, year, currentWeek, messages } = gameState;
-    const currentW = currentWeek < 9 ? `Week ${currentWeek + 1}` : 'Offseason';
+    const offseasonPhase = gameState.offseasonState?.phase;
+    let currentW = currentWeek < 9 ? `Week ${currentWeek + 1}` : 'Offseason';
+    if (currentWeek === 0) {
+        if (offseasonPhase === 'staff_review') {
+            currentW = `Offseason · Staff Review (${gameState.offseasonState?.staffReviewDay || 1}/2)`;
+        } else if (offseasonPhase === 'draft' || !gameState.draftCompleted) {
+            currentW = 'Offseason · Rookie Draft';
+        } else if (offseasonPhase === 'recruiting') {
+            currentW = `Offseason · Recruiting (Day ${gameState.offseasonState?.recruitingDay || 1}/7)`;
+        } else if (offseasonPhase === 'roster_finalization' && !gameState.offseasonFACompleted) {
+            currentW = 'Offseason · Finalize Roster';
+        }
+    }
 
     if (elements.dashboardTeamName) elements.dashboardTeamName.textContent = playerTeam.name;
     if (elements.dashboardRecord) elements.dashboardRecord.textContent = `${playerTeam.wins || 0} - ${playerTeam.losses || 0}${playerTeam.ties ? ` - ${playerTeam.ties}` : ''}`;
@@ -2528,9 +2541,21 @@ export function renderDashboard(gameState) {
         const rosterLimit = getCurrentRosterLimit(gameState);
         const isOverLimit = gameState.draftCompleted && (playerTeam.roster?.length || 0) > rosterLimit;
 
-        if (currentWeek === 0 && !gameState.draftCompleted) {
-            elements.advanceWeekBtn.innerHTML = `<span>Start Draft</span>`;
+        if (currentWeek === 0 && offseasonPhase === 'staff_review') {
+            const opened = gameState.offseasonState?.staffCarouselOpened === true;
+            elements.advanceWeekBtn.innerHTML = opened
+                ? `<span>Return to Coach Carousel →</span>`
+                : `<span>Open Coach Carousel →</span>`;
             elements.advanceWeekBtn.className = 'btn bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-emerald-900 flex items-center gap-2';
+        } else if (currentWeek === 0 && !gameState.draftCompleted) {
+            elements.advanceWeekBtn.innerHTML = `<span>Start Draft →</span>`;
+            elements.advanceWeekBtn.className = 'btn bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-emerald-900 flex items-center gap-2';
+        } else if (currentWeek === 0 && offseasonPhase === 'recruiting') {
+            elements.advanceWeekBtn.innerHTML = `<span>Resume Recruiting →</span>`;
+            elements.advanceWeekBtn.className = 'btn bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-emerald-900 flex items-center gap-2';
+        } else if (currentWeek === 0 && offseasonPhase === 'roster_finalization' && !gameState.offseasonFACompleted) {
+            elements.advanceWeekBtn.innerHTML = `<span>Review Walk-On Offers →</span>`;
+            elements.advanceWeekBtn.className = 'btn bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-6 rounded-sm text-sm uppercase tracking-wider transition shadow-sm border border-amber-800 flex items-center gap-2';
         } else if (isOverLimit) {
             const excess = playerTeam.roster.length - rosterLimit;
             elements.advanceWeekBtn.innerHTML = `<span>⚠️ Cut ${excess} Player${excess > 1 ? 's' : ''}</span>`;
@@ -3637,11 +3662,13 @@ export function renderRecruitingWirePanel(gameState) {
     }
 
     const dailyActivity = (Array.isArray(progress.dailyActivity) ? progress.dailyActivity : [])
-        .filter(act => Number(act.day) === lastResolvedDay);
+        .filter(act =>
+            Number(act?.day) === lastResolvedDay &&
+            !(act?.type === 'staff_assignment' && act?.action !== 'tryout_batch')
+        );
 
     const yourActivity = dailyActivity.filter(act => String(act.teamId) === teamId);
     const leagueActivity = dailyActivity.filter(act => String(act.teamId) !== teamId);
-
     const dayCommitments = (Array.isArray(progress.commitments) ? progress.commitments : [])
         .filter(c => Number(c.day) === lastResolvedDay);
 
@@ -3650,13 +3677,44 @@ export function renderRecruitingWirePanel(gameState) {
     })[c]);
 
     const renderActRow = act => {
-        const teamName = escapeWireHtml(act.teamName || 'Team');
-        const pName = escapeWireHtml(act.playerName || 'Recruit');
-        const label = escapeWireHtml(act.label || act.action || act.type || 'Recruiting activity');
+        const isTryoutSession = act.type === 'staff_assignment' && act.action === 'tryout_batch';
+        const isTryoutAttendee = act.type === 'recruiting_action' && act.action === 'tryout_batch';
+        const teamName = escapeWireHtml(act.teamName || gameState.teams?.find(t => String(t?.id) === String(act.teamId))?.name || 'Team');
+        const pName = escapeWireHtml(
+            isTryoutSession
+                ? `${Array.isArray(act.playerIds) ? act.playerIds.length : 0} prospects`
+                : (act.playerName || 'Recruit')
+        );
+        const label = escapeWireHtml(
+            isTryoutSession
+                ? 'Group tryout session'
+                : isTryoutAttendee
+                    ? 'Group tryout · individual evaluation'
+                    : (act.label || act.action || act.type || 'Recruiting activity')
+        );
+
+        const detailParts = [];
+        if (act.coachName) detailParts.push(`Coach: ${act.coachName}`);
+        const deliveredHours = Number(act.effectiveHours ?? act.hours) || 0;
+        if (isTryoutSession && Number(act.hours) > 0) detailParts.push(`${Number(act.hours)}h session`);
+        else if (!isTryoutAttendee && deliveredHours > 0) detailParts.push(`${deliveredHours.toFixed(1)}h`);
+
+        const iBefore = Number(act.interestBefore);
+        const iAfter = Number(act.interestAfter);
+        const iGain = Number(act.interestGain) || 0;
+        if (Number.isFinite(iBefore) && Number.isFinite(iAfter)) {
+            detailParts.push(`Interest ${Math.round(iBefore)}→${Math.round(iAfter)} (${iGain > 0 ? '+' : ''}${Math.round(iGain)})`);
+        } else if (iGain !== 0) {
+            detailParts.push(`${iGain > 0 ? '+' : ''}${Math.round(iGain)} interest`);
+        }
+        if (Number(act.cashSpent) > 0) detailParts.push(`-$${Number(act.cashSpent).toFixed(2)}`);
+        if (Number(act.tokensSpent) > 0) detailParts.push(`${Number(act.tokensSpent)} Token(s)`);
+
         return `
             <div class="rounded border border-slate-200 bg-white p-2 text-[11px]">
                 <div class="font-bold text-slate-800">${teamName} · ${pName}</div>
                 <div class="mt-0.5 text-slate-600">${label}</div>
+                ${detailParts.length > 0 ? `<div class="mt-0.5 text-[10px] text-slate-500">${detailParts.map(escapeWireHtml).join(' · ')}</div>` : ''}
             </div>
         `;
     };
@@ -3667,7 +3725,7 @@ export function renderRecruitingWirePanel(gameState) {
                 Day ${lastResolvedDay} Wire Summary
             </div>
             <div class="mt-0.5 text-[10px] text-slate-500">
-                Your actions: ${yourActivity.length} · League actions: ${leagueActivity.length} · Commitments: ${dayCommitments.length}
+                Your actions: ${yourActivity.length} · League: ${leagueActivity.length} · Commitments: ${dayCommitments.length}
             </div>
         </div>
 
@@ -3684,11 +3742,18 @@ export function renderRecruitingWirePanel(gameState) {
             </div>
         ` : ''}
 
-        <div class="space-y-1.5">
-            <div class="text-[10px] font-black uppercase tracking-wide text-slate-700 border-b border-slate-200 pb-0.5">
-                Recent Activity
+        <div class="mb-3 space-y-1">
+            <div class="text-[10px] font-black uppercase tracking-wide text-emerald-800 border-b border-emerald-200 pb-0.5">
+                Your Team (${yourActivity.length})
             </div>
-            ${dailyActivity.length > 0 ? dailyActivity.slice(-8).reverse().map(renderActRow).join('') : '<p class="text-[10px] text-slate-400 italic">No actions recorded on Day ' + lastResolvedDay + '.</p>'}
+            ${yourActivity.length > 0 ? yourActivity.slice(-6).reverse().map(renderActRow).join('') : '<p class="text-[10px] text-slate-400 italic">No actions recorded for your team on Day ' + lastResolvedDay + '.</p>'}
+        </div>
+
+        <div class="space-y-1">
+            <div class="text-[10px] font-black uppercase tracking-wide text-slate-700 border-b border-slate-200 pb-0.5">
+                Around the League (${leagueActivity.length})
+            </div>
+            ${leagueActivity.length > 0 ? leagueActivity.slice(-8).reverse().map(renderActRow).join('') : '<p class="text-[10px] text-slate-400 italic">No league activity recorded on Day ' + lastResolvedDay + '.</p>'}
         </div>
     `;
 }
@@ -4353,8 +4418,8 @@ export function renderOffseasonFAPool(gameState) {
         recruitingAutonomy === 'direct'
             ? 'Direct control: Coaches do not recruit or extend offers automatically. You decide which prospects to pursue and when to offer a roster spot.'
             : recruitingAutonomy === 'delegate'
-                ? 'Delegate: Coaches handle recruiting and may extend roster offers when their evaluations support it and capacity is available. They have more discretion over your priorities. You can still make or withdraw offers manually.'
-                : 'Guided: Coaches handle recruiting and may extend roster offers when their evaluations support it and capacity is available. They follow your recruiting priorities more closely. You can still make or withdraw offers manually.';
+                ? 'Delegate: Coaches autonomously pursue top targets matching your program direction & position priorities (plus any targets on your Recruiting List) and extend offers when interest/capacity allow.'
+                : 'Guided: Coaches actively work the prospects on your Recruiting List and may extend offers when evaluations and capacity allow. You can still adjust offers manually.';
 
     const normalizedPhase = String(state.phase || '')
         .toLowerCase()
@@ -4693,7 +4758,7 @@ export function renderOffseasonFAPool(gameState) {
                 userOffer?.status === 'active';
 
             const offerStatusLabel = hasActiveOffer
-                ? 'Offer active · Roster spot reserved'
+                ? 'Offer active · Pending decision'
                 : userOffer?.status === 'withdrawn'
                     ? 'Previous offer withdrawn'
                     : userOffer?.status === 'accepted'
@@ -5231,7 +5296,7 @@ export function renderOffseasonFAPool(gameState) {
                 userRecruitingList.length > 0
                     ? `
                         <div class="overflow-x-auto">
-                            <table class="w-full min-w-[1280px] text-left">
+                            <table class="w-full min-w-[960px] text-left">
                                 <thead class="bg-slate-100">
                                     <tr class="text-[9px] font-black uppercase tracking-wide text-slate-500">
                                         <th class="px-3 py-2 text-center">Tryout</th>
@@ -8630,35 +8695,9 @@ window.app_openBidModal = function(playerId) {
 
 let staffWorkloadExpanded = false;
 
-export function renderStaffTab(gameState, targetContainerId = null) {
-    const carouselScreen = document.getElementById('staff-carousel-screen');
-
-    const isDedicatedCarouselVisible =
-        carouselScreen && !carouselScreen.classList.contains('hidden');
-
-    const containerId = targetContainerId || (
-        isDedicatedCarouselVisible
-            ? 'staff-carousel-staff-container'
-            : 'staff-container'
-    );
-
-    const container = document.getElementById(containerId);
-
-    if (!container || !gameState?.playerTeam) return;
-
-    const team = gameState.playerTeam;
-    if (!team.staff) Game.initializeTeamStaff(team);
-    if (!gameState.availableStaff) gameState.availableStaff = Game.generateStaffPool(6);
-
-    // Auto-repair: Prevent Head Coach from sharing the GM's exact name
-    if (team.staff.coach && team.staff.gm && team.staff.coach.name === team.staff.gm.name) {
-        const former = team.staff.coach.formerPlayerId ? Game.getPlayer(team.staff.coach.formerPlayerId) : null;
-        team.staff.coach.name = former ? former.name : `${Game.getRandom(firstNames)} ${Game.getRandom(lastNames)}`;
-        team.coach = team.staff.coach;
-    }
-
+function ensureHireStaffHandler() {
     const isStaffChangeWindowOpen = () => {
-        const currentState = Game.getGameState() || gameState;
+        const currentState = Game.getGameState();
 
         const offseasonPhase = String(
             currentState?.offseasonState?.phase ?? ''
@@ -8680,7 +8719,11 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         );
     };
 
-    window.app_hireStaff = (staffId, roleKey) => {
+    window.app_hireStaff = (staffId, roleKey = 'coach') => {
+        let gameState = Game.getGameState();
+        let team = gameState?.playerTeam;
+        if (!gameState || !team) return;
+
         if (!isStaffChangeWindowOpen()) {
             showModal(
                 'Staff Changes Closed',
@@ -8767,11 +8810,29 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         // The active coaching group determines whether this is a new hire
         // into an open slot or a replacement for an existing coach.
         const hasOpenCoachingSlot = currentStaffCoaches.length < 3;
+        const headCoachId =
+            team.staff?.coach?.id ??
+            team.coach?.id ??
+            null;
+        const hasCurrentHeadCoach =
+            headCoachId != null &&
+            currentStaffCoaches.some(
+                coach => String(coach.id) === String(headCoachId)
+            );
 
         const tokensAvailable = team.socialProfile?.favorTokens || 0;
-        const roleLabels = { coach: 'Head Coach', scout: 'Park Scout', trainer: 'Sideline Trainer' };
+        const isCoachPoolHire = roleKey === 'coach';
+        const showSchemeAutonomy =
+            isCoachPoolHire &&
+            (!hasCurrentHeadCoach || !hasOpenCoachingSlot);
+        const roleLabels = {
+            coach: hasOpenCoachingSlot
+                ? (hasCurrentHeadCoach ? 'Assistant Coach' : 'Head Coach')
+                : 'Coaching Staff',
+            scout: 'Park Scout',
+            trainer: 'Sideline Trainer'
+        };
         const roleName = roleLabels[roleKey] || roleKey.toUpperCase();
-        const isHeadCoach = roleKey === 'coach';
 
         const getCoachSkillAverage = coach => {
             const ratings = coach?.ratings || {};
@@ -8902,7 +8963,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     </div>
                 </div>
 
-                ${isHeadCoach && !hasOpenCoachingSlot ? `
+                ${isCoachPoolHire && !hasOpenCoachingSlot ? `
                 <div class="rounded border border-blue-200 bg-blue-50 p-3">
                     <span class="block text-[10px] font-black uppercase tracking-wider text-blue-900 mb-1.5">
                         Replace Which Coach?
@@ -8914,6 +8975,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             const skillAverage = getCoachSkillAverage(coach);
                             const generalFit = getCoachRoleFit(coach, 'general');
                             const active = index === 0;
+                            const isCurrentHead =
+                                headCoachId != null &&
+                                String(coach.id) === String(headCoachId);
                             return `
                                 <button type="button"
                                     data-replacement-coach-id="${String(coach.id ?? '').replace(/"/g, '&quot;')}"
@@ -8927,7 +8991,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                         });
                                     "
                                     class="flex items-center justify-between gap-2 rounded border px-2.5 py-2 text-left text-xs ${active ? 'border-blue-700 bg-white ring-1 ring-blue-600 font-bold text-slate-900' : 'border-blue-200 bg-white/70 text-slate-700 hover:bg-white'}">
-                                    <span class="truncate">${String(coach.name || `Staff Coach ${index + 1}`)}</span>
+                                    <span class="truncate">${String(coach.name || `Staff Coach ${index + 1}`)}${isCurrentHead ? ' <span class="text-[9px] font-black uppercase text-amber-700">(Head Coach)</span>' : ' <span class="text-[9px] text-slate-500">(Assistant)</span>'}</span>
                                     <span class="shrink-0 font-mono text-[10px] text-slate-500">Avg ${skillAverage ?? '—'} · Fit ${generalFit ?? '—'}</span>
                                 </button>
                             `;
@@ -8939,10 +9003,10 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         if this candidate accepts.
                     </p>
                 </div>
-                ` : isHeadCoach ? `
+                ` : isCoachPoolHire ? `
                 <div class="rounded border border-emerald-200 bg-emerald-50 p-3">
                     <h4 class="text-[10px] font-black uppercase tracking-wider text-emerald-900">
-                        Open Coaching Position
+                        Open ${hasCurrentHeadCoach ? 'Assistant' : 'Head Coach'} Position
                     </h4>
                     <p class="text-[11px] text-emerald-800 mt-1">
                         Your coaching group has an open position. An accepted offer
@@ -8953,10 +9017,10 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                 <!-- Deep Pitch Options -->
                 <div class="space-y-2.5">
-                    ${isHeadCoach ? `
+                    ${showSchemeAutonomy ? `
                     <div>
                         <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
-                            Scheme Autonomy & Play-Calling Rights
+                            Scheme Autonomy & Play-Calling Rights${hasCurrentHeadCoach && !hasOpenCoachingSlot ? ' (Applies if replacing Head Coach)' : ''}
                         </label>
                         <input type="hidden" id="staff-scheme-promise" value="COACH_CHOICE">
                         <div class="grid grid-cols-1 gap-1 sm:grid-cols-2" role="group" aria-label="Scheme autonomy">
@@ -9038,6 +9102,10 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             // Read the current game state again because the candidate may
             // have been hired or removed while the offer modal was open.
             const latestState = Game.getGameState() || gameState;
+            const latestTeam = latestState?.playerTeam;
+            if (!latestState || !latestTeam) return;
+            gameState = latestState;
+            team = latestTeam;
 
             const latestMarketMatches = (
                 Array.isArray(latestState?.availableStaff)
@@ -9659,7 +9727,36 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             }
         }, "Submit Contract Offer");
     };
+}
 
+export function renderStaffTab(gameState, targetContainerId = null) {
+    const carouselScreen = document.getElementById('staff-carousel-screen');
+
+    const isDedicatedCarouselVisible =
+        carouselScreen && !carouselScreen.classList.contains('hidden');
+
+    const containerId = targetContainerId || (
+        isDedicatedCarouselVisible
+            ? 'staff-carousel-staff-container'
+            : 'staff-container'
+    );
+
+    const container = document.getElementById(containerId);
+
+    if (!container || !gameState?.playerTeam) return;
+
+    const team = gameState.playerTeam;
+    if (!team.staff) Game.initializeTeamStaff(team);
+    if (!gameState.availableStaff) gameState.availableStaff = Game.generateStaffPool(6);
+
+    // Auto-repair: Prevent Head Coach from sharing the GM's exact name
+    if (team.staff.coach && team.staff.gm && team.staff.coach.name === team.staff.gm.name) {
+        const former = team.staff.coach.formerPlayerId ? Game.getPlayer(team.staff.coach.formerPlayerId) : null;
+        team.staff.coach.name = former ? former.name : `${Game.getRandom(firstNames)} ${Game.getRandom(lastNames)}`;
+        team.coach = team.staff.coach;
+    }
+
+    ensureHireStaffHandler();
     ensureTeamInstructions(team);
     const staffOutlooks = new Map(
         (Array.isArray(team.coaches) ? team.coaches.filter(Boolean) : []).map(c => [
@@ -14338,11 +14435,11 @@ export function renderStaffCarouselTab(
 
     if (!container || !gameState?.playerTeam) return;
 
-    // Initialize the hiring handlers and candidate pool.
-    // renderStaffTab no longer renders the candidate market.
-    renderStaffTab(gameState);
+    ensureHireStaffHandler();
 
     const team = gameState.playerTeam;
+    if (!team.staff) Game.initializeTeamStaff(team);
+    if (!gameState.availableStaff) gameState.availableStaff = Game.generateStaffPool(6);
 
     const carouselDayLabel = document.getElementById(
         'staff-carousel-day-label'
@@ -14382,6 +14479,16 @@ export function renderStaffCarouselTab(
                 )
             )
         );
+    }
+
+    const carouselFundsLabel = document.getElementById(
+        'staff-carousel-funds-label'
+    );
+
+    if (carouselFundsLabel) {
+        carouselFundsLabel.textContent = (
+            Number(team.finances?.balance) || 0
+        ).toFixed(2);
     }
 
     const employedStaffIds = new Set();
@@ -15578,19 +15685,24 @@ function renderMyTeamTab(gameState) {
             ` : ''}
         </div>`;
     } else if (roster.length < 14) {
+        const canInviteWalkOns =
+            gameState.offseasonState?.phase === 'roster_finalization' &&
+            gameState.offseasonFACompleted !== true;
+
         rosterNotice = `
         <div class="bg-amber-50 border-b border-amber-200 p-2.5 px-4 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 shrink-0">
             <div class="flex items-center gap-2">
                 <span class="text-base">⚠️</span>
-                <span><b>Roster Depth Low (${roster.length}/${rosterLimit}):</b> You need at least 14 players for two-way stamina and backup rotations.</span>
+                <span><b>Roster Depth Low (${roster.length}/${rosterLimit}):</b> You need at least 14 players for two-way stamina and backup rotations.${roster.length < 8 ? ' Below 8 healthy players on game day triggers an emergency call-up.' : ''}</span>
             </div>
             <div class="flex items-center gap-2">
                 <button class="bg-slate-900 text-white font-bold px-2.5 py-1 rounded text-[11px] uppercase tracking-wider hover:bg-slate-800 transition" onclick="app.switchTab('free-agents')">
-                    Browse Free Agents →
+                    Browse Player Database →
                 </button>
+                ${canInviteWalkOns ? `
                 <button class="bg-emerald-700 text-white font-bold px-2.5 py-1 rounded text-[11px] uppercase tracking-wider hover:bg-emerald-800 transition shadow-sm" onclick="app.autoFillRoster()">
-                    ⚡ Auto-Invite Walk-Ons
-                </button>
+                    ⚡ Review Walk-On Offers
+                </button>` : ''}
             </div>
         </div>`;
     }
@@ -15979,22 +16091,13 @@ function renderDepthChartTab(gameState) {
     const gs = getGameState();
     if (!gs?.playerTeam) return;
 
-    renderFormationPills('offense', offenseFormations, gs.playerTeam.formations.offense);
-    renderFormationPills('defense', defenseFormations, gs.playerTeam.formations.defense);
-    renderDepthChartSide('offense', gs);
-    renderDepthChartSide('defense', gs);
-
     const activeSub = document.querySelector(".depth-chart-tab.active")?.dataset.subTab || "depth-order";
 
-    const offensePane = document.getElementById("depth-chart-offense-pane");
-    const defensePane = document.getElementById("depth-chart-defense-pane");
     const overallsPane = document.getElementById("positional-overalls-container");
     const depthOrderPane = document.getElementById("depth-order-container");
     const playbookPane = document.getElementById("playbook-manager-container");
     const practicePane = document.getElementById("practice-manager-container");
 
-    if (offensePane) offensePane.classList.toggle("hidden", activeSub !== "offense");
-    if (defensePane) defensePane.classList.toggle("hidden", activeSub !== "defense");
     if (overallsPane) overallsPane.classList.toggle("hidden", activeSub !== "overalls");
     if (depthOrderPane) depthOrderPane.classList.toggle("hidden", activeSub !== "depth-order");
     if (playbookPane) playbookPane.classList.toggle("hidden", activeSub !== "playbook");
@@ -17952,8 +18055,23 @@ export function renderHistoryTab(gameState) {
                 </p>`;
     }
 
+    window.app_clearSeasonReportFilter = function () {
+        activeHistoryReportYear = null;
+        activeHistoryReportView = 'overview';
+        const gs = getGameState();
+        if (gs) renderHistoryTab(gs);
+    };
+
     const reportPanelHtml = `
         <section class="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-6">
+            ${activeHistoryReportYear !== null ? `
+                <div class="mb-3 flex items-center justify-between gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
+                    <span class="font-bold text-amber-900">Viewing Year ${escapeHistoryHtml(activeHistoryReportYear)} Yearbook</span>
+                    <button type="button" onclick="app_clearSeasonReportFilter()" class="rounded bg-slate-900 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-slate-800">
+                        ← Show All Recent Seasons
+                    </button>
+                </div>
+            ` : ''}
             <div class="flex flex-wrap gap-2" role="tablist" aria-label="Season yearbook sections">
                 ${reportViews.map(view => `
                     <button
@@ -18430,8 +18548,6 @@ export function setupDepthChartTabs() {
     const switchSubTab = (subTab) => {
         const validTabs = [
             "depth-order",
-            "offense",
-            "defense",
             "overalls",
             "playbook",
             "practice"
@@ -18441,15 +18557,11 @@ export function setupDepthChartTabs() {
 
         setActiveTabStyle(subTab);
 
-        const offensePane = document.getElementById("depth-chart-offense-pane");
-        const defensePane = document.getElementById("depth-chart-defense-pane");
         const overallsPane = document.getElementById("positional-overalls-container");
         const depthOrderPane = document.getElementById("depth-order-container");
         const playbookPane = document.getElementById("playbook-manager-container");
         const practicePane = document.getElementById("practice-manager-container");
 
-        if (offensePane) offensePane.classList.toggle("hidden", subTab !== "offense");
-        if (defensePane) defensePane.classList.toggle("hidden", subTab !== "defense");
         if (overallsPane) overallsPane.classList.toggle("hidden", subTab !== "overalls");
         if (depthOrderPane) depthOrderPane.classList.toggle("hidden", subTab !== "depth-order");
         if (playbookPane) playbookPane.classList.toggle("hidden", subTab !== "playbook");
@@ -18457,16 +18569,10 @@ export function setupDepthChartTabs() {
 
         const gs = getGameState();
 
-        if (subTab === "offense") {
-            renderFormationPills('offense', offenseFormations, gs?.playerTeam?.formations?.offense);
-            renderDepthChartSide('offense', gs);
-        } else if (subTab === "defense") {
-            renderFormationPills('defense', defenseFormations, gs?.playerTeam?.formations?.defense);
-            renderDepthChartSide('defense', gs);
+        if (subTab === "depth-order") {
+            renderDepthOrderPane(gs);
         } else if (subTab === "overalls") {
             renderPositionalOveralls();
-        } else if (subTab === "depth-order") {
-            renderDepthOrderPane(gs);
         } else if (subTab === "playbook") {
             renderPlaybookManager(gs);
         } else if (subTab === "practice") {
@@ -19055,12 +19161,15 @@ export function renderPracticeManager(gameState) {
         };
     }
 
-    const coach = team.staff?.coach;
+    const coach = Game.getTeamCoachingSpecialist?.(team, 'training') || team.staff?.coach;
     const practiceAutonomy = String(
         team.teamInstructions?.departments?.practice?.autonomy ??
         (team.gameplan.delegatePractice ? 'delegate' : 'guided')
     ).toLowerCase();
-    const isDelegated = practiceAutonomy !== 'direct';
+    const isDelegated = practiceAutonomy === 'delegate';
+    const isGuided = practiceAutonomy === 'guided';
+    const hasGuidedOverride = isGuided &&
+        team.gameplan.practiceOverrideKey === `${gameState.year}:${gameState.currentWeek}`;
     const directive = team.gameplan.gmDirective || 'COACH_AUTONOMY';
     const currentPlan = team.gameplan.weeklyPractice || 'chalk_talk';
 
@@ -19191,8 +19300,13 @@ export function renderPracticeManager(gameState) {
             team.teamInstructions?.departments?.practice?.autonomy ??
             (team.gameplan.delegatePractice ? 'delegate' : 'guided')
         ).toLowerCase();
-        if (currentPracticeMode !== 'direct') return;
+        if (currentPracticeMode === 'delegate') return;
         team.gameplan.weeklyPractice = plan;
+        if (currentPracticeMode === 'guided') {
+            team.gameplan.practiceOverrideKey = `${gameState.year}:${gameState.currentWeek}`;
+        } else {
+            delete team.gameplan.practiceOverrideKey;
+        }
         saveGameState();
         renderPracticeManager(gameState);
     };
@@ -19290,7 +19404,8 @@ export function renderPracticeManager(gameState) {
         { key: 'chalk_talk', title: '📋 Cafeteria Napkins & Walk-Throughs', badge: 'Playbook Mastery', desc: 'Focus on route timing and assignment mastery (+15% familiarity gain on active plays). Young prospects gain Playbook IQ reps.' },
         { key: 'conditioning', title: '🏃 Tire Pits & Sideline Tree Runs', badge: 'Conditioning', desc: 'Punishing physical conditioning. Increases player Stamina and Toughness; builds fourth-quarter closing endurance.' },
         { key: 'scrimmage', title: '🧃 Two-Hand Touch & Freeze Pops', badge: 'Morale & Skills', desc: 'Light sandlot scrimmage followed by team freeze-pops. Accelerates recovery, builds chemistry, and sharpens catching/tackling hands.' },
-        { key: 'scouting', title: '🕵️ Spying on the Opponent at Recess', badge: 'Anti-Exploit Prep', desc: 'Watch your upcoming opponent practice to decode their go-to formation. Gives your defense a speed-reaction bonus on game day.' }
+        { key: 'scouting', title: '🕵️ Spying on the Opponent at Recess', badge: 'Anti-Exploit Prep', desc: 'Watch your upcoming opponent practice to decode their go-to formation. Gives your defense a speed-reaction bonus on game day.' },
+        { key: 'hustle', title: '🧹 Neighborhood Hustle (Car Wash & Lawns)', badge: 'Team Funds', desc: 'Kids wash cars and mow lawns to raise ~$0.85–$1.15 per worker. Slight scheme rust (-4% mastery) and low-ethic divas may boycott.' }
     ];
 
     container.innerHTML = `
@@ -19811,18 +19926,25 @@ export function startLiveGameLoop(initialGameState, onComplete) {
 
 
     const userTeam = getGameState()?.playerTeam;
-    if (!activeLiveGame.liveGmAdjustments) {
-        activeLiveGame.liveGmAdjustments = userTeam?.liveGmAdjustments || {
-            offenseFocus: 'balanced',
-            defenseFocus: 'base',
-            fourthDown: 'coach',
-            tempo: 'normal'
-        };
-    }
-
     const livePlayerTeam = [activeLiveGame.homeTeam, activeLiveGame.awayTeam].find(
         t => t && (t.isPlayerControlled || (userTeam && String(t.id) === String(userTeam.id)))
     );
+    const persistentAutoSub =
+        livePlayerTeam?.autoSubTendency ||
+        userTeam?.autoSubTendency ||
+        'balanced';
+
+    if (!activeLiveGame.liveGmAdjustments) {
+        activeLiveGame.liveGmAdjustments = {
+            offenseFocus: 'balanced',
+            defenseFocus: 'base',
+            fourthDown: 'coach',
+            tempo: 'normal',
+            ...(userTeam?.liveGmAdjustments || {}),
+            autoSubTendency: persistentAutoSub
+        };
+    }
+
     if (livePlayerTeam) {
         livePlayerTeam.liveGmAdjustments = activeLiveGame.liveGmAdjustments;
     }
@@ -20011,12 +20133,13 @@ function renderLiveStrategyControls() {
         }
     activeLiveGame.liveGmAdjustments[category] = value;
 
-    const gameState = getGameState();
-    const team = gameState?.playerTeam;
-    if (team) {
-        team.liveGmAdjustments = { ...activeLiveGame.liveGmAdjustments };
+    if (category === 'autoSubTendency') {
+        const thresholdMap = { ironman: 80, balanced: 60, frequent: 40 };
+        activeLiveGame.autoSubThreshold = thresholdMap[value] ?? 60;
     }
 
+    const gameState = getGameState();
+    const team = gameState?.playerTeam;
     const livePlayerTeam = [activeLiveGame.homeTeam, activeLiveGame.awayTeam].find(
         t => t && (t.isPlayerControlled || (team && String(t.id) === String(team.id)))
     );
@@ -20147,29 +20270,33 @@ function runLiveGameStep(sessionId = liveGameSessionId) {
     }
 }
 
+let openLiveSubDrawerPlayerId = null;
+
 // Attach Sub UI Functions to the Global Scope for Inline Handlers
 window.app_toggleLiveSubDrawer = function(playerId) {
+    const pid = String(playerId);
+    openLiveSubDrawerPlayerId = (openLiveSubDrawerPlayerId === pid) ? null : pid;
     const drawer = document.getElementById(`sub-drawer-${playerId}`);
     if (drawer) {
-        drawer.classList.toggle('hidden');
+        drawer.classList.toggle('hidden', openLiveSubDrawerPlayerId !== pid);
     }
 };
 
-window.app_submitLiveSub = function(outId, inId) {
+window.app_submitLiveSub = function(outId, inId, slot = null, side = null) {
     const gs = Game.getGameState();
     const teamId = gs?.playerTeam?.id;
     if (!teamId || !activeLiveGame) return;
-    
-    Game.substitutePlayers(teamId, outId, inId, activeLiveGame.gameLog);
-    
-    // Close the drawer immediately
-    const drawer = document.getElementById(`sub-drawer-${outId}`);
-    if (drawer) drawer.classList.add('hidden');
-    
-    // Force a re-render to reflect the immediate UI change
-    if (activeLiveGame.visualizationFrames?.length > 0) {
-        const lastFrame = activeLiveGame.visualizationFrames[activeLiveGame.visualizationFrames.length - 1];
-        renderLiveFieldLineup(lastFrame, gs);
+
+    Game.substitutePlayers(teamId, outId, inId, activeLiveGame.gameLog, slot, side);
+    openLiveSubDrawerPlayerId = null;
+
+    if (lastRenderedFrame?.players) {
+        lastRenderedFrame.players.forEach(p => {
+            if (String(p.teamId) === String(teamId) && String(p.id) === String(outId)) {
+                p.id = inId;
+            }
+        });
+        renderLiveFieldLineup(lastRenderedFrame, gs);
     }
 };
 
@@ -20220,10 +20347,10 @@ export function renderLiveFieldLineup(frameData, gameState) {
                 suit: calculateSlotSuitability(c, p.slot, p.isOffense ? 'offense' : 'defense', team),
                 energy: Math.max(0, Math.round(100 - (c.fatigue || 0)))
             };
-        }).filter(c => c.suit > 25).sort((a,b) => b.suit - a.suit).slice(0, 4);
-
-        html += `
-            <!-- Active Player Row (Click to toggle drawer) -->
+        }).filter(c => c.suit > 25)
+          .sort((a, b) => (b.suit * 0.65 + b.energy * 0.35) - (a.suit * 0.65 + a.energy * 0.35))
+          .slice(0, 4);
+        const isDrawerOpen = openLiveSubDrawerPlayerId === String(fullPlayer.id);
             <div class="p-2 hover:bg-slate-800/40 transition-colors flex items-center justify-between text-xs cursor-pointer select-none" onclick="window.app_toggleLiveSubDrawer('${fullPlayer.id}')">
                 <div class="flex items-center gap-2 truncate pr-2">
                     <span class="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${p.isOffense ? 'bg-blue-950 text-blue-300 border border-blue-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">
@@ -20246,8 +20373,8 @@ export function renderLiveFieldLineup(frameData, gameState) {
                 </div>
             </div>
             
-            <!-- Hidden Bench Drawer -->
-            <div id="sub-drawer-${fullPlayer.id}" class="hidden bg-slate-950/80 border-t border-b border-slate-800/50 px-2 py-1.5 space-y-1">
+            <!-- Bench Drawer -->
+            <div id="sub-drawer-${fullPlayer.id}" class="${isDrawerOpen ? '' : 'hidden'} bg-slate-950/80 border-t border-b border-slate-800/50 px-2 py-1.5 space-y-1">
                 <div class="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 flex justify-between">
                     <span>Eligible Replacements</span>
                     <span>Energy / Suitability</span>
@@ -20262,7 +20389,7 @@ export function renderLiveFieldLineup(frameData, gameState) {
                             <div class="flex gap-0.5">
                                 ${Array(5).fill(0).map((_, i) => `<div class="w-1.5 h-1.5 rounded-sm ${i < Math.round(c.suit/20) ? 'bg-emerald-500' : 'bg-slate-700'}"></div>`).join('')}
                             </div>
-                            <button class="bg-slate-700 hover:bg-amber-600 text-white font-bold px-2 py-0.5 rounded-sm text-[9px] uppercase tracking-wider transition-colors shadow-sm" onclick="app_submitLiveSub('${fullPlayer.id}', '${c.player.id}')">
+                            <button class="bg-slate-700 hover:bg-amber-600 text-white font-bold px-2 py-0.5 rounded-sm text-[9px] uppercase tracking-wider transition-colors shadow-sm" onclick="app_submitLiveSub('${fullPlayer.id}', '${c.player.id}', '${p.slot}', '${p.isOffense ? 'offense' : 'defense'}')">
                                 Sub In
                             </button>
                         </div>

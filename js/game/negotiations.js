@@ -2882,18 +2882,24 @@ export function discussPositionChange(player, targetPos, team, useToken = false)
         }
 
         if (isOffensive) {
-            player.favoriteOffensivePosition = targetPos;
-            if (['OL', 'TE'].includes(targetPos) && ['DB'].includes(player.favoriteDefensivePosition)) {
-                player.favoriteDefensivePosition = 'DL';
+                player.favoriteOffensivePosition = targetPos;
+                if (['OL', 'TE'].includes(targetPos) && ['DB'].includes(player.favoriteDefensivePosition)) {
+                    player.favoriteDefensivePosition = 'DL';
+                }
+            } else {
+                player.favoriteDefensivePosition = targetPos;
+                if (['DL'].includes(targetPos) && ['WR', 'QB'].includes(player.favoriteOffensivePosition)) {
+                    player.favoriteOffensivePosition = 'OL';
+                }
             }
-        } else {
-            player.favoriteDefensivePosition = targetPos;
-            if (['DL'].includes(targetPos) && ['WR', 'QB'].includes(player.favoriteOffensivePosition)) {
-                player.favoriteOffensivePosition = 'OL';
-            }
-        }
 
-        rebuildDepthChartFromOrder(team);
+            // Rebuild depth order so the player is immediately ranked in their new room
+            import('./depth_chart.js').then(dc => {
+                dc.populateNaturalDepthOrder(team);
+                dc.rebuildDepthChartFromOrder(team);
+            }).catch(() => {
+                rebuildDepthChartFromOrder(team);
+            });
 
         if (useToken) {
             team.socialProfile.favorTokens = availableTokens - 1;

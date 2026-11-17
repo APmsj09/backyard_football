@@ -194,7 +194,7 @@ export function renderDepthOrderPane(gameState) {
         };
 
         return `
-            <section class="min-w-0 bg-white border border-slate-200 rounded shadow-sm overflow-hidden flex flex-col">
+            <section id="depth-order-card-${pos}" class="min-w-0 bg-white border border-slate-200 rounded shadow-sm overflow-hidden flex flex-col transition-all duration-300">
                 <div class="flex items-center justify-between px-3 py-2 ${headerColor}">
                     <div>
                         <span class="font-black text-sm uppercase tracking-wider">${pos}</span>
@@ -491,196 +491,192 @@ export function renderDepthOrderPane(gameState) {
         ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50';
 
+    let schemePreviewCollapsed = window._schemePreviewCollapsed ?? false;
+
+    window.toggleSchemePreview = function() {
+        window._schemePreviewCollapsed = !window._schemePreviewCollapsed;
+        renderDepthOrderPane(getGameState());
+    };
+
+    const isOffenseSide = activeDepthChartTab === 'offense';
+    const isDefenseSide = activeDepthChartTab === 'defense';
+    const currentActiveSide = isOffenseSide ? 'offense' : (isDefenseSide ? 'defense' : null);
+    const activeFormKey = isOffenseSide ? offFormKey : (isDefenseSide ? defFormKey : null);
+    const activeFormationMap = isOffenseSide ? offenseFormations : (isDefenseSide ? defenseFormations : null);
+    const activeFormationData = activeFormationMap ? activeFormationMap[activeFormKey] : null;
+    const activeSlots = isOffenseSide ? offenseSlots : (isDefenseSide ? defenseSlots : []);
+
+    const personnelText = activeFormationData?.personnel
+        ? Object.entries(activeFormationData.personnel)
+            .filter(([, count]) => count > 0)
+            .map(([pos, count]) => `${count} ${pos}`)
+            .join(' · ')
+        : 'Standard personnel';
+
     pane.innerHTML = `
         <!-- Depth Chart Header -->
-        <div class="mb-4 bg-slate-900 text-white rounded p-3 flex flex-wrap justify-between items-center gap-3">
+        <div class="mb-3 bg-slate-900 text-white rounded p-3 flex flex-wrap justify-between items-center gap-2 shadow-sm">
             <div class="min-w-0">
-                <span class="font-black text-sm uppercase tracking-wider">
-                    Depth Chart
-                </span>
-
-                <p class="text-[10px] text-slate-400 mt-1">
-                    Set your starters, manage positional depth, and configure specialists.
-                </p>
-
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
-                    <span class="text-[10px] text-blue-300 font-bold">
-                        OFFENSE: ${offFormKey}
-                    </span>
-                    <span class="text-[10px] text-rose-300 font-bold">
-                        DEFENSE: ${defFormKey}
+                <div class="flex items-center gap-2">
+                    <span class="font-black text-sm uppercase tracking-wider">Depth Chart &amp; Rotation</span>
+                    <span class="rounded bg-slate-800 border border-slate-700 px-2 py-0.5 text-[10px] font-mono text-amber-400">
+                        ${roster.length} Rostered
                     </span>
                 </div>
+                <p class="text-[10px] text-slate-400 mt-0.5">
+                    Order your players below. Formations automatically pull starters from the top of each ladder.
+                </p>
             </div>
 
-            <div class="flex gap-2 shrink-0">
+            <div class="flex flex-wrap items-center gap-2 shrink-0">
+                ${currentActiveSide ? `
                 <button
-                    class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold px-3 py-1.5 rounded text-xs uppercase tracking-wider"
+                    type="button"
+                    class="rounded border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-slate-700 transition xl:hidden"
+                    onclick="window.toggleSchemePreview()">
+                    ${schemePreviewCollapsed ? '👁️ Show Scheme Preview' : '✕ Hide Preview'}
+                </button>` : ''}
+
+                <button
+                    class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-2.5 py-1 rounded text-xs uppercase tracking-wider transition"
                     onclick="window.resetDepthChartOverrides()">
                     Reset Locks
                 </button>
 
                 <button
-                    class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-3 py-1.5 rounded text-xs uppercase tracking-wider shadow"
+                    class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-3 py-1 rounded text-xs uppercase tracking-wider shadow transition"
                     onclick="window.autoOptimizeLineup()">
-                    ⚡ Auto-Optimize Best Lineup
+                    ⚡ Auto-Set Best
                 </button>
             </div>
         </div>
 
-        <!-- Main Depth Chart Subtabs -->
-        <div class="flex gap-2 border-b border-slate-200 pb-2 mb-4 overflow-x-auto">
+        <!-- Main Subtabs -->
+        <div class="flex gap-1.5 border-b border-slate-200 pb-2 mb-3 overflow-x-auto text-xs font-bold">
             <button
-                class="px-4 py-2 rounded border text-xs font-black uppercase tracking-wider whitespace-nowrap ${tabClass('offense')}"
+                class="px-4 py-1.5 rounded border uppercase tracking-wider whitespace-nowrap transition ${tabClass('offense')}"
                 onclick="window.setDepthChartTab('offense')">
                 🏈 Offense
             </button>
 
             <button
-                class="px-4 py-2 rounded border text-xs font-black uppercase tracking-wider whitespace-nowrap ${tabClass('defense')}"
+                class="px-4 py-1.5 rounded border uppercase tracking-wider whitespace-nowrap transition ${tabClass('defense')}"
                 onclick="window.setDepthChartTab('defense')">
-                🛡 Defense
+                🛡️ Defense
             </button>
 
             <button
-                class="px-4 py-2 rounded border text-xs font-black uppercase tracking-wider whitespace-nowrap ${tabClass('specialTeams')}"
+                class="px-4 py-1.5 rounded border uppercase tracking-wider whitespace-nowrap transition ${tabClass('specialTeams')}"
                 onclick="window.setDepthChartTab('specialTeams')">
-                🦶 Special Teams
+                🦶 Special Teams &amp; Packages
             </button>
         </div>
 
-        <!-- OFFENSE TAB -->
-        ${activeDepthChartTab === 'offense' ? `
-            <div class="space-y-5 pb-6">
+        <!-- MAIN RESPONSIVE CONTAINER (Ladders Left + Scheme Preview Right) -->
+        <div class="grid grid-cols-1 ${currentActiveSide && !schemePreviewCollapsed ? 'xl:grid-cols-12' : ''} gap-3 items-start min-h-0 pb-6">
 
-                <section class="space-y-2">
-                    <div class="flex flex-wrap justify-between items-center border-b border-blue-200 pb-2">
-                        <div>
-                            <h4 class="font-black text-sm text-blue-950 uppercase tracking-wider">
-                                Active Offensive Lineup
-                            </h4>
-                            <p class="text-[10px] text-slate-500 mt-1">
-                                Click a position to assign its starter. Position labels reflect the active formation.
-                            </p>
-                        </div>
-                        <span class="text-[10px] font-bold text-blue-800 bg-blue-50 px-2 py-1 rounded">
-                            ${offenseSlots.length} Slots
-                        </span>
-                    </div>
-
-                    ${renderInlineFormationBar('offense', offenseFormations, offFormKey)}
-                    ${renderActiveFormationSlots(offenseSlots, 'offense')}
-                </section>
-
-                <section class="space-y-2">
-                    <div class="flex justify-between items-center border-b border-blue-200 pb-2">
-                        <h4 class="font-black text-sm text-blue-950 uppercase tracking-wider">
-                            Offensive Depth Rankings
-                        </h4>
-                        <span class="text-[9px] text-slate-400 uppercase font-bold">
-                            Automatic fallback order
-                        </span>
-                    </div>
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-3">
+            <!-- POSITION LADDERS (Main Column) -->
+            <div class="${currentActiveSide && !schemePreviewCollapsed ? 'xl:col-span-8 2xl:col-span-9' : 'col-span-1'} space-y-3 min-w-0">
+                ${activeDepthChartTab === 'offense' ? `
+                    <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2.5">
                         ${['QB', 'RB', 'WR', 'TE', 'OL'].map(renderPositionDepthCard).join('')}
                     </div>
-                </section>
-            </div>
-        ` : ''}
+                ` : ''}
 
-        <!-- DEFENSE TAB -->
-        ${activeDepthChartTab === 'defense' ? `
-            <div class="space-y-5 pb-6">
-
-                <section class="space-y-2">
-                    <div class="flex flex-wrap justify-between items-center border-b border-rose-200 pb-2">
-                        <div>
-                            <h4 class="font-black text-sm text-rose-950 uppercase tracking-wider">
-                                Active Defensive Lineup
-                            </h4>
-                            <p class="text-[10px] text-slate-500 mt-1">
-                                Assign individual defensive ends, tackles, corners, and safeties.
-                            </p>
-                        </div>
-                        <span class="text-[10px] font-bold text-rose-800 bg-rose-50 px-2 py-1 rounded">
-                            ${defenseSlots.length} Slots
-                        </span>
-                    </div>
-
-                    ${renderInlineFormationBar('defense', defenseFormations, defFormKey)}
-                    ${renderActiveFormationSlots(defenseSlots, 'defense')}
-                </section>
-
-                <section class="space-y-2">
-                    <div class="flex justify-between items-center border-b border-rose-200 pb-2">
-                        <h4 class="font-black text-sm text-rose-950 uppercase tracking-wider">
-                            Defensive Depth Rankings
-                        </h4>
-                        <span class="text-[9px] text-slate-400 uppercase font-bold">
-                            Automatic fallback order
-                        </span>
-                    </div>
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-3">
+                ${activeDepthChartTab === 'defense' ? `
+                    <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2.5">
                         ${['DE', 'DT', 'LB', 'CB', 'S'].map(renderPositionDepthCard).join('')}
                     </div>
-                </section>
+                ` : ''}
+
+                ${activeDepthChartTab === 'specialTeams' ? `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <section class="bg-white border border-slate-200 rounded p-3 space-y-2.5 shadow-sm">
+                            <div class="border-b border-slate-100 pb-2">
+                                <h4 class="font-black text-xs text-amber-950 uppercase tracking-wider">
+                                    Special Teams Specialists
+                                </h4>
+                                <p class="text-[10px] text-slate-500 mt-0.5">
+                                    Kicking and return personnel.
+                                </p>
+                            </div>
+                            <div class="space-y-2">
+                                ${renderSlotCard('PR', 'specialTeams')}
+                                ${renderSlotCard('P', 'specialTeams')}
+                            </div>
+                        </section>
+
+                        <section class="bg-white border border-slate-200 rounded p-3 space-y-2.5 shadow-sm">
+                            <div class="border-b border-slate-100 pb-2">
+                                <h4 class="font-black text-xs text-indigo-950 uppercase tracking-wider">
+                                    Situational Package Specialists
+                                </h4>
+                                <p class="text-[10px] text-slate-500 mt-0.5">
+                                    Extra personnel used when packages are called.
+                                </p>
+                            </div>
+                            <div class="space-y-2">
+                                ${renderSlotCard('FB', 'specialists')}
+                                ${renderSlotCard('SLOT', 'specialists')}
+                                ${renderSlotCard('NCB', 'specialists')}
+                            </div>
+                        </section>
+                    </div>
+                ` : ''}
             </div>
-        ` : ''}
 
-        <!-- SPECIAL TEAMS TAB -->
-        ${activeDepthChartTab === 'specialTeams' ? `
-            <div class="space-y-5 pb-6">
-
-                <section class="bg-amber-50/50 border border-amber-200 rounded p-3 space-y-3">
-                    <div class="border-b border-amber-200 pb-2">
-                        <h4 class="font-black text-sm text-amber-950 uppercase tracking-wider">
-                            Special Teams Specialists
-                        </h4>
-                        <p class="text-[10px] text-slate-500 mt-1">
-                            Players assigned to dedicated kicking and return duties.
-                        </p>
+            <!-- SCHEME PREVIEW & STARTING 8 ON-FIELD CARD (Side Column / Collapsible) -->
+            ${currentActiveSide ? `
+            <aside class="${schemePreviewCollapsed ? 'hidden' : 'flex'} flex-col gap-2.5 ${currentActiveSide && !schemePreviewCollapsed ? 'xl:col-span-4 2xl:col-span-3' : 'hidden'} bg-white border border-slate-300 rounded p-3 shadow-sm min-w-0">
+                <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+                    <div>
+                        <span class="text-xs font-black uppercase tracking-wider text-slate-900 block">
+                            ${currentActiveSide === 'offense' ? '🏈 Base Scheme Preview' : '🛡️ Base Defense Preview'}
+                        </span>
+                        <span class="text-[10px] text-slate-500 font-mono">${personnelText}</span>
                     </div>
+                    <button
+                        type="button"
+                        class="text-slate-400 hover:text-slate-700 xl:hidden text-sm font-bold px-1"
+                        onclick="window.toggleSchemePreview()"
+                        title="Close preview">✕</button>
+                </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        ${renderSlotCard('PR', 'specialTeams')}
-                        ${renderSlotCard('P', 'specialTeams')}
+                <!-- Scheme Selector -->
+                <div>
+                    <label class="block text-[9px] font-black uppercase tracking-wider text-slate-500 mb-1">
+                        Active Base Formation
+                    </label>
+                    <div class="flex flex-wrap gap-1">
+                        ${Object.keys(activeFormationMap || {})
+                            .filter(k => k !== 'Punt' && k !== 'Punt_Return')
+                            .map(k => `
+                                <button
+                                    type="button"
+                                    onclick="window.app_changeFormation('${currentActiveSide}', '${k}')"
+                                    class="px-2 py-1 rounded text-[10px] font-bold border transition ${
+                                        k === activeFormKey
+                                            ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                    }">
+                                    ${activeFormationMap[k]?.name || k}
+                                </button>
+                            `).join('')}
                     </div>
+                </div>
 
-                    <div class="text-[10px] text-slate-500 italic">
-                        <b>PR:</b> Punt returner — speed, agility, and hands.
-                        <br>
-                        <b>P:</b> Punter — throwing power and accuracy.
+                <!-- Starting 8 in this Formation (Compact Cards) -->
+                <div>
+                    <span class="block text-[9px] font-black uppercase tracking-wider text-slate-500 mb-1">
+                        Starting 8 in ${activeFormationData?.name || activeFormKey}
+                    </span>
+                    <div class="space-y-1.5 max-h-[380px] overflow-y-auto pr-0.5">
+                        ${activeSlots.map(slot => renderSlotCard(slot, currentActiveSide)).join('')}
                     </div>
-                </section>
+                </div>
+            </aside>` : ''}
 
-                <section class="bg-indigo-50/50 border border-indigo-200 rounded p-3 space-y-3">
-                    <div class="border-b border-indigo-200 pb-2">
-                        <h4 class="font-black text-sm text-indigo-950 uppercase tracking-wider">
-                            Package Specialists
-                        </h4>
-                        <p class="text-[10px] text-slate-500 mt-1">
-                            Situational assignments used in specific offensive and defensive packages.
-                        </p>
-                    </div>
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        ${renderSlotCard('FB', 'specialists')}
-                        ${renderSlotCard('SLOT', 'specialists')}
-                        ${renderSlotCard('NCB', 'specialists')}
-                    </div>
-
-                    <div class="text-[10px] text-slate-500 italic">
-                        <b>FB:</b> Lead blocker in Power/Jumbo sets.
-                        <br>
-                        <b>SLOT:</b> Slot receiver in Spread/Trips sets.
-                        <br>
-                        <b>NCB:</b> Extra defensive back in Nickel/Dime packages.
-                    </div>
-                </section>
-            </div>
-        ` : ''}
+        </div>
     `;
 }
 

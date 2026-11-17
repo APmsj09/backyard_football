@@ -4313,6 +4313,49 @@ export function ensureTeamStaffWorkPlan(
     ) {
         const activeWeekKey = `${year}:${week}`;
 
+        if (reserveRecruitingHours === false) {
+            // Recruiting assignments belong to the offseason event.
+            // Do not carry them into the regular-season workload.
+            plan.assignments = plan.assignments.filter(assignment =>
+                assignment?.task !== STAFF_WORK_TASKS.RECRUITING &&
+                assignment?.source !== 'recruiting'
+            );
+        }
+
+        // Restore the full pre-recruiting workload (scouting, training, prep)
+        // suspended when entering the seven-day recruiting week, while keeping
+        // any live community-service obligations already in plan.assignments.
+        if (
+            plan.offseasonRecruitingPlanKey &&
+            (
+                plan.offseasonRecruitingPlanKey !== activeWeekKey ||
+                reserveRecruitingHours === false
+            ) &&
+            Array.isArray(plan.offseasonRecruitingWorkBaseline)
+        ) {
+            const restoredAssignments = plan.offseasonRecruitingWorkBaseline
+                .filter(assignment =>
+                    assignment &&
+                    assignment.task !== STAFF_WORK_TASKS.COMMUNITY_SERVICE &&
+                    assignment.task !== STAFF_WORK_TASKS.RECRUITING &&
+                    assignment.source !== 'recruiting'
+                )
+                .map(assignment => ({ ...assignment }));
+
+            const preservedCommunityAssignments = plan.assignments.filter(
+                assignment =>
+                    assignment?.task === STAFF_WORK_TASKS.COMMUNITY_SERVICE
+            );
+
+            plan.assignments = [
+                ...restoredAssignments,
+                ...preservedCommunityAssignments
+            ];
+
+            delete plan.offseasonRecruitingWorkBaseline;
+            delete plan.offseasonRecruitingPlanKey;
+        }
+
         // Restore the normal training allocation when moving beyond
         // the recruiting week. Recruiting assignments from the old
         // week are removed by the normal week-key filter below.
@@ -4343,14 +4386,6 @@ export function ensureTeamStaffWorkPlan(
 
             delete plan.recruitingTrainingBaseline;
             delete plan.recruitingReserveWeekKey;
-        }
-
-        if (reserveRecruitingHours === false) {
-            // Recruiting assignments belong to the offseason event.
-            // Do not carry them into the regular-season workload.
-            plan.assignments = plan.assignments.filter(assignment =>
-                assignment?.task !== STAFF_WORK_TASKS.RECRUITING
-            );
         }
 
         // Community service and recruiting assignments are temporary
@@ -7612,7 +7647,9 @@ export function processAiRecruitingDay(gameState) {
                 : total;
         }, 0);
 
-        return rosterSize + activeReservations < rosterLimit;
+        if (rosterSize >= rosterLimit) return false;
+        const maxActiveOffers = Math.min(24, (rosterLimit - rosterSize) + 2);
+        return activeReservations < maxActiveOffers;
     };
 
     if (!progress.aiProcessedDays) {
@@ -7672,8 +7709,13 @@ export function processAiRecruitingDay(gameState) {
             return false;
         }
 
-        // Guided and delegated staff only work prospects explicitly
-        // placed on the persistent recruiting list.
+        // Delegated staff can operate independently using GM priorities
+        // even when My Recruiting List has not been manually populated.
+        if (recruitingAutonomy === 'delegate') {
+            return true;
+        }
+
+        // Guided staff work prospects placed on the persistent recruiting list.
         return getTeamRecruitingList(team).some(
             entry => entry?.playerId != null
         );
@@ -8090,6 +8132,7 @@ export function processAiRecruitingDay(gameState) {
                     targetedToday.has(String(player.id)) ||
                     (
                         isPlayerControlledTeam &&
+                        recruitingAutonomy !== 'delegate' &&
                         !userRecruitingTarget
                     ) ||
                     assignedToAnotherCoach
@@ -8706,64 +8749,94 @@ export function processAiRecruitingDay(gameState) {
                 .filter(Boolean)
                 .sort((a, b) => {
                     if (isPlayerControlledTeam) {
-                        const getLastWorkedDay = target => {
-                            const entry = userRecruitingTargets.get(
-                                String(target.player?.id)
-                            );
+                        const aIsListed = userRecruitingTargets.has(
+                            String(a.player?.id)
+                        );
+                        const bIsListed = userRecruitingTargets.has(
+                            String(b.player?.id)
+                        );
 
-                            const lastWorkedYear = Number(
-                                entry?.lastWorkedYear
-                            );
-
-                            const lastWorkedDay = Number(
-                                entry?.lastWorkedDay
-                            );
-
-                            return (
-                                lastWorkedYear === Number(gameState.year) &&
-                                Number.isFinite(lastWorkedDay) &&
-                                lastWorkedDay > 0
-                            )
-                                ? lastWorkedDay
-                                : 0;
-                        };
-
-                        const aLastWorkedDay = getLastWorkedDay(a);
-                        const bLastWorkedDay = getLastWorkedDay(b);
-
-                        // Work prospects who have received less attention first.
-                        // GM priority remains the tie-breaker.
-                        if (aLastWorkedDay !== bLastWorkedDay) {
-                            return aLastWorkedDay - bLastWorkedDay;
+                        if (aIsListed !== bIsListed) {
+                            return aIsListed ? -1 : 1;
                         }
 
-                        const aRank =
-                            userRecruitingPriorityIndices.get(
-                                String(a.player?.id)
-                            ) ?? Number.MAX_SAFE_INTEGER;
+                        if (aIsListed && bIsListed) {
+                            const getLastWorkedDay = target => {
+                                const entry = userRecruitingTargets.get(
+                                    String(target.player?.id)
+                                );
 
-                        const bRank =
-                            userRecruitingPriorityIndices.get(
-                                String(b.player?.id)
-                            ) ?? Number.MAX_SAFE_INTEGER;
+                                const lastWorkedYear = Number(
+                                    entry?.lastWorkedYear
+                                );
 
-                        if (aRank !== bRank) {
-                            return aRank - bRank;
+                                const lastWorkedDay = Number(
+                                    entry?.lastWorkedDay
+                                );
+
+                                return (
+                                    lastWorkedYear === Number(gameState.year) &&
+                                    Number.isFinite(lastWorkedDay) &&
+                                    lastWorkedDay > 0
+                                )
+                                    ? lastWorkedDay
+                                    : 0;
+                            };
+
+                            const aLastWorkedDay = getLastWorkedDay(a);
+                            const bLastWorkedDay = getLastWorkedDay(b);
+
+                            // Work prospects who have received less attention first.
+                            // GM priority remains the tie-breaker.
+                            if (aLastWorkedDay !== bLastWorkedDay) {
+                                return aLastWorkedDay - bLastWorkedDay;
+                            }
+
+                            const aRank =
+                                userRecruitingPriorityIndices.get(
+                                    String(a.player?.id)
+                                ) ?? Number.MAX_SAFE_INTEGER;
+
+                            const bRank =
+                                userRecruitingPriorityIndices.get(
+                                    String(b.player?.id)
+                                ) ?? Number.MAX_SAFE_INTEGER;
+
+                            if (aRank !== bRank) {
+                                return aRank - bRank;
+                            }
                         }
                     }
 
-                    // AI teams continue to rank prospects by evaluation.
+                    // AI teams and delegated unlisted evaluations rank by score.
                     return b.score - a.score;
                 });
 
 
             if (evaluatedTargets.length === 0) continue;
 
-            // User staff can work multiple prospects.
-            // AI opponents retain their original single-target behavior.
+            const listedTargets = evaluatedTargets.filter(target =>
+                userRecruitingTargets.has(String(target.player?.id))
+            );
+            const unlistedTargets = evaluatedTargets.filter(target =>
+                !userRecruitingTargets.has(String(target.player?.id))
+            );
+
+            // Guided teams work their recruiting list; Delegated teams prioritize
+            // any listed targets first or autonomously work top roster fits.
             const targetsToWork = isPlayerControlledTeam
-                ? evaluatedTargets
+                ? (
+                    recruitingAutonomy === 'delegate'
+                        ? (
+                            listedTargets.length > 0
+                                ? listedTargets
+                                : unlistedTargets.slice(0, 2)
+                        )
+                        : listedTargets
+                )
                 : evaluatedTargets.slice(0, 1);
+
+            if (targetsToWork.length === 0) continue;
 
             let dailyHoursRemaining = Math.floor(hoursToday);
 
@@ -11312,6 +11385,27 @@ export function getTeamCoachingSpecialist(team, task = 'general') {
         return team.staff?.coach || team.coach || null;
     }
 
+    const departmentKeyByTask = {
+        scouting: 'scouting',
+        training: 'development',
+        offensePrep: 'offense',
+        defensePrep: 'defense',
+        recruiting: 'recruiting',
+        general: 'offense'
+    };
+
+    const departmentKey = departmentKeyByTask[task];
+    const leadCoachId = departmentKey
+        ? team.teamInstructions?.staffAssignments?.[departmentKey]?.leadCoachId
+        : null;
+
+    if (leadCoachId != null) {
+        const assignedLead = coaches.find(
+            coach => String(coach.id) === String(leadCoachId)
+        );
+        if (assignedLead) return assignedLead;
+    }
+
     const rating = (coach, key) => {
         const value = Number(coach.ratings?.[key]);
         return Number.isFinite(value) ? value : 50;
@@ -11606,7 +11700,10 @@ export function aiSetSituationalGameplan(team) {
     // If GM is calling plays manually, do not overwrite their sliders
     if (team.gameplan.situational?.playcaller === 'GM') return;
 
-    const coach = team.staff?.coach || team.coach;
+    const coach =
+        getTeamCoachingSpecialist(team, 'offensePrep') ||
+        team.staff?.coach ||
+        team.coach;
     team.gameplan.situational = {
         playcaller: 'COACH',
         ...previewCoachTendencies(coach, team)
@@ -12710,7 +12807,7 @@ export function aiEvaluatePositionChanges(team, gameState) {
 
     for (const targetPos of deficits) {
         // Find candidate from a surplus position who is viable at targetPos
-        const bestCandidate = eligibleKids.map(kid => {
+        const eligibleCandidates = eligibleKids.map(kid => {
             const currentPos = String(
                 kid.pos || ''
             ).toUpperCase();
@@ -12885,7 +12982,7 @@ export function aiEvaluatePositionChanges(team, gameState) {
                 b.conversionAdvantage - a.conversionAdvantage
             );
 
-        //const bestCandidate = eligibleCandidates[0]?.player;
+        const bestCandidate = eligibleCandidates[0]?.player || null;
 
         if (bestCandidate) {
             const oldPos = String(

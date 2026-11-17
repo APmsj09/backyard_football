@@ -4228,9 +4228,9 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                     const conditioningMod = Math.max(0.75, 1.25 - (trainerConditioning / 100)); // Good trainer cuts fatigue accumulation
 
                     const stamina = player.attributes?.physical?.stamina || 50;
-                    const effortMultiplier = (p.action.includes('run') || p.action.includes('rush') || p.action === 'pursuit' || p.action.includes('route')) ? 1.0 : 0.4;
-                    const staminaFactor = (150 - stamina) / 100;
-                    const drain = 0.03 * effortMultiplier * staminaFactor * conditioningMod;
+                    const effortMultiplier = (p.action.includes('run') || p.action.includes('rush') || p.action === 'pursuit' || p.action.includes('route') || p.action === 'trucking') ? 1.0 : 0.35;
+                    const staminaFactor = (140 - stamina) / 90;
+                    const drain = 0.08 * effortMultiplier * staminaFactor * conditioningMod;
                     player.fatigue = Math.min(100, (player.fatigue || 0) + drain);
                     p.fatigue = player.fatigue;
                     p.fatigueModifier = Math.max(0.70, 1.0 - (player.fatigue / 100) * 0.30);
@@ -4354,6 +4354,7 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
                 }
             } else {
                 // Positive yards on a scramble is a rush
+                playState.isScrambleRun = true;
                 playState.statEvents.push({ type: 'rush', runnerId: ballCarrierState.id, yards: rushYards });
             }
         } else if (playState.type === 'run' && !caughtPassThisPlay && !playState.sack) {
@@ -4475,6 +4476,25 @@ export function resolvePlay(offense, defense, offensivePlayKey, defensivePlayKey
             const staminaRating = player.attributes?.physical?.stamina || 50;
             const recoveryAmt = 1.5 + (staminaRating / 25); // Recovers roughly 3.5% to 5.5% fatigue per play
             player.fatigue = Math.max(0, (player.fatigue || 0) - recoveryAmt);
+        }
+    });
+
+    // SIDELINE BENCH RECOVERY: Rested players on the sideline recover energy each play
+    const activeOnFieldIds = new Set(playState.activePlayers.map(p => String(p.id)));
+    const allSquadPlayers = [
+        ...getGameDayRosterObjects(offense),
+        ...getGameDayRosterObjects(defense)
+    ];
+
+    allSquadPlayers.forEach(player => {
+        if (!player || activeOnFieldIds.has(String(player.id))) return;
+
+        const stamina = player.attributes?.physical?.stamina || 50;
+        const benchRecovery = 2.5 + (stamina / 20); // Recovers ~5.0% to 7.5% fatigue per play on the bench
+        player.fatigue = Math.max(0, (player.fatigue || 0) - benchRecovery);
+
+        if (player.fatigue <= 35) {
+            player.isResting = false;
         }
     });
 

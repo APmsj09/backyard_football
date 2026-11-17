@@ -38,7 +38,9 @@ import {
     getEffectiveStaffWorkHours,
     applyRecruitingSweetener,
     buildAutomatedStaffAssignmentsForTeam,
-    setDepartmentControlMode
+    setDepartmentControlMode,
+    applyManagementPreset,
+    generateWeeklyStaffReport
 } from './game/staff.js';
 import {
     acceptCommunityFavor as acceptCommunityFavorAction
@@ -1252,6 +1254,16 @@ function openStaffCarouselScreen() {
         );
     }
 
+    const fundsLabel = document.getElementById(
+        'staff-carousel-funds-label'
+    );
+
+    if (fundsLabel) {
+        fundsLabel.textContent = (
+            Number(gameState.playerTeam.finances?.balance) || 0
+        ).toFixed(2);
+    }
+
     const statusLabel = document.getElementById(
         'staff-carousel-status'
     );
@@ -1589,6 +1601,8 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
             (team.socialProfile.favorTokens ?? 3) +
             background.startingFavorTokenBonus
         );
+
+        applyManagementPreset(team, 'casual_gm');
 
         team.formations.offense = coachDetails.off;
         team.formations.defense = coachDetails.def;
@@ -2507,8 +2521,14 @@ function showWalkOnInvitationModal(invitation) {
             finishOffseasonFAMinigame();
         },
         'Finish Walk-On Period',
-        () => {},
-        'Return Later'
+        () => {
+            gameState = Game.getGameState() || gameState;
+            Game.saveGameState(activeSaveKey);
+            UI.renderDashboard(gameState);
+            UI.switchTab('my-team', gameState);
+            UI.showScreen('dashboard-screen');
+        },
+        'Return Later (Check Roster)'
     );
 
     const modalBody = document.getElementById('modal-body');
@@ -3352,8 +3372,11 @@ function showEmergencyFriendCallup(onContinue) {
     const friendsHtml = freeAgents.map(player => {
         if (!player) return '';
 
-        const bestPos = player.pos || estimateBestPosition(player);
-        const ovr = Game.calculateOverall(player, bestPos);
+        const bestPos = player.pos || 'ATH';
+        const rawOvr = player.estimatedOverall != null 
+            ? Math.round(Number(player.estimatedOverall))
+            : (player.ovr != null ? Math.round(Number(player.ovr)) : null);
+        const ovrDisplay = rawOvr !== null && Number.isFinite(rawOvr) ? `${rawOvr} Est OVR` : 'Scouted Prospect';
         const connection = player.connectedBuddyName
             ? `Introduced through ${escapeHtml(player.connectedBuddyName)}`
             : 'Connected to your team network';
@@ -3364,7 +3387,7 @@ function showEmergencyFriendCallup(onContinue) {
                     <p class="font-bold text-slate-900">${escapeHtml(player.name)}</p>
                     <p class="text-[11px] text-slate-600">${connection}</p>
                     <p class="text-[10px] text-slate-500">
-                        ${escapeHtml(bestPos)} • ${ovr} OVR
+                        ${escapeHtml(bestPos)} • ${ovrDisplay}
                     </p>
                 </div>
                 <button
@@ -3500,17 +3523,25 @@ async function handleAdvanceWeek() {
         return;
     }
 
-    // Recruiting has its own daily progression controls.
-    // Never allow the dashboard's Advance button to bypass the
-    // seven-day recruiting period and enter regular-season game handling.
+    // Reopen the active recruiting screen instead of stranding the player
+    // on the dashboard with a dead-end warning.
     if (
         gameState.offseasonState?.phase ===
         OFFSEASON_PHASES.RECRUITING
     ) {
-        UI.showModal(
-            'Recruiting Week Still Active',
-            '<p>Complete the seven-day recruiting period before moving toward the regular season.</p>'
-        );
+        UI.showScreen('offseason-fa-screen');
+        UI.renderOffseasonFAScreen(gameState);
+        return;
+    }
+
+    // Complete pending walk-on invitations / AI finalization before Week 1.
+    if (
+        gameState.currentWeek === 0 &&
+        gameState.offseasonState?.phase ===
+            OFFSEASON_PHASES.ROSTER_FINALIZATION &&
+        gameState.offseasonFACompleted !== true
+    ) {
+        finishOffseasonFAMinigame();
         return;
     }
 
@@ -3793,25 +3824,28 @@ function finishWeekSimulation(results, expectedWeekKey) {
         r => r && (r.homeTeam?.id === gameState.playerTeam?.id || r.awayTeam?.id === gameState.playerTeam?.id)
     );
 
-    import('./game/staff.js').then(s => {
-        const report = s.generateWeeklyStaffReport(gameState.playerTeam, gameState, userMatch);
-        gameState._latestStaffReport = report;
+    const report = generateWeeklyStaffReport(
+        gameState.playerTeam,
+        gameState,
+        userMatch
+    );
+    gameState._latestStaffReport = report;
 
-        if (report) {
-            UI.showWeeklyStaffReport(report, gameState, () => {
-                if (results && results.length > 0) {
-                    UI.showModal(`Week ${gameState.currentWeek} League Summary`, buildResultsModalHtml(results));
-                }
-            });
-        } else if (results && results.length > 0) {
-            UI.showModal(`Week ${gameState.currentWeek} Summary`, buildResultsModalHtml(results));
-        }
-    }).catch(err => {
-        console.error("Staff report build error:", err);
-        if (results && results.length > 0) {
-            UI.showModal(`Week ${gameState.currentWeek} Summary`, buildResultsModalHtml(results));
-        }
-    });
+    if (report) {
+        UI.showWeeklyStaffReport(report, gameState, () => {
+            if (results && results.length > 0) {
+                UI.showModal(
+                    `Week ${gameState.currentWeek} League Summary`,
+                    buildResultsModalHtml(results)
+                );
+            }
+        });
+    } else if (results && results.length > 0) {
+        UI.showModal(
+            `Week ${gameState.currentWeek} Summary`,
+            buildResultsModalHtml(results)
+        );
+    }
 
     UI.renderDashboard(gameState);
     UI.showScreen('dashboard-screen');
@@ -4927,110 +4961,6 @@ export function openCoachCard(coachId) {
                         </b>
                     </div>
                 </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                    <div class="bg-white p-3 rounded border border-slate-200">
-                        <span class="block text-[9px] font-bold uppercase text-slate-400">
-                            Preferred Offense
-                        </span>
-                        <b class="text-blue-800">
-                            ${escapeCoachText(coach.preferredOffense || 'Flexible')}
-                        </b>
-                        ${tactical?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(tactical.desc)}</p>` : ''}
-                    </div>
-
-                    <div class="bg-white p-3 rounded border border-slate-200">
-                        <span class="block text-[9px] font-bold uppercase text-slate-400">
-                            Preferred Defense
-                        </span>
-                        <b class="text-rose-800">
-                            ${escapeCoachText(coach.preferredDefense || 'Flexible')}
-                        </b>
-                        ${personality?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(personality.desc)}</p>` : ''}
-                    </div>
-                </div>
-
-                ${team && Array.isArray(team.staffWorkPlan?.assignments) ? (() => {
-                    const coachTasks = team.staffWorkPlan.assignments.filter(
-                        a => String(a?.coachId) === currentCoachId && Number(a?.hours) > 0
-                    );
-                    const taskNames = {
-                        scouting: 'Scouting',
-                        training: 'Player Development',
-                        offensePrep: 'Offense Prep',
-                        defensePrep: 'Defense Prep',
-                        communityService: 'Community Service'
-                    };
-                    return `
-                        <section class="rounded border border-slate-200 bg-white p-3">
-                            <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-2">
-                                This Week's Assigned Work
-                            </h5>
-                            ${coachTasks.length > 0 ? `
-                                <div class="space-y-1">
-                                    ${coachTasks.map(a => `
-                                        <div class="flex justify-between items-center text-xs bg-slate-50 px-2.5 py-1.5 rounded border border-slate-100">
-                                            <span class="font-semibold text-slate-800">${escapeCoachText(taskNames[a.task] || a.task)}${a.focus && a.focus !== 'all' ? ` · ${escapeCoachText(a.focus)}` : ''}</span>
-                                            <span class="font-mono font-bold text-slate-700">${Number(a.hours)}h</span>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            ` : `<p class="text-xs text-slate-500 italic">No weekly workload tasks currently assigned.</p>`}
-                        </section>
-                    `;
-                })() : ''}
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                    <div class="bg-white p-3 rounded border border-slate-200">
-                        <span class="block text-[9px] font-bold uppercase text-slate-400">
-                            Preferred Offense
-                        </span>
-                        <b class="text-blue-800">
-                            ${escapeCoachText(coach.preferredOffense || 'Flexible')}
-                        </b>
-                        ${tactical?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(tactical.desc)}</p>` : ''}
-                    </div>
-
-                    <div class="bg-white p-3 rounded border border-slate-200">
-                        <span class="block text-[9px] font-bold uppercase text-slate-400">
-                            Preferred Defense
-                        </span>
-                        <b class="text-rose-800">
-                            ${escapeCoachText(coach.preferredDefense || 'Flexible')}
-                        </b>
-                        ${personality?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(personality.desc)}</p>` : ''}
-                    </div>
-                </div>
-
-                ${team && Array.isArray(team.staffWorkPlan?.assignments) ? (() => {
-                    const coachTasks = team.staffWorkPlan.assignments.filter(
-                        a => String(a?.coachId) === currentCoachId && Number(a?.hours) > 0
-                    );
-                    const taskNames = {
-                        scouting: 'Scouting',
-                        training: 'Player Development',
-                        offensePrep: 'Offense Prep',
-                        defensePrep: 'Defense Prep',
-                        communityService: 'Community Service'
-                    };
-                    return `
-                        <section class="rounded border border-slate-200 bg-white p-3">
-                            <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-500 mb-2">
-                                This Week's Assigned Work
-                            </h5>
-                            ${coachTasks.length > 0 ? `
-                                <div class="space-y-1">
-                                    ${coachTasks.map(a => `
-                                        <div class="flex justify-between items-center text-xs bg-slate-50 px-2.5 py-1.5 rounded border border-slate-100">
-                                            <span class="font-semibold text-slate-800">${escapeCoachText(taskNames[a.task] || a.task)}${a.focus && a.focus !== 'all' ? ` · ${escapeCoachText(a.focus)}` : ''}</span>
-                                            <span class="font-mono font-bold text-slate-700">${Number(a.hours)}h</span>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            ` : `<p class="text-xs text-slate-500 italic">No weekly workload tasks currently assigned.</p>`}
-                        </section>
-                    `;
-                })() : ''}
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     <div class="bg-white p-3 rounded border border-slate-200">
@@ -6782,11 +6712,8 @@ window.app = {
             })[character]
         );
 
-        const dailyWire = document.getElementById(
-            'fa-daily-wire-list'
-        );
-
-        if (dailyWire) {
+        // Recruiting wire rendering is handled consistently by UI.renderRecruitingWirePanel
+        // via UI.renderOffseasonFAScreen so Days 1-7 and save/load match identically.
             const dailyActivity = (
                 Array.isArray(progress.dailyActivity)
                     ? progress.dailyActivity
@@ -7125,6 +7052,7 @@ window.app = {
         }
 
         Game.saveGameState(activeSaveKey);
+        UI.renderOffseasonFAScreen(gameState);
 
         if (roundIndicator) {
             roundIndicator.textContent =
@@ -8557,7 +8485,7 @@ window.app = {
         openDepthChartPosition: (pos) => {
         const validPositions = [
             'QB', 'RB', 'WR', 'TE',
-            'OL', 'DL', 'LB', 'DB'
+            'OL', 'DL', 'LB', 'DB', 'DE', 'DT', 'CB', 'S'
         ];
 
         if (!validPositions.includes(pos)) return;
@@ -8581,6 +8509,15 @@ window.app = {
             ? 'offense'
             : 'defense';
         window.setDepthChartTab?.(sideTab);
+
+        setTimeout(() => {
+            const card = document.getElementById(`depth-order-card-${pos}`);
+            if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.classList.add('ring-2', 'ring-amber-500');
+                setTimeout(() => card.classList.remove('ring-2', 'ring-amber-500'), 1800);
+            }
+        }, 120);
     },
     autoFillRoster: () => {
         gameState = Game.getGameState();

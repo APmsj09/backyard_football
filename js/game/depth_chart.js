@@ -391,7 +391,7 @@ export function autoResetLineup(team) {
 }
 
 export function aiSetDepthChart(team) {
-    if (!team) return;
+    if (!team || team.isPlayerControlled) return;
     autoResetLineup(team);
 }
 
@@ -585,7 +585,7 @@ export function getDepthChartEmptySlots(team) {
     return emptySlots;
 }
 
-export function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null) {
+export function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = null, targetSlot = null, targetSide = null) {
     if (!game || !game.teams) return { success: false, message: 'Game state invalid.' };
     const team = game.teams.find(t => t && t.id === teamId) || game.playerTeam;
     if (!team || !team.depthChart) return { success: false, message: 'Team or depth chart invalid.' };
@@ -595,13 +595,14 @@ export function substitutePlayers(teamId, outPlayerId, inPlayerId, gameLog = nul
     const inPlayer = fullRoster.find(p => p && p.id === inPlayerId);
     if (!outPlayer || !inPlayer) return { success: false, message: 'Player not found.' };
 
-    const sides = ['offense', 'defense'];
+    const sides = targetSide ? [targetSide] : ['offense', 'defense'];
     let swappedCount = 0;
     let lastSlot = '';
 
     sides.forEach(side => {
         const chart = team.depthChart[side] || {};
         Object.keys(chart).forEach(slot => {
+            if (targetSlot && slot !== targetSlot) return;
             if (chart[slot] === outPlayerId) {
                 const isAlreadyOnSide = Object.values(chart).includes(inPlayerId);
                 if (!isAlreadyOnSide) {
@@ -692,7 +693,12 @@ export function autoMakeSubstitutions(team, options = {}, gameLog = null) {
                 if ((currentPlayer.fatigue || 0) <= recoverLimit) currentPlayer.isResting = false;
             }
 
-            const isTwoWayFatigued = side === 'defense' && (currentPlayer?.fatigue || 0) > 55;
+            const isTwoWayStarter = Boolean(
+                currentPlayer &&
+                activeOffense.has(currentPlayer.id) &&
+                activeDefense.has(currentPlayer.id)
+            );
+            const isTwoWayFatigued = isTwoWayStarter && side === 'defense' && (currentPlayer?.fatigue || 0) > 55;
             const isManualLocked = (currentPlayer?.manualSubLock || 0) > 0;
             const isInjured = currentPlayer?.status?.duration > 0;
             

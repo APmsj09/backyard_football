@@ -1555,14 +1555,11 @@ export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
             delete cleanTeam.playCallHistory;
             delete cleanTeam._captainFlavorLogged;
 
-            const isUserTeam = String(team.id) === String(resolvedPlayerTeamId);
-            if (!isUserTeam) {
-                delete cleanTeam.scoutingReports;
-            } else if (cleanTeam.scoutingReports && typeof cleanTeam.scoutingReports === 'object') {
+            if (cleanTeam.scoutingReports && typeof cleanTeam.scoutingReports === 'object') {
                 const compactReports = {};
                 for (const [pId, rep] of Object.entries(cleanTeam.scoutingReports)) {
                     if (!rep) continue;
-                    const hasScoutingProgress = rep.level > 0 || (rep.progressPoints && rep.progressPoints > 0);
+                    const hasScoutingProgress = (rep.level > 0) || (rep.progressPoints && rep.progressPoints > 0);
                     if (hasScoutingProgress && activePlayerIds.has(String(pId))) {
                         compactReports[pId] = rep;
                     }
