@@ -1057,31 +1057,16 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 );
 
             if (playState.type === 'run' || (ballCarrier && ballCarrier.y > playState.lineOfScrimmage)) {
-                // If the runner has blown past this block by 7+ yards, disengage immediately
-                // so the defender can pursue and the blocker can climb/escort.
+                // If the runner has blown past this block by 7+ yards, or is past and within pursuit range,
+                // disengage immediately so the defender can pursue and the blocker can climb/escort.
                 const carrierSeparationY = ballCarrier.y - defender.y;
                 if (carrierSeparationY > 7.0 || (carrierIsPastDefender && distToCarrier <= 6.0)) {
-                    blocker.engagedWith = null;
-                    blocker.isEngaged = false;
-                    blocker.dynamicTargetId = null;
-                    blocker.reengageCooldown = 25; // Long cooldown so they don't re-lock while chasing
-
-                    defender.isBlocked = false;
-                    defender.blockedBy = null;
-                    defender.isEngaged = false;
-                    defender.action = 'pursuit';
-
-                    battle.status = 'disengaged';
-                    battlesToRemove.push(index);
-                    return;
-                }
-            }
                     if (isRunBlock) {
                         logPlayDebug(
                             'RUN_BLOCK_PURSUIT_RELEASE',
                             `${defender.name} abandoned ${blocker.name}'s block to pursue ${ballCarrier.name}`,
                             {
-                                reason: 'carrier_passed_defender',
+                                reason: carrierSeparationY > 7.0 ? 'breakaway_runner' : 'carrier_passed_defender',
                                 ticksInBlock: playState.tick - battle.startTick,
                                 distanceToCarrier: Number(distToCarrier.toFixed(2)),
                                 battleScore: Number(
@@ -1101,24 +1086,10 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                         );
                     }
 
-                    // This is a pursuit release, not a DL victory.
-                    // Give the blocker a short cooldown so checkBlockCollisions does not
-                    // immediately re-latch onto the same fleeing defender on the next tick.
                     blocker.engagedWith = null;
                     blocker.isEngaged = false;
                     blocker.dynamicTargetId = null;
-                    blocker.reengageCooldown = 14;
-
-                    defender.isBlocked = false;
-                    defender.blockedBy = null;
-                    defender.isEngaged = false;
-                    defender.action = 'pursuit';
-
-                    battle.status = 'disengaged';
-                    battlesToRemove.push(index);
-                    return;
-                }
-            } else {
+                    block
                 const isQBInPocket =
                     (ballCarrier.formationRole === 'QB' || ballCarrier.role === 'QB') &&
                     ballCarrier.action === 'qb_setup' &&
