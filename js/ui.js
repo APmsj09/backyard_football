@@ -3486,7 +3486,6 @@ window.app_setScoutingDelegation = function(field, value) {
     const team = gs?.playerTeam;
     if (!team) return;
     setScoutingDelegationSettings(team, { [field]: value });
-    scheduleSaveGameState();
 
     // Update only the active button pills in place — zero table/DOM rebuild.
     const activeStyles = {
@@ -3518,8 +3517,13 @@ export function renderScoutingHub(gameState) {
         .filter(a => a?.task === 'scouting')
         .reduce((sum, a) => sum + Math.max(0, Number(a.hours) || 0), 0);
 
-    const teamsById = new Map((gameState.teams || []).map(t => [String(t.id), t]));
-    const playersById = new Map((gameState.players || []).map(pl => [String(pl?.id), pl]));
+    const teamsById = shortlist.length > 0
+        ? new Map((gameState.teams || []).map(t => [String(t.id), t]))
+        : new Map();
+
+    const playersById = shortlist.length > 0
+        ? new Map((gameState.players || []).map(pl => [String(pl?.id), pl]))
+        : new Map();
     const isRecruiting = gameState.offseasonState?.phase === 'recruiting' && !gameState.offseasonState?.completed;
     const recruitingListIds = new Set(
         (gameState.offseasonState?.recruitingProgress?.teamRecruitingLists?.[String(team.id)] || [])
@@ -3551,7 +3555,11 @@ export function renderScoutingHub(gameState) {
                                 ['guided', 'Guided'],
                                 ['direct', 'Manual']
                             ].map(([val, lbl]) => `
-                                <button type="button" onclick="window.app_setScoutingDelegation('autonomy', '${val}')"
+                                <button type="button"
+                                    data-scout-ctrl="autonomy"
+                                    data-scout-val="${val}"
+                                    aria-pressed="${autonomy === val}"
+                                    onclick="window.app_setScoutingDelegation('autonomy', '${val}')"
                                     class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold ${autonomy === val ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}">${lbl}</button>
                             `).join('')}
                         </div>
@@ -3567,7 +3575,11 @@ export function renderScoutingHub(gameState) {
                                 ['freeAgents', 'Free Agents'],
                                 ['opponents', 'Opponents']
                             ].map(([val, lbl]) => `
-                                <button type="button" onclick="window.app_setScoutingDelegation('delegatedFocus', '${val}')"
+                                <button type="button"
+                                    data-scout-ctrl="delegatedFocus"
+                                    data-scout-val="${val}"
+                                    aria-pressed="${delegatedFocus === val}"
+                                    onclick="window.app_setScoutingDelegation('delegatedFocus', '${val}')"
                                     class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold whitespace-nowrap ${delegatedFocus === val ? 'bg-indigo-700 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}">${lbl}</button>
                             `).join('')}
                         </div>
@@ -3582,7 +3594,11 @@ export function renderScoutingHub(gameState) {
                                 ['shortlist_only', '100% List'],
                                 ['general_only', 'General Only']
                             ].map(([val, lbl]) => `
-                                <button type="button" onclick="window.app_setScoutingDelegation('shortlistMode', '${val}')"
+                                <button type="button"
+                                    data-scout-ctrl="shortlistMode"
+                                    data-scout-val="${val}"
+                                    aria-pressed="${shortlistMode === val}"
+                                    onclick="window.app_setScoutingDelegation('shortlistMode', '${val}')"
                                     class="flex-1 rounded-sm px-2 py-1.5 text-[10px] font-bold whitespace-nowrap ${shortlistMode === val ? 'bg-emerald-700 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}">${lbl}</button>
                             `).join('')}
                         </div>
@@ -20623,6 +20639,116 @@ window.app_selectDraftTeam = function(teamId) {
     renderDraftTeamView(getGameState());
 };
 
+function getUniformColorRgb(color) {
+    const match = String(color || '').trim().match(/^#?([0-9a-f]{6})$/i);
+    if (!match) return null;
+
+    const hex = match[1];
+
+    return [
+        parseInt(hex.slice(0, 2), 16),
+        parseInt(hex.slice(2, 4), 16),
+        parseInt(hex.slice(4, 6), 16)
+    ];
+}
+
+function getUniformColorDistance(colorA, colorB) {
+    const a = getUniformColorRgb(colorA);
+    const b = getUniformColorRgb(colorB);
+
+    if (!a || !b) return 0;
+
+    return Math.sqrt(
+        Math.pow(a[0] - b[0], 2) +
+        Math.pow(a[1] - b[1], 2) +
+        Math.pow(a[2] - b[2], 2)
+    );
+}
+
+function getLiveMatchupUniforms(homeTeam, awayTeam) {
+    const homePrimary = homeTeam?.primaryColor || '#0000aa';
+    const awayPrimary = awayTeam?.primaryColor || '#aa0000';
+
+    const homeAlternate =
+        homeTeam?.alternatePrimaryColor ||
+        homeTeam?.secondaryColor ||
+        homePrimary;
+
+    const awayAlternate =
+        awayTeam?.alternatePrimaryColor ||
+        awayTeam?.secondaryColor ||
+        awayPrimary;
+
+    const primaryDistance = getUniformColorDistance(
+        homePrimary,
+        awayPrimary
+    );
+
+    // Keep both primary uniforms when their colors are sufficiently distinct.
+    if (primaryDistance >= 120) {
+        return {
+            homeColor: homePrimary,
+            awayColor: awayPrimary
+        };
+    }
+
+    const candidates = [
+        {
+            homeColor: homePrimary,
+            awayColor: awayPrimary,
+            homeUsesAlternate: false,
+            awayUsesAlternate: false
+        },
+        {
+            homeColor: homePrimary,
+            awayColor: awayAlternate,
+            homeUsesAlternate: false,
+            awayUsesAlternate: true
+        },
+        {
+            homeColor: homeAlternate,
+            awayColor: awayPrimary,
+            homeUsesAlternate: true,
+            awayUsesAlternate: false
+        },
+        {
+            homeColor: homeAlternate,
+            awayColor: awayAlternate,
+            homeUsesAlternate: true,
+            awayUsesAlternate: true
+        }
+    ];
+
+    let best = candidates[0];
+    let bestDistance = primaryDistance;
+    let bestChangeCount = 0;
+
+    for (const candidate of candidates.slice(1)) {
+        const distance = getUniformColorDistance(
+            candidate.homeColor,
+            candidate.awayColor
+        );
+
+        const changeCount =
+            Number(candidate.homeUsesAlternate) +
+            Number(candidate.awayUsesAlternate);
+
+        if (
+            distance > bestDistance ||
+            (distance === bestDistance && changeCount < bestChangeCount)
+        ) {
+            best = candidate;
+            bestDistance = distance;
+            bestChangeCount = changeCount;
+        }
+    }
+
+    return {
+        homeColor: best.homeColor,
+        awayColor: best.awayColor
+    };
+}
+
 export function startLiveGameLoop(initialGameState, onComplete) {
     liveGameSessionId++;
     clearTimeout(liveGameStepTimeout);
@@ -20631,6 +20757,15 @@ export function startLiveGameLoop(initialGameState, onComplete) {
     liveGamePlaybackTimeout = null;
 
     activeLiveGame = initialGameState;
+
+    const matchupUniforms = getLiveMatchupUniforms(
+        activeLiveGame.homeTeam,
+        activeLiveGame.awayTeam
+    );
+
+    activeLiveGame.homeUniformColor = matchupUniforms.homeColor;
+    activeLiveGame.awayUniformColor = matchupUniforms.awayColor;
+
     currentLiveGameResult = { homeTeam: activeLiveGame.homeTeam, awayTeam: activeLiveGame.awayTeam };
     liveGameCallback = onComplete;
     isSkipping = false;
@@ -21158,8 +21293,8 @@ function drawLiveGameFieldFrame(frame) {
         elements.fieldCanvas,
         elements.fieldCanvasCtx,
         frame,
-        homeTeam?.primaryColor || '#0000aa',
-        awayTeam?.primaryColor || '#aa0000',
+        activeLiveGame?.homeUniformColor || homeTeam?.primaryColor || '#0000aa',
+        activeLiveGame?.awayUniformColor || awayTeam?.primaryColor || '#aa0000',
         homeTeam?.name || 'HOME',
         awayTeam?.name || 'AWAY'
     );
