@@ -291,7 +291,7 @@ export function renderDepthOrderPane(gameState) {
                 if (k.v >= 80) badgeStyle = 'bg-emerald-50 text-emerald-800 border-emerald-200 font-bold';
                 else if (k.v >= 70) badgeStyle = 'bg-blue-50 text-blue-800 border-blue-200 font-semibold';
 
-                return `<span class="${badgeStyle} border px-0.5 rounded text-[8px] leading-tight font-mono whitespace-nowrap"><span class="opacity-75">${k.l}</span> ${k.v}</span>`;
+                return `<span class="${badgeStyle} border px-1 py-0.5 rounded text-[9px] leading-tight font-mono whitespace-nowrap"><span class="opacity-75">${k.l}</span> ${k.v}</span>`;
             }).join('');
         };
 
