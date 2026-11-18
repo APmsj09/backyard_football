@@ -647,50 +647,138 @@ function getActiveSnapLineup(baseLineup, quarter, scoreDiff, gameFatigue) {
     const baseDef = baseLineup.defense;
     const twoWayIds = baseLineup.twoWayIds || new Set();
 
+    // Track all players currently occupying a position on each side.
+    // A backup cannot be selected if already active elsewhere.
+    const activeOffenseIds = new Set(
+        [
+            baseOff.qb,
+            ...baseOff.receivers,
+            ...baseOff.ol
+        ]
+            .filter(Boolean)
+            .map(player => player.id)
+    );
+
+    const activeDefenseIds = new Set(
+        (baseDef.all || [])
+            .filter(Boolean)
+            .map(player => player.id)
+    );
+
+    // Replace a starter only with a backup who isn't already active.
+    const replaceWithUnusedBackup = (starter, backups, activeIds) => {
+        if (!starter) return starter;
+
+        const backup = (backups || []).find(
+            candidate => candidate && !activeIds.has(candidate.id)
+        );
+
+        if (!backup) return starter;
+
+        activeIds.delete(starter.id);
+        activeIds.add(backup.id);
+
+        return backup;
+    };
+
+    // Quarterback rotation remains limited to garbage time.
     const activeQB = (isGarbageTime && baseOff.backups.qb)
-        ? baseOff.backups.qb
+        ? replaceWithUnusedBackup(
+            baseOff.qb,
+            [baseOff.backups.qb],
+            activeOffenseIds
+        )
         : baseOff.qb;
 
-    const activeRB = (baseOff.backups.rb.length > 0 && shouldSub(baseOff.rb, twoWayIds.has(baseOff.rb?.id)))
-        ? (baseOff.rb2 || baseOff.backups.rb[0])
+    // RB1 uses an actual backup, never an RB2 already in the lineup.
+    const activeRB = (
+        baseOff.backups.rb.length > 0 &&
+        shouldSub(baseOff.rb, twoWayIds.has(baseOff.rb?.id))
+    )
+        ? replaceWithUnusedBackup(
+            baseOff.rb,
+            baseOff.backups.rb,
+            activeOffenseIds
+        )
         : baseOff.rb;
 
     const activeReceiverSlotById = { ...baseOff.receiverSlotById };
-    const activeReceivers = baseOff.receivers.map((rec, idx) => {
+
+    const activeReceivers = baseOff.receivers.map(rec => {
         if (!rec) return rec;
+
         const slot = baseOff.receiverSlotById[rec.id];
+
+        // Keep RB1 synchronized with the active running-back assignment.
         if (slot?.startsWith('RB')) {
-            if (activeRB && rec.id === baseOff.rb?.id && activeRB.id !== rec.id) {
+            if (rec.id === baseOff.rb?.id && activeRB?.id !== rec.id) {
+                delete activeReceiverSlotById[rec.id];
                 activeReceiverSlotById[activeRB.id] = slot;
                 return activeRB;
             }
+
             return rec;
         }
-        if (slot?.startsWith('WR') && baseOff.backups.wr.length > 0 && shouldSub(rec, twoWayIds.has(rec.id))) {
-            const sub = baseOff.backups.wr[idx % baseOff.backups.wr.length];
-            if (sub && !baseOff.receivers.some(r => r.id === sub.id)) {
+
+        // Rotate wide receivers using only backups not already on the field.
+        if (
+            slot?.startsWith('WR') &&
+            baseOff.backups.wr.length > 0 &&
+            shouldSub(rec, twoWayIds.has(rec.id))
+        ) {
+            const sub = replaceWithUnusedBackup(
+                rec,
+                baseOff.backups.wr,
+                activeOffenseIds
+            );
+
+            if (sub && sub.id !== rec.id) {
+                delete activeReceiverSlotById[rec.id];
                 activeReceiverSlotById[sub.id] = slot;
                 return sub;
             }
         }
+
         return rec;
     });
 
-    const activeDLs = baseDef.dls.map((dl, idx) =>
-        (baseDef.backups.dl.length > 0 && shouldSub(dl, twoWayIds.has(dl?.id)))
-            ? (baseDef.backups.dl[idx % baseDef.backups.dl.length] || dl)
+    const activeDLs = baseDef.dls.map(dl =>
+        (
+            baseDef.backups.dl.length > 0 &&
+            shouldSub(dl, twoWayIds.has(dl?.id))
+        )
+            ? replaceWithUnusedBackup(
+                dl,
+                baseDef.backups.dl,
+                activeDefenseIds
+            )
             : dl
     );
 
-    const activeLBs = baseDef.lbs.map((lb, idx) =>
-        (baseDef.backups.lb.length > 0 && shouldSub(lb, twoWayIds.has(lb?.id)))
-            ? (baseDef.backups.lb[idx % baseDef.backups.lb.length] || lb)
+    const activeLBs = baseDef.lbs.map(lb =>
+        (
+            baseDef.backups.lb.length > 0 &&
+            shouldSub(lb, twoWayIds.has(lb?.id))
+        )
+            ? replaceWithUnusedBackup(
+                lb,
+                baseDef.backups.lb,
+                activeDefenseIds
+            )
             : lb
     );
 
-    const activeDBs = baseDef.dbs.map((db, idx) =>
-        (isGarbageTime && baseDef.backups.db.length > 0)
-            ? (baseDef.backups.db[idx % baseDef.backups.db.length] || db)
+    // Preserve the existing garbage-time DB rotation policy.
+    const activeDBs = baseDef.dbs.map(db =>
+        (
+            isGarbageTime &&
+            baseDef.backups.db.length > 0
+        )
+            ? replaceWithUnusedBackup(
+                db,
+                baseDef.backups.db,
+                activeDefenseIds
+            )
             : db
     );
 
