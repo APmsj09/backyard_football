@@ -19,7 +19,10 @@ import {
     getOffensivePlayKnowledge,
     getDefensivePlayKnowledge
 } from './playcalling_knowledge.js';
-import { evaluateStaffNegotiation } from './negotiations.js';
+import {
+    evaluateStaffNegotiation,
+    buildStaffCounteroffer
+} from './negotiations.js';
 import { isPlayerViableForPosition, rebuildDepthChartFromOrder } from './depth_chart.js';
 
 const LEGACY_STAFF_PROFILE_IDS = {
@@ -2970,6 +2973,199 @@ export function processCoachOffseasonRetention(
                 String(favor.acceptedByTeamId) === String(team.id) &&
                 String(favor.assignedStaffId) === String(coach.id)
             ) || false;
+
+        // AI teams may negotiate with an unhappy coach before allowing
+        // a voluntary departure. Never negotiate away a life-event exit
+        // or make staffing decisions for the user's team.
+        const isAiControlledTeam =
+            !team.isPlayerControlled &&
+            String(team.id) !== String(gameState?.playerTeam?.id);
+
+        if (
+            isAiControlledTeam &&
+            !hasPendingCommunityCommitment &&
+            !lifeEvent &&
+            voluntaryDeparture
+        ) {
+            const cashBalance = Number(team.finances?.balance);
+            const availableCash = Number.isFinite(cashBalance)
+                ? Math.max(0, cashBalance)
+                : 0;
+
+            const availableTokens = Math.max(
+                0,
+                Math.floor(Number(team.socialProfile?.favorTokens) || 0)
+            );
+
+            const directive =
+                team.aiGmProfile?.strategicDirective ||
+                team.gameplan?.gmDirective ||
+                'COACH_AUTONOMY';
+
+            const practiceStyle = String(
+                team.gameplan?.weeklyPractice || ''
+            ).toLowerCase();
+
+            const practiceFocus =
+                practiceStyle === 'conditioning'
+                    ? 'CONDITIONING'
+                    : ['chalk_talk', 'scouting'].includes(practiceStyle)
+                        ? 'CHALK_TALK'
+                        : practiceStyle === 'scrimmage'
+                            ? 'FUN_SCRIMMAGE'
+                            : 'BALANCED';
+
+            // The opening offer reflects the team's existing coaching
+            // philosophy and does not spend resources immediately.
+            let finalPitch = {
+                cashOffered: 0,
+                tokensOffered: 0,
+                schemePromise: directive === 'COACH_AUTONOMY'
+                    ? 'COACH_CHOICE'
+                    : 'GM_CHOICE',
+                practiceFocus
+            };
+
+            let retentionNegotiation = evaluateStaffNegotiation(
+                coach,
+                team,
+                'coach',
+                finalPitch
+            );
+
+            // Keep any retention stipend modest relative to the team's
+            // available funds. Tokens are capped at two.
+            const maximumStipend = Math.min(
+                availableCash,
+                Math.max(1, Math.floor(availableCash * 0.10))
+            );
+
+            // Opening offer plus up to two counteroffers.
+            for (
+                let offerRound = 0;
+                offerRound < 2 && !retentionNegotiation?.accepted;
+                offerRound++
+            ) {
+                if (!retentionNegotiation) break;
+
+                const counteroffer = buildStaffCounteroffer(
+                    coach,
+                    team,
+                    'coach',
+                    finalPitch,
+                    retentionNegotiation
+                );
+
+                const counterTerms = counteroffer?.terms || {};
+
+                const requestedCash = Math.max(
+                    0,
+                    Number(counterTerms.cashOffered) || 0
+                );
+
+                const requestedTokens = Math.max(
+                    0,
+                    Math.floor(Number(counterTerms.tokensOffered) || 0)
+                );
+
+                const nextCash = Math.max(
+                    Number(finalPitch.cashOffered) || 0,
+                    Math.min(maximumStipend, requestedCash)
+                );
+
+                const nextTokens = Math.max(
+                    Number(finalPitch.tokensOffered) || 0,
+                    Math.min(2, availableTokens, requestedTokens)
+                );
+
+                const nextPitch = {
+                    ...finalPitch,
+                    ...counterTerms,
+                    cashOffered: nextCash,
+                    tokensOffered: nextTokens
+                };
+
+                const termsChanged =
+                    nextPitch.schemePromise !== finalPitch.schemePromise ||
+                    nextPitch.practiceFocus !== finalPitch.practiceFocus ||
+                    nextPitch.cashOffered !== finalPitch.cashOffered ||
+                    nextPitch.tokensOffered !== finalPitch.tokensOffered;
+
+                // Do not keep negotiating if the AI cannot improve its offer.
+                if (!termsChanged) break;
+
+                finalPitch = nextPitch;
+
+                retentionNegotiation = evaluateStaffNegotiation(
+                    coach,
+                    team,
+                    'coach',
+                    finalPitch
+                );
+            }
+
+            if (retentionNegotiation?.accepted) {
+                // Spend the agreed resources only after the coach accepts.
+                if (finalPitch.cashOffered > 0 && team.finances) {
+                    team.finances.balance = Math.max(
+                        0,
+                        (Number(team.finances.balance) || 0) -
+                            finalPitch.cashOffered
+                    );
+                }
+
+                if (
+                    finalPitch.tokensOffered > 0 &&
+                    team.socialProfile
+                ) {
+                    team.socialProfile.favorTokens = Math.max(
+                        0,
+                        (Number(team.socialProfile.favorTokens) || 0) -
+                            finalPitch.tokensOffered
+                    );
+                }
+
+                const isCurrentHeadCoach =
+                    String(team.staff?.coach?.id) === String(coach.id) ||
+                    String(team.coach?.id) === String(coach.id);
+
+                // Record the accepted terms for future staff-management logic.
+                coach.retentionAgreement = {
+                    year: seasonYear,
+                    role: isCurrentHeadCoach ? 'head_coach' : 'assistant_coach',
+                    schemePromise: finalPitch.schemePromise,
+                    practiceFocus: finalPitch.practiceFocus,
+                    cashOffered: finalPitch.cashOffered,
+                    tokensOffered: finalPitch.tokensOffered
+                };
+
+                if (isCurrentHeadCoach) {
+                    if (!team.gameplan) team.gameplan = {};
+
+                    team.gameplan.coachSchemeAuthority =
+                        finalPitch.schemePromise;
+                }
+
+                coach.happiness = Math.min(
+                    100,
+                    (Number(coach.happiness) || 50) + 6
+                );
+
+                if (!Array.isArray(coach.retentionHistory)) {
+                    coach.retentionHistory = [];
+                }
+
+                coach.retentionHistory.push({
+                    year: seasonYear,
+                    outcome: 'RETAINED',
+                    teamId: team.id,
+                    ...coach.retentionAgreement
+                });
+
+                // The coach accepted. Skip the normal departure process.
+                continue;
+            }
+        }
 
         if (
             hasPendingCommunityCommitment ||

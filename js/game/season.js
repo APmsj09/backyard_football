@@ -44,7 +44,7 @@ import {
     resolvePlayerBiddingWar,
     calculateAiTeamNeedAndDesire,
     createPlayerPromise,
-    evaluateAiRetentionPitch
+    resolveAiPlayerRetentionNegotiation
 } from './negotiations.js';
 import {
     processWeeklyScoutingAssignments,
@@ -11537,7 +11537,7 @@ export function advanceToOffseason() {
                     !retentionCheck.willStay &&
                     !retentionCheck.permanentDeparture
                 ) {
-                    const aiRetention = evaluateAiRetentionPitch(
+                    const aiRetention = resolveAiPlayerRetentionNegotiation(
                         player,
                         team,
                         {
