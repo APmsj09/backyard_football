@@ -45,6 +45,95 @@ function getReceiverProjectionSpeedYPS(receiver) {
     );
 }
 
+function projectReceiverPathPoint(receiver, flightTimeSec, recYPS, speedScale = 1.0, includeSlant = false) {
+    let currX = receiver.x;
+    let currY = receiver.y;
+    let remainingTime = Math.max(0, flightTimeSec);
+    const effectiveSpeed = Math.max(0.5, recYPS * speedScale);
+    const recAgility = Math.max(20, Math.min(99, Number(receiver.agility ?? receiver.agi) || 50));
+    const agilityBreakFactor = 1.15 - (recAgility / 220);
+
+    const routePath = Array.isArray(receiver.routePath) ? receiver.routePath : null;
+    const startIndex = Math.max(0, Math.floor(Number(receiver.currentPathIndex) || 0));
+
+    if (routePath && startIndex < routePath.length) {
+        const curSpeed = Math.hypot(receiver.vx || 0, receiver.vy || 0);
+        let prevDirX = curSpeed > 0.5 ? (receiver.vx / curSpeed) : 0;
+        let prevDirY = curSpeed > 0.5 ? (receiver.vy / curSpeed) : 1;
+        let projectedWithinRoute = false;
+
+        for (let i = startIndex; i < routePath.length; i++) {
+            const nextNode = routePath[i];
+            const dx = nextNode.x - currX;
+            const dy = nextNode.y - currY;
+            const distToNext = Math.hypot(dx, dy);
+
+            if (distToNext <= 0.1) continue;
+
+            const nextDirX = dx / distToNext;
+            const nextDirY = dy / distToNext;
+
+            // Deduct plant/redirect time and brief momentum drift on sharp route breaks
+            const turnDot = (prevDirX * nextDirX) + (prevDirY * nextDirY);
+            if (turnDot < 0.70) {
+                const turnSeverity = Math.min(2.0, 1.0 - turnDot);
+                const breakDelay = Math.min(remainingTime, (0.12 + (turnSeverity * 0.13)) * agilityBreakFactor);
+                const driftDist = Math.min(1.2, curSpeed * breakDelay * 0.30);
+                currX += prevDirX * driftDist;
+                currY += prevDirY * driftDist;
+                remainingTime = Math.max(0, remainingTime - breakDelay);
+                if (remainingTime <= 0) {
+                    projectedWithinRoute = true;
+                    break;
+                }
+            }
+
+            const updatedDx = nextNode.x - currX;
+            const updatedDy = nextNode.y - currY;
+            const updatedDist = Math.hypot(updatedDx, updatedDy);
+            const timeToNode = updatedDist / effectiveSpeed;
+
+            prevDirX = updatedDist > 0.1 ? (updatedDx / updatedDist) : nextDirX;
+            prevDirY = updatedDist > 0.1 ? (updatedDy / updatedDist) : nextDirY;
+
+            if (remainingTime > timeToNode) {
+                remainingTime -= timeToNode;
+                currX = nextNode.x;
+                currY = nextNode.y;
+            } else {
+                const ratio = updatedDist > 0.1 ? ((remainingTime * effectiveSpeed) / updatedDist) : 0;
+                currX += updatedDx * ratio;
+                currY += updatedDy * ratio;
+                remainingTime = 0;
+                projectedWithinRoute = true;
+                break;
+            }
+        }
+
+        const assignmentStr = String(receiver.assignment || '').toLowerCase();
+        const continuousList = [
+            'fly', 'go', 'streak', 'vert', 'fade', 'post', 'corner',
+            'cross', 'crosser', 'crossing', 'deep_cross', 'over', 'wheel', 'seam', 'mesh', 'drag'
+        ];
+        if (includeSlant) continuousList.push('slant');
+
+        const isContinuousRoute = continuousList.some(r => assignmentStr.includes(r));
+
+        if (remainingTime > 0 && isContinuousRoute) {
+            currX += prevDirX * (remainingTime * effectiveSpeed);
+            currY += prevDirY * (remainingTime * effectiveSpeed);
+        }
+
+        return { x: currX, y: currY, projectedWithinRoute };
+    }
+
+    return {
+        x: currX + ((receiver.vx || 0) * remainingTime * speedScale),
+        y: currY + ((receiver.vy || 0) * remainingTime * speedScale),
+        projectedWithinRoute: false
+    };
+}
+
 export function diagnosePlay(pState, tick, offenseStates, playState = null) {
     const decisionProfile = getDecisionProfile(pState, tick);
     // Deep safeties (20-30y off LOS) need telescopic downfield vision to read the backfield mesh
@@ -2142,6 +2231,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
     // IQ = understanding the offense/play.
     // Decision Making = choosing correctly under pressure.
     const qbProcessing = (qbIQ * 0.40) + (qbDecision * 0.60);
+    const qbProcessingFactor = Math.max(0.20, Math.min(1.0, qbProcessing / 100));
 
     if (!qbState.readProgression || qbState.readProgression.length === 0) {
         qbState.readProgression = offenseStates
@@ -2389,56 +2479,16 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
         // Route projection logic
         const recYPS = getReceiverProjectionSpeedYPS(rec);
-        let distanceToTravel = recYPS * estimatedFlightTime;
+        const projectedCatchPoint = projectReceiverPathPoint(
+            rec,
+            estimatedFlightTime,
+            recYPS,
+            1.0,
+            false
+        );
 
-        let currX = rec.x;
-        let currY = rec.y;
-        const recSpeed = Math.hypot(rec.vx || 0, rec.vy || 0);
-        let lastValidDirX = recSpeed > 0.5 ? (rec.vx / recSpeed) : 0;
-        let lastValidDirY = recSpeed > 0.5 ? (rec.vy / recSpeed) : 1;
-
-        if (rec.routePath && rec.currentPathIndex < rec.routePath.length) {
-            for (let i = rec.currentPathIndex; i < rec.routePath.length; i++) {
-                const nextNode = rec.routePath[i];
-                const dx = nextNode.x - currX;
-                const dy = nextNode.y - currY;
-                const distToNext = Math.hypot(dx, dy);
-
-                if (distToNext > 0.1) {
-                    lastValidDirX = dx / distToNext;
-                    lastValidDirY = dy / distToNext;
-                }
-
-                if (distanceToTravel > distToNext) {
-                    distanceToTravel -= distToNext;
-                    currX = nextNode.x;
-                    currY = nextNode.y;
-                } else {
-                    const ratio = distanceToTravel / distToNext;
-                    currX = currX + dx * ratio;
-                    currY = currY + dy * ratio;
-                    distanceToTravel = 0;
-                    break;
-                }
-            }
-
-            // Include all continuing downfield and crossing route concepts
-            const isContinuousRoute = [
-                'fly', 'go', 'streak', 'vert', 'fade', 'post', 'corner',
-                'cross', 'crosser', 'crossing', 'deep_cross', 'over', 'wheel', 'seam', 'mesh', 'drag'
-            ].some(r => routeAssignment.includes(r));
-
-            if (distanceToTravel > 0 && isContinuousRoute) {
-                currX += lastValidDirX * distanceToTravel;
-                currY += lastValidDirY * distanceToTravel;
-            }
-        } else {
-            currX += (rec.vx || 0) * estimatedFlightTime;
-            currY += (rec.vy || 0) * estimatedFlightTime;
-        }
-
-        const projRecX = currX;
-        const projRecY = currY;
+        const projRecX = projectedCatchPoint.x;
+        const projRecY = projectedCatchPoint.y;
 
         const depth = rec.y - (playState.lineOfScrimmage || 0);
         let minProjectedSeparation = 20;
@@ -2469,8 +2519,8 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
 
             if (projDist < 2.3) {
                 defendersClosingIn = Math.min(3, defendersClosingIn + 1);
-            } else if ((isOverTheTop || (isSafetyOrDeepDB && projDist < 5.0)) && qbProcessing >= 0.45) {
-                const safetyReadFactor = 0.72 + ((1 - qbProcessing) * 0.25);
+            } else if ((isOverTheTop || (isSafetyOrDeepDB && projDist < 5.0)) && qbProcessingFactor >= 0.45) {
+                const safetyReadFactor = 0.72 + ((1.0 - qbProcessingFactor) * 0.25);
                 minProjectedSeparation = Math.min(minProjectedSeparation, projDist * safetyReadFactor);
                 defendersClosingIn = Math.min(3, defendersClosingIn + 1);
             }
@@ -2484,7 +2534,7 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 const defDy = projDefY - qbState.y;
                 const dot = (dx * defDx + dy * defDy) / (distFromQB * distDefToQB);
                 if (dot > 0.92) {
-                    undercutThreat = Math.min(2.0, undercutThreat + (0.40 + (qbProcessing * 0.60)));
+                    undercutThreat = Math.min(2.0, undercutThreat + (0.40 + (qbProcessingFactor * 0.60)));
                 }
             }
         });
@@ -2495,19 +2545,22 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             qbState._targetEvalBiasPlayId = playState.playId;
         }
         if (qbState._targetEvalBias[rec.slot] === undefined) {
-            const evalSpread = Math.max(0.5, (1.0 - qbProcessing) * 14.0);
+            const evalSpread = Math.max(0.5, (1.0 - qbProcessingFactor) * 14.0);
             qbState._targetEvalBias[rec.slot] = (Math.random() - 0.42) * evalSpread;
         }
 
         // Base score directly proportional to projected separation
         let score = (Math.min(minProjectedSeparation, 6) * 11) + qbState._targetEvalBias[rec.slot];
 
-        // Waiting on breaking routes before the cut (allow anticipation when pressured)
+        // Waiting on breaking routes before the cut (allow rhythm anticipation near the break)
         const needsToWait = ['dig', 'corner', 'post', 'out', 'in', 'comeback', 'postcorner', 'sluggo', 'out_and_up', 'hitch_and_go', 'texas'].some(r => routeAssignment.includes(r));
         const hasRouteCut = rec.routePath && rec.routePath.length > 1;
         const isBeforeCut = needsToWait && hasRouteCut && rec.currentPathIndex < (rec.routePath.length - 1);
         if (isBeforeCut) {
-            score -= isPressured ? 10 : 20;
+            const nextBreakNode = rec.routePath[rec.currentPathIndex];
+            const distToBreak = nextBreakNode ? Math.hypot(nextBreakNode.x - rec.x, nextBreakNode.y - rec.y) : 99;
+            const isAnticipationWindow = qbIQ >= 65 && distToBreak <= 2.5 && rec.currentPathIndex === (rec.routePath.length - 2);
+            score -= isPressured ? 10 : (isAnticipationWindow ? 5 : 20);
         }
 
         // Deep vertical gating: ensure vertical routes develop at least 7.0 yards downfield
@@ -3527,62 +3580,15 @@ export function executeThrow(qbState, target, throwPower, accuracy, playState, g
         if (passType === 'bullet') qbEstimation *= 0.96;
         if (passType === 'lob') qbEstimation *= 1.04;
 
-        let distanceToTravel = recYPS * flightTime * qbEstimation;
-
-        let currX = target.x;
-        let currY = target.y;
-        let lastValidDirX = 0;
-        let lastValidDirY = 1;
-
-        if (target.routePath && target.currentPathIndex < target.routePath.length) {
-            let projectedWithinRoute = false;
-            for (let i = target.currentPathIndex; i < target.routePath.length; i++) {
-                const nextNode = target.routePath[i];
-                const dx = nextNode.x - currX;
-                const dy = nextNode.y - currY;
-                const distToNext = Math.hypot(dx, dy);
-
-                if (distToNext > 0.1) {
-                    lastValidDirX = dx / distToNext;
-                    lastValidDirY = dy / distToNext;
-                }
-
-                if (distanceToTravel > distToNext) {
-                    distanceToTravel -= distToNext;
-                    currX = nextNode.x;
-                    currY = nextNode.y;
-                } else {
-                    const ratio = distanceToTravel / distToNext;
-                    aimX = currX + dx * ratio;
-                    aimY = currY + dy * ratio;
-                    distanceToTravel = 0;
-                    projectedWithinRoute = true;
-                    break;
-                }
-            }
-
-            // DEEPER FIX: Expanded continuous routes list to include Crossers/Drags/Slants so they aren't thrown behind
-            const isContinuousRoute = [
-                'fly', 'go', 'streak', 'vert', 'fade', 'post', 'corner',
-                'cross', 'crosser', 'crossing', 'deep_cross', 'over', 'wheel', 'seam', 'mesh', 'drag', 'slant'
-            ].some(r => assignmentStr.includes(r));
-            
-            if (distanceToTravel > 0 && isContinuousRoute) {
-                const targetSpeed = Math.hypot(target.vx || 0, target.vy || 0);
-                const dirX = targetSpeed > 0.5 ? (target.vx / targetSpeed) : lastValidDirX;
-                const dirY = targetSpeed > 0.5 ? (target.vy / targetSpeed) : lastValidDirY;
-
-                aimX = currX + (dirX * distanceToTravel);
-                aimY = currY + (dirY * distanceToTravel);
-            } else if (!projectedWithinRoute) {
-                aimX = currX;
-                aimY = currY;
-            }
-        } else {
-            // DEEPER FIX: Linear projection. Accurately lead moving receivers even if they lack a defined route path (Screens, scrambles)
-            aimX = currX + (target.vx || 0) * flightTime * qbEstimation;
-            aimY = currY + (target.vy || 0) * flightTime * qbEstimation;
-        }
+        const projectedAim = projectReceiverPathPoint(
+            target,
+            flightTime,
+            recYPS,
+            qbEstimation,
+            true
+        );
+        aimX = projectedAim.x;
+        aimY = projectedAim.y;
     } else {
         aimX = target.x;
         aimY = target.y;

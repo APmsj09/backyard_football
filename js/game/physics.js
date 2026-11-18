@@ -518,9 +518,9 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         dot = ((pState.vx / currentSpeed) * (dx / distToTarget)) + ((pState.vy / currentSpeed) * (dy / distToTarget));
 
         // WEIGHT IMPACT ON CUTS:
-        // Increased base cut stability so players don't drop to 40% speed on hard cuts (fixes the "molasses" effect)
-        const cutStability = 0.65 + (agiFactor * 0.35) - ((weightRatio - 1.0) * 0.25);
-        turningPenalty = Math.max(cutStability, dot);
+        // Momentarily trim speed through sharp breaks so cuts stay tight instead of rounding wide
+        const cutStability = 0.48 + (agiFactor * 0.28) - ((weightRatio - 1.0) * 0.20);
+        turningPenalty = Math.max(Math.max(0.35, cutStability), dot);
     }
     const effectiveMaxSpeed = maxPossibleSpeed * turningPenalty;
 
@@ -880,72 +880,61 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     const targetVx = steeringX * clampedTargetSpeed;
     const targetVy = steeringY * clampedTargetSpeed;
 
-    // Smoothly steer toward the desired velocity.
-    // The exponential form behaves consistently across different timestep sizes.
-     const steeringAlpha = 1 - Math.exp(-Math.max(0, accelRate) * dt);
-
     const currentVX = pState.vx;
     const currentVY = pState.vy;
-
-    const proposedVX =
-        currentVX + (targetVx - currentVX) * steeringAlpha;
-    const proposedVY =
-        currentVY + (targetVy - currentVY) * steeringAlpha;
-
-    let deltaVX = proposedVX - currentVX;
-    let deltaVY = proposedVY - currentVY;
-
-    // Enforce a physical acceleration limit on each velocity change.
-    const deltaVelocity = Math.hypot(deltaVX, deltaVY);
     const currentVelocityMagnitude = Math.hypot(currentVX, currentVY);
     const desiredSpeed = Math.hypot(targetVx, targetVy);
 
+    // Decompose velocity into forward progress along steering direction and perpendicular skid
+    const forwardSpeed = (currentVX * steeringX) + (currentVY * steeringY);
+    const skidVX = currentVX - (forwardSpeed * steeringX);
+    const skidVY = currentVY - (forwardSpeed * steeringY);
+    const skidSpeed = Math.hypot(skidVX, skidVY);
+
     const targetDirectionAlignment =
         currentVelocityMagnitude > 0.05 && desiredSpeed > 0.05
-            ? (
-                (currentVX / currentVelocityMagnitude) * (targetVx / desiredSpeed) +
-                (currentVY / currentVelocityMagnitude) * (targetVy / desiredSpeed)
-            )
+            ? Math.max(-1, Math.min(1, forwardSpeed / currentVelocityMagnitude))
             : 1.0;
 
     const isBraking =
-        desiredSpeed < currentVelocityMagnitude - 0.05 ||
+        desiredSpeed < forwardSpeed - 0.05 ||
         targetDirectionAlignment < 0;
 
-    // Sharp lateral cuts (45-90 deg) require planting cleats to kill old momentum
-    const isSharpCut =
-        !isBraking &&
-        currentVelocityMagnitude > 1.5 &&
-        desiredSpeed > 0.5 &&
-        targetDirectionAlignment < 0.45;
+    // 1. Cleat-plant traction scrubs off-axis skid independently of straight-line acceleration
+    const cleatGripFactor = (0.75 + (agiFactor * 0.45)) / Math.sqrt(weightRatio);
+    const cleatBrakeYPS2 = Math.max(0, maxDecelerationYPS2 * cleatGripFactor);
+    const cleatBrakeStep = cleatBrakeYPS2 * dt;
+    const nextSkidScale = skidSpeed > 0.001
+        ? Math.max(0, skidSpeed - cleatBrakeStep) / skidSpeed
+        : 0;
+    const nextSkidVX = skidVX * nextSkidScale;
+    const nextSkidVY = skidVY * nextSkidScale;
 
-    let cutAccelerationYPS2 = maxAccelerationYPS2;
-    if (isSharpCut) {
-        const cutSharpness = (0.45 - targetDirectionAlignment) / 0.45; // 0..1
-        const agilityCutScale = 0.65 + (agiFactor * 0.35);
-        cutAccelerationYPS2 =
-            maxAccelerationYPS2 +
-            ((maxDecelerationYPS2 - maxAccelerationYPS2) * cutSharpness * agilityCutScale);
-    }
-
-    // Apply physical acceleration limits independently of steering response.
-    const effectiveAccelerationYPS2 = isBraking
+    // 2. Forward speed uses normal acceleration (or braking deceleration if slowing/reversing)
+    const forwardAlpha = 1 - Math.exp(-Math.max(0, accelRate) * dt);
+    const isDeceleratingForward = desiredSpeed < forwardSpeed || forwardSpeed < 0;
+    const forwardLimitYPS2 = isDeceleratingForward
         ? Math.max(0, maxDecelerationYPS2)
-        : Math.max(0, cutAccelerationYPS2);
+        : Math.max(0, maxAccelerationYPS2);
 
-    const maxVelocityChange = effectiveAccelerationYPS2 * dt;
-    
-    if (
-        deltaVelocity > maxVelocityChange &&
-        deltaVelocity > 0
-    ) {
-        const scale = maxVelocityChange / deltaVelocity;
-        deltaVX *= scale;
-        deltaVY *= scale;
+    // While heavily skidding during a sharp cut, hold forward push briefly so the player plants before driving out
+    const plantHoldFactor = (!isDeceleratingForward && skidSpeed > 1.5)
+        ? Math.max(0.45, 1.0 - ((skidSpeed - 1.5) * 0.14))
+        : 1.0;
+
+    const effectiveAccelerationYPS2 = isBraking
+        ? cleatBrakeYPS2
+        : (forwardLimitYPS2 * plantHoldFactor);
+    const maxVelocityChange = forwardLimitYPS2 * plantHoldFactor * dt;
+
+    let forwardDelta = (desiredSpeed - forwardSpeed) * forwardAlpha;
+    if (Math.abs(forwardDelta) > maxVelocityChange) {
+        forwardDelta = Math.sign(forwardDelta) * maxVelocityChange;
     }
 
-    pState.vx = currentVX + deltaVX;
-    pState.vy = currentVY + deltaVY;
+    const nextForwardSpeed = forwardSpeed + forwardDelta;
+    pState.vx = (nextForwardSpeed * steeringX) + nextSkidVX;
+    pState.vy = (nextForwardSpeed * steeringY) + nextSkidVY;
 
     // Soft Speed Clamp (Retain slight over-speed from being bumped, but bleed it off)
     const speedAfter = Math.sqrt(pState.vx ** 2 + pState.vy ** 2);
