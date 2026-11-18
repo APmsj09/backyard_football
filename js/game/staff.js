@@ -1286,6 +1286,122 @@ export function getEffectiveStaffWorkHours(team, assignment) {
     return Math.max(0, effectiveHours);
 }
 
+/**
+ * Estimates how much scheme and gameplan autonomy a coach prefers.
+ *
+ * Higher scores indicate a stronger preference for coach-led decisions.
+ * The value is generated once for new coaches and preserved on the
+ * coach record. Legacy records receive a stable identity-based estimate.
+ */
+const calculateCoachAutonomyPreference = (coach, baseline) => {
+    const tacticalId =
+        getStaffProfileId(coach, 'tactical') ||
+        'adaptive_strategist';
+
+    const personalityId =
+        getStaffProfileId(coach, 'personality') ||
+        'analytical_planner';
+
+    let score = Number(baseline) || 50;
+
+    // Leadership personality influences willingness to share control.
+    if (personalityId === 'hard_nosed_competitor') {
+        score += 14;
+    } else if (personalityId === 'traditionalist') {
+        score += 10;
+    } else if (personalityId === 'player_centered') {
+        score -= 8;
+    } else if (personalityId === 'analytical_planner') {
+        score -= 5;
+    }
+
+    // Strong tactical identities tend to favor greater scheme authority.
+    if (tacticalId === 'pressure_oriented_defender') {
+        score += 10;
+    } else if (
+        tacticalId === 'power_run_specialist' ||
+        tacticalId === 'spread_passing_specialist'
+    ) {
+        score += 7;
+    } else if (tacticalId === 'adaptive_strategist') {
+        score -= 8;
+    } else if (tacticalId === 'conservative_game_manager') {
+        score -= 3;
+    }
+
+    const authority = Number(coach?.ratings?.authority);
+
+    if (Number.isFinite(authority)) {
+        score += Math.round((authority - 65) * 0.20);
+    }
+
+    const stubbornness = Number(coach?.stubbornness);
+
+    if (Number.isFinite(stubbornness)) {
+        score += Math.round((stubbornness - 0.75) * 20);
+    }
+
+    return Math.max(0, Math.min(100, Math.round(score)));
+};
+
+export function getCoachAutonomyProfile(coach) {
+    const storedValue = coach?.autonomyPreference;
+
+    const hasStoredValue =
+        storedValue !== null &&
+        storedValue !== undefined &&
+        storedValue !== '';
+
+    const rawStoredValue = Number(storedValue);
+
+    let score;
+
+    if (hasStoredValue && Number.isFinite(rawStoredValue)) {
+        score = Math.max(
+            0,
+            Math.min(100, Math.round(rawStoredValue))
+        );
+    } else {
+        // Stable fallback for older coach records.
+        const identity = String(coach?.id ?? coach?.name ?? '');
+
+        const stableSeed = [...identity].reduce(
+            (total, character) =>
+                total + character.charCodeAt(0),
+            0
+        );
+
+        const baseline = 38 + (stableSeed % 25);
+
+        score = calculateCoachAutonomyPreference(
+            coach,
+            baseline
+        );
+    }
+
+    if (score >= 66) {
+        return {
+            score,
+            label: 'Coach-Led',
+            description: 'Strongly prefers control over schemes and game planning. May resist GM-directed systems.'
+        };
+    }
+
+    if (score <= 35) {
+        return {
+            score,
+            label: 'GM-Friendly',
+            description: 'Comfortable with GM direction and shared decisions over schemes.'
+        };
+    }
+
+    return {
+        score,
+        label: 'Collaborative',
+        description: 'Wants a meaningful voice in scheme decisions but appears open to shared control.'
+    };
+}
+
 export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, formerPlayer = null) {
     const firstName = formerPlayer ? formerPlayer.name.split(' ')[0] : getRandom(firstNames);
     const lastName = formerPlayer ? formerPlayer.name.split(' ').slice(1).join(' ') : getRandom(lastNames);
@@ -1382,6 +1498,13 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
         behaviorProfile,
         experience: 0
     };
+
+    // Give each coach a persistent, individual scheme-autonomy preference.
+    staffMember.autonomyPreference =
+        calculateCoachAutonomyPreference(
+            staffMember,
+            getRandomInt(38, 62)
+        );
 
     // Initialize the asking price immediately so newly generated
     // market candidates cannot appear free before the next weekly update.
@@ -2339,6 +2462,15 @@ export function ensureTeamCoachingStaff(team) {
 
     npcCoaches.forEach(coach => {
         coach.teamId = team.id;
+
+        if (
+            coach.autonomyPreference == null ||
+            coach.autonomyPreference === '' ||
+            !Number.isFinite(Number(coach.autonomyPreference))
+        ) {
+            coach.autonomyPreference =
+                getCoachAutonomyProfile(coach).score;
+        }
     });
 
     if (!team.isPlayerControlled) {

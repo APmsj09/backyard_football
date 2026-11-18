@@ -16,6 +16,139 @@ import {
     rebuildDepthChartFromOrder
 } from './depth_chart.js';
 
+const NEGOTIATION_MAX_ROUNDS = 3;
+
+const clampNegotiationValue = (value, min = 0, max = 100) =>
+    Math.max(min, Math.min(max, Math.round(value)));
+
+function getCoachAutonomyPreference(staff) {
+    const storedPreference = Number(staff?.autonomyPreference);
+
+    if (
+        staff?.autonomyPreference != null &&
+        staff.autonomyPreference !== '' &&
+        Number.isFinite(storedPreference)
+    ) {
+        return clampNegotiationValue(storedPreference);
+    }
+
+    // Stable fallback for coaches generated before this attribute existed.
+    const tactical = staff?.biases?.tactical?.name || '';
+    const personality = staff?.biases?.personality?.name || '';
+
+    let preference = 50;
+
+    if (personality === 'Old-School Disciplinarian') {
+        preference += 8;
+    } else if (personality === "Peaked in '94") {
+        preference += 10;
+    } else if (personality === "Players' Coach") {
+        preference -= 8;
+    } else if (personality === 'Analytical Savant') {
+        preference -= 5;
+    }
+
+    if (
+        tactical === 'Air Raid Purist' ||
+        tactical === 'Smashmouth Zealot' ||
+        tactical === 'Blitz Addict'
+    ) {
+        preference += 8;
+    } else if (
+        tactical === 'Balanced Tactician' ||
+        tactical === 'Conservative Turtler'
+    ) {
+        preference -= 4;
+    }
+
+    const authority = Number(staff?.ratings?.authority);
+
+    if (Number.isFinite(authority)) {
+        preference += Math.round((authority - 60) * 0.20);
+    }
+
+    const stubbornness = Number(staff?.stubbornness);
+
+    if (Number.isFinite(stubbornness)) {
+        preference += Math.round((stubbornness - 0.75) * 20);
+    }
+
+    return clampNegotiationValue(preference);
+}
+
+function getPreferredCoachPracticeFocus(staff, roleKey) {
+    if (roleKey === 'scout') {
+        return 'CHALK_TALK';
+    }
+
+    if (roleKey === 'trainer') {
+        return 'CONDITIONING';
+    }
+
+    const personality = staff?.biases?.personality?.name || '';
+
+    if (
+        personality === 'Old-School Disciplinarian' ||
+        personality === "Peaked in '94"
+    ) {
+        return 'CONDITIONING';
+    }
+
+    if (personality === "Players' Coach") {
+        return 'FUN_SCRIMMAGE';
+    }
+
+    if (personality === 'Analytical Savant') {
+        return 'CHALK_TALK';
+    }
+
+    return null;
+}
+
+function copyNegotiationTerms(offer = {}) {
+    const copied = {};
+
+    Object.entries(offer || {}).forEach(([key, value]) => {
+        if (
+            value === null ||
+            ['string', 'number', 'boolean'].includes(typeof value)
+        ) {
+            copied[key] = value;
+        }
+    });
+
+    return copied;
+}
+
+function createNegotiationSession(
+    type,
+    participant,
+    team,
+    context = {}
+) {
+    if (
+        !participant ||
+        participant.id == null ||
+        !team ||
+        team.id == null
+    ) {
+        return null;
+    }
+
+    return {
+        version: 1,
+        type,
+        participantId: String(participant.id),
+        teamId: String(team.id),
+        roleKey: context.roleKey || null,
+        round: 0,
+        maxRounds: NEGOTIATION_MAX_ROUNDS,
+        status: 'open',
+        history: [],
+        context: { ...context }
+    };
+}
+
 function playerRefusesTeam(player, team) {
     if (team?.id == null || !Array.isArray(player?.refusedTeamIds)) {
         return false;
@@ -1574,11 +1707,19 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
         ? Math.max(0, rawCashBalance)
         : 0;
 
-    const schemePromise =
-        pitchDetails.schemePromise || 'GM_CHOICE';
+    const schemePromise = [
+        'GM_CHOICE',
+        'SHARED_CONTROL',
+        'COACH_CHOICE'
+    ].includes(pitchDetails.schemePromise)
+        ? pitchDetails.schemePromise
+        : 'GM_CHOICE';
 
     const practiceFocus =
         pitchDetails.practiceFocus || 'BALANCED';
+
+    const autonomyPreference =
+        getCoachAutonomyPreference(staff);
 
     if (
         !Number.isInteger(tokensOffered) ||
@@ -1592,6 +1733,7 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
         return {
             accepted: false,
             interestScore: 0,
+            threshold: 100,
             reasons: [
                 'Invalid offer or insufficient team funds/Favor Tokens.'
             ],
@@ -1711,13 +1853,34 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
             }
         }
 
-        if (schemePromise === 'COACH_CHOICE') {
-            interest += 18;
-            reasons.push("📋 Full Play-Calling & Scheme Autonomy (+18)");
-        } else if (ratingAvg >= 65) {
-            interest -= 16;
-            reasons.push("😠 Veteran coach refuses GM micromanagement (-16)");
-        }
+        const offeredControlLevel =
+            schemePromise === 'COACH_CHOICE'
+                ? 90
+                : schemePromise === 'SHARED_CONTROL'
+                    ? 55
+                    : 20;
+
+        const authorityFit = clampNegotiationValue(
+            18 - Math.abs(
+                autonomyPreference - offeredControlLevel
+            ) * 0.42,
+            -18,
+            18
+        );
+
+        interest += authorityFit;
+
+        const controlLabel =
+            schemePromise === 'COACH_CHOICE'
+                ? 'Full coach autonomy'
+                : schemePromise === 'SHARED_CONTROL'
+                    ? 'Shared scheme authority'
+                    : 'GM-controlled schemes';
+
+        reasons.push(
+            `📋 ${controlLabel} matches coach preference ` +
+            `(${authorityFit >= 0 ? '+' : ''}${authorityFit})`
+        );
     }
 
     // 3. PRACTICE CULTURE
@@ -1779,6 +1942,9 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
     return {
         accepted,
         interestScore: Math.max(0, Math.min(100, interest)),
+        threshold,
+        requiredStipend,
+        autonomyPreference,
         reasons,
         quote,
         schemePromise,
@@ -2708,6 +2874,742 @@ export function evaluateAiRetentionPitch(player, team, context = {}) {
         reason: evaluation.accepted
             ? 'AI retention pitch accepted.'
             : 'Player rejected the AI retention pitch.'
+    };
+}
+
+/**
+ * Opens a coach or staff hiring negotiation.
+ * The session is temporary conversation state, not a contract.
+ */
+export function startStaffNegotiation(
+    staff,
+    team,
+    roleKey = 'coach'
+) {
+    if (!staff || !team) return null;
+
+    const autonomyPreference =
+        getCoachAutonomyPreference(staff);
+
+    const preferredPracticeFocus =
+        getPreferredCoachPracticeFocus(staff, roleKey);
+
+    let openingLine;
+
+    if (
+        roleKey === 'coach' &&
+        autonomyPreference >= 68
+    ) {
+        openingLine =
+            `"I'm interested, but I want to know how much control I'll have over the football side of things."`;
+    } else if (
+        roleKey === 'coach' &&
+        autonomyPreference <= 35
+    ) {
+        openingLine =
+            `"I'm open to joining the program. I want to understand your expectations and how you want the staff to work together."`;
+    } else if (roleKey === 'scout') {
+        openingLine =
+            `"I'd like to hear how you want scouting and player evaluation handled."`;
+    } else if (roleKey === 'trainer') {
+        openingLine =
+            `"Before I commit, I'd like to understand the team's practice and development priorities."`;
+    } else {
+        openingLine =
+            `"I'm interested. Let's talk about the role and what you can offer."`;
+    }
+
+    return {
+        ...createNegotiationSession(
+            'staff',
+            staff,
+            team,
+            { roleKey }
+        ),
+        openingLine,
+        profile: {
+            autonomyPreference,
+            preferredPracticeFocus
+        }
+    };
+}
+
+/**
+ * Opens a player retention negotiation.
+ * Context should include the departure reason and completed-season details.
+ */
+export function startPlayerRetentionNegotiation(
+    player,
+    team,
+    context = {}
+) {
+    if (!player || !team) return null;
+
+    const options = getRetentionPitchOptions(player);
+    const reason = String(context.reason || '');
+
+    let openingLine;
+
+    if (/playing time|role|starter|rotation/i.test(reason)) {
+        openingLine =
+            `"I don't feel like I got the opportunity I deserved. I need to know my role will be different next season."`;
+    } else if (/losing|poor play|winning culture/i.test(reason)) {
+        openingLine =
+            `"I want to play somewhere that feels like it's going in the right direction. Why should I believe things will improve here?"`;
+    } else if (/tier|relegat|promotion/i.test(reason)) {
+        openingLine =
+            `"I'm not sure I want to spend another season at this level. What makes staying here worth it?"`;
+    } else {
+        openingLine =
+            `"I'm thinking about a fresh start. I want to hear what would actually be different if I stayed."`;
+    }
+
+    return {
+        ...createNegotiationSession(
+            'player_retention',
+            player,
+            team,
+            {
+                reason,
+                completedWins: context.completedWins,
+                completedLosses: context.completedLosses,
+                snapsThisSeason: context.snapsThisSeason
+            }
+        ),
+        openingLine,
+        profile: {
+            position: options.position,
+            focusPromise: options.focusPromise?.value || null
+        }
+    };
+}
+
+/**
+ * Builds a staff counteroffer based on the candidate's strongest preferences.
+ * Only returned terms need to be changed; the UI can preserve the other terms.
+ */
+function buildStaffCounteroffer(
+    staff,
+    team,
+    roleKey,
+    pitch,
+    evaluation
+) {
+    const terms = {};
+    const priorities = [];
+    const messages = [];
+
+    if (roleKey === 'coach') {
+        const autonomy = getCoachAutonomyPreference(staff);
+
+        const desiredSchemePromise =
+            autonomy >= 68
+                ? 'COACH_CHOICE'
+                : autonomy >= 38
+                    ? 'SHARED_CONTROL'
+                    : 'GM_CHOICE';
+
+        const controlRank = {
+            GM_CHOICE: 0,
+            SHARED_CONTROL: 1,
+            COACH_CHOICE: 2
+        };
+
+        const currentSchemePromise =
+            pitch.schemePromise || 'GM_CHOICE';
+
+        if (
+            (controlRank[desiredSchemePromise] ?? 0) >
+            (controlRank[currentSchemePromise] ?? 0)
+        ) {
+            terms.schemePromise = desiredSchemePromise;
+            priorities.push('scheme_authority');
+
+            messages.push(
+                desiredSchemePromise === 'COACH_CHOICE'
+                    ? 'I need greater control over the football philosophy and gameplan.'
+                    : "I'd be more comfortable if scheme decisions were shared rather than entirely GM-controlled."
+            );
+        }
+    }
+
+    const preferredPracticeFocus =
+        getPreferredCoachPracticeFocus(staff, roleKey);
+
+    if (
+        preferredPracticeFocus &&
+        (pitch.practiceFocus || 'BALANCED') !== preferredPracticeFocus
+    ) {
+        terms.practiceFocus = preferredPracticeFocus;
+        priorities.push('practice_culture');
+
+        const focusDescriptions = {
+            CONDITIONING: 'a more demanding conditioning-focused program',
+            CHALK_TALK: 'more time for film study and tactical preparation',
+            FUN_SCRIMMAGE: 'a stronger emphasis on chemistry and relaxed team sessions'
+        };
+
+        messages.push(
+            `I'd also prefer ${focusDescriptions[preferredPracticeFocus] || 'a practice approach that fits my philosophy'}.`
+        );
+    }
+
+    const requiredStipend = Math.max(
+        0,
+        Number(evaluation.requiredStipend) || 0
+    );
+
+    const currentCashOffered = Math.max(
+        0,
+        Number(pitch.cashOffered) || 0
+    );
+
+    if (currentCashOffered < requiredStipend) {
+        terms.cashOffered = requiredStipend;
+        priorities.push('upfront_resources');
+
+        messages.push(
+            `The equipment and preparation stipend would need to be closer to $${requiredStipend}.`
+        );
+    }
+
+    const tokensAvailable = Math.max(
+        0,
+        Math.floor(Number(team.socialProfile?.favorTokens) || 0)
+    );
+
+    const currentTokensOffered = Math.max(
+        0,
+        Math.floor(Number(pitch.tokensOffered) || 0)
+    );
+
+    if (
+        tokensAvailable > currentTokensOffered &&
+        currentTokensOffered === 0 &&
+        Number(evaluation.interestScore) <
+            Number(evaluation.threshold)
+    ) {
+        terms.tokensOffered = 1;
+        priorities.push('favor_token');
+
+        messages.push(
+            `I'd like to see one more meaningful sign of commitment from the program.`
+        );
+    }
+
+    return {
+        terms,
+        priorities,
+        message: messages.length
+            ? messages.join(' ')
+            : "We're getting closer, but I'd need you to improve the overall offer before I can commit."
+    };
+}
+
+/**
+ * Builds a player retention counteroffer from the player's role,
+ * workload, personality, and relationship concerns.
+ */
+function buildPlayerRetentionCounteroffer(
+    player,
+    team,
+    pitch,
+    session
+) {
+    const terms = {};
+    const priorities = [];
+
+    const options = getRetentionPitchOptions(player);
+    const reason = String(session.context?.reason || '').toLowerCase();
+
+    const ego = Number(player.personality?.ego) || 50;
+    const loyalty = Number(player.personality?.loyalty) || 50;
+    const happiness = Number(player.expectations?.happiness) || 50;
+
+    const currentRole =
+        pitch.rolePromised || 'ROTATION';
+
+    const currentPromise =
+        pitch.promiseType || 'NONE';
+
+    const currentTokens = Math.max(
+        0,
+        Math.floor(Number(pitch.tokensOffered) || 0)
+    );
+
+    const tokensAvailable = Math.max(
+        0,
+        Math.floor(Number(team.socialProfile?.favorTokens) || 0)
+    );
+
+    const isPlayingTimeConcern =
+        reason.includes('playing time') ||
+        reason.includes('role') ||
+        reason.includes('starter') ||
+        reason.includes('rotation');
+
+    // A player with a role concern or strong ego may insist on a starting role.
+    if (
+        currentRole !== 'STARTER' &&
+        (isPlayingTimeConcern || ego >= 62)
+    ) {
+        terms.rolePromised = 'STARTER';
+        priorities.push('starting_role');
+    }
+
+    // Skill players may ask for a measurable workload commitment.
+    if (
+        options.focusPromise &&
+        currentPromise !== options.focusPromise.value &&
+        (
+            ego >= 58 ||
+            happiness < 68 ||
+            isPlayingTimeConcern
+        )
+    ) {
+        terms.promiseType = options.focusPromise.value;
+        priorities.push('workload');
+    }
+
+    // A player with damaged trust may want a tangible sign of commitment.
+    if (
+        currentTokens === 0 &&
+        tokensAvailable >= 1 &&
+        (loyalty < 48 || happiness < 52)
+    ) {
+        terms.tokensOffered = 1;
+        priorities.push('relationship_repair');
+    }
+
+    let message;
+
+    if (priorities.includes('starting_role')) {
+        message =
+            `"I need a real opportunity to start. A rotation promise isn't enough for me."`;
+    } else if (priorities.includes('workload')) {
+        message =
+            `"I want to know I'll have a meaningful role in the offense next season, not just be told to wait my turn."`;
+    } else if (priorities.includes('relationship_repair')) {
+        message =
+            `"Words are a start, but I need to know the program genuinely values me."`;
+    } else if (options.focusPromise) {
+        message =
+            `"I need a more concrete role and a clearer commitment to how you'll use me."`;
+    } else {
+        message =
+            `"I hear what you're saying, but I need a more meaningful commitment before I agree to stay."`;
+    }
+
+    return {
+        terms,
+        priorities,
+        message
+    };
+}
+
+/**
+ * Resolves one round of a shared negotiation.
+ *
+ * A counteroffer keeps the session open. Acceptance and rejection close it.
+ * Three total offer rounds are allowed: the opening offer plus two revisions.
+ */
+function resolveNegotiationRound(
+    session,
+    offer,
+    evaluation,
+    tolerance,
+    counteroffer
+) {
+    const round = Math.max(
+        0,
+        Number(session.round) || 0
+    ) + 1;
+
+    const maxRounds = Math.max(
+        1,
+        Number(session.maxRounds) || NEGOTIATION_MAX_ROUNDS
+    );
+
+    const rawScore =
+        evaluation.interestScore ?? evaluation.score ?? 0;
+
+    const score = Number.isFinite(Number(rawScore))
+        ? Number(rawScore)
+        : 0;
+
+    const rawThreshold = Number(evaluation.threshold);
+
+    const threshold = Number.isFinite(rawThreshold)
+        ? rawThreshold
+        : 52;
+
+    const hardStop =
+        threshold >= 100 ||
+        evaluation.accepted === true && evaluation.accepted !== false;
+
+    let outcome;
+
+    if (evaluation.accepted) {
+        outcome = 'accepted';
+    } else if (
+        !hardStop &&
+        round < maxRounds &&
+        score >= threshold - tolerance
+    ) {
+        outcome = 'countered';
+    } else {
+        outcome = 'rejected';
+    }
+
+    const historyEntry = {
+        round,
+        offer: copyNegotiationTerms(offer),
+        score,
+        threshold,
+        outcome,
+        quote: String(evaluation.quote || '')
+    };
+
+    const nextSession = {
+        ...session,
+        round,
+        status: outcome === 'countered' ? 'open' : outcome,
+        lastOutcome: outcome,
+        history: [
+            ...(Array.isArray(session.history) ? session.history : []),
+            historyEntry
+        ]
+    };
+
+    return {
+        outcome,
+        accepted: outcome === 'accepted',
+        countered: outcome === 'countered',
+        rejected: outcome === 'rejected',
+        round,
+        maxRounds,
+        quote: outcome === 'countered'
+            ? counteroffer.message
+            : evaluation.quote,
+        counteroffer: outcome === 'countered'
+            ? counteroffer
+            : null,
+        evaluation,
+        session: nextSession
+    };
+}
+
+/**
+ * Evaluates one coach/staff negotiation round.
+ */
+export function evaluateStaffNegotiationRound(
+    session,
+    staff,
+    team,
+    roleKey,
+    pitch = {}
+) {
+    const resolvedRoleKey =
+        roleKey || session?.roleKey || 'coach';
+
+    if (
+        !session ||
+        session.type !== 'staff' ||
+        session.status !== 'open' ||
+        !staff ||
+        !team ||
+        String(staff.id) !== String(session.participantId) ||
+        String(team.id) !== String(session.teamId)
+    ) {
+        return {
+            outcome: 'invalid',
+            accepted: false,
+            countered: false,
+            rejected: true,
+            quote: 'This negotiation is no longer active.'
+        };
+    }
+
+    const evaluation = evaluateStaffNegotiation(
+        staff,
+        team,
+        resolvedRoleKey,
+        pitch
+    );
+
+    const autonomy = getCoachAutonomyPreference(staff);
+    const stubbornnessValue = Number(staff.stubbornness);
+
+    const stubbornness = Number.isFinite(stubbornnessValue)
+        ? Math.max(0, Math.min(1, stubbornnessValue))
+        : 0.75;
+
+    const weeksUnemployed = Math.max(
+        0,
+        Number(staff.weeksUnemployed) || 0
+    );
+
+    const tolerance = clampNegotiationValue(
+        12 +
+        (1 - stubbornness) * 16 +
+        Math.min(6, weeksUnemployed),
+        8,
+        30
+    );
+
+    const counteroffer = buildStaffCounteroffer(
+        staff,
+        team,
+        resolvedRoleKey,
+        pitch,
+        evaluation
+    );
+
+    const result = resolveNegotiationRound(
+        session,
+        pitch,
+        evaluation,
+        tolerance,
+        counteroffer
+    );
+
+    result.autonomyPreference = autonomy;
+
+    return result;
+}
+
+/**
+ * Evaluates one player exit-interview negotiation round.
+ */
+export function evaluatePlayerRetentionNegotiationRound(
+    session,
+    player,
+    team,
+    pitch = {}
+) {
+    if (
+        !session ||
+        session.type !== 'player_retention' ||
+        session.status !== 'open' ||
+        !player ||
+        !team ||
+        String(player.id) !== String(session.participantId) ||
+        String(team.id) !== String(session.teamId)
+    ) {
+        return {
+            outcome: 'invalid',
+            accepted: false,
+            countered: false,
+            rejected: true,
+            quote: 'This exit interview is no longer active.'
+        };
+    }
+
+    const evaluation = evaluateRetentionPitch(
+        player,
+        team,
+        pitch
+    );
+
+    const ego = Number(player.personality?.ego) || 50;
+    const loyalty = Number(player.personality?.loyalty) || 50;
+    const happiness = Number(player.expectations?.happiness) || 50;
+
+    const tolerance = clampNegotiationValue(
+        16 +
+        (loyalty - 50) * 0.14 +
+        (happiness - 50) * 0.10 -
+        (ego - 50) * 0.12,
+        8,
+        28
+    );
+
+    const counteroffer = buildPlayerRetentionCounteroffer(
+        player,
+        team,
+        pitch,
+        session
+    );
+
+    return resolveNegotiationRound(
+        session,
+        pitch,
+        evaluation,
+        tolerance,
+        counteroffer
+    );
+}
+
+/**
+ * Resolves an AI team's player-retention negotiation automatically.
+ *
+ * The AI makes its normal opening offer, then responds to up to two
+ * player counteroffers through the shared negotiation engine.
+ */
+export function resolveAiPlayerRetentionNegotiation(
+    player,
+    team,
+    context = {}
+) {
+    const opening = evaluateAiRetentionPitch(
+        player,
+        team,
+        context
+    );
+
+    if (!opening?.attempted || !opening.pitch) {
+        return opening;
+    }
+
+    // Preserve the existing one-off behavior if the shared
+    // negotiation engine is unavailable.
+    if (
+        typeof startPlayerRetentionNegotiation !== 'function' ||
+        typeof evaluatePlayerRetentionNegotiationRound !== 'function'
+    ) {
+        return opening;
+    }
+
+    let session = startPlayerRetentionNegotiation(
+        player,
+        team,
+        context
+    );
+
+    if (!session) {
+        return opening;
+    }
+
+    const openingPitch = { ...opening.pitch };
+    let currentPitch = { ...openingPitch };
+    let lastEvaluation = opening.evaluation || null;
+
+    const options = getRetentionPitchOptions(player);
+    const position = options?.position;
+
+    const availableTokens = Math.max(
+        0,
+        Math.floor(Number(team.socialProfile?.favorTokens) || 0)
+    );
+
+    const originalTokens = Math.max(
+        0,
+        Math.floor(Number(openingPitch.tokensOffered) || 0)
+    );
+
+    const canPromiseStarter =
+        openingPitch.rolePromised === 'STARTER' ||
+        isPlayerStarterAtPosition(player, team, position);
+
+    // Three total offers: the opening offer and up to two revisions.
+    for (let roundIndex = 0; roundIndex < 3; roundIndex++) {
+        const roundResult = evaluatePlayerRetentionNegotiationRound(
+            session,
+            player,
+            team,
+            currentPitch
+        );
+
+        if (!roundResult) {
+            break;
+        }
+
+        session = roundResult.session || session;
+        lastEvaluation = roundResult.evaluation || roundResult;
+
+        if (
+            roundResult.accepted ||
+            lastEvaluation.accepted
+        ) {
+            return {
+                attempted: true,
+                accepted: true,
+                pitch: { ...currentPitch },
+                evaluation: lastEvaluation,
+                negotiationRounds: roundIndex + 1,
+                reason: 'AI retention negotiation accepted.'
+            };
+        }
+
+        // No counteroffer, or the final offer was rejected.
+        if (
+            !roundResult.countered ||
+            roundIndex >= 2
+        ) {
+            break;
+        }
+
+        const requested = roundResult.counterTerms || {};
+
+        const requestedRole =
+            requested.rolePromised || currentPitch.rolePromised;
+
+        const requestedPromise =
+            requested.promiseType || currentPitch.promiseType || 'NONE';
+
+        const requestedTokens = Math.max(
+            0,
+            Math.floor(Number(requested.tokensOffered) || 0)
+        );
+
+        // The AI will not promise a starting role unless it can
+        // credibly offer one based on its roster and depth chart.
+        const nextRole =
+            requestedRole === 'STARTER' && canPromiseStarter
+                ? 'STARTER'
+                : currentPitch.rolePromised;
+
+        // Workload promises must match a legitimate position-specific
+        // promise option. The AI cannot invent a playing-time guarantee.
+        const canOfferPromise =
+            requestedPromise === 'NONE' ||
+            requestedPromise === currentPitch.promiseType ||
+            requestedPromise === options?.focusPromise?.value;
+
+        const nextPromiseType = canOfferPromise
+            ? requestedPromise
+            : currentPitch.promiseType || 'NONE';
+
+        // The AI may increase its token offer gradually, but never
+        // beyond two tokens or the team's actual available balance.
+        const maximumTokensThisRound = Math.min(
+            2,
+            availableTokens,
+            originalTokens + roundIndex + 1
+        );
+
+        const nextTokens = Math.max(
+            Number(currentPitch.tokensOffered) || 0,
+            Math.min(maximumTokensThisRound, requestedTokens)
+        );
+
+        const nextPitch = {
+            ...currentPitch,
+            rolePromised: nextRole,
+            promiseType: nextPromiseType,
+            tokensOffered: nextTokens
+        };
+
+        const termsChanged =
+            nextPitch.rolePromised !== currentPitch.rolePromised ||
+            nextPitch.promiseType !== currentPitch.promiseType ||
+            nextPitch.tokensOffered !== currentPitch.tokensOffered;
+
+        // Do not waste another round repeating an offer the AI
+        // is unwilling or unable to improve.
+        if (!termsChanged) {
+            break;
+        }
+
+        currentPitch = nextPitch;
+    }
+
+    return {
+        attempted: true,
+        accepted: false,
+        pitch: null,
+        evaluation: lastEvaluation,
+        reason: 'AI team and player could not reach an agreement.'
     };
 }
 
