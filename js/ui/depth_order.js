@@ -170,26 +170,128 @@ export function renderDepthOrderPane(gameState) {
             ? 'bg-blue-950 text-blue-200'
             : 'bg-rose-950 text-rose-200';
 
-        // Helper to get 2-3 key attributes to preview in compact rows with subtle color highlights (ratings tab model)
+        // Helper to get 6 key attributes to preview in compact rows with subtle color highlights (ratings tab model)
+        // Six position-specific key attributes for compact depth-chart rows.
         const getCompactKeyAttributes = (player, p) => {
-            const getAttr = (group, attr) => Number(player.attributes?.[group]?.[attr]) || 50;
-            const corePos = ['DE', 'DT', 'CB', 'S'].includes(p) ? p : p;
-            
+            const getAttr = (group, attr) => {
+                const value = Number(player.attributes?.[group]?.[attr]);
+                return Number.isFinite(value) ? value : 50;
+            };
+
+            const skill = (label, group, attribute) => ({
+                l: label,
+                v: getAttr(group, attribute)
+            });
+
             let keys = [];
-            if (corePos === 'QB') keys = [{l: 'ACC', v: getAttr('technical', 'throwingAccuracy')}, {l: 'POW', v: getAttr('technical', 'throwPower')}, {l: 'IQ', v: getAttr('mental', 'playbookIQ')}];
-            else if (corePos === 'RB') keys = [{l: 'SPD', v: getAttr('physical', 'speed')}, {l: 'AGI', v: getAttr('physical', 'agility')}, {l: 'STR', v: getAttr('physical', 'strength')}];
-            else if (corePos === 'WR' || corePos === 'SLOT') keys = [{l: 'SPD', v: getAttr('physical', 'speed')}, {l: 'HND', v: getAttr('technical', 'catchingHands')}, {l: 'AGI', v: getAttr('physical', 'agility')}];
-            else if (corePos === 'TE') keys = [{l: 'HND', v: getAttr('technical', 'catchingHands')}, {l: 'BLK', v: getAttr('technical', 'blocking')}, {l: 'STR', v: getAttr('physical', 'strength')}];
-            else if (corePos === 'OL') keys = [{l: 'STR', v: getAttr('physical', 'strength')}, {l: 'BLK', v: getAttr('technical', 'blocking')}, {l: 'IQ', v: getAttr('mental', 'playbookIQ')}];
-            else if (corePos === 'DL' || corePos === 'DE' || corePos === 'DT') keys = [{l: 'STR', v: getAttr('physical', 'strength')}, {l: 'BSH', v: getAttr('technical', 'blockShedding')}, {l: 'TKL', v: getAttr('technical', 'tackling')}];
-            else if (corePos === 'LB') keys = [{l: 'TKL', v: getAttr('technical', 'tackling')}, {l: 'SPD', v: getAttr('physical', 'speed')}, {l: 'IQ', v: getAttr('mental', 'playbookIQ')}];
-            else keys = [{l: 'COV', v: getAttr('technical', 'coverage') || getAttr('technical', 'passCoverage')}, {l: 'SPD', v: getAttr('physical', 'speed')}, {l: 'TKL', v: getAttr('technical', 'tackling')}];
+
+            if (p === 'QB') {
+                keys = [
+                    skill('ACC', 'technical', 'throwingAccuracy'),
+                    skill('POW', 'technical', 'throwPower'),
+                    skill('IQ', 'mental', 'playbookIQ'),
+                    skill('DEC', 'mental', 'decisionMaking'),
+                    skill('CLT', 'mental', 'clutch'),
+                    skill('CON', 'mental', 'consistency')
+                ];
+            } else if (p === 'RB') {
+                keys = [
+                    skill('SPD', 'physical', 'speed'),
+                    skill('AGI', 'physical', 'agility'),
+                    skill('STR', 'physical', 'strength'),
+                    skill('CAR', 'technical', 'carrying'),
+                    skill('EXP', 'physical', 'explosiveness'),
+                    skill('STA', 'physical', 'stamina')
+                ];
+            } else if (p === 'WR' || p === 'SLOT') {
+                keys = [
+                    skill('SPD', 'physical', 'speed'),
+                    skill('HND', 'technical', 'catchingHands'),
+                    skill('AGI', 'physical', 'agility'),
+                    skill('JMP', 'physical', 'jumping'),
+                    skill('IQ', 'mental', 'playbookIQ'),
+                    skill('CON', 'mental', 'consistency')
+                ];
+            } else if (p === 'TE') {
+                keys = [
+                    skill('HND', 'technical', 'catchingHands'),
+                    skill('BLK', 'technical', 'blocking'),
+                    skill('STR', 'physical', 'strength'),
+                    skill('SPD', 'physical', 'speed'),
+                    skill('AGI', 'physical', 'agility'),
+                    skill('IQ', 'mental', 'playbookIQ')
+                ];
+            } else if (p === 'OL') {
+                keys = [
+                    skill('STR', 'physical', 'strength'),
+                    skill('BLK', 'technical', 'blocking'),
+                    skill('IQ', 'mental', 'playbookIQ'),
+                    skill('EXP', 'physical', 'explosiveness'),
+                    skill('TGH', 'mental', 'toughness'),
+                    skill('STA', 'physical', 'stamina')
+                ];
+            } else if (p === 'DE') {
+                keys = [
+                    skill('STR', 'physical', 'strength'),
+                    skill('BSH', 'technical', 'blockShedding'),
+                    skill('TKL', 'technical', 'tackling'),
+                    skill('SPD', 'physical', 'speed'),
+                    skill('EXP', 'physical', 'explosiveness'),
+                    skill('STA', 'physical', 'stamina')
+                ];
+            } else if (p === 'DT' || p === 'DL') {
+                keys = [
+                    skill('STR', 'physical', 'strength'),
+                    skill('BSH', 'technical', 'blockShedding'),
+                    skill('TKL', 'technical', 'tackling'),
+                    skill('IQ', 'mental', 'playbookIQ'),
+                    skill('TGH', 'mental', 'toughness'),
+                    skill('STA', 'physical', 'stamina')
+                ];
+            } else if (p === 'LB') {
+                keys = [
+                    skill('TKL', 'technical', 'tackling'),
+                    skill('SPD', 'physical', 'speed'),
+                    skill('IQ', 'mental', 'playbookIQ'),
+                    skill('STR', 'physical', 'strength'),
+                    skill('AGI', 'physical', 'agility'),
+                    skill('COV', 'technical', 'coverage')
+                ];
+            } else if (p === 'CB') {
+                keys = [
+                    skill('COV', 'technical', 'coverage'),
+                    skill('SPD', 'physical', 'speed'),
+                    skill('AGI', 'physical', 'agility'),
+                    skill('HND', 'technical', 'catchingHands'),
+                    skill('JMP', 'physical', 'jumping'),
+                    skill('IQ', 'mental', 'playbookIQ')
+                ];
+            } else if (p === 'S') {
+                keys = [
+                    skill('SPD', 'physical', 'speed'),
+                    skill('COV', 'technical', 'coverage'),
+                    skill('TKL', 'technical', 'tackling'),
+                    skill('STR', 'physical', 'strength'),
+                    skill('HND', 'technical', 'catchingHands'),
+                    skill('IQ', 'mental', 'playbookIQ')
+                ];
+            } else {
+                keys = [
+                    skill('SPD', 'physical', 'speed'),
+                    skill('COV', 'technical', 'coverage'),
+                    skill('TKL', 'technical', 'tackling'),
+                    skill('HND', 'technical', 'catchingHands'),
+                    skill('AGI', 'physical', 'agility'),
+                    skill('IQ', 'mental', 'playbookIQ')
+                ];
+            }
 
             return keys.map(k => {
                 let badgeStyle = 'bg-slate-100 text-slate-700 border-slate-200';
                 if (k.v >= 80) badgeStyle = 'bg-emerald-50 text-emerald-800 border-emerald-200 font-bold';
                 else if (k.v >= 70) badgeStyle = 'bg-blue-50 text-blue-800 border-blue-200 font-semibold';
-                return `<span class="${badgeStyle} border px-1 rounded text-[9px] font-mono"><span class="opacity-75">${k.l}</span> ${k.v}</span>`;
+
+                return `<span class="${badgeStyle} border px-0.5 rounded text-[8px] leading-tight font-mono whitespace-nowrap"><span class="opacity-75">${k.l}</span> ${k.v}</span>`;
             }).join('');
         };
 
@@ -300,7 +402,7 @@ export function renderDepthOrderPane(gameState) {
                                         <span class="text-[10px] text-slate-500 font-mono">
                                             Age ${player.age} · <span class="${energy < 60 ? 'text-rose-600 font-bold' : ''}">NRG ${energy}%</span>
                                         </span>
-                                        <div class="flex items-center gap-1">
+                                        <div class="flex items-center gap-0.5 flex-wrap">
                                             ${skillPills}
                                         </div>
                                     </div>
