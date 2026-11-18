@@ -175,7 +175,7 @@ export function checkBlockCollisions(playState, gameLog = null) {
         if (isPassBlock && (playState.ballState?.inAir || playState.ballState?.throwTick)) return;
 
         const eligibleDefenders = defenders.filter(d => {
-            if (isPassBlock && !(d.role === 'DL' || d.assignment?.includes('rush') || d.assignment?.includes('blitz'))) {
+            if (isPassBlock && (d.assignment?.startsWith('zone_') || !(d.role === 'DL' || d.assignment?.includes('rush') || d.assignment?.includes('blitz')))) {
                 return false;
             }
             if (ballCarrier && ballCarrier.isOffense && !playState.ballState.inAir && !isPocketPasser) {

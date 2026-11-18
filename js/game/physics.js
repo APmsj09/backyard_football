@@ -650,9 +650,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             if (along <= 0.05 || along >= 0.95 || along >= nearestProjection) continue;
 
             // Ignore blocks that are not close enough to obstruct the path laterally.
-            // 1.65 yards represents the approximate physical width of two engaged players.
+            // Pullers/screen linemen running lateral paths only avoid bodies directly in their lane.
             const lateralDistance = Math.abs(offsetX * dy - offsetY * dx) / safeDist;
-            if (lateralDistance >= 1.65) continue; 
+            const maxAvoidWidth = isBlockingPathRunner ? 1.15 : 1.65;
+            if (lateralDistance >= maxAvoidWidth) continue; 
 
             nearestProjection = along;
 
@@ -667,10 +668,17 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
             const directX = steeringX;
             const directY = steeringY;
 
-            // Keep perpendicular blend <= 0.65 (~33 deg) so diagonal paths
-            // never rotate past 90 deg and reverse away from the target.
-            steeringX = directX + (directY * avoidanceSide * 0.65);
-            steeringY = directY - (directX * avoidanceSide * 0.65);
+            // Keep perpendicular blend <= 0.65 (~33 deg); for lateral pull/screen paths
+            // never let obstacle avoidance rotate steering backward away from the target Y.
+            let nextSteeringX = directX + (directY * avoidanceSide * 0.65);
+            let nextSteeringY = directY - (directX * avoidanceSide * 0.65);
+            if (isBlockingPathRunner && directY >= 0 && nextSteeringY < 0) {
+                nextSteeringX = directX - (directY * avoidanceSide * 0.65);
+                nextSteeringY = Math.max(0, directY + (directX * avoidanceSide * 0.65));
+            }
+
+            steeringX = nextSteeringX;
+            steeringY = nextSteeringY;
 
             const steeringMagnitude = Math.hypot(steeringX, steeringY);
             if (steeringMagnitude > 0.001) {
@@ -687,8 +695,10 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
     // of progress does not snap the receiver right back into the defender.
     const isRouteRunner =
         pState.isOffense &&
-        pState.action === 'run_route' &&
-        pState.movementMode === 'ROUTE';
+        (
+            (pState.action === 'run_route' && pState.movementMode === 'ROUTE') ||
+            (pState.action === 'route_complete' && pState.movementMode === 'POINT')
+        );
 
     const isPassTargetTracker =
         pState.isOffense &&
@@ -1017,7 +1027,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
                 pState.movementMode === 'ROUTE'
             ) ||
             (
-                pState.action === 'tracking_ball' &&
+                (pState.action === 'tracking_ball' || pState.action === 'route_complete') &&
                 pState.movementMode === 'POINT'
             )
         );

@@ -182,7 +182,7 @@ function addStat(player, key, amount = 1) {
 }
 
 function prepareStats(team) {
-    getRosterObjects(team).forEach(player => {
+    getGameDayRosterObjects(team).forEach(player => {
         if (!player) return;
         if (!player.gameStats || typeof player.gameStats !== 'object') player.gameStats = {};
         STAT_FIELDS.forEach(key => {
@@ -470,7 +470,7 @@ function pickBackups(roster, used, position, count = 1) {
 }
 
 function buildLineup(team) {
-    const roster = getRosterObjects(team).filter(Boolean);
+    const roster = getGameDayRosterObjects(team).filter(Boolean);
 
     const offenseFormationName =
         team?.formations?.offense || 'Balanced';
@@ -2118,7 +2118,12 @@ function resolveFourthDownPunt(offense, defense, ballOn, offenseTeam, defenseTea
 
     // Touchback into receiving team's end zone -> receiving team starts at 20.
     if (landYardLine >= 100) {
-        return { nextBallOn: 20, touchback: true };
+        return {
+            nextBallOn: 20,
+            touchback: true,
+            punter,
+            returner
+        };
     }
 
     let returnYards = 0;
@@ -2151,7 +2156,9 @@ function resolveFourthDownPunt(offense, defense, ballOn, offenseTeam, defenseTea
 
     return {
         nextBallOn: clamp((100 - landYardLine) + returnYards, 5, 95),
-        touchback: false
+        touchback: false,
+        punter,
+        returner
     };
 }
 
@@ -2275,7 +2282,7 @@ export function simulateYouthMatch(homeTeam, awayTeam) {
         const activeOffWrap = getActiveSnapLineup(baseOffense, quarter, scoreDiff, offFatigueMap);
         const activeDefWrap = getActiveSnapLineup(baseDefense, quarter, -scoreDiff, defFatigueMap);
 
-        // Handle 4th-down punt decision before simulating an offensive snap
+        // Handle 4th-down punt decision before simulating an offensive snap.
         if (shouldPuntOnFourthDown(offenseTeam, down, yardsToGo, ballOn, scoreDiff, quarter, clockRemaining)) {
             const puntResult = resolveFourthDownPunt(
                 activeOffWrap.offense,
@@ -2284,6 +2291,34 @@ export function simulateYouthMatch(homeTeam, awayTeam) {
                 offenseTeam,
                 defenseTeam
             );
+
+            // Count the normal active lineups plus the actual punt specialists.
+            // recordSnaps() deduplicates players who already occupy another role.
+            recordSnaps(
+                {
+                    offense: {
+                        ...activeOffWrap.offense,
+                        receivers: [
+                            ...(activeOffWrap.offense.receivers || []),
+                            puntResult.punter
+                        ].filter(Boolean)
+                    },
+                    defense: {
+                        ...activeDefWrap.defense,
+                        all: [
+                            ...(activeDefWrap.defense.all || []),
+                            puntResult.returner
+                        ].filter(Boolean)
+                    }
+                },
+                new Set([
+                    ...(baseOffense.twoWayIds || []),
+                    ...(baseDefense.twoWayIds || [])
+                ]),
+                offFatigueMap,
+                defFatigueMap
+            );
+
             plays++;
             offenseTeam = defenseTeam;
             ballOn = puntResult.nextBallOn;

@@ -558,7 +558,7 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             let targetDepth = 0;
                             if (isScreen) targetDepth = 12.0;
                             else if (isShotgun) {
-                                if (isQuick) targetDepth = initialDepth;
+                                if (isQuick) targetDepth = initialDepth + 1.0;
                                 else if (isDeep) targetDepth = 10.0;
                                 else targetDepth = 7.5;
                             } else {
@@ -740,19 +740,16 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                         );
 
                         // Give priority to threats without an active or explicit primary assignment.
-                        // If every threat already has coverage, allow a helper.
+                        // If every threat already has a primary assignment, bracket a WR/TE rather than stealing a later DB's RB.
                         const unreservedThreats = offensiveThreats.filter(
                             threat =>
                                 !coveredOffensiveSlots.has(threat.slot) &&
                                 !explicitlyCoveredSlots.has(threat.slot)
                         );
-                        const uncoveredThreats = offensiveThreats.filter(
-                            threat => !coveredOffensiveSlots.has(threat.slot)
-                        );
 
                         const candidates = unreservedThreats.length > 0
                             ? unreservedThreats
-                            : (uncoveredThreats.length > 0 ? uncoveredThreats : offensiveThreats);
+                            : offensiveThreats;
 
                         const getTargetScore = threat => {
                             const targetPosition = threat.slot.replace(/\d+/g, '');
@@ -841,19 +838,19 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             p => !p.isOffense && p.assignment === assignment
                         ).length;
 
+                        let baseXOffset = isRB
+                            ? (tState.x < CENTER_X ? -1.5 : 1.5)
+                            : xOffset;
+
                         if (existingCoverers === 1) {
-                            xOffset *= -2.5;
+                            baseXOffset *= -2.0;
                             yOffset += 2.0;
                         } else if (existingCoverers >= 2) {
-                            xOffset = 0;
+                            baseXOffset = 0;
                             yOffset += 4.0;
                         }
 
-                        const desiredX = tState.x + (
-                            isRB
-                                ? (tState.x < CENTER_X ? -1.5 : 1.5)
-                                : xOffset
-                        );
+                        const desiredX = tState.x + baseXOffset;
 
                         // In pure man coverage, defenders line up directly across from their man laterally.
                         // We do not clamp them to base formation lanes.
@@ -861,12 +858,12 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
 
                         if (isRB && isLB) {
                             // Linebackers covering RBs maintain standard linebacker depth
-                            startY = playState.lineOfScrimmage + 4.5;
+                            startY = playState.lineOfScrimmage + 4.5 + (existingCoverers * 1.5);
                         } else if (isRB) {
                             startY = Math.max(
-                                formationStartY,
-                                playState.lineOfScrimmage + 2.0
-                            );
+                                playState.lineOfScrimmage + 2.0,
+                                Math.min(formationStartY, playState.lineOfScrimmage + 7.5)
+                            ) + (existingCoverers * 2.0);
                         } else {
                             startY = tState.y + yOffset;
                         }
@@ -878,13 +875,19 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                 } else if (assignment.startsWith('zone_')) {
                     const zoneCenter = getZoneCenter(assignment, playState.lineOfScrimmage);
 
-                    // Spatial sanity check: If the formation places a defender >6 yards on the
-                    // wrong side of the field from their assigned zone center, shift their pre-snap alignment
-                    // towards their zone so they don't have to sprint 25 yards across the field at the snap.
+                    // Spatial sanity check: Keep non-deep zone LBs near box/apex leverage rather than on the sideline,
+                    // and avoid sliding underneath DBs directly onto outside cornerbacks.
                     if (zoneCenter && Number.isFinite(zoneCenter.x)) {
                         const lateralOffset = zoneCenter.x - startX;
                         if (Math.abs(lateralOffset) > 6.0) {
-                            startX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, startX + (lateralOffset * 0.70)));
+                            const isDeepZone = assignment.includes('deep');
+                            const isLB = slot.startsWith('LB');
+                            const shiftFactor = (isLB && !isDeepZone) ? 0.35 : (isDeepZone ? 0.70 : 0.45);
+                            let shiftedX = startX + (lateralOffset * shiftFactor);
+                            if (isLB && !isDeepZone) {
+                                shiftedX = Math.max(ballX - 7.5, Math.min(ballX + 7.5, shiftedX));
+                            }
+                            startX = Math.max(2.0, Math.min(FIELD_WIDTH - 2.0, shiftedX));
                         }
                     }
 
@@ -3043,11 +3046,14 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         const scanInterval = Math.max(10, Math.round(40 - (iq * 0.3)));
                         if (pState._scrambleTargetX === undefined || playState.tick % scanInterval === 0) {
                             const visionWidth = 4.0 + (iq * 0.05);
+                            const isSameSideAsRollout = Math.sign(pState.initialX - CENTER_X) === rolloutDir;
                             const candidates = [
-                                { x: pState.x + (rolloutDir * visionWidth), y: pState.y + 2.0 },
-                                { x: pState.x - (rolloutDir * 2.0), y: pState.y + 3.0 },
-                                { x: qbState.x + (rolloutDir * 4.0), y: Math.max(LOS + 3, qbState.y + 2.0) },
-                                { x: pState.x, y: pState.y + 5.0 }
+                                { x: pState.x + (rolloutDir * visionWidth), y: Math.min(118.0, pState.y + 2.0) },
+                                { x: pState.x - (rolloutDir * 2.5), y: Math.min(118.0, pState.y + 3.0) },
+                                isSameSideAsRollout
+                                    ? { x: qbState.x + (rolloutDir * 4.0), y: Math.max(LOS + 3, Math.min(118.0, qbState.y + 2.0)) }
+                                    : { x: Math.max(4, Math.min(FIELD_WIDTH - 4, pState.initialX)), y: Math.max(LOS + 4, Math.min(118.0, pState.y - 2.0)) },
+                                { x: pState.x, y: Math.min(118.0, pState.y + 4.0) }
                             ];
 
                             let bestX = pState.x;
@@ -3055,7 +3061,7 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                             let maxOpenScore = -Infinity;
 
                             candidates.forEach(pt => {
-                                if (pt.x < 2 || pt.x > FIELD_WIDTH - 2 || pt.y < LOS || pt.y > 115) return;
+                                if (pt.x < 2 || pt.x > FIELD_WIDTH - 2 || pt.y < LOS || pt.y > 118.5) return;
 
                                 let minDefDist = Infinity;
                                 defenseStates.forEach(def => {
@@ -4036,8 +4042,9 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
             // In Cover 3 / Cover 1, deep middle also picks up inward-breaking posts from outside thirds
             if (isDeep && assignment === 'zone_deep_middle' && !isTampa2LB) {
                 const breakingInward = (o.vy || 0) > 2.5 &&
+                    Math.abs(o.vx || 0) >= 1.5 &&
                     Math.sign(o.vx || 0) === Math.sign(CENTER_X - o.x) &&
-                    Math.abs(o.x - CENTER_X) < 16.0;
+                    Math.abs(o.x - CENTER_X) < 13.5;
                 if (breakingInward && o.y >= minY && o.y <= maxY) return true;
             }
             return o.x >= minX && o.x <= maxX && o.y >= minY && o.y <= maxY;

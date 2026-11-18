@@ -180,11 +180,11 @@ export const routeTree = {
     'lead_right_wide': { path: [{ x: 5, y: 0.8 }, { x: 8, y: 4 }] },
     'lead_left_wide': { path: [{ x: -5, y: 0.8 }, { x: -8, y: 4 }] },
     'lead_wedge': { path: [{ x: 0, y: 1.0 }, { x: 0, y: 3.5 }] },
-    'pull_right': { path: [{ x: -0.5, y: -1.0 }, { x: 4, y: -0.5 }, { x: 5, y: 3 }], mirror: false },
-    'pull_left': { path: [{ x: 0.5, y: -1.0 }, { x: -4, y: -0.5 }, { x: -5, y: 3 }], mirror: false },
-    'pull_right_wide': { path: [{ x: -0.5, y: -1.0 }, { x: 6, y: -0.5 }, { x: 7, y: 4 }], mirror: false },
-    'pull_left_wide': { path: [{ x: 0.5, y: -1.0 }, { x: -6, y: -0.5 }, { x: -7, y: 4 }], mirror: false },
-    'screen_block': { path: [{ x: 0, y: -1 }, { x: -5, y: -0.5 }, { x: -8, y: 5 }], mirror: false },
+    'pull_right': { path: [{ x: -0.5, y: -1.4 }, { x: 4, y: -1.2 }, { x: 5, y: 3 }], mirror: false },
+    'pull_left': { path: [{ x: 0.5, y: -1.4 }, { x: -4, y: -1.2 }, { x: -5, y: 3 }], mirror: false },
+    'pull_right_wide': { path: [{ x: -0.5, y: -1.4 }, { x: 6, y: -1.2 }, { x: 7, y: 4 }], mirror: false },
+    'pull_left_wide': { path: [{ x: 0.5, y: -1.4 }, { x: -6, y: -1.2 }, { x: -7, y: 4 }], mirror: false },
+    'screen_block': { path: [{ x: 0, y: -1.4 }, { x: -5, y: -1.2 }, { x: -8, y: 5 }], mirror: false },
     'Screen_Wait': { path: [{ x: 0, y: -1 }, { x: 4, y: -1 }, { x: 5, y: 1 }] },
     'Wall_Alley_Left': { path: [{ x: -2, y: -1 }, { x: -8, y: 1 }, { x: -10, y: 5 }] },
     'Wall_Alley_Right': { path: [{ x: 2, y: -1 }, { x: 8, y: 1 }, { x: 10, y: 5 }] }
@@ -1869,7 +1869,7 @@ export const defensivePlaybook = {
         tags: ['runStop', 'blitz'],
         assignments: {
             'DL1': 'run_edge_left', 'DL2': 'run_gap_A_left', 'DL3': 'run_gap_A_right', 'DL4': 'run_edge_right',
-            'LB1': 'blitz_gap', 'LB2': 'blitz_gap',
+            'LB1': 'blitz_gap', 'LB2': 'man_cover_Y',
             'DB1': 'man_cover_X',
             'DB2': 'man_cover_Z'
         }
@@ -2058,8 +2058,8 @@ export const defensivePlaybook = {
         compatibleFormations: ['3-1-4'],
         tags: ['zone', 'blitz', 'firezone'],
         assignments: {
-            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'zone_short_middle',
-            'LB1': 'blitz_edge',
+            'DL1': 'pass_rush', 'DL2': 'pass_rush', 'DL3': 'zone_hook_curl_right',
+            'LB1': 'blitz_gap',
             'DB1': 'zone_deep_third_left', 'DB2': 'zone_deep_third_right', 'DB3': 'zone_flat_left', 'DB4': 'zone_deep_middle'
         }
     },

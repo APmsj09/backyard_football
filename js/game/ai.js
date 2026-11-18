@@ -1276,8 +1276,9 @@ export function calculateSafetyHelp(safetyState, defenseStates, offenseStates, b
             } else if (isDeepMiddle) {
                 const breakingTowardMiddle =
                     (receiver.vy || 0) > 2.5 &&
+                    Math.abs(receiver.vx || 0) >= 1.5 &&
                     Math.sign(receiver.vx || 0) === Math.sign(CENTER_X - receiver.x) &&
-                    Math.abs(receiver.x - CENTER_X) < 16.0;
+                    Math.abs(receiver.x - CENTER_X) < 13.5;
                 inMyZone = Math.abs(receiver.x - CENTER_X) < 11.5 || breakingTowardMiddle;
             }
 
@@ -2466,14 +2467,15 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 Math.abs(projDefX - projRecX) < 4.5 &&
                 projDist < 7.0;
 
-            if (projDist < 2.5) {
+            if (projDist < 2.3) {
                 defendersClosingIn = Math.min(3, defendersClosingIn + 1);
-            } else if (isOverTheTop || (isSafetyOrDeepDB && projDist < 5.0)) {
-                minProjectedSeparation = Math.min(minProjectedSeparation, projDist * 0.75); // Shrink perceived window for closing help
+            } else if ((isOverTheTop || (isSafetyOrDeepDB && projDist < 5.0)) && qbProcessing >= 0.45) {
+                const safetyReadFactor = 0.72 + ((1 - qbProcessing) * 0.25);
+                minProjectedSeparation = Math.min(minProjectedSeparation, projDist * safetyReadFactor);
                 defendersClosingIn = Math.min(3, defendersClosingIn + 1);
             }
 
-            // Undercut recognition: capped so it cannot blow up exponentially
+            // Undercut recognition: scaled by QB processing so lower-IQ QBs occasionally throw into lurking underneath defenders
             const distDefToQB = Math.hypot(projDefX - qbState.x, projDefY - qbState.y);
             if (distDefToQB < distFromQB - 2.0 && distDefToQB > 3.0) {
                 const dx = projRecX - qbState.x;
@@ -2482,13 +2484,23 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
                 const defDy = projDefY - qbState.y;
                 const dot = (dx * defDx + dy * defDy) / (distFromQB * distDefToQB);
                 if (dot > 0.92) {
-                    undercutThreat = Math.min(2.0, undercutThreat + 1.0);
+                    undercutThreat = Math.min(2.0, undercutThreat + (0.40 + (qbProcessing * 0.60)));
                 }
             }
         });
 
+        // Latch slight per-play, per-target read misjudgment based on (100 - qbProcessing)
+        if (!qbState._targetEvalBias || qbState._targetEvalBiasPlayId !== playState.playId) {
+            qbState._targetEvalBias = {};
+            qbState._targetEvalBiasPlayId = playState.playId;
+        }
+        if (qbState._targetEvalBias[rec.slot] === undefined) {
+            const evalSpread = Math.max(0.5, (1.0 - qbProcessing) * 14.0);
+            qbState._targetEvalBias[rec.slot] = (Math.random() - 0.42) * evalSpread;
+        }
+
         // Base score directly proportional to projected separation
-        let score = Math.min(minProjectedSeparation, 6) * 10;
+        let score = (Math.min(minProjectedSeparation, 6) * 11) + qbState._targetEvalBias[rec.slot];
 
         // Waiting on breaking routes before the cut (allow anticipation when pressured)
         const needsToWait = ['dig', 'corner', 'post', 'out', 'in', 'comeback', 'postcorner', 'sluggo', 'out_and_up', 'hitch_and_go', 'texas'].some(r => routeAssignment.includes(r));
@@ -2626,18 +2638,18 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             score += Math.min(10, (minProjectedSeparation - 2.0) * 2.5);
         }
 
-        if (minProjectedSeparation < 1.5) {
-            const tightWindowPenalty = (1.5 - minProjectedSeparation) * (2.0 + ((100 - qbDecision) / 25));
+        if (minProjectedSeparation < 1.4) {
+            const tightWindowPenalty = (1.4 - minProjectedSeparation) * (1.8 + ((100 - qbDecision) / 30));
             score -= tightWindowPenalty * 3.0;
         }
 
         // Clean, non-multiplying penalties for closing defenders
         if (defendersClosingIn === 1) {
-            score -= 12;
+            score -= 6;
         } else if (defendersClosingIn === 2) {
-            score -= 24 + ((100 - qbDecision) * 0.12);
+            score -= 20 + ((100 - qbDecision) * 0.12);
         } else if (defendersClosingIn >= 3) {
-            score -= 38 + ((100 - qbDecision) * 0.18);
+            score -= 34 + ((100 - qbDecision) * 0.18);
         }
 
         // Deep throw difficulty scaling (clean and proportional)
@@ -2645,18 +2657,18 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             if (qbPower < 60) {
                 score -= (60 - qbPower) * 1.0;
             }
-            if (minProjectedSeparation >= 3.0 && defendersClosingIn === 0) {
+            if (minProjectedSeparation >= 2.5 && defendersClosingIn <= 1) {
                 score += 5 + (qbIQ * 0.04);
             }
             // Add a small penalty for deep routes to make QBs hesitate unless it's a great look
-            if (depth > 20 && minProjectedSeparation < 4.0) {
-                score -= 8;
+            if (depth > 20 && minProjectedSeparation < 3.5) {
+                score -= 6;
             }
         }
 
         // Undercut penalty
         if (undercutThreat > 0) {
-            score -= undercutThreat * 15;
+            score -= undercutThreat * 12;
         }
 
         // ======================================================
@@ -3021,11 +3033,11 @@ export function updateQBDecision(qbState, offenseStates, defenseStates, playStat
             }
         }
 
-        let THROW_THRESHOLD = 32;
+        let THROW_THRESHOLD = 27;
 
         // Early downs: stay patient.
         if (down <= 2) {
-            THROW_THRESHOLD += 5;
+            THROW_THRESHOLD += 4;
         }
 
         // Third/fourth down: accept more risk when the sticks demand it.
