@@ -15,6 +15,8 @@ import {
     offensivePlaybook, defensivePlaybook,
     teamNames, divisionNames, relationshipLevels
 } from '../data.js';
+
+import { getTeamBranding } from '../team_branding.js';
 import {
     getOffensivePlayKnowledge,
     getDefensivePlayKnowledge
@@ -1260,23 +1262,6 @@ export function getCurrentRosterLimit(gameState) {
     return ROSTER_LIMIT;
 }
 
-const teamColors = [
-    { primary: '#DC2626', secondary: '#FFFFFF' },
-    { primary: '#2563EB', secondary: '#FFFFFF' },
-    { primary: '#FBBF24', secondary: '#000000' },
-    { primary: '#D1D5DB', secondary: '#000000' },
-    { primary: '#10B981', secondary: '#000000' },
-    { primary: '#F97316', secondary: '#FFFFFF' },
-    { primary: '#6366F1', secondary: '#FFFFFF' },
-    { primary: '#EC4899', secondary: '#FFFFFF' },
-    { primary: '#000000', secondary: '#FFFFFF' },
-    { primary: '#84CC16', secondary: '#000000' },
-    { primary: '#A855F7', secondary: '#FFFFFF' },
-    { primary: '#14B8A6', secondary: '#FFFFFF' }
-];
-
-let availableColors = [...teamColors];
-
 function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
 export function buildSocialNetworks(targetPlayers, allPlayers) {
@@ -1496,7 +1481,6 @@ export async function initializeLeague(onProgress) {
     if (onProgress) onProgress(0.9);
     await yieldToMain();
 
-    availableColors = [...teamColors];
     const availableTeamNames = [...teamNames];
 
     for (let i = 0; i < 20; i++) {
@@ -1511,8 +1495,7 @@ export async function initializeLeague(onProgress) {
         const offenseFormationData = offenseFormations[prefOff] || offenseFormations['Balanced'];
         const defenseFormationData = defenseFormations[prefDef] || defenseFormations['3-2-3'];
 
-        if (availableColors.length === 0) availableColors = [...teamColors];
-        const colorSet = availableColors.splice(getRandomInt(0, availableColors.length - 1), 1)[0];
+        const teamBranding = getTeamBranding(teamName, 'main');
 
         const team = {
             id: crypto.randomUUID(), name: teamName, roster: [], coach, wins: 0, losses: 0,
@@ -1520,8 +1503,11 @@ export async function initializeLeague(onProgress) {
             tier: tier,
             ageMin: 12,
             ageMax: 18,
-            primaryColor: colorSet?.primary || teamColors[0].primary,
-            secondaryColor: colorSet?.secondary || teamColors[0].secondary,
+            primaryColor: teamBranding?.primaryColor || '#1E293B',
+            secondaryColor: teamBranding?.secondaryColor || '#FFFFFF',
+            alternatePrimaryColor: teamBranding?.alternatePrimaryColor || '#F8FAFC',
+            alternateSecondaryColor: teamBranding?.alternateSecondaryColor || '#1E293B',
+            logoId: teamBranding?.logoId || null,
             formations: { offense: prefOff, defense: prefDef },
             depthChart: {
                 offense: Object.fromEntries((offenseFormationData?.slots || []).map(slot => [slot, null])),
@@ -1600,13 +1586,21 @@ export async function initializeLeague(onProgress) {
     ];
 
     for (let i = 0; i < youthMascots.length; i++) {
+        const youthTeamName = `The ${youthMascots[i]}`;
+        const youthBranding = getTeamBranding(youthTeamName, 'youth');
+
         const yTeam = {
-            id: crypto.randomUUID(), name: `The ${youthMascots[i]}`, roster: [],
+            id: crypto.randomUUID(), name: youthTeamName, roster: [],
             coach: getRandom(coachPersonalities), wins: 0, losses: 0, ties: 0,
             leagueType: 'youth',
             tier: null,
             ageMin: 8,
             ageMax: 11,
+            primaryColor: youthBranding?.primaryColor || '#475569',
+            secondaryColor: youthBranding?.secondaryColor || '#FFFFFF',
+            alternatePrimaryColor: youthBranding?.alternatePrimaryColor || '#F8FAFC',
+            alternateSecondaryColor: youthBranding?.alternateSecondaryColor || '#475569',
+            logoId: youthBranding?.logoId || null,
             formations: { offense: 'Balanced', defense: '3-2-3' },
             depthChart: { offense: {}, defense: {}, special: { P: null } },
             isYouth: true

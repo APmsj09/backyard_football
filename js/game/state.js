@@ -1490,33 +1490,91 @@ const compactNonZeroStats = (stats) => {
 
 let scheduledSaveTimer = null;
 let scheduledSaveKey = null;
+let scheduledSaveMode = null;
+
+function cancelScheduledSaveTimer() {
+    if (scheduledSaveTimer === null) return;
+
+    if (
+        scheduledSaveMode === 'idle' &&
+        typeof window !== 'undefined' &&
+        typeof window.cancelIdleCallback === 'function'
+    ) {
+        window.cancelIdleCallback(scheduledSaveTimer);
+    } else {
+        clearTimeout(scheduledSaveTimer);
+    }
+
+    scheduledSaveTimer = null;
+    scheduledSaveMode = null;
+}
+
+function runScheduledSave() {
+    scheduledSaveTimer = null;
+    scheduledSaveMode = null;
+
+    const key = scheduledSaveKey || DEFAULT_SAVE_KEY;
+    scheduledSaveKey = null;
+
+    saveGameState(key);
+}
 
 export function flushScheduledSaveGameState() {
     if (scheduledSaveTimer !== null) {
-        clearTimeout(scheduledSaveTimer);
-        scheduledSaveTimer = null;
         const key = scheduledSaveKey || DEFAULT_SAVE_KEY;
+
+        cancelScheduledSaveTimer();
         scheduledSaveKey = null;
+
         return saveGameState(key);
     }
+
     return false;
 }
 
-export function scheduleSaveGameState(saveKey = currentSaveSlotKey, delayMs = 400) {
-    scheduledSaveKey = typeof saveKey === 'string' ? saveKey : currentSaveSlotKey;
-    if (scheduledSaveTimer !== null) clearTimeout(scheduledSaveTimer);
+export function scheduleSaveGameState(
+    saveKey = currentSaveSlotKey,
+    delayMs = 400
+) {
+    scheduledSaveKey =
+        typeof saveKey === 'string'
+            ? saveKey
+            : currentSaveSlotKey;
+
+    cancelScheduledSaveTimer();
+
+    // Preserve the existing debounce before requesting an idle save.
+    scheduledSaveMode = 'timeout';
+
     scheduledSaveTimer = setTimeout(() => {
         scheduledSaveTimer = null;
-        const key = scheduledSaveKey || DEFAULT_SAVE_KEY;
-        scheduledSaveKey = null;
-        saveGameState(key);
+        scheduledSaveMode = null;
+
+        if (
+            typeof window !== 'undefined' &&
+            typeof window.requestIdleCallback === 'function' &&
+            typeof window.cancelIdleCallback === 'function'
+        ) {
+            scheduledSaveMode = 'idle';
+
+            scheduledSaveTimer = window.requestIdleCallback(
+                runScheduledSave,
+                { timeout: 2000 }
+            );
+        } else {
+            // Compatibility fallback for browsers without idle callbacks.
+            scheduledSaveMode = 'timeout';
+            scheduledSaveTimer = setTimeout(
+                runScheduledSave,
+                250
+            );
+        }
     }, delayMs);
 }
 
 export function saveGameState(targetOrKey = DEFAULT_SAVE_KEY, maybeKey = null) {
     if (scheduledSaveTimer !== null) {
-        clearTimeout(scheduledSaveTimer);
-        scheduledSaveTimer = null;
+        cancelScheduledSaveTimer();
         scheduledSaveKey = null;
     }
 
