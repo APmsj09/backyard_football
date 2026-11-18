@@ -479,17 +479,28 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                     player => player.slot === mappedQuarterbackSlot
                 );
 
+                const isRunningPAFake = Boolean(
+                    assignment?.startsWith('run_') &&
+                    !assignment.includes('route')
+                );
+
                 if (
+                    !isRunningPAFake &&
                     qbInitialState &&
                     Math.abs(startX - qbInitialState.x) < 1.5
                 ) {
                     const preferredOffsetX = qbInitialState.x + 2.2;
                     const alternateOffsetX = qbInitialState.x - 2.2;
+                    const preferredOccupied = initialOffenseStates.some(
+                        player =>
+                            player.slot !== slot &&
+                            Math.abs(player.x - preferredOffsetX) < 1.5 &&
+                            Math.abs(player.y - startY) < 3.0
+                    );
 
-                    // Use the opposite side near the right boundary rather
-                    // than clamping the back back into the QB's lane.
+                    // Use the opposite side if the preferred lane is occupied or near the boundary.
                     const offsetX =
-                        preferredOffsetX <= FIELD_WIDTH - 0.5
+                        (!preferredOccupied && preferredOffsetX <= FIELD_WIDTH - 0.5)
                             ? preferredOffsetX
                             : alternateOffsetX;
 
@@ -833,9 +844,14 @@ export function setupInitialPlayerStates(playState, offense, defense, play, assi
                             ? 1.5 
                             : (isPressCall ? 2.0 : 5.0);
 
-                        // Keep intentional double coverage staggered.
+                        // Keep intentional double coverage and adjacent backfield coverage staggered.
                         const existingCoverers = playState.activePlayers.filter(
-                            p => !p.isOffense && p.assignment === assignment
+                            p =>
+                                !p.isOffense &&
+                                (
+                                    p.assignment === assignment ||
+                                    (isRB && p.assignment?.startsWith('man_cover_RB'))
+                                )
                         ).length;
 
                         let baseXOffset = isRB
@@ -1737,14 +1753,21 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                 ? (avoidsUnneededDoubleTeam ? 30 : 18)
                 : 0;
 
-            const gapResponsibilityA = isPassPlay ? (laneDiffA * 3.5) : (laneDiffA * 3.0);
-            const gapResponsibilityB = isPassPlay ? (laneDiffB * 3.5) : (laneDiffB * 3.0);
+            const gapResponsibilityA = isPassPlay ? (laneDiffA * 3.5) : (laneDiffA * 4.2);
+            const gapResponsibilityB = isPassPlay ? (laneDiffB * 3.5) : (laneDiffB * 4.2);
+
+            const crossesLaneA = (!isPassPlay && !isDownfieldOpenPlay && Number.isFinite(priorityLaneX) &&
+                Math.sign(a.x - priorityLaneX) !== Math.sign(blocker.x - priorityLaneX) &&
+                Math.abs(a.x - blocker.x) > 4.0) ? 24 : 0;
+            const crossesLaneB = (!isPassPlay && !isDownfieldOpenPlay && Number.isFinite(priorityLaneX) &&
+                Math.sign(b.x - priorityLaneX) !== Math.sign(blocker.x - priorityLaneX) &&
+                Math.abs(b.x - blocker.x) > 4.0) ? 24 : 0;
 
             const runDepthPenaltyA = !isPassPlay
-                ? (Math.max(0, a.y - blocker.y) * 2.5) + ((a.y - LOS > 7.5) ? 15 : 0)
+                ? (Math.max(0, a.y - blocker.y) * 1.8) + ((a.y - LOS > 7.5) ? 15 : 0) + crossesLaneA
                 : Math.max(0, a.y - blocker.y) * 2.5;
             const runDepthPenaltyB = !isPassPlay
-                ? (Math.max(0, b.y - blocker.y) * 2.5) + ((b.y - LOS > 7.5) ? 15 : 0)
+                ? (Math.max(0, b.y - blocker.y) * 1.8) + ((b.y - LOS > 7.5) ? 15 : 0) + crossesLaneB
                 : Math.max(0, b.y - blocker.y) * 2.5;
 
             return (
@@ -2872,7 +2895,26 @@ export function updatePlayerTargets(playState, offenseStates, defenseStates, bal
                         pState._hookDriftY = undefined;
                     }
 
-                    pState.contactReduction = distToNode < 1.0 ? 0.8 : 1.0;
+                    const nextBreakPt = (pState.currentPathIndex + 1 < pState.routePath.length)
+                        ? pState.routePath[pState.currentPathIndex + 1]
+                        : null;
+                    let approachingSharpBreak = false;
+                    if (nextBreakPt && distToNode < 1.8) {
+                        const inDX = pt.x - pState.x;
+                        const inDY = pt.y - pState.y;
+                        const outDX = nextBreakPt.x - pt.x;
+                        const outDY = nextBreakPt.y - pt.y;
+                        const inMag = Math.hypot(inDX, inDY);
+                        const outMag = Math.hypot(outDX, outDY);
+                        if (inMag > 0.2 && outMag > 0.2) {
+                            const breakDot = ((inDX * outDX) + (inDY * outDY)) / (inMag * outMag);
+                            approachingSharpBreak = breakDot < 0.65;
+                        }
+                    }
+
+                    pState.contactReduction = approachingSharpBreak
+                        ? (distToNode < 1.0 ? 0.72 : 0.84)
+                        : (distToNode < 1.0 ? 0.88 : 1.0);
 
                     // Route stall ticks are tracked by updatePlayerPosition()
                     // using actual progress toward the current waypoint.
