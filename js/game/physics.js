@@ -695,7 +695,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         pState.action === 'tracking_ball' &&
         pState.movementMode === 'POINT';
 
-    const routeStallTriggered = (Number(pState._routeWaypointStallTicks) || 0) >= 4;
+    const routeStallTriggered = (Number(pState._routeWaypointStallTicks) || 0) >= 3;
     const isHoldingRouteAvoidance = (Number(pState._routeAvoidanceHoldTicks) || 0) > 0;
 
     if (
@@ -708,6 +708,13 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
         let nearestAlongPath = Infinity;
         let routeObstacle = null;
         let avoidanceSide = 0;
+
+        const isCrossingRoute =
+            pState.assignment?.includes('Slant') ||
+            pState.assignment?.includes('Drag') ||
+            pState.assignment?.includes('Cross');
+
+        const sidestepStrength = isCrossingRoute ? 0.60 : 0.75;
 
         for (const other of allPlayers) {
             // Only react to opposing, upright players. Ignore self, downed,
@@ -768,8 +775,8 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
                 // Score both sidestep directions so we don't dodge one defender straight into another body
                 const scoreSide = side => {
-                    let candX = steeringX + (steeringY * side * 0.70);
-                    let candY = steeringY - (steeringX * side * 0.70);
+                    let candX = steeringX + (steeringY * side * sidestepStrength);
+                    let candY = steeringY - (steeringX * side * sidestepStrength);
                     const mag = Math.hypot(candX, candY) || 1;
                     candX /= mag;
                     candY /= mag;
@@ -795,7 +802,7 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
         if (routeObstacle && avoidanceSide !== 0) {
             if (routeStallTriggered && !isHoldingRouteAvoidance) {
-                pState._routeAvoidanceHoldTicks = 8;
+                pState._routeAvoidanceHoldTicks = 10;
                 pState._routeAvoidanceSide = avoidanceSide;
             } else if (isHoldingRouteAvoidance) {
                 pState._routeAvoidanceHoldTicks--;
@@ -803,16 +810,6 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
             const directX = steeringX;
             const directY = steeringY;
-
-            // Blend forward progress with a lateral sidestep without
-            // turning backwards relative to the route direction.
-            // Crossing routes (slants/drags) use a tighter sidestep so they don't bounce into adjacent rushers.
-            const isCrossingRoute =
-                pState.assignment?.includes('Slant') ||
-                pState.assignment?.includes('Drag') ||
-                pState.assignment?.includes('Cross');
-
-            const sidestepStrength = isCrossingRoute ? 0.35 : 0.70;
 
             steeringX =
                 directX +
@@ -1446,8 +1443,8 @@ function resolveNewtonianCollisions(pState, allPlayers) {
                     const tangentSpeed = (pState.vx * tangentX) + (pState.vy * tangentY);
 
                     const isMovingUpfield = (pState.targetY ?? pState.y) >= pState.y;
-                    pState.vx = (tangentX * tangentSpeed * 0.85) + (dx_norm * 0.2);
-                    const nextVy = (tangentY * tangentSpeed * 0.85) + (dy_norm * 0.2);
+                    pState.vx = (tangentX * tangentSpeed * 0.96) + (dx_norm * 0.05);
+                    const nextVy = (tangentY * tangentSpeed * 0.96) + (dy_norm * 0.05);
                     pState.vy = isMovingUpfield ? Math.max(0.5, nextVy) : nextVy;
                 } else {
                     pState.vx -= dx_norm * normalVelocity * myMoveRatio * 0.5;

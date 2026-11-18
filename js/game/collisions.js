@@ -149,8 +149,18 @@ export function checkBlockCollisions(playState, gameLog = null) {
 
         // Breakaway cleanup: do NOT initiate new blocks far behind the ball carrier
         const ballCarrier = playState.activePlayers.find(p => p.hasBall || p.isBallCarrier);
+        const isPocketPasser = Boolean(
+            ballCarrier &&
+            ballCarrier.isOffense &&
+            (ballCarrier.formationRole === 'QB' || ballCarrier.role === 'QB') &&
+            playState.type === 'pass' &&
+            !playState.qbRunCommitted &&
+            ballCarrier.action !== 'qb_scramble' &&
+            ballCarrier.y <= playState.lineOfScrimmage + 0.5
+        );
+
         if (ballCarrier && !playState.ballState.inAir) {
-            const runnerAheadDistance = playState.type === 'run' || ballCarrier.isOffense
+            const runnerAheadDistance = ballCarrier.isOffense
                 ? (ballCarrier.y - blocker.y)
                 : (blocker.y - ballCarrier.y);
             if (runnerAheadDistance > 7.0) {
@@ -164,9 +174,18 @@ export function checkBlockCollisions(playState, gameLog = null) {
 
         if (isPassBlock && (playState.ballState?.inAir || playState.ballState?.throwTick)) return;
 
-        const eligibleDefenders = isPassBlock
-            ? defenders.filter(d => d.role === 'DL' || d.assignment?.includes('rush') || d.assignment?.includes('blitz'))
-            : defenders;
+        const eligibleDefenders = defenders.filter(d => {
+            if (isPassBlock && !(d.role === 'DL' || d.assignment?.includes('rush') || d.assignment?.includes('blitz'))) {
+                return false;
+            }
+            if (ballCarrier && ballCarrier.isOffense && !playState.ballState.inAir && !isPocketPasser) {
+                const defenderBehindCarrier = ballCarrier.y - d.y;
+                if (defenderBehindCarrier > 1.5) {
+                    return false; // Carrier already ran past this defender; don't clip/stall pursuit from behind
+                }
+            }
+            return true;
+        });
 
         let target = null;
         const imminentThreat = eligibleDefenders
@@ -802,8 +821,8 @@ export function checkTackleCollisions(playState, gameLog) {
             carrier.tacklesBrokenThisPlay = brokenCount + 1;
 
             // A defender who whiffs is taken out of the immediate pursuit on this carrier
-            // for at least 2.0s (50 ticks) unless another defender slows the carrier down first.
-            defender._carrierTackleCooldownTicks = 50;
+            // for 1.0s (25 ticks) to cover recovery without barring second-effort tackles.
+            defender._carrierTackleCooldownTicks = 25;
 
             const weightDelta = carrierWeight - defenderWeight;
 
@@ -1045,7 +1064,9 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         if (ballCarrier) {
             const distToCarrier = getDistance(defender, ballCarrier);
             const carrierPastLOS = ballCarrier.y > playState.lineOfScrimmage + 1.0;
-            const carrierIsPastDefender = ballCarrier.y > defender.y + 2.0;
+            const carrierIsPastDefender = ballCarrier.isOffense
+                ? (ballCarrier.y > defender.y + 2.0)
+                : (defender.y > ballCarrier.y + 2.0);
 
             const isPassRusher =
                 playState.type === 'pass' &&
@@ -1225,14 +1246,15 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
         // Downfield blocks (WR blocking DB or DB blocking WR) must break down quickly.
         // A cornerback cannot be held at the line of scrimmage for 200 ticks.
         const isPerimeterBlock = blocker.role !== 'OL' && defender.role !== 'DL';
-        const maxCleanHoldTicks = isPerimeterBlock ? 25 : (blocker.role === 'OL' ? 45 : 30);
+        const maxCleanHoldTicks = isPerimeterBlock ? 25 : (blocker.role === 'OL' ? (isPassBlock ? 55 : 50) : 30);
 
         if (ticksInBlock > maxCleanHoldTicks) {
-            const fatiguePenalty = 1.0 - ((ticksInBlock - maxCleanHoldTicks) * 0.05);
-            blockPower *= Math.max(0.10, fatiguePenalty);
-            // After 3.5 seconds (85+ ticks), pass rushers aggressively collapse the pocket
-            const lateRushBoost = ticksInBlock > 85 ? 1.6 : 1.0;
-            shedPower *= (1.0 + ((ticksInBlock - maxCleanHoldTicks) * 0.045)) * lateRushBoost;
+            const overtimeTicks = ticksInBlock - maxCleanHoldTicks;
+            const fatiguePenalty = 1.0 - (overtimeTicks * 0.012);
+            blockPower *= Math.max(0.55, fatiguePenalty);
+            // After 3.4 seconds (85+ ticks) in pass protection, pass rushers collapse the pocket
+            const lateRushBoost = (isPassBlock && ticksInBlock > 85) ? 1.35 : 1.0;
+            shedPower *= (1.0 + Math.min(0.45, overtimeTicks * 0.012)) * lateRushBoost;
 
             // Force a natural disengagement if a perimeter block exceeds 45 ticks (~1.8 seconds)
             if (isPerimeterBlock && ticksInBlock > 45) {
@@ -1715,14 +1737,19 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                 const canRollPancake =
                     dur >= 20 &&
                     (playState.tick - (battle._lastPancakeRollTick ?? -Infinity)) >= 15;
-                const strAdvantage = Math.max(0, blkStr - defStr);
+                const strDiff = blkStr - defStr;
                 const techniqueEdge = (blocker.blocking || 50) - (defender.blockShedding || 50);
 
+                // Overmatched blockers cannot flatten much stronger defenders; pass-pro pancakes are rare.
+                const isStrengthOvermatched = strDiff < -10;
+                const rawPancakeChance = isStrengthOvermatched
+                    ? 0
+                    : (0.02 + (strDiff * 0.004) + (techniqueEdge * 0.0018)) * (isPassBlock ? 0.35 : 1.0);
+
                 // Base chance scales with strength gap and technique; never automatic 100%
-                const pancakeChance = Math.max(
-                    0.02,
-                    Math.min(0.20, 0.03 + (strAdvantage * 0.004) + (techniqueEdge * 0.002))
-                );
+                const pancakeChance = isStrengthOvermatched
+                    ? 0
+                    : Math.max(0.005, Math.min(0.18, rawPancakeChance));
 
                 let pancakeRoll = null;
                 if (canRollPancake) {

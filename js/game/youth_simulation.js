@@ -5,6 +5,7 @@
 
 import {
     getRosterObjects,
+    getGameDayRosterObjects,
     resetGameStats,
     finalizeGameResults
 } from './state.js';
@@ -703,6 +704,7 @@ function getActiveSnapLineup(baseLineup, quarter, scoreDiff, gameFatigue) {
         : baseOff.rb;
 
     const activeReceiverSlotById = { ...baseOff.receiverSlotById };
+    const activePlayersBySlot = { ...(baseOff.playersBySlot || {}) };
 
     const activeReceivers = baseOff.receivers.map(rec => {
         if (!rec) return rec;
@@ -714,6 +716,7 @@ function getActiveSnapLineup(baseLineup, quarter, scoreDiff, gameFatigue) {
             if (rec.id === baseOff.rb?.id && activeRB?.id !== rec.id) {
                 delete activeReceiverSlotById[rec.id];
                 activeReceiverSlotById[activeRB.id] = slot;
+                activePlayersBySlot[slot] = activeRB;
                 return activeRB;
             }
 
@@ -735,6 +738,7 @@ function getActiveSnapLineup(baseLineup, quarter, scoreDiff, gameFatigue) {
             if (sub && sub.id !== rec.id) {
                 delete activeReceiverSlotById[rec.id];
                 activeReceiverSlotById[sub.id] = slot;
+                activePlayersBySlot[slot] = sub;
                 return sub;
             }
         }
@@ -788,7 +792,8 @@ function getActiveSnapLineup(baseLineup, quarter, scoreDiff, gameFatigue) {
             qb: activeQB,
             rb: activeRB,
             receivers: activeReceivers,
-            receiverSlotById: activeReceiverSlotById
+            receiverSlotById: activeReceiverSlotById,
+            playersBySlot: activePlayersBySlot
         },
         defense: {
             ...baseDef,
@@ -800,21 +805,17 @@ function getActiveSnapLineup(baseLineup, quarter, scoreDiff, gameFatigue) {
     };
 }
 
-function recordSnaps(lineup, twoWayIds, gameFatigue) {
-    const players = [
-        lineup.offense.qb,
-        ...lineup.offense.receivers,
-        ...lineup.offense.ol,
-        ...lineup.defense.all
-    ];
-
+function recordSnaps(lineup, twoWayIds, offenseGameFatigue, defenseGameFatigue) {
     const counted = new Set();
-    players.forEach(player => {
+
+    const recordPlayerSnap = (player, gameFatigue) => {
         if (!player || counted.has(player.id)) return;
         counted.add(player.id);
+
         if (!player.careerStats || typeof player.careerStats !== 'object') {
             player.careerStats = { seasonsPlayed: 0 };
         }
+
         player.careerStats.snapsThisSeason = (player.careerStats.snapsThisSeason || 0) + 1;
         player.snapsThisWeek = (player.snapsThisWeek || 0) + 1;
 
@@ -823,8 +824,26 @@ function recordSnaps(lineup, twoWayIds, gameFatigue) {
             const staminaFactor = (150 - stm) / 100;
             const twoWayFactor = twoWayIds?.has(player.id) ? 1.25 : 1.0;
             const prev = gameFatigue.get(player.id) || 0;
-            gameFatigue.set(player.id, prev + (0.65 * staminaFactor * twoWayFactor));
+
+            gameFatigue.set(
+                player.id,
+                prev + (0.65 * staminaFactor * twoWayFactor)
+            );
         }
+    };
+
+    // Offensive participants update their own team's fatigue map.
+    [
+        lineup.offense.qb,
+        ...lineup.offense.receivers,
+        ...lineup.offense.ol
+    ].forEach(player => {
+        recordPlayerSnap(player, offenseGameFatigue);
+    });
+
+    // Defensive participants update the opposing team's fatigue map.
+    lineup.defense.all.forEach(player => {
+        recordPlayerSnap(player, defenseGameFatigue);
     });
 }
 
@@ -903,9 +922,9 @@ function chooseTackler(defense, exclude = new Set(), playType = 'run') {
     return weightedCandidates[weightedCandidates.length - 1].player;
 }
 
-function finishBallCarrier(carrier, defense, startingYards, maxGain = 100, playType = 'run') {
+function finishBallCarrier(carrier, defense, startingYards, maxGain = 100, playType = 'run', primaryTackler = null) {
     let yards = clamp(Math.round(startingYards), -8, Math.max(0, maxGain));
-    let tackler = chooseTackler(defense, new Set(), playType);
+    let tackler = primaryTackler || chooseTackler(defense, new Set(), playType);
     let contacted = false;
 
     if (tackler) {
@@ -1448,6 +1467,7 @@ function resolveRunPlay(
     const runnerIQ = getDecisionQuality(runner, runnerRole);
 
     let winsAtPointOfAttack = false;
+    const runFrontWinners = [];
 
     if (blockers.length > 0 && frontDefenders.length > 0) {
         const matchupResults = blockers.map((blocker, index) => {
@@ -1470,8 +1490,14 @@ function resolveRunPlay(
             );
 
             const wins = Math.random() < winChance;
+
             if (wins && effectiveBlockingSkill > runDefenseSkill + 4 && Math.random() < 0.08) {
                 addStat(blocker, 'pancakes');
+            }
+
+            // A defender who beats his blocker becomes a potential primary tackler.
+            if (!wins) {
+                runFrontWinners.push(defender);
             }
 
             return {
@@ -1486,6 +1512,11 @@ function resolveRunPlay(
         const unblockedRushers = Math.max(
             0,
             frontDefenders.length - blockers.length
+        );
+
+        // Unblocked defensive linemen are also involved in the run play.
+        runFrontWinners.push(
+            ...frontDefenders.slice(blockers.length)
         );
 
         const blockingMargin = blockWins - blockLosses - unblockedRushers;
@@ -1512,6 +1543,10 @@ function resolveRunPlay(
         );
 
         winsAtPointOfAttack = Math.random() < blockWinChance;
+
+        // With no individual blocking matchups, available front defenders
+        // remain eligible to make the play.
+        runFrontWinners.push(...frontDefenders);
     }
 
     // PHASE 2: Linebackers read the run and may close the initial lane.
@@ -1524,12 +1559,34 @@ function resolveRunPlay(
         0.50
     );
 
+    let primaryRunTackler = null;
+
     if (
         winsAtPointOfAttack &&
         defense.lbs.length > 0 &&
         Math.random() < linebackerFillChance
     ) {
+        // A successful linebacker run fit gives that player first tackle opportunity.
+        const availableLinebackers = defense.lbs.filter(Boolean);
+
+        primaryRunTackler = chooseTackler({
+            all: availableLinebackers,
+            dls: [],
+            lbs: availableLinebackers,
+            dbs: []
+        });
+
         winsAtPointOfAttack = false;
+    }
+
+    // Otherwise, prioritize a defensive lineman who actually won his matchup.
+    if (!primaryRunTackler && runFrontWinners.length > 0) {
+        primaryRunTackler = chooseTackler({
+            all: runFrontWinners,
+            dls: runFrontWinners,
+            lbs: [],
+            dbs: []
+        });
     }
 
     const seesCutback = !winsAtPointOfAttack && Math.random() < clamp(
@@ -1562,7 +1619,14 @@ function resolveRunPlay(
     }
 
     const maxGain = Math.max(0, 100 - ballOn);
-    const contact = finishBallCarrier(runner, defense, baseYards, maxGain);
+    const contact = finishBallCarrier(
+        runner,
+        defense,
+        baseYards,
+        maxGain,
+        'run',
+        primaryRunTackler
+    );
     addStat(runner, 'rushAttempts');
     addStat(runner, 'rushYards', contact.yards);
 
@@ -1937,7 +2001,8 @@ function resolvePassPlay(
         defense,
         Math.min(maxGain, intendedAirYards + initialYac),
         maxGain,
-        'pass'
+        'pass',
+        chosen.defender
     );
     addStat(qb, 'passYards', contact.yards);
     addStat(target, 'recYards', contact.yards);
@@ -1965,9 +2030,88 @@ function shouldPuntOnFourthDown(
     return yardsToGo > 5 && ballOn < 30;
 }
 
-function resolveFourthDownPunt(offense, defense, ballOn) {
-    const qb = offense.qb || offense.rb;
-    const armPower = qb?.attributes?.technical?.throwPower ?? getSkill(qb, 'strength');
+function resolveFourthDownPunt(offense, defense, ballOn, offenseTeam, defenseTeam) {
+    const getAvailableSpecialist = (team, slot, position) => {
+        if (!team) return null;
+
+        const roster = getGameDayRosterObjects(team);
+        const assignedId =
+            team.specialTeams?.[slot] ??
+            team.depthChart?.specialTeams?.[slot];
+
+        const isAvailable = player =>
+            player &&
+            !['departed', 'retired'].includes(player.status?.type) &&
+            (
+                !player.status ||
+                player.status.duration === 0 ||
+                player.status.type === 'temporary'
+            );
+
+        // Honor the team's explicit special-teams assignment first.
+        if (assignedId != null) {
+            const assignedPlayer = roster.find(
+                player =>
+                    String(player.id) === String(assignedId) &&
+                    isAvailable(player) &&
+                    isPlayerViableForPosition(player, position)
+            );
+
+            if (assignedPlayer) return assignedPlayer;
+        }
+
+        // Otherwise select the best available player for this role.
+        const getRating = (player, group, attribute, fallback = 50) => {
+            const value = Number(player?.attributes?.[group]?.[attribute]);
+            return Number.isFinite(value) ? value : fallback;
+        };
+
+        const getFitScore = player => {
+            if (slot === 'PR') {
+                return (
+                    getRating(player, 'physical', 'speed') * 0.35 +
+                    getRating(player, 'physical', 'agility') * 0.25 +
+                    getRating(player, 'technical', 'catchingHands') * 0.30 +
+                    getRating(player, 'mental', 'playbookIQ') * 0.10
+                );
+            }
+
+            return (
+                getRating(
+                    player,
+                    'technical',
+                    'throwPower',
+                    getRating(player, 'physical', 'strength')
+                ) * 0.45 +
+                getRating(player, 'technical', 'throwingAccuracy') * 0.35 +
+                getRating(player, 'physical', 'strength') * 0.10 +
+                getRating(player, 'mental', 'playbookIQ') * 0.10
+            );
+        };
+
+        return roster
+            .filter(player =>
+                isAvailable(player) &&
+                isPlayerViableForPosition(player, position)
+            )
+            .sort((a, b) => getFitScore(b) - getFitScore(a))[0] || null;
+    };
+
+    const punter =
+        getAvailableSpecialist(offenseTeam, 'P', 'QB') ||
+        offense.qb ||
+        offense.rb;
+
+    const returner =
+        getAvailableSpecialist(defenseTeam, 'PR', 'WR') ||
+        defense.dbs?.[0] ||
+        defense.lbs?.[0] ||
+        chooseTackler(defense);
+
+    const armPower =
+        punter?.attributes?.technical?.throwPower ??
+        getSkill(punter, 'strength');
+
     const baseDist = 24 + ((armPower / 100) * 30) + noise(5);
     const puntYards = clamp(Math.round(baseDist), 18, 56);
     const landYardLine = ballOn + puntYards;
@@ -1977,21 +2121,31 @@ function resolveFourthDownPunt(offense, defense, ballOn) {
         return { nextBallOn: 20, touchback: true };
     }
 
-    const returner = defense.dbs?.[0] || defense.lbs?.[0] || chooseTackler(defense);
     let returnYards = 0;
 
     if (returner) {
         const retSkill = weightedSkill(returner, BALL_CARRIER_SKILLS);
+
         returnYards = clamp(
             Math.round(roll(1, 9) + (retSkill - 50) * 0.08 + noise(3)),
             0,
             Math.min(25, landYardLine)
         );
+
         addStat(returner, 'returnYards', returnYards);
 
         const coverageTackler = chooseTackler(
-            { all: [offense.rb, offense.wr1, offense.wr2, offense.te, ...(offense.ol || [])].filter(Boolean) }
+            {
+                all: [
+                    offense.rb,
+                    offense.wr1,
+                    offense.wr2,
+                    offense.te,
+                    ...(offense.ol || [])
+                ].filter(Boolean)
+            }
         );
+
         if (coverageTackler) addStat(coverageTackler, 'tackles');
     }
 
@@ -2123,7 +2277,13 @@ export function simulateYouthMatch(homeTeam, awayTeam) {
 
         // Handle 4th-down punt decision before simulating an offensive snap
         if (shouldPuntOnFourthDown(offenseTeam, down, yardsToGo, ballOn, scoreDiff, quarter, clockRemaining)) {
-            const puntResult = resolveFourthDownPunt(activeOffWrap.offense, activeDefWrap.defense, ballOn);
+            const puntResult = resolveFourthDownPunt(
+                activeOffWrap.offense,
+                activeDefWrap.defense,
+                ballOn,
+                offenseTeam,
+                defenseTeam
+            );
             plays++;
             offenseTeam = defenseTeam;
             ballOn = puntResult.nextBallOn;
@@ -2136,15 +2296,9 @@ export function simulateYouthMatch(homeTeam, awayTeam) {
         recordSnaps(
             { offense: activeOffWrap.offense, defense: activeDefWrap.defense },
             new Set([...(baseOffense.twoWayIds || []), ...(baseDefense.twoWayIds || [])]),
-            new Map([...offFatigueMap, ...defFatigueMap])
+            offFatigueMap,
+            defFatigueMap
         );
-        // Sync local fatigue changes back to each team's map
-        [activeOffWrap.offense.qb, ...activeOffWrap.offense.receivers, ...activeOffWrap.offense.ol].forEach(p => {
-            if (p) offFatigueMap.set(p.id, (offFatigueMap.get(p.id) || 0) + 0.5);
-        });
-        activeDefWrap.defense.all.forEach(p => {
-            if (p) defFatigueMap.set(p.id, (defFatigueMap.get(p.id) || 0) + 0.5);
-        });
 
         let passChance = 0.48;
         if (down >= 3 && yardsToGo >= 6) passChance += 0.20;

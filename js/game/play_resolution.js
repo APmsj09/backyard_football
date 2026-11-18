@@ -121,7 +121,7 @@ function getScoutedPlaycallAttributeValue(team, player, skill) {
     const report = getTeamScoutingReport(team, player.id);
     const range = report?.attributeRanges?.[category]?.[attribute];
 
-    if (!range) return getPlaycallAttributeValue(player, skill);
+    if (!range) return null;
 
     const low = Number(range.low);
     const high = Number(range.high);
@@ -175,8 +175,8 @@ function getScoutedPositionOverall(team, player, position) {
         ? Math.max(0, Math.min(1, rawConfidence > 1 ? rawConfidence / 100 : rawConfidence)) 
         : 0;
 
-    // If we don't have enough scouting info, fall back to true overall or average baseline
-    if (confidence < 0.25) return calculateOverall(player, position) || 50;
+    // If we don't have enough scouting info, fall back to an average baseline
+    if (confidence < 0.25) return 50;
 
     const fit = [
         report?.evaluation?.offenseFit,
