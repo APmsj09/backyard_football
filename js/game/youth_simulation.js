@@ -1326,10 +1326,17 @@ function resolveRunPlay(
     playKey = null,
     defenseTeam = null
 ) {
-    const runner = offense.rb || offense.qb;
+    const tags = play?.tags || [];
+    const isDesignedQbRun = tags.includes('qb');
+
+    // Explicit QB-designed runs use the quarterback as the runner.
+    // All other run plays continue to use the RB when available.
+    const runner = isDesignedQbRun
+        ? offense.qb
+        : (offense.rb || offense.qb);
+
     if (!runner) return { type: 'incomplete', yards: 0, turnover: false };
 
-    const tags = play?.tags || [];
     const playMastery = playKey ? Number(offenseTeam?.gameplan?.mastery?.[playKey] ?? 55) : 55;
     const masteryBonus = (clamp(playMastery, 20, 100) - 55) * 0.0012;
 
@@ -1547,7 +1554,8 @@ function resolvePassPlay(
         0.02
     );
 
-    let noPressureChance = 1;
+    // Track the actual defenders who win their pass-rush battles.
+    const pressureWinners = [];
 
     passRushers.forEach(({ player: rusher, isBlitzer }, index) => {
         const blocker = blockers[index];
@@ -1579,12 +1587,14 @@ function resolvePassPlay(
             }
         }
 
-        // Every matchup changes the overall chance that the QB is pressured.
-        noPressureChance *= 1 - matchupPressureChance;
+        // Resolve this individual battle rather than calculating only an aggregate.
+        if (Math.random() < matchupPressureChance) {
+            pressureWinners.push(rusher);
+        }
     });
 
-    const pressureChance = clamp(1 - noPressureChance, 0, 0.95);
-    const pressured = Math.random() < pressureChance;
+    // The QB is pressured when at least one defender wins a matchup.
+    const pressured = pressureWinners.length > 0;
 
     // Keep the existing aggregate rush estimate for sack-severity calculations.
     const rushThreat = averageSkill(defense.dls, RUSH_SKILLS) +
@@ -1601,9 +1611,12 @@ function resolvePassPlay(
 
         const sackChance = clamp(0.16 + (rushThreat - getSkill(qb, 'agility')) * 0.002, 0.08, 0.30);
         if (Math.random() < sackChance) {
-            const rusher = [...defense.dls, ...defense.lbs]
-                .filter(Boolean)
-                .sort((a, b) => weightedSkill(b, RUSH_SKILLS) - weightedSkill(a, RUSH_SKILLS))[0];
+            // Only a defender who actually won a pass-rush battle can receive the sack.
+            const rusher = pressureWinners.length > 0
+                ? pressureWinners[
+                    Math.floor(Math.random() * pressureWinners.length)
+                ]
+                : null;
             if (rusher) {
                 addStat(rusher, 'sacks');
                 addStat(rusher, 'tackles');
