@@ -2014,7 +2014,7 @@ export function handleBallArrival(playState, carrier, playResult, gameLog) {
             isDeflectedBall;
 
         const maxCatchHeight = isTracking
-            ? (playerHeight / 36) + 1.1 + (verticalLeap * 0.7)
+            ? standingReach + (verticalLeap * 0.65)
             : standingReach;
 
         // Ball must be in the air and above the turf

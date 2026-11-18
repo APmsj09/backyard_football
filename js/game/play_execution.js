@@ -102,8 +102,7 @@ function getReachablePassInterceptionPoint(pState, ballState) {
 
     const standingReach = (playerHeight / 36) + 0.6;
     const cleanInterceptHeight = standingReach + 0.25;
-    const maxVerticalReach =
-        (playerHeight / 36) + 1.2 + (verticalLeap * 0.7);
+    const maxVerticalReach = standingReach + (verticalLeap * 0.65);
 
     const startZ = Number.isFinite(ballState.z) ? ballState.z : 2.0;
     const ballVZ = Number.isFinite(ballState.vz) ? ballState.vz : 0;
@@ -4165,8 +4164,9 @@ export function executeAssignment(pState, assignment, offenseStates, LOS, playSt
                     const minSafeDepth = dynamicSafeDepth;
                     const desiredDepth = projectedThreatY + 3.5;
 
+                    const redZoneRoofFloor = Math.min(116.5, LOS + Math.max(6.0, distanceToGoal + 1.5));
                     const leverageDepth = distanceToGoal < 20
-                        ? Math.max(Math.min(116.5, projectedThreatY + 2.5), Math.min(zoneCenter.y, primaryThreat.y + 2.0))
+                        ? Math.max(redZoneRoofFloor, Math.min(116.5, projectedThreatY + 2.5))
                         : Math.max(minSafeDepth, desiredDepth);
 
                     pState.targetY = Math.min(118.0, leverageDepth);
