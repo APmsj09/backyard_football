@@ -378,8 +378,61 @@ export function rebuildDepthChartFromOrder(team) {
 
     const qbBucket = team.depthOrder['QB'] || [];
     const bestPunter = qbBucket.length > 1 ? qbBucket[1] : qbBucket[0];
+
+    // Special teams use a canonical team-level assignment.
+    // Preserve existing assignments and migrate the legacy P field.
+    if (!team.specialTeams || typeof team.specialTeams !== 'object') {
+        team.specialTeams = team.depthChart.specialTeams || {};
+    }
+
+    const rosterPlayerIds = new Set(
+        getRosterObjects(team).map(player => String(player.id))
+    );
+
+    const hasPunterOverride = Object.prototype.hasOwnProperty.call(
+        team.specialistOverrides || {},
+        'P'
+    );
+
+    if (hasPunterOverride) {
+        const lockedPunterId = team.specialistOverrides.P;
+
+        if (lockedPunterId == null) {
+            team.specialTeams.P = null;
+        } else if (rosterPlayerIds.has(String(lockedPunterId))) {
+            team.specialTeams.P = lockedPunterId;
+        } else {
+            // Clear a stale manual assignment if the player left the team.
+            delete team.specialistOverrides.P;
+
+            const existingPunterId =
+                team.specialTeams.P ||
+                team.depthChart.specialTeams?.P ||
+                team.depthChart.special?.P;
+
+            team.specialTeams.P =
+                existingPunterId && rosterPlayerIds.has(String(existingPunterId))
+                    ? existingPunterId
+                    : bestPunter || team.roster[0] || null;
+        }
+    } else {
+        const existingPunterId =
+            team.specialTeams.P ||
+            team.depthChart.specialTeams?.P ||
+            team.depthChart.special?.P;
+
+        team.specialTeams.P =
+            existingPunterId && rosterPlayerIds.has(String(existingPunterId))
+                ? existingPunterId
+                : bestPunter || team.roster[0] || null;
+    }
+
+    // Keep the old field synchronized for compatibility with older code.
     if (!team.depthChart.special) team.depthChart.special = {};
-    team.depthChart.special['P'] = bestPunter || team.roster[0] || null;
+    team.depthChart.special.P = team.specialTeams.P;
+
+    // The live engine reads this canonical special-teams object.
+    team.depthChart.specialTeams = team.specialTeams;
 }
 
 
