@@ -806,7 +806,13 @@ export function updatePlayerPosition(pState, timeDelta, allPlayers = []) {
 
             // Blend forward progress with a lateral sidestep without
             // turning backwards relative to the route direction.
-            const sidestepStrength = 0.70;
+            // Crossing routes (slants/drags) use a tighter sidestep so they don't bounce into adjacent rushers.
+            const isCrossingRoute =
+                pState.assignment?.includes('Slant') ||
+                pState.assignment?.includes('Drag') ||
+                pState.assignment?.includes('Cross');
+
+            const sidestepStrength = isCrossingRoute ? 0.35 : 0.70;
 
             steeringX =
                 directX +

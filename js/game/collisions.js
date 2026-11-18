@@ -1070,7 +1070,7 @@ export function resolveOngoingBlocks(playState, gameLog, offenseStates = [], def
                             'RUN_BLOCK_PURSUIT_RELEASE',
                             `${defender.name} abandoned ${blocker.name}'s block to pursue ${ballCarrier.name}`,
                             {
-                                reason: carrierSeparationY > 7.0 ? 'breakaway_runner' : 'carrier_passed_defender',
+                                reason: runnerAheadDistance > 7.0 ? 'breakaway_runner' : 'carrier_passed_defender',
                                 ticksInBlock: playState.tick - battle.startTick,
                                 distanceToCarrier: Number(distToCarrier.toFixed(2)),
                                 battleScore: Number(
