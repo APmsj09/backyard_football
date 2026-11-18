@@ -2988,13 +2988,13 @@ export function startPlayerRetentionNegotiation(
  * Builds a staff counteroffer based on the candidate's strongest preferences.
  * Only returned terms need to be changed; the UI can preserve the other terms.
  */
-function buildStaffCounteroffer(
+export function buildStaffCounteroffer(
     staff,
     team,
     roleKey,
     pitch,
     evaluation
-) {
+) { 
     const terms = {};
     const priorities = [];
     const messages = [];
