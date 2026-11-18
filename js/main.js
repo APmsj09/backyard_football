@@ -2944,6 +2944,11 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
     isExitInterviewFlowActive = true;
     const totalInterviews = retentions.length;
 
+    // Keep the current player's negotiation alive while the modal
+    // moves between the opening pitch and subsequent counteroffers.
+    let activeRetentionNegotiationSession = null;
+    let activeRetentionNegotiationPlayerId = null;  
+
     window.app_setExitInterviewChoice = (controlId, value) => {
         const input = document.getElementById(controlId);
         if (!input) return;
@@ -2971,6 +2976,10 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
         })[char]);
 
     const saveAndContinue = () => {
+        // Clear the completed player's conversation before advancing.
+        activeRetentionNegotiationSession = null;
+        activeRetentionNegotiationPlayerId = null;
+
         // Remove the resolved player before saving, so the same interview
         // cannot be repeated from the remaining queue.
         retentions.shift();
@@ -3036,6 +3045,9 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
     const finishFlow = () => {
         UI.hideModal();
 
+        activeRetentionNegotiationSession = null;
+        activeRetentionNegotiationPlayerId = null;
+
         isExitInterviewFlowActive = false;
         renderActiveExitInterview = null;
 
@@ -3046,7 +3058,7 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
         onComplete?.();
     };
 
-    const renderCurrentInterview = () => {
+    const renderCurrentInterview = (initialPitch = null) => {
         gameState = Game.getGameState();
 
         if (!retentions.length) {
@@ -3070,6 +3082,52 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
             return;
         }
 
+        const currentPlayerId = String(player.id);
+
+        // Start a new conversation only when advancing to another player.
+        // Reopening the form for a counteroffer keeps the existing session.
+        if (
+            activeRetentionNegotiationPlayerId !== currentPlayerId
+        ) {
+            activeRetentionNegotiationPlayerId = currentPlayerId;
+
+            activeRetentionNegotiationSession =
+                typeof Game.startPlayerRetentionNegotiation === 'function'
+                    ? Game.startPlayerRetentionNegotiation(
+                        player,
+                        team,
+                        {
+                            reason: item.reason,
+                            completedWins: item.teamWins,
+                            completedLosses: item.teamLosses,
+                            snapsThisSeason: item.snapsThisSeason
+                        }
+                    )
+                    : null;
+        }
+
+        if (
+            !activeRetentionNegotiationSession ||
+            activeRetentionNegotiationSession.status !== 'open' ||
+            typeof Game.evaluatePlayerRetentionNegotiationRound !== 'function'
+        ) {
+            UI.showModal(
+                'Negotiation Engine Unavailable',
+                `
+                    <p class="text-sm text-slate-700">
+                        The updated player-retention negotiation functions
+                        are not available. No promise has been made and
+                        ${escapeExitHtml(player.name)} remains on the roster.
+                    </p>
+                `,
+                null,
+                null,
+                null,
+                'Close'
+            );
+            return;
+        }
+
         const fits = getBestTwoWayFits(player);
         const pos = fits.offense.position;
         const ovr = fits.offense.ovr;
@@ -3086,6 +3144,73 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                 : 'ROTATION';
 
         const focusPromise = pitchOptions.focusPromise;
+
+        // Prepopulate the form when the player makes a counteroffer
+        // or when the GM chooses to revise an earlier proposal.
+        const selectedRole = [
+            'STARTER',
+            'ROTATION'
+        ].includes(initialPitch?.rolePromised)
+            ? initialPitch.rolePromised
+            : defaultRole;
+
+        const selectedPromise =
+            focusPromise &&
+            initialPitch?.promiseType === focusPromise.value
+                ? focusPromise.value
+                : 'NONE';
+
+        const rawSelectedTokens = Number(
+            initialPitch?.tokensOffered ?? 0
+        );
+
+        const selectedTokens =
+            Number.isInteger(rawSelectedTokens) &&
+            rawSelectedTokens >= 0 &&
+            rawSelectedTokens <= 2 &&
+            rawSelectedTokens <= tokensAvailable
+                ? rawSelectedTokens
+                : 0;
+
+        // Show the conversation so far whenever the pitch form reopens.
+        const conversationHistoryHtml = (
+            activeRetentionNegotiationSession.history || []
+        ).map(entry => {
+            const offer = entry.offer || {};
+
+            const offerSummary = [
+                offer.rolePromised === 'STARTER'
+                    ? 'Starting role'
+                    : offer.rolePromised === 'ROTATION'
+                        ? 'Rotation role'
+                        : null,
+                offer.promiseType && offer.promiseType !== 'NONE'
+                    ? offer.promiseType
+                    : null,
+                Number(offer.tokensOffered) > 0
+                    ? `${offer.tokensOffered} Favor Token(s)`
+                    : null
+            ].filter(Boolean).join(' · ');
+
+            return `
+                <div class="border-l-2 border-indigo-300 pl-2 py-1">
+                    <div class="flex justify-between gap-2">
+                        <b class="text-[10px] uppercase text-slate-700">
+                            Round ${entry.round}
+                        </b>
+                        <span class="text-[9px] font-bold uppercase text-amber-700">
+                            ${escapeExitHtml(entry.outcome)}
+                        </span>
+                    </div>
+                    <p class="text-[9px] text-slate-500">
+                        Your offer: ${escapeExitHtml(offerSummary || 'Standard role offer')}
+                    </p>
+                    <p class="mt-1 text-[10px] italic text-slate-700">
+                        ${escapeExitHtml(entry.quote || '')}
+                    </p>
+                </div>
+            `;
+        }).join('');
 
         const modalHtml = `
             <div class="space-y-3.5 text-left text-xs font-sans">
@@ -3121,6 +3246,17 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                     </div>
                 </div>
 
+                <div class="rounded border border-indigo-200 bg-indigo-50 p-3 space-y-1">
+                    <span class="block text-[10px] font-black uppercase tracking-wider text-indigo-900">
+                        ${conversationHistoryHtml ? 'Conversation' : 'Player’s Opening Statement'}
+                    </span>
+                    ${
+                        conversationHistoryHtml
+                            ? `<div class="space-y-2">${conversationHistoryHtml}</div>`
+                            : `<p class="text-[11px] leading-relaxed italic text-indigo-950">${escapeExitHtml(activeRetentionNegotiationSession.openingLine || 'I want to understand what would change if I stayed.')}</p>`
+                    }
+                </div>
+
                 <div class="space-y-2.5">
                     <h5 class="font-black text-xs uppercase tracking-wider text-slate-700">
                         Your Pitch
@@ -3130,13 +3266,13 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                         <div class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
                             Role Commitment
                         </div>
-                        <input type="hidden" id="retention-role" value="${defaultRole}">
+                        <input type="hidden" id="retention-role" value="${selectedRole}">
                         <div class="grid grid-cols-2 gap-1" role="group" aria-label="Role commitment">
                             ${[
                                 ['STARTER', pitchOptions.starterRoleLabel, 'Guaranteed starting role'],
                                 ['ROTATION', pitchOptions.rotationRoleLabel, 'Earn the role in practice']
                             ].map(([value, label, detail]) => `
-                                <button type="button" data-exit-choice-control="retention-role" data-exit-choice-value="${value}" aria-pressed="${defaultRole === value}" onclick="window.app_setExitInterviewChoice('retention-role', '${value}')" class="rounded-sm border px-2 py-1.5 text-left ${defaultRole === value ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"><span class="block text-[10px] font-bold">${escapeExitHtml(label)}</span><span class="mt-0.5 block text-[9px] text-slate-500">${detail}</span></button>
+                                <button type="button" data-exit-choice-control="retention-role" data-exit-choice-value="${value}" aria-pressed="${selectedRole === value}" onclick="window.app_setExitInterviewChoice('retention-role', '${value}')" class="rounded-sm border px-2 py-1.5 text-left ${selectedRole === value ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"><span class="block text-[10px] font-bold">${escapeExitHtml(label)}</span><span class="mt-0.5 block text-[9px] text-slate-500">${detail}</span></button>
                             `).join('')}
                         </div>
                         <p class="text-[10px] text-slate-500 mt-1">
@@ -3148,10 +3284,10 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                         <div class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
                             Position-Specific Commitment
                         </div>
-                        <input type="hidden" id="retention-promise" value="NONE">
+                        <input type="hidden" id="retention-promise" value="${selectedPromise}">
                         <div class="grid grid-cols-1 gap-1 sm:grid-cols-2" role="group" aria-label="Position-specific commitment">
-                            <button type="button" data-exit-choice-control="retention-promise" data-exit-choice-value="NONE" aria-pressed="true" onclick="window.app_setExitInterviewChoice('retention-promise', 'NONE')" class="rounded-sm border border-emerald-700 bg-emerald-50 px-2 py-1.5 text-left text-emerald-900"><span class="block text-[10px] font-bold">No promise</span><span class="mt-0.5 block text-[9px] text-slate-500">No extra workload guarantee</span></button>
-                            ${focusPromise ? `<button type="button" data-exit-choice-control="retention-promise" data-exit-choice-value="${escapeExitHtml(focusPromise.value)}" aria-pressed="false" onclick="window.app_setExitInterviewChoice('retention-promise', '${escapeExitHtml(focusPromise.value)}')" class="rounded-sm border border-slate-200 bg-white px-2 py-1.5 text-left text-slate-700 hover:bg-slate-50"><span class="block text-[10px] font-bold">${escapeExitHtml(focusPromise.label)}</span><span class="mt-0.5 block text-[9px] text-slate-500">${escapeExitHtml(focusPromise.description)}</span></button>` : ''}
+                            <button type="button" data-exit-choice-control="retention-promise" data-exit-choice-value="NONE" aria-pressed="${selectedPromise === 'NONE'}" onclick="window.app_setExitInterviewChoice('retention-promise', 'NONE')" class="rounded-sm border px-2 py-1.5 text-left ${selectedPromise === 'NONE' ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"><span class="block text-[10px] font-bold">No promise</span><span class="mt-0.5 block text-[9px] text-slate-500">No extra workload guarantee</span></button>
+                            ${focusPromise ? `<button type="button" data-exit-choice-control="retention-promise" data-exit-choice-value="${escapeExitHtml(focusPromise.value)}" aria-pressed="${selectedPromise === focusPromise.value}" onclick="window.app_setExitInterviewChoice('retention-promise', '${escapeExitHtml(focusPromise.value)}')" class="rounded-sm border px-2 py-1.5 text-left ${selectedPromise === focusPromise.value ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"><span class="block text-[10px] font-bold">${escapeExitHtml(focusPromise.label)}</span><span class="mt-0.5 block text-[9px] text-slate-500">${escapeExitHtml(focusPromise.description)}</span></button>` : ''}
                         </div>
                         <p class="text-[10px] text-slate-500 mt-1">
                             ${escapeExitHtml(
@@ -3166,10 +3302,10 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                         <div class="block text-[10px] font-bold text-slate-500 uppercase mb-1">
                             Favor Token Sweetener
                         </div>
-                        <input type="hidden" id="retention-tokens" value="0">
+                        <input type="hidden" id="retention-tokens" value="${selectedTokens}">
                         <div class="flex flex-wrap gap-1" role="group" aria-label="Favor token sweetener">
                             ${[0, ...[1, 2].filter(amount => amount <= tokensAvailable)].map(amount => `
-                                <button type="button" data-exit-choice-control="retention-tokens" data-exit-choice-value="${amount}" aria-pressed="${amount === 0}" onclick="window.app_setExitInterviewChoice('retention-tokens', '${amount}')" class="rounded-sm border px-3 py-1.5 text-[10px] font-bold ${amount === 0 ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">${amount} token${amount === 1 ? '' : 's'}</button>
+                                <button type="button" data-exit-choice-control="retention-tokens" data-exit-choice-value="${amount}" aria-pressed="${amount === selectedTokens}" onclick="window.app_setExitInterviewChoice('retention-tokens', '${amount}')" class="rounded-sm border px-3 py-1.5 text-[10px] font-bold ${amount === selectedTokens ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}">${amount} token${amount === 1 ? '' : 's'}</button>
                             `).join('')}
                         </div>
                         <p class="text-[10px] text-slate-500 mt-1">
@@ -3238,15 +3374,188 @@ function startExitInterviewFlow(retentions, onComplete, report = null) {
                 return;
             }
 
-            const pitchResult = Game.evaluateRetentionPitch(player, team, {
+            const pitch = {
                 rolePromised,
                 promiseType,
                 tokensOffered,
                 completedWins: item.teamWins,
                 completedLosses: item.teamLosses
-            });
+            };
 
-            if (!pitchResult.accepted) {
+            const negotiationRound =
+                Game.evaluatePlayerRetentionNegotiationRound(
+                    activeRetentionNegotiationSession,
+                    player,
+                    team,
+                    pitch
+                );
+
+            if (negotiationRound.session) {
+                activeRetentionNegotiationSession =
+                    negotiationRound.session;
+            }
+
+            // Keep the actual dialogue in the session history so the next
+            // version of the pitch form can show what has already happened.
+            const latestHistoryEntry =
+                activeRetentionNegotiationSession?.history?.[
+                    activeRetentionNegotiationSession.history.length - 1
+                ];
+
+            if (latestHistoryEntry) {
+                latestHistoryEntry.quote =
+                    negotiationRound.quote || latestHistoryEntry.quote;
+            }
+
+            if (negotiationRound.outcome === 'invalid') {
+                UI.showModal(
+                    'Negotiation Could Not Continue',
+                    `
+                        <p class="text-sm text-slate-700">
+                            ${escapeExitHtml(
+                                negotiationRound.quote ||
+                                'This negotiation is no longer active.'
+                            )}
+                        </p>
+                    `,
+                    null,
+                    null,
+                    null,
+                    'Close'
+                );
+                return;
+            }
+
+            if (negotiationRound.countered) {
+                const counteroffer =
+                    negotiationRound.counteroffer || {};
+
+                const counterTerms = counteroffer.terms || {};
+
+                const counterTermLabels = Object.entries(counterTerms)
+                    .map(([key, value]) => {
+                        if (key === 'rolePromised') {
+                            return value === 'STARTER'
+                                ? pitchOptions.starterRoleLabel
+                                : pitchOptions.rotationRoleLabel;
+                        }
+
+                        if (key === 'promiseType') {
+                            return focusPromise?.value === value
+                                ? focusPromise.label
+                                : value;
+                        }
+
+                        if (key === 'tokensOffered') {
+                            return `${value} Favor Token(s)`;
+                        }
+
+                        return null;
+                    })
+                    .filter(Boolean);
+
+                const counterMessage =
+                    counteroffer.message ||
+                    negotiationRound.quote ||
+                    'I need a little more commitment before I agree to stay.';
+
+                window.app_exitInterviewCounterChoice = action => {
+                    window.app_exitInterviewCounterChoice = null;
+
+                    if (action === 'revise') {
+                        // Reopen the form with your previous offer intact.
+                        renderCurrentInterview(pitch);
+                        return;
+                    }
+
+                    if (action === 'meet') {
+                        // Apply the player's requested changes, but require
+                        // the GM to submit the revised offer for evaluation.
+                        renderCurrentInterview({
+                            ...pitch,
+                            ...counterTerms
+                        });
+                        return;
+                    }
+
+                    // Walking away resolves the departure immediately.
+                    activeRetentionNegotiationSession.status = 'walked_away';
+
+                    releaseToFreeAgency(player, item, team);
+
+                    Game.addMessage(
+                        'Player Departed',
+                        `🚲 <b>${escapeExitHtml(player.name)}</b> chose Free Agency after unsuccessful retention negotiations.`
+                    );
+
+                    saveAndContinue();
+                };
+
+                const counterHtml = `
+                    <div class="space-y-3 text-left text-xs">
+                        <div class="rounded border border-amber-200 bg-amber-50 p-3">
+                            <div class="mb-1 text-[10px] font-black uppercase tracking-wider text-amber-900">
+                                ${escapeExitHtml(player.name)}'s Counteroffer
+                            </div>
+                            <p class="text-[11px] leading-relaxed italic text-amber-950">
+                                "${escapeExitHtml(counterMessage)}"
+                            </p>
+                        </div>
+
+                        <div class="rounded border border-slate-200 bg-white p-3">
+                            <div class="mb-2 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                What the Player Wants
+                            </div>
+                            ${
+                                counterTermLabels.length
+                                    ? `
+                                        <ul class="space-y-1 text-[11px] font-bold text-slate-800">
+                                            ${counterTermLabels.map(term =>
+                                                `<li>• ${escapeExitHtml(term)}</li>`
+                                            ).join('')}
+                                        </ul>
+                                    `
+                                    : `
+                                        <p class="text-[11px] text-slate-600">
+                                            The player wants a more meaningful
+                                            commitment, but has not identified
+                                            one specific term.
+                                        </p>
+                                    `
+                            }
+                        </div>
+
+                        <p class="text-[10px] text-slate-500">
+                            Negotiation round ${negotiationRound.round}
+                            of ${negotiationRound.maxRounds}.
+                            Meeting these requests does not guarantee
+                            the player will accept.
+                        </p>
+
+                        <button type="button"
+                            onclick="window.app_exitInterviewCounterChoice?.('revise')"
+                            class="w-full rounded border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] font-bold text-indigo-900 hover:bg-indigo-100">
+                            Make a Different Offer
+                        </button>
+                    </div>
+                `;
+
+                UI.showModal(
+                    `Counteroffer: ${player.name}`,
+                    counterHtml,
+                    () => window.app_exitInterviewCounterChoice?.('meet'),
+                    'Use Player’s Terms',
+                    () => window.app_exitInterviewCounterChoice?.('walk'),
+                    'Let Him Walk'
+                );
+
+                return;
+            }
+
+            const pitchResult =
+                negotiationRound.evaluation || negotiationRound;
+
+            if (!negotiationRound.accepted) {
                 releaseToFreeAgency(player, item, team);
 
                 Game.addMessage(
@@ -4733,6 +5042,69 @@ export function openCoachCard(coachId) {
     const tactical = coach.biases?.tactical;
     const scouting = coach.biases?.scouting;
 
+    // Project this coach's tendencies against the team's available
+    // scouting information. Free agents use the player's team as a
+    // comparison context rather than pretending to have team reports.
+    const tendencyContextTeam = team || gs.playerTeam || null;
+
+    const projectedTendencies =
+        tendencyContextTeam &&
+        typeof Game.previewCoachTendencies === 'function'
+            ? Game.previewCoachTendencies(
+                coach,
+                tendencyContextTeam
+            )
+            : null;
+
+    const readProjectedTendency = key => {
+        const value = Number(projectedTendencies?.[key]);
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, Math.round(value)))
+            : null;
+    };
+
+    const projectedRun = readProjectedTendency('earlyDownTendency');
+
+    const projectedPass = projectedRun === null
+        ? null
+        : 100 - projectedRun;
+
+    const projectedThirdLong = readProjectedTendency(
+        'thirdAndLongAggressiveness'
+    );
+
+    const projectedBlitz = readProjectedTendency(
+        'defenseAggressiveness'
+    );
+
+    const projectedFourthDown = readProjectedTendency(
+        'fourthDownBravery'
+    );
+
+    const formatProjectedTendency = value =>
+        value === null ? '—' : `${value}%`;
+
+    const preferredOffenseLabel = coach.preferredOffense
+        ? (
+            offenseFormations[coach.preferredOffense]?.name ||
+            coach.preferredOffense
+        )
+        : 'Flexible';
+
+    const preferredDefenseLabel = coach.preferredDefense
+        ? (
+            defenseFormations[coach.preferredDefense]?.name ||
+            coach.preferredDefense
+        )
+        : 'Flexible';
+
+    const tendencyContextNote = team
+        ? `Projected using ${teamName}'s roster and scouting information.`
+        : tendencyContextTeam
+            ? `Free-agent comparison using ${tendencyContextTeam.name || 'your team'}'s roster and scouting information.`
+            : 'No team-specific scouting context is available.';
+
     const experienceWeeks = Math.max(
         0,
         Math.floor(Number(development.experienceWeeks) || 0)
@@ -4986,27 +5358,124 @@ export function openCoachCard(coachId) {
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                    <div class="bg-white p-3 rounded border border-slate-200">
-                        <span class="block text-[9px] font-bold uppercase text-slate-400">
-                            Preferred Offense
-                        </span>
-                        <b class="text-blue-800">
-                            ${escapeCoachText(coach.preferredOffense || 'Flexible')}
-                        </b>
-                        ${tactical?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(tactical.desc)}</p>` : ''}
+                <section class="space-y-2">
+                    <div class="rounded border border-blue-200 bg-blue-50/50 p-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <span class="block text-[9px] font-black uppercase tracking-wide text-blue-700">
+                                    Football Identity
+                                </span>
+                                <h5 class="mt-0.5 text-sm font-black text-slate-900">
+                                    ${escapeCoachText(tactical?.displayName || tactical?.name || 'Adaptive Strategist')}
+                                </h5>
+                            </div>
+
+                            <span class="rounded border border-blue-200 bg-white px-2 py-1 text-[9px] font-bold text-blue-800">
+                                ${escapeCoachText(personality?.displayName || personality?.name || 'Unknown Personality')}
+                            </span>
+                        </div>
+
+                        <p class="mt-2 text-xs leading-relaxed text-slate-700">
+                            ${escapeCoachText(tactical?.desc || 'No specific tactical philosophy has been recorded.')}
+                        </p>
+
+                        ${personality?.desc ? `
+                            <p class="mt-2 border-t border-blue-200 pt-2 text-[10px] leading-relaxed text-slate-600">
+                                <b>Coaching personality:</b>
+                                ${escapeCoachText(personality.desc)}
+                            </p>
+                        ` : ''}
                     </div>
 
-                    <div class="bg-white p-3 rounded border border-slate-200">
-                        <span class="block text-[9px] font-bold uppercase text-slate-400">
-                            Preferred Defense
-                        </span>
-                        <b class="text-rose-800">
-                            ${escapeCoachText(coach.preferredDefense || 'Flexible')}
-                        </b>
-                        ${personality?.desc ? `<p class="mt-1 text-[10px] text-slate-600 leading-relaxed">${escapeCoachText(personality.desc)}</p>` : ''}
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <div class="bg-white p-3 rounded border border-slate-200">
+                            <span class="block text-[9px] font-bold uppercase text-slate-400">
+                                Preferred Offense
+                            </span>
+                            <b class="text-blue-800">
+                                ${escapeCoachText(preferredOffenseLabel)}
+                            </b>
+                        </div>
+
+                        <div class="bg-white p-3 rounded border border-slate-200">
+                            <span class="block text-[9px] font-bold uppercase text-slate-400">
+                                Preferred Defense
+                            </span>
+                            <b class="text-rose-800">
+                                ${escapeCoachText(preferredDefenseLabel)}
+                            </b>
+                        </div>
                     </div>
-                </div>
+                </section>
+
+                ${projectedTendencies ? `
+                    <section class="rounded border border-slate-200 bg-white p-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-700">
+                                Projected Play-Calling Tendencies
+                            </h5>
+
+                            <span class="text-[9px] font-bold text-slate-500">
+                                COACHING PROFILE
+                            </span>
+                        </div>
+
+                        <div class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div class="rounded bg-slate-50 p-2">
+                                <span class="block text-[9px] text-slate-500">
+                                    Early Down Run / Pass
+                                </span>
+                                <b class="font-mono text-sm font-black text-slate-900">
+                                    ${formatProjectedTendency(projectedRun)}
+                                    /
+                                    ${formatProjectedTendency(projectedPass)}
+                                </b>
+                            </div>
+
+                            <div class="rounded bg-slate-50 p-2">
+                                <span class="block text-[9px] text-slate-500">
+                                    3rd &amp; Long Aggression
+                                </span>
+                                <b class="font-mono text-sm font-black text-slate-900">
+                                    ${formatProjectedTendency(projectedThirdLong)}
+                                </b>
+                            </div>
+
+                            <div class="rounded bg-slate-50 p-2">
+                                <span class="block text-[9px] text-slate-500">
+                                    Defensive Blitz
+                                </span>
+                                <b class="font-mono text-sm font-black text-slate-900">
+                                    ${formatProjectedTendency(projectedBlitz)}
+                                </b>
+                            </div>
+
+                            <div class="rounded bg-slate-50 p-2">
+                                <span class="block text-[9px] text-slate-500">
+                                    4th Down Aggression
+                                </span>
+                                <b class="font-mono text-sm font-black text-slate-900">
+                                    ${formatProjectedTendency(projectedFourthDown)}
+                                </b>
+                            </div>
+                        </div>
+
+                        <p class="mt-2 text-[10px] leading-relaxed text-slate-500">
+                            ${escapeCoachText(tendencyContextNote)}
+                            These are tendencies, not fixed play-call percentages.
+                            Adaptability, game situations, and roster strengths can change the coach's decisions.
+                        </p>
+                    </section>
+                ` : `
+                    <section class="rounded border border-dashed border-slate-300 bg-slate-50 p-3">
+                        <h5 class="text-[10px] font-black uppercase tracking-wide text-slate-600">
+                            Projected Play-Calling Tendencies
+                        </h5>
+                        <p class="mt-1 text-[10px] text-slate-500">
+                            Tendencies cannot be projected until a team context is available.
+                        </p>
+                    </section>
+                `}
 
                 ${team && Array.isArray(team.staffWorkPlan?.assignments) ? (() => {
                     const coachTasks = team.staffWorkPlan.assignments.filter(
