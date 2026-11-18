@@ -4010,8 +4010,13 @@ export function renderRecruitingWirePanel(gameState) {
 
     if (lastResolvedDay === 0) {
         dailyWire.innerHTML = `
-            <div class="p-6 text-center text-slate-400 italic text-[11px]">
-                Free Agency commences on Day 1. Offers and commitments will appear here as each day resolves.
+            <div class="flex flex-nowrap items-center gap-2 whitespace-nowrap">
+                <span class="rounded bg-slate-100 px-2 py-1 text-[9px] font-black uppercase text-slate-600 shrink-0">
+                    RECRUITING WIRE
+                </span>
+                <span class="text-[10px] text-slate-500 shrink-0">
+                    Free Agency begins on Day 1. Offers and commitments will appear here as each day resolves.
+                </span>
             </div>
         `;
         return;
@@ -4067,49 +4072,81 @@ export function renderRecruitingWirePanel(gameState) {
         if (Number(act.tokensSpent) > 0) detailParts.push(`${Number(act.tokensSpent)} Token(s)`);
 
         return `
-            <div class="rounded border border-slate-200 bg-white p-2 text-[11px]">
-                <div class="font-bold text-slate-800">${teamName} · ${pName}</div>
-                <div class="mt-0.5 text-slate-600">${label}</div>
-                ${detailParts.length > 0 ? `<div class="mt-0.5 text-[10px] text-slate-500">${detailParts.map(escapeWireHtml).join(' · ')}</div>` : ''}
-            </div>
+            <span class="inline-flex items-center gap-1.5 shrink-0 rounded border border-slate-200 bg-white px-2 py-1 text-[10px] whitespace-nowrap">
+                <span class="font-black text-slate-800">
+                    ${teamName}
+                </span>
+
+                <span class="text-slate-300">·</span>
+
+                <span class="font-semibold text-slate-700">
+                    ${pName}
+                </span>
+
+                <span class="text-slate-500">
+                    ${label}
+                </span>
+
+                ${detailParts.length > 0 ? `
+                    <span class="text-[9px] text-slate-400">
+                        ${detailParts.map(escapeWireHtml).join(' · ')}
+                    </span>
+                ` : ''}
+            </span>
         `;
     };
 
     dailyWire.innerHTML = `
-        <div class="mb-3 border-b border-slate-200 pb-2">
-            <div class="font-black text-[10px] uppercase tracking-wider text-slate-800">
-                Day ${lastResolvedDay} Wire Summary
-            </div>
-            <div class="mt-0.5 text-[10px] text-slate-500">
-                Your actions: ${yourActivity.length} · League: ${leagueActivity.length} · Commitments: ${dayCommitments.length}
-            </div>
-        </div>
+        <div class="flex flex-nowrap items-center gap-1.5 min-w-0 whitespace-nowrap">
 
-        ${dayCommitments.length > 0 ? `
-            <div class="mb-3 space-y-1">
-                <div class="text-[10px] font-black uppercase tracking-wide text-emerald-800 border-b border-emerald-200 pb-0.5">
-                    Commitments
-                </div>
-                ${dayCommitments.map(c => `
-                    <div class="rounded border border-emerald-200 bg-emerald-50 p-2 text-[11px]">
-                        <b>${escapeWireHtml(c.playerName)}</b> committed to <b>${escapeWireHtml(c.teamName)}</b>.
-                    </div>
-                `).join('')}
-            </div>
-        ` : ''}
+            <span class="rounded bg-slate-900 px-2 py-1 text-[9px] font-black uppercase text-white shrink-0">
+                DAY ${lastResolvedDay}
+            </span>
 
-        <div class="mb-3 space-y-1">
-            <div class="text-[10px] font-black uppercase tracking-wide text-emerald-800 border-b border-emerald-200 pb-0.5">
-                Your Team (${yourActivity.length})
-            </div>
-            ${yourActivity.length > 0 ? yourActivity.slice(-6).reverse().map(renderActRow).join('') : '<p class="text-[10px] text-slate-400 italic">No actions recorded for your team on Day ' + lastResolvedDay + '.</p>'}
-        </div>
+            <span class="text-[9px] font-bold text-slate-500 shrink-0">
+                YOUR ${yourActivity.length}
+            </span>
 
-        <div class="space-y-1">
-            <div class="text-[10px] font-black uppercase tracking-wide text-slate-700 border-b border-slate-200 pb-0.5">
-                Around the League (${leagueActivity.length})
-            </div>
-            ${leagueActivity.length > 0 ? leagueActivity.slice(-8).reverse().map(renderActRow).join('') : '<p class="text-[10px] text-slate-400 italic">No league activity recorded on Day ' + lastResolvedDay + '.</p>'}
+            <span class="text-[9px] font-bold text-slate-500 shrink-0">
+                LEAGUE ${leagueActivity.length}
+            </span>
+
+            <span class="text-[9px] font-bold text-emerald-700 shrink-0">
+                SIGNINGS ${dayCommitments.length}
+            </span>
+
+            ${dayCommitments.map(c => `
+                <span class="inline-flex items-center gap-1 shrink-0 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px]">
+                    <span class="font-black text-emerald-800">SIGNED</span>
+                    <span class="font-semibold text-slate-800">
+                        ${escapeWireHtml(c.playerName)}
+                    </span>
+                    <span class="text-slate-500">→ ${escapeWireHtml(c.teamName)}</span>
+                </span>
+            `).join('')}
+
+            <span class="h-5 border-l border-slate-200 mx-1 shrink-0"></span>
+
+            <span class="text-[9px] font-black uppercase text-emerald-800 shrink-0">
+                Your Team
+            </span>
+
+            ${yourActivity.length > 0
+                ? yourActivity.slice(-6).reverse().map(renderActRow).join('')
+                : `<span class="text-[10px] text-slate-400 shrink-0">No team activity recorded.</span>`
+            }
+
+            <span class="h-5 border-l border-slate-200 mx-1 shrink-0"></span>
+
+            <span class="text-[9px] font-black uppercase text-slate-600 shrink-0">
+                Around the League
+            </span>
+
+            ${leagueActivity.length > 0
+                ? leagueActivity.slice(-8).reverse().map(renderActRow).join('')
+                : `<span class="text-[10px] text-slate-400 shrink-0">No league activity recorded.</span>`
+            }
+
         </div>
     `;
 }
@@ -4418,26 +4455,30 @@ function renderRecruitingActivityPanel(gameState) {
         );
 
         return `
-            <div class="flex items-center justify-between gap-3 py-2 border-b border-gray-700/50">
-                <div class="min-w-0">
-                    <div class="text-sm text-gray-200 truncate">
-                        ${escapeHtml(coachName)}
-                    </div>
-                    <div class="text-xs text-gray-500">
-                        ${escapeHtml(entry?.role ?? coach?.role ?? 'Staff')}
-                    </div>
-                </div>
-                <div class="text-sm text-right whitespace-nowrap">
-                    <div class="text-[10px] text-gray-400">
-                        Recruiting ${recruitingHours}h assigned · ${deliveredRecruitingHours.toFixed(1)}h delivered
-                    </div>
-                    <div class="text-[10px] text-gray-500">
-                        Other work ${otherHours}h
-                    </div>
-                    <div class="text-xs ${remainingHours > 0 ? 'text-emerald-400' : 'text-amber-400'}">
-                        ${remainingHours}h recruiting allowance left / ${weeklyHours}h weekly
-                    </div>
-                </div>
+            <div class="inline-flex items-center gap-2 shrink-0 rounded border border-slate-200 bg-slate-50 px-2 py-1">
+                <span class="text-[10px] font-black text-slate-800">
+                    ${escapeHtml(coachName)}
+                </span>
+
+                <span class="text-[9px] text-slate-500">
+                    ${escapeHtml(entry?.role ?? coach?.role ?? 'Staff')}
+                </span>
+
+                <span class="text-[9px] font-semibold text-blue-800 whitespace-nowrap">
+                    Recruit ${recruitingHours}h
+                </span>
+
+                <span class="text-[9px] text-slate-500 whitespace-nowrap">
+                    ${deliveredRecruitingHours.toFixed(1)}h delivered
+                </span>
+
+                <span class="text-[9px] text-slate-500 whitespace-nowrap">
+                    Other ${otherHours}h
+                </span>
+
+                <span class="text-[9px] font-black whitespace-nowrap ${remainingHours > 0 ? 'text-emerald-700' : 'text-amber-700'}">
+                    ${remainingHours}/${weeklyHours}h left
+                </span>
             </div>
         `;
     }).join('');
@@ -4708,49 +4749,54 @@ function renderRecruitingActivityPanel(gameState) {
             }
 
             return `
-                <div class="py-2 border-b border-gray-700/50">
-                    <div class="flex items-start justify-between gap-3">
-                        <div class="text-sm text-gray-200">
-                            ${escapeHtml(playerName)}
-                        </div>
-                        <div class="text-xs text-gray-500 whitespace-nowrap">
-                            Day ${
-                                activity?.type === 'recruiting_outcome'
-                                    ? Number(activity.decisionDay) || '—'
-                                    : Number(activity.day) || '—'
-                            }
-                        </div>
-                    </div>
-                    <div class="text-xs text-gray-400 mt-1">
+                <div
+                    title="${escapeHtml(description)}"
+                    class="inline-flex items-center gap-1.5 shrink-0 rounded border border-slate-200 bg-white px-2 py-1">
+
+                    <span class="text-[9px] font-black text-slate-500 whitespace-nowrap">
+                        DAY ${
+                            activity?.type === 'recruiting_outcome'
+                                ? Number(activity.decisionDay) || '—'
+                                : Number(activity.day) || '—'
+                        }
+                    </span>
+
+                    <span class="text-[10px] font-bold text-slate-800 whitespace-nowrap">
+                        ${escapeHtml(playerName)}
+                    </span>
+
+                    <span class="text-[9px] text-slate-500 max-w-[300px] truncate">
                         ${escapeHtml(description)}
-                    </div>
+                    </span>
                 </div>
             `;
         }).join('');
 
     activityEl.innerHTML = `
-        <div class="space-y-4">
-            <section>
-                <div class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">
-                    Weekly Staff Hours
-                </div>
-                ${coachRows || `
-                    <div class="text-sm text-gray-500 py-2">
-                        No recruiting staff hours are available.
-                    </div>
-                `}
-            </section>
+        <div class="flex flex-nowrap items-center gap-1.5 min-w-0 whitespace-nowrap">
 
-            <section>
-                <div class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">
-                    Recruiting Week Activity
-                </div>
-                ${activityRows || `
-                    <div class="text-sm text-gray-500 py-2">
-                        No recruiting actions recorded today.
-                    </div>
-                `}
-            </section>
+            <span class="text-[9px] font-black uppercase tracking-wide text-slate-500 shrink-0">
+                Coach Hours
+            </span>
+
+            ${coachRows || `
+                <span class="text-[10px] text-slate-400 shrink-0">
+                    No recruiting staff hours available.
+                </span>
+            `}
+
+            <span class="h-5 border-l border-slate-200 mx-1 shrink-0"></span>
+
+            <span class="text-[9px] font-black uppercase tracking-wide text-slate-500 shrink-0">
+                Week Activity
+            </span>
+
+            ${activityRows || `
+                <span class="text-[10px] text-slate-400 shrink-0">
+                    No recruiting actions recorded yet.
+                </span>
+            `}
+
         </div>
     `;
 }
@@ -5074,12 +5120,12 @@ export function renderOffseasonFAPool(gameState) {
                 </div>
                 <span class="text-[9px] text-slate-500">Click any position room to filter matching prospects</span>
             </div>
-            <div class="grid grid-cols-4 sm:grid-cols-8 gap-1.5 font-mono text-[10px]">
+            <div class="flex flex-nowrap items-stretch gap-1.5 overflow-x-auto pb-1 font-mono text-[10px] hide-scrollbar">
                 ${rosterDepthAnalysis.map(item => `
                     <button type="button"
                         onclick="window.app_jumpToRecruitingPositionNeed('${item.pos}')"
                         title="${item.pos}: ${item.viableCount}/${item.ideal} viable · Starter Avg ${item.starterAvg || '--'} · ${item.status}"
-                        class="rounded border px-2 py-1 text-left transition hover:border-slate-500 ${item.badgeColor}">
+                        class="shrink-0 min-w-[76px] rounded border px-2 py-1 text-left transition hover:border-slate-500 ${item.badgeColor}">
                         <div class="flex items-center justify-between gap-1">
                             <span class="font-black font-sans">${item.pos}</span>
                             <span class="font-bold">${item.viableCount}/${item.ideal}</span>

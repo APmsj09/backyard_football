@@ -643,41 +643,65 @@
                 </div>
             </div>
 
-            <!-- Main Content Grid -->
-            <div class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-hidden min-h-0">
-                <!-- Main Operations Board (8-9 cols) -->
+            <!-- Recruiting Layout: Coach Hours / Prospect Board / Wire -->
+            <div class="flex-grow flex flex-col gap-2.5 p-3 overflow-hidden min-h-0">
+
+                <!-- TOP STRIP: Coach Hours & Recruiting Activity -->
+                <section
+                    id="fa-staff-hours-strip"
+                    class="shrink-0 bg-white border border-slate-300 rounded-sm shadow-sm overflow-hidden">
+
+                    <div class="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-slate-200 bg-slate-50">
+                        <h4 class="font-bold text-[10px] uppercase tracking-wider text-slate-800">
+                            Coach Hours & Recruiting Activity
+                        </h4>
+
+                        <span
+                            id="fa-bids-count"
+                            class="text-[10px] font-mono text-slate-500 font-bold whitespace-nowrap">
+                            0 This Week
+                        </span>
+                    </div>
+
+                    <div
+                        id="fa-pending-bids-list"
+                        class="min-w-0 overflow-x-auto overflow-y-hidden p-2 text-xs">
+                        <p class="text-slate-400 italic text-[10px]">
+                            Coach hours and recruiting activity will appear here.
+                        </p>
+                    </div>
+                </section>
+
+                <!-- MAIN: Full-Width Recruiting Board -->
                 <div
-                    class="lg:col-span-8 xl:col-span-9 min-w-0 bg-white border border-slate-300 rounded-sm shadow-sm flex flex-col overflow-hidden min-h-0">
-                    <div id="fa-minigame-pool-tbody" class="flex-grow overflow-auto min-h-0 p-3"></div>
-                </div>
+                    class="flex-1 min-h-[260px] min-w-0 bg-white border border-slate-300 rounded-sm shadow-sm flex flex-col overflow-hidden">
 
-                <!-- Active Bids & Day Recap (4 cols) -->
-                <div class="lg:col-span-4 xl:col-span-3 min-w-0 flex flex-col gap-3 min-h-0">
-                    <!-- Your Active Day Bids -->
                     <div
-                        class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col shrink-0 max-h-[38vh]">
-                        <div class="flex justify-between items-center border-b border-slate-200 pb-1 mb-2">
-                            <h4 class="font-bold text-xs uppercase tracking-wider text-slate-800">Your Recruiting Activity</h4>
-                            <span id="fa-bids-count" class="text-[10px] font-mono text-slate-500 font-bold">0
-                                Pending</span>
-                        </div>
-                        <div id="fa-pending-bids-list" class="space-y-1.5 overflow-y-auto flex-grow text-xs">
-                            <p class="text-slate-400 italic text-center py-4 text-[11px]">No recruiting activity yet. Assign staff time or take an action on a prospect to get started.</p>
-                        </div>
-                    </div>
-
-                    <!-- Daily News & Signings Ticker -->
-                    <div
-                        class="bg-white border border-slate-300 rounded-sm shadow-sm p-3 flex flex-col flex-grow overflow-hidden min-h-0">
-                        <h4
-                            class="font-bold text-xs uppercase tracking-wider text-slate-800 border-b border-slate-200 pb-1 mb-2">
-                            Neighborhood Wire & Signings</h4>
-                        <div id="fa-daily-wire-list" class="space-y-1.5 overflow-y-auto flex-grow text-xs">
-                            <p class="text-slate-400 italic text-center py-6 text-[11px]">Free Agency commences on Day
-                                1. Offers will be reviewed by players at the end of each day.</p>
-                        </div>
+                        id="fa-minigame-pool-tbody"
+                        class="flex-grow overflow-auto min-h-0 p-3">
                     </div>
                 </div>
+
+                <!-- BOTTOM STRIP: Neighborhood Wire -->
+                <section
+                    id="fa-neighborhood-wire-strip"
+                    class="shrink-0 bg-white border border-slate-300 rounded-sm shadow-sm overflow-hidden">
+
+                    <div class="flex items-center gap-2 px-3 py-1.5 border-b border-slate-200 bg-slate-50">
+                        <h4 class="font-bold text-[10px] uppercase tracking-wider text-slate-800">
+                            Neighborhood Wire & Signings
+                        </h4>
+                    </div>
+
+                    <div
+                        id="fa-daily-wire-list"
+                        class="min-w-0 overflow-x-auto overflow-y-hidden p-2 text-xs">
+                        <p class="text-slate-400 italic text-[10px]">
+                            Free Agency commences on Day 1. Offers and commitments will appear here as each day resolves.
+                        </p>
+                    </div>
+                </section>
+
             </div>
         </section>
 

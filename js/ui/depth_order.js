@@ -505,13 +505,6 @@ export function renderDepthOrderPane(gameState) {
         ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50';
 
-    let schemePreviewCollapsed = window._schemePreviewCollapsed ?? false;
-
-    window.toggleSchemePreview = function() {
-        window._schemePreviewCollapsed = !window._schemePreviewCollapsed;
-        renderDepthOrderPane(getGameState());
-    };
-
     const isOffenseSide = activeDepthChartTab === 'offense';
     const isDefenseSide = activeDepthChartTab === 'defense';
     const currentActiveSide = isOffenseSide ? 'offense' : (isDefenseSide ? 'defense' : null);
@@ -526,6 +519,64 @@ export function renderDepthOrderPane(gameState) {
             .map(([pos, count]) => `${count} ${pos}`)
             .join(' · ')
         : 'Standard personnel';
+
+    const renderCompactStarterChip = slot => {
+        const chart = currentActiveSide === 'offense'
+            ? offChart
+            : defChart;
+
+        const player = rosterById.get(String(chart?.[slot]));
+
+        const posKey = slot.replace(/\d/g, '');
+        let evalPosKey = posKey;
+
+        if (posKey === 'PR' || posKey === 'SLOT') evalPosKey = 'WR';
+        else if (posKey === 'P') evalPosKey = 'QB';
+        else if (posKey === 'FB') evalPosKey = 'TE';
+        else if (posKey === 'NCB') evalPosKey = 'DB';
+
+        const slotInfo = getFormationSlotInfo(
+            team,
+            currentActiveSide,
+            slot,
+            evalPosKey
+        );
+
+        const ovr = player
+            ? calculateOverall(player, slotInfo.ratingPosition)
+            : null;
+
+        return `
+            <button
+                type="button"
+                onclick="window.openSlotPicker('${slot}', '${currentActiveSide}')"
+                title="${player ? player.name : 'Assign player'}"
+                class="flex items-center gap-1.5 px-2 py-1 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 transition min-w-0 max-w-[145px] shrink-0">
+
+                <span class="text-[9px] font-black uppercase ${
+                    currentActiveSide === 'offense'
+                        ? 'text-blue-800'
+                        : 'text-rose-800'
+                }">
+                    ${slotInfo.displayLabel}
+                </span>
+
+                <span class="text-[10px] font-semibold text-slate-700 truncate">
+                    ${player ? player.name : 'Assign'}
+                </span>
+
+                ${player ? `
+                    <span class="text-[10px] font-black font-mono shrink-0 ${
+                        ovr >= 70 ? 'text-emerald-700' : 'text-slate-600'
+                    }">
+                        ${ovr}
+                    </span>
+                ` : `
+                    <span class="text-[10px] font-black text-rose-600">+</span>
+                `}
+            </button>
+        `;
+    };
 
     pane.innerHTML = `
         <!-- Depth Chart Header -->
@@ -543,14 +594,6 @@ export function renderDepthOrderPane(gameState) {
             </div>
 
             <div class="flex flex-wrap items-center gap-2 shrink-0">
-                ${currentActiveSide ? `
-                <button
-                    type="button"
-                    class="rounded border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-slate-700 transition xl:hidden"
-                    onclick="window.toggleSchemePreview()">
-                    ${schemePreviewCollapsed ? '👁️ Show Scheme Preview' : '✕ Hide Preview'}
-                </button>` : ''}
-
                 <button
                     class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-2.5 py-1 rounded text-xs uppercase tracking-wider transition"
                     onclick="window.resetDepthChartOverrides()">
@@ -586,11 +629,61 @@ export function renderDepthOrderPane(gameState) {
             </button>
         </div>
 
-        <!-- MAIN RESPONSIVE CONTAINER (Ladders Left + Scheme Preview Right) -->
-        <div class="grid grid-cols-1 ${currentActiveSide && !schemePreviewCollapsed ? 'xl:grid-cols-12' : ''} gap-3 items-start min-h-0 pb-6">
+        <!-- FULL-WIDTH DEPTH CHART LAYOUT -->
+        <div class="space-y-3 min-h-0 pb-6">
 
-            <!-- POSITION LADDERS (Main Column) -->
-            <div class="${currentActiveSide && !schemePreviewCollapsed ? 'xl:col-span-8 2xl:col-span-9' : 'col-span-1'} space-y-3 min-w-0">
+            <!-- COMPACT BASE SCHEME PREVIEW -->
+            ${currentActiveSide ? `
+            <section class="bg-white border border-slate-300 rounded px-2.5 py-2 shadow-sm">
+
+                <div class="flex flex-nowrap items-center gap-2 overflow-x-auto">
+
+                    <!-- Scheme Identity -->
+                    <div class="flex items-center gap-2 shrink-0 border-r border-slate-200 pr-3">
+                        <span class="text-[10px] font-black uppercase tracking-wider text-slate-800">
+                            ${currentActiveSide === 'offense'
+                                ? '🏈 Base Scheme'
+                                : '🛡️ Base Defense'}
+                        </span>
+
+                        <span class="text-[9px] text-slate-500 font-mono whitespace-nowrap">
+                            ${personnelText}
+                        </span>
+                    </div>
+
+                    <!-- Formation Selector -->
+                    <select
+                        aria-label="Active base formation"
+                        onchange="window.app_changeFormation('${currentActiveSide}', this.value)"
+                        class="shrink-0 max-w-[170px] border border-slate-200 bg-slate-50 rounded px-2 py-1 text-[10px] font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-400">
+
+                        ${Object.keys(activeFormationMap || {})
+                            .filter(k => k !== 'Punt' && k !== 'Punt_Return')
+                            .map(k => `
+                                <option value="${k}" ${k === activeFormKey ? 'selected' : ''}>
+                                    ${activeFormationMap[k]?.name || k}
+                                </option>
+                            `).join('')}
+                    </select>
+
+                    <div class="h-6 border-l border-slate-200 shrink-0"></div>
+
+                    <!-- Starting Lineup -->
+                    <span class="text-[9px] font-black uppercase tracking-wider text-slate-500 shrink-0">
+                        Starting 8
+                    </span>
+
+                    <div class="flex flex-nowrap items-center gap-1.5 min-w-0">
+                        ${activeSlots.map(renderCompactStarterChip).join('')}
+                    </div>
+
+                </div>
+            </section>
+            ` : ''}
+
+            <!-- FULL-WIDTH POSITION LADDERS -->
+            <div class="space-y-3 min-w-0">
+
                 ${activeDepthChartTab === 'offense' ? `
                     <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2.5">
                         ${['QB', 'RB', 'WR', 'TE', 'OL'].map(renderPositionDepthCard).join('')}
@@ -605,6 +698,7 @@ export function renderDepthOrderPane(gameState) {
 
                 ${activeDepthChartTab === 'specialTeams' ? `
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+
                         <section class="bg-white border border-slate-200 rounded p-3 space-y-2.5 shadow-sm">
                             <div class="border-b border-slate-100 pb-2">
                                 <h4 class="font-black text-xs text-amber-950 uppercase tracking-wider">
@@ -614,6 +708,7 @@ export function renderDepthOrderPane(gameState) {
                                     Kicking and return personnel.
                                 </p>
                             </div>
+
                             <div class="space-y-2">
                                 ${renderSlotCard('PR', 'specialTeams')}
                                 ${renderSlotCard('P', 'specialTeams')}
@@ -629,67 +724,18 @@ export function renderDepthOrderPane(gameState) {
                                     Extra personnel used when packages are called.
                                 </p>
                             </div>
+
                             <div class="space-y-2">
                                 ${renderSlotCard('FB', 'specialists')}
                                 ${renderSlotCard('SLOT', 'specialists')}
                                 ${renderSlotCard('NCB', 'specialists')}
                             </div>
                         </section>
+
                     </div>
                 ` : ''}
+
             </div>
-
-            <!-- SCHEME PREVIEW & STARTING 8 ON-FIELD CARD (Side Column / Collapsible) -->
-            ${currentActiveSide ? `
-            <aside class="${schemePreviewCollapsed ? 'hidden' : 'flex'} flex-col gap-2.5 ${currentActiveSide && !schemePreviewCollapsed ? 'xl:col-span-4 2xl:col-span-3' : 'hidden'} bg-white border border-slate-300 rounded p-3 shadow-sm min-w-0">
-                <div class="flex items-center justify-between border-b border-slate-200 pb-2">
-                    <div>
-                        <span class="text-xs font-black uppercase tracking-wider text-slate-900 block">
-                            ${currentActiveSide === 'offense' ? '🏈 Base Scheme Preview' : '🛡️ Base Defense Preview'}
-                        </span>
-                        <span class="text-[10px] text-slate-500 font-mono">${personnelText}</span>
-                    </div>
-                    <button
-                        type="button"
-                        class="text-slate-400 hover:text-slate-700 xl:hidden text-sm font-bold px-1"
-                        onclick="window.toggleSchemePreview()"
-                        title="Close preview">✕</button>
-                </div>
-
-                <!-- Scheme Selector -->
-                <div>
-                    <label class="block text-[9px] font-black uppercase tracking-wider text-slate-500 mb-1">
-                        Active Base Formation
-                    </label>
-                    <div class="flex flex-wrap gap-1">
-                        ${Object.keys(activeFormationMap || {})
-                            .filter(k => k !== 'Punt' && k !== 'Punt_Return')
-                            .map(k => `
-                                <button
-                                    type="button"
-                                    onclick="window.app_changeFormation('${currentActiveSide}', '${k}')"
-                                    class="px-2 py-1 rounded text-[10px] font-bold border transition ${
-                                        k === activeFormKey
-                                            ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                                    }">
-                                    ${activeFormationMap[k]?.name || k}
-                                </button>
-                            `).join('')}
-                    </div>
-                </div>
-
-                <!-- Starting 8 in this Formation (Compact Cards) -->
-                <div>
-                    <span class="block text-[9px] font-black uppercase tracking-wider text-slate-500 mb-1">
-                        Starting 8 in ${activeFormationData?.name || activeFormKey}
-                    </span>
-                    <div class="space-y-1.5 max-h-[380px] overflow-y-auto pr-0.5">
-                        ${activeSlots.map(slot => renderSlotCard(slot, currentActiveSide)).join('')}
-                    </div>
-                </div>
-            </aside>` : ''}
-
         </div>
     `;
 }
