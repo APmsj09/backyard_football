@@ -9410,6 +9410,22 @@ function ensureHireStaffHandler() {
                 : null;
         };
 
+        let staffNegotiationSession =
+            typeof Game.startStaffNegotiation === 'function'
+                ? Game.startStaffNegotiation(staff, team, roleKey)
+                : null;
+
+        const autonomyPreference = Number(
+            staffNegotiationSession?.profile?.autonomyPreference
+        );
+
+        const autonomyLabel =
+            autonomyPreference >= 66
+                ? 'Prefers coach-led control'
+                : autonomyPreference <= 35
+                    ? 'Comfortable with GM direction'
+                    : 'Prefers collaborative control';
+
         const pitchModalHtml = `
             <div class="space-y-3.5 text-left text-xs">
                 <!-- Candidate Identity Header -->
@@ -9436,6 +9452,26 @@ function ensureHireStaffHandler() {
                     "${staff.biases.tactical?.desc || staff.biases.personality.desc}"
                 </div>
 
+                ${isCoachPoolHire && Number.isFinite(autonomyPreference) ? `
+                <div class="rounded border border-indigo-200 bg-indigo-50 p-2.5 text-indigo-950">
+                    <div class="flex justify-between items-center gap-2">
+                        <b class="text-[10px] uppercase tracking-wider">
+                            Control Preference
+                        </b>
+                        <span class="text-[10px] font-black">
+                            ${autonomyLabel}
+                        </span>
+                    </div>
+                    <div class="mt-1 h-1.5 rounded bg-indigo-100 overflow-hidden">
+                        <div class="h-full bg-indigo-600 rounded"
+                            style="width:${autonomyPreference}%"></div>
+                    </div>
+                    <p class="mt-1 text-[9px] text-indigo-800">
+                        This is the candidate's preference, not a guarantee
+                        that they will reject other arrangements.
+                    </p>
+                </div>
+                ` : ''}
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <div class="rounded border border-slate-200 bg-white p-2">
                         <span class="block text-[9px] font-bold uppercase text-slate-500">
@@ -9534,9 +9570,10 @@ function ensureHireStaffHandler() {
                             Scheme Autonomy & Play-Calling Rights${hasCurrentHeadCoach && !hasOpenCoachingSlot ? ' (Applies if replacing Head Coach)' : ''}
                         </label>
                         <input type="hidden" id="staff-scheme-promise" value="COACH_CHOICE">
-                        <div class="grid grid-cols-1 gap-1 sm:grid-cols-2" role="group" aria-label="Scheme autonomy">
-                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="COACH_CHOICE" aria-pressed="true" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'COACH_CHOICE')" class="rounded-sm border border-emerald-700 bg-emerald-50 px-2 py-2 text-left text-[10px] font-bold text-emerald-900">Coach autonomy<span class="mt-0.5 block text-[9px] font-normal text-slate-600">Coach sets the gameplan · improves pitch</span></button>
-                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="GM_CHOICE" aria-pressed="false" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'GM_CHOICE')" class="rounded-sm border border-slate-200 bg-white px-2 py-2 text-left text-[10px] font-bold text-slate-700">GM control<span class="mt-0.5 block text-[9px] font-normal text-slate-500">Front office sets both formations</span></button>
+                        <div class="grid grid-cols-1 gap-1 sm:grid-cols-3" role="group" aria-label="Scheme autonomy">
+                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="COACH_CHOICE" aria-pressed="true" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'COACH_CHOICE')" class="rounded-sm border border-emerald-700 bg-emerald-50 px-2 py-2 text-left text-[10px] font-bold text-emerald-900">Coach autonomy<span class="mt-0.5 block text-[9px] font-normal text-slate-600">Coach controls both schemes</span></button>
+                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="SHARED_CONTROL" aria-pressed="false" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'SHARED_CONTROL')" class="rounded-sm border border-slate-200 bg-white px-2 py-2 text-left text-[10px] font-bold text-slate-700">Shared control<span class="mt-0.5 block text-[9px] font-normal text-slate-500">GM and coach agree on schemes</span></button>
+                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="GM_CHOICE" aria-pressed="false" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'GM_CHOICE')" class="rounded-sm border border-slate-200 bg-white px-2 py-2 text-left text-[10px] font-bold text-slate-700">GM control<span class="mt-0.5 block text-[9px] font-normal text-slate-500">Front office controls both</span></button>
                         </div>
                     </div>` : ''}
 
@@ -9597,7 +9634,21 @@ function ensureHireStaffHandler() {
             </div>
         `;
 
-        showModal(`Recruit ${roleName}: ${staff.name}`, pitchModalHtml, () => {
+        const submitStaffOffer = (pitchOverride = null) => {
+            if (
+                !staffNegotiationSession ||
+                typeof Game.evaluateStaffNegotiationRound !== 'function'
+            ) {
+                showModal(
+                    'Negotiation Engine Not Ready',
+                    'The updated negotiation functions in js/game/negotiations.js must be applied before coach counteroffers can be used.',
+                    null,
+                    null,
+                    null,
+                    'Close'
+                );
+                return;
+            }   
             if (!isStaffChangeWindowOpen()) {
                 showModal(
                     'Staff Changes Closed',
@@ -9650,12 +9701,30 @@ function ensureHireStaffHandler() {
             // object captured when the offer modal was opened.
             staff = latestMarketMatches[0];
 
-            const tokensOffered = parseInt(document.getElementById('staff-pitch-tokens')?.value || '0', 10);
-            const cashOffered = parseFloat(document.getElementById('staff-pitch-cash')?.value || '0');
-            const schemePromise = document.getElementById('staff-scheme-promise')?.value || 'GM_CHOICE';
-            const practiceFocus = document.getElementById('staff-practice-focus')?.value || 'BALANCED';
-            const replacementCoachId =
-                document.getElementById('staff-replacement-coach')?.value || '';
+            const tokensOffered = pitchOverride
+                ? Number(pitchOverride.tokensOffered ?? 0)
+                : parseInt(
+                    document.getElementById('staff-pitch-tokens')?.value || '0',
+                    10
+                );
+
+            const cashOffered = pitchOverride
+                ? Number(pitchOverride.cashOffered ?? 0)
+                : parseFloat(
+                    document.getElementById('staff-pitch-cash')?.value || '0'
+                );
+
+            const schemePromise = pitchOverride?.schemePromise ||
+                document.getElementById('staff-scheme-promise')?.value ||
+                'GM_CHOICE';
+
+            const practiceFocus = pitchOverride?.practiceFocus ||
+                document.getElementById('staff-practice-focus')?.value ||
+                'BALANCED';
+
+            const replacementCoachId = pitchOverride?.replacementCoachId ??
+                document.getElementById('staff-replacement-coach')?.value ??
+                '';
 
             // Revalidate the offer against current resources. The modal may
             // have been open while another transaction changed the balance.
@@ -9715,7 +9784,205 @@ function ensureHireStaffHandler() {
                 practiceFocus,
                 replacementCoachId
             };
-            const negotiation = Game.evaluateStaffNegotiation(staff, team, roleKey, pitch);
+            const negotiationRound = Game.evaluateStaffNegotiationRound(
+                staffNegotiationSession,
+                staff,
+                team,
+                roleKey,
+                pitch
+            );
+
+            if (negotiationRound.session) {
+                staffNegotiationSession = negotiationRound.session;
+            }
+
+            const negotiation =
+                negotiationRound.evaluation || negotiationRound;
+
+            if (negotiationRound.outcome === 'invalid') {
+                showModal(
+                    'Negotiation Could Not Continue',
+                    negotiationRound.quote ||
+                        'The negotiation is no longer valid. No resources have been spent.',
+                    null,
+                    null,
+                    null,
+                    'Close'
+                );
+                return;
+            }
+
+            if (negotiationRound.countered) {
+                const counteroffer =
+                    negotiationRound.counteroffer || {};
+
+                const counterTerms = counteroffer.terms || {};
+
+                const describeCounterTerm = ([key, value]) => {
+                    if (key === 'schemePromise') {
+                        const labels = {
+                            GM_CHOICE: 'GM controls both schemes',
+                            SHARED_CONTROL: 'Shared scheme authority',
+                            COACH_CHOICE: 'Full coach autonomy'
+                        };
+
+                        return `Scheme authority: ${labels[value] || value}`;
+                    }
+
+                    if (key === 'practiceFocus') {
+                        const labels = {
+                            CONDITIONING: 'Conditioning',
+                            CHALK_TALK: 'Film and playbook study',
+                            FUN_SCRIMMAGE: 'Team chemistry'
+                        };
+
+                        return `Practice culture: ${labels[value] || value}`;
+                    }
+
+                    if (key === 'cashOffered') {
+                        return `Upfront stipend: $${Number(value).toFixed(0)}`;
+                    }
+
+                    if (key === 'tokensOffered') {
+                        return `Favor Tokens: ${value}`;
+                    }
+
+                    return `${key}: ${value}`;
+                };
+
+                const counterTermLines = Object.entries(counterTerms)
+                    .map(describeCounterTerm);
+
+                window.app_respondStaffCounteroffer = action => {
+                    window.app_respondStaffCounteroffer = null;
+
+                    if (action === 'meet') {
+                        submitStaffOffer({
+                            ...pitch,
+                            ...counterTerms
+                        });
+                        return;
+                    }
+
+                    if (action === 'revise') {
+                        showModal(
+                            `Revise Offer: ${staff.name}`,
+                            pitchModalHtml,
+                            submitStaffOffer,
+                            'Submit Revised Offer'
+                        );
+
+                        const cashInput = document.getElementById(
+                            'staff-pitch-cash'
+                        );
+
+                        if (cashInput) {
+                            cashInput.value = String(pitch.cashOffered || 0);
+                        }
+
+                        const replacementInput =
+                            document.getElementById('staff-replacement-coach');
+
+                        if (replacementInput) {
+                            replacementInput.value =
+                                String(pitch.replacementCoachId || '');
+                        }
+
+                        window.app_setStaffPitchChoice?.(
+                            'staff-scheme-promise',
+                            pitch.schemePromise || 'GM_CHOICE'
+                        );
+
+                        window.app_setStaffPitchChoice?.(
+                            'staff-practice-focus',
+                            pitch.practiceFocus || 'CONDITIONING'
+                        );
+
+                        window.app_setStaffPitchChoice?.(
+                            'staff-pitch-tokens',
+                            String(pitch.tokensOffered || 0)
+                        );
+
+                        return;
+                    }
+
+                    staffNegotiationSession.status = 'walked_away';
+
+                    showModal(
+                        'Negotiations Ended',
+                        `
+                            <p class="text-sm text-slate-700">
+                                You and ${staff.name} could not reach an agreement.
+                                The candidate remains available on the staff market.
+                                No stipend or Favor Tokens were spent.
+                            </p>
+                        `,
+                        null,
+                        null,
+                        null,
+                        'Close'
+                    );
+                };
+
+                const counterHtml = `
+                    <div class="space-y-3 text-left text-xs">
+                        <div class="rounded border border-amber-200 bg-amber-50 p-3">
+                            <div class="font-black text-[10px] uppercase tracking-wider text-amber-900 mb-1">
+                                ${staff.name}'s Counteroffer
+                            </div>
+                            <p class="text-[11px] leading-relaxed text-amber-950 italic">
+                                ${counteroffer.message || negotiationRound.quote}
+                            </p>
+                        </div>
+
+                        <div class="rounded border border-slate-200 bg-white p-3">
+                            <div class="font-black text-[10px] uppercase tracking-wider text-slate-500 mb-2">
+                                Requested Changes
+                            </div>
+                            ${
+                                counterTermLines.length
+                                    ? `
+                                        <ul class="space-y-1 text-[11px] text-slate-800">
+                                            ${counterTermLines.map(line =>
+                                                `<li>• ${line}</li>`
+                                            ).join('')}
+                                        </ul>
+                                    `
+                                    : `
+                                        <p class="text-[11px] text-slate-600">
+                                            The candidate wants the overall offer improved,
+                                            but has not identified one specific term.
+                                        </p>
+                                    `
+                            }
+                        </div>
+
+                        <p class="text-[10px] text-slate-500">
+                            Negotiation round ${negotiationRound.round}
+                            of ${negotiationRound.maxRounds}.
+                            Meeting these requests submits a revised offer;
+                            it does not guarantee acceptance.
+                        </p>
+
+                        <button type="button"
+                            onclick="window.app_respondStaffCounteroffer('revise')"
+                            class="w-full rounded border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] font-bold text-indigo-900 hover:bg-indigo-100">
+                            Make a Different Offer
+                        </button>
+                    </div>
+                `;
+
+                showModal(
+                    `Counteroffer: ${staff.name}`,
+                    counterHtml,
+                    () => window.app_respondStaffCounteroffer?.('meet'),
+                    'Meet Counteroffer',
+                    () => window.app_respondStaffCounteroffer?.('walk'),
+                    'Walk Away'
+                );
+
+                return;
+            }
 
             const resultHtml = `
                 <div class="space-y-3 text-left text-xs">
@@ -9726,7 +9993,8 @@ function ensureHireStaffHandler() {
                         </div>
                         <p class="italic text-[11px] leading-relaxed mb-2">${negotiation.quote}</p>
                         <div class="text-[10px] font-mono border-t pt-1.5 ${negotiation.accepted ? 'border-emerald-200' : 'border-rose-200'}">
-                            Interest Score: <b>${negotiation.interestScore}/100</b> (Threshold: 45)
+                            Interest Score: <b>${negotiation.interestScore}/100</b>
+                            (Threshold: ${negotiation.threshold ?? '—'})
                         </div>
                     </div>
 
@@ -9998,6 +10266,27 @@ function ensureHireStaffHandler() {
                 staff.role = roleKey;
                 staff.teamId = team.id;
 
+                // Preserve the terms agreed during this hiring negotiation.
+                // The stipend and Favor Tokens are one-time costs, not salary.
+                staff.hiringAgreement = {
+                    year: Number(gameState.year) || 1,
+                    role: roleKey,
+                    schemeAuthority: roleKey === 'coach'
+                        ? schemePromise
+                        : null,
+                    practiceFocus,
+                    upfrontStipend: cashOffered,
+                    favorTokens: tokensOffered
+                };
+
+                if (roleKey === 'coach') {
+                    if (!team.gameplan) {
+                        team.gameplan = {};
+                    }
+
+                    team.gameplan.coachSchemeAuthority = schemePromise;
+                }
+
                 if (!team.staff) {
                     team.staff = {};
                 }
@@ -10236,7 +10525,14 @@ function ensureHireStaffHandler() {
             } else {
                 showModal("Pitch Rejected ✋", resultHtml, null, null, null, "Understood");
             }
-        }, "Submit Contract Offer");
+        };
+
+        showModal(
+            `Recruit ${roleName}: ${staff.name}`,
+            pitchModalHtml,
+            submitStaffOffer,
+            "Submit Contract Offer"
+        );
     };
 }
 
@@ -10346,6 +10642,51 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         if (defKey && defenseFormations[defKey]) currentTeam.formations.defense = defKey;
 
         rebuildDepthChartFromOrder(currentTeam);
+        saveGameState();
+        renderStaffTab(gs);
+    };
+
+    window.app_setHeadCoach = coachId => {
+        const gs = getGameState();
+        const currentTeam = gs?.playerTeam;
+
+        if (!currentTeam || coachId == null) return;
+
+        const coachingGroup =
+            Game.ensureTeamCoachingStaff?.(currentTeam) ||
+            currentTeam.coaches ||
+            [];
+
+        const nextHeadCoach = coachingGroup.find(coach =>
+            coach?.id != null &&
+            !coach.isUserCoach &&
+            String(coach.id) === String(coachId)
+        );
+
+        if (!nextHeadCoach) return;
+
+        const currentHeadCoachId = String(
+            currentTeam.staff?.coach?.id ??
+            currentTeam.coach?.id ??
+            ''
+        );
+
+        if (currentHeadCoachId === String(nextHeadCoach.id)) return;
+
+        if (
+            !currentTeam.staff ||
+            typeof currentTeam.staff !== 'object' ||
+            Array.isArray(currentTeam.staff)
+        ) {
+            currentTeam.staff = {};
+        }
+
+        currentTeam.staff.coach = nextHeadCoach;
+        currentTeam.coach = nextHeadCoach;
+
+        // Re-sync the assistant aliases around the new Head Coach.
+        Game.ensureTeamCoachingStaff?.(currentTeam);
+
         saveGameState();
         renderStaffTab(gs);
     };
@@ -13430,6 +13771,64 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                            </button>`
                         : '';
 
+                    const isHeadCoach = entry.role === 'Head Coach';
+
+                    const tendencies = outlook?.tendencies || {};
+
+                    const getTendency = key => {
+                        const value = Number(tendencies[key]);
+
+                        return Number.isFinite(value)
+                            ? Math.max(0, Math.min(100, Math.round(value)))
+                            : null;
+                    };
+
+                    const formatTendency = value =>
+                        value === null ? '—' : `${value}%`;
+
+                    const runTendency = getTendency('earlyDownTendency');
+                    const passTendency = runTendency === null
+                        ? null
+                        : 100 - runTendency;
+
+                    const thirdLongTendency = getTendency(
+                        'thirdAndLongAggressiveness'
+                    );
+
+                    const blitzTendency = getTendency(
+                        'defenseAggressiveness'
+                    );
+
+                    const fourthDownTendency = getTendency(
+                        'fourthDownBravery'
+                    );
+
+                    const offenseSchemeLabel = outlook?.preferredOffense
+                        ? (
+                            offenseFormations[outlook.preferredOffense]?.name ||
+                            outlook.preferredOffense
+                        )
+                        : 'Flexible';
+
+                    const defenseSchemeLabel = outlook?.preferredDefense
+                        ? (
+                            defenseFormations[outlook.preferredDefense]?.name ||
+                            outlook.preferredDefense
+                        )
+                        : 'Flexible';
+
+                    const makeHeadCoachActionHtml =
+                        isNPC && !isHeadCoach
+                            ? `
+                                <button
+                                    type="button"
+                                    onclick="event.stopPropagation(); window.app_setHeadCoach('${overviewEscape(entry.coachId)}')"
+                                    class="rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[9px] font-black uppercase text-amber-900 hover:bg-amber-100">
+                                    Make Head Coach
+                                </button>
+                            `
+                            : '';
+
                     return `
                         <article class="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm flex flex-col justify-between gap-2.5">
                             <div>
@@ -13441,7 +13840,11 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                                 onclick="app.openCoachCard('${entry.coachId}')">
                                                 ${overviewEscape(entry.coach.name || 'Unnamed Coach')}
                                             </button>
-                                            <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-slate-700">
+                                            <span class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                                                isHeadCoach
+                                                    ? 'bg-amber-100 text-amber-900'
+                                                    : 'bg-slate-100 text-slate-700'
+                                            }">
                                                 ${overviewEscape(entry.role)}
                                             </span>
                                             ${moraleBadge}
@@ -13470,17 +13873,70 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                         <span class="font-semibold text-emerald-800">${overviewEscape(entry.strengthsSummary)}</span>
                                     </div>
                                     <div>
-                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Preferred Formations</span>
-                                        <span class="font-semibold text-slate-800">${overviewEscape(outlook?.preferredOffense || 'Flexible')} / ${overviewEscape(outlook?.preferredDefense || 'Flexible')}</span>
+                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Preferred Schemes</span>
+                                        <span class="font-semibold text-slate-800">
+                                            ${overviewEscape(offenseSchemeLabel)}
+                                            /
+                                            ${overviewEscape(defenseSchemeLabel)}
+                                        </span>
                                     </div>
                                 </div>
 
+                                ${outlook ? `
+                                    <div class="mt-2 rounded border border-blue-200 bg-blue-50/40 p-2 text-[10px] text-slate-700">
+                                        <span class="font-black uppercase text-[9px] text-blue-900 block">
+                                            Football Identity
+                                        </span>
+
+                                        <p class="mt-1 font-bold text-slate-900">
+                                            ${overviewEscape(outlook.tacticalName || 'Adaptive Strategist')}
+                                        </p>
+
+                                        <p class="mt-0.5 leading-relaxed text-slate-600">
+                                            ${overviewEscape(outlook.tacticalDesc || 'No tactical description available.')}
+                                        </p>
+
+                                        <div class="mt-2 border-t border-blue-200 pt-2">
+                                            <span class="font-black uppercase text-[9px] text-slate-500 block">
+                                                Projected Play-Calling Tendencies
+                                            </span>
+
+                                            <div class="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
+                                                <div>
+                                                    <span class="block text-[9px] text-slate-500">Run / Pass</span>
+                                                    <b>${formatTendency(runTendency)} / ${formatTendency(passTendency)}</b>
+                                                </div>
+
+                                                <div>
+                                                    <span class="block text-[9px] text-slate-500">3rd & Long Aggro</span>
+                                                    <b>${formatTendency(thirdLongTendency)}</b>
+                                                </div>
+
+                                                <div>
+                                                    <span class="block text-[9px] text-slate-500">Blitz</span>
+                                                    <b>${formatTendency(blitzTendency)}</b>
+                                                </div>
+
+                                                <div>
+                                                    <span class="block text-[9px] text-slate-500">4th Down Aggro</span>
+                                                    <b>${formatTendency(fourthDownTendency)}</b>
+                                                </div>
+                                            </div>
+
+                                            <p class="mt-1 text-[9px] text-slate-500">
+                                                Estimates reflect this team's current scouting picture and the coach's ability to adapt.
+                                            </p>
+                                        </div>
+                                    </div>
+                                ` : ''}
+
                                 ${isNPC ? `
                                     <div class="mt-2 rounded border border-slate-200 bg-slate-50/80 p-2 text-[10px] text-slate-700">
-                                        <span class="font-black uppercase text-[9px] text-slate-500 block">Coach's Weekly Idea</span>
-                                        <p class="mt-0.5 italic">"${overviewEscape(outlook.practiceReason)}"</p>
-                                        <p class="mt-1 text-[9px] text-slate-500 font-mono">
-                                            Prefers ~${outlook.tendencies.earlyDownTendency}% Run · ${outlook.tendencies.defenseAggressiveness}% Blitz · ${outlook.tendencies.fourthDownBravery}% 4th-Down Aggro
+                                        <span class="font-black uppercase text-[9px] text-slate-500 block">
+                                            Coach's Weekly Idea
+                                        </span>
+                                        <p class="mt-0.5 italic">
+                                            "${overviewEscape(outlook.practiceReason)}"
                                         </p>
                                     </div>
                                 ` : ''}
@@ -13490,6 +13946,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                             <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
                                 <div class="flex flex-wrap gap-1.5">
+                                    ${makeHeadCoachActionHtml}
                                     ${practiceActionHtml}
                                     ${schemeActionsHtml}
                                 </div>
@@ -15627,6 +16084,50 @@ export function renderStaffCarouselTab(
 
                     <div class="rounded border border-slate-200 p-3">
                         <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
+                            Preferred Schemes
+                        </h5>
+
+                        <div class="mt-2 grid grid-cols-2 gap-2">
+                            <div class="rounded bg-blue-50 p-2">
+                                <span class="block text-[9px] font-bold uppercase text-blue-700">
+                                    Offense
+                                </span>
+                                <span class="text-xs font-black text-slate-900">
+                                    ${escapeProfileText(
+                                        candidate.preferredOffense
+                                            ? (
+                                                offenseFormations[candidate.preferredOffense]?.name ||
+                                                candidate.preferredOffense
+                                            )
+                                            : 'Flexible'
+                                    )}
+                                </span>
+                            </div>
+
+                            <div class="rounded bg-rose-50 p-2">
+                                <span class="block text-[9px] font-bold uppercase text-rose-700">
+                                    Defense
+                                </span>
+                                <span class="text-xs font-black text-slate-900">
+                                    ${escapeProfileText(
+                                        candidate.preferredDefense
+                                            ? (
+                                                defenseFormations[candidate.preferredDefense]?.name ||
+                                                candidate.preferredDefense
+                                            )
+                                            : 'Flexible'
+                                    )}
+                                </span>
+                            </div>
+                        </div>
+
+                        <p class="mt-2 text-[10px] text-slate-500">
+                            These preferences describe the coach's favored approach, not an exclusive or mandatory playbook.
+                        </p>
+                    </div>
+
+                    <div class="rounded border border-slate-200 p-3">
+                        <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
                             Scouting style
                         </h5>
                         <p class="mt-1 text-sm font-bold text-slate-900">
@@ -15747,28 +16248,42 @@ export function renderStaffCarouselTab(
                 ${tendencies ? `
                     <section class="rounded border border-slate-200 p-3">
                         <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
-                            Expected play-calling tendencies
+                            Projected Play-Calling Tendencies
                         </h5>
-                        <div class="mt-2 grid grid-cols-3 gap-2 text-center">
+
+                        <div class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                             <div class="rounded bg-slate-50 p-2">
-                                <span class="block text-[9px] text-slate-500">Run tendency</span>
+                                <span class="block text-[9px] text-slate-500">Early Down Run</span>
                                 <span class="font-mono font-black text-slate-900">
-                                    ${Number(tendencies.earlyDownTendency) || 0}%
+                                    ${Math.round(Number(tendencies.earlyDownTendency) || 0)}%
                                 </span>
                             </div>
+
                             <div class="rounded bg-slate-50 p-2">
-                                <span class="block text-[9px] text-slate-500">Blitz</span>
+                                <span class="block text-[9px] text-slate-500">3rd & Long Aggro</span>
                                 <span class="font-mono font-black text-slate-900">
-                                    ${Number(tendencies.defenseAggressiveness) || 0}%
+                                    ${Math.round(Number(tendencies.thirdAndLongAggressiveness) || 0)}%
                                 </span>
                             </div>
+
                             <div class="rounded bg-slate-50 p-2">
-                                <span class="block text-[9px] text-slate-500">4th down</span>
+                                <span class="block text-[9px] text-slate-500">Defensive Blitz</span>
                                 <span class="font-mono font-black text-slate-900">
-                                    ${Number(tendencies.fourthDownBravery) || 0}%
+                                    ${Math.round(Number(tendencies.defenseAggressiveness) || 0)}%
+                                </span>
+                            </div>
+
+                            <div class="rounded bg-slate-50 p-2">
+                                <span class="block text-[9px] text-slate-500">4th Down Aggro</span>
+                                <span class="font-mono font-black text-slate-900">
+                                    ${Math.round(Number(tendencies.fourthDownBravery) || 0)}%
                                 </span>
                             </div>
                         </div>
+
+                        <p class="mt-2 text-[10px] leading-relaxed text-slate-500">
+                            These are projections using your current team's scouting picture. The coach may change approach as roster strengths, game situations, and experience change.
+                        </p>
                     </section>
                 ` : ''}
             </div>
@@ -15918,6 +16433,38 @@ export function renderStaffCarouselTab(
                     ${displayCandidates.length > 0
                         ? displayCandidates.map(s => {
                             const personality = s.biases?.personality || {};
+                            const tactical = s.biases?.tactical || {};
+
+                            const candidateTendencies =
+                                typeof Game.previewCoachTendencies === 'function'
+                                    ? Game.previewCoachTendencies(s, team)
+                                    : null;
+
+                            const candidateRun = Number(
+                                candidateTendencies?.earlyDownTendency
+                            );
+
+                            const candidateRunPercent = Number.isFinite(candidateRun)
+                                ? Math.max(0, Math.min(100, Math.round(candidateRun)))
+                                : null;
+
+                            const candidatePassPercent = candidateRunPercent === null
+                                ? null
+                                : 100 - candidateRunPercent;
+
+                            const preferredOffense = s.preferredOffense
+                                ? (
+                                    offenseFormations[s.preferredOffense]?.name ||
+                                    s.preferredOffense
+                                )
+                                : 'Flexible';
+
+                            const preferredDefense = s.preferredDefense
+                                ? (
+                                    defenseFormations[s.preferredDefense]?.name ||
+                                    s.preferredDefense
+                                )
+                                : 'Flexible';
 
                             const overall = getCandidateMetric(s, 'overall');
                             const roleFit = getCandidateMetric(s, 'roleFit');
@@ -15967,6 +16514,22 @@ export function renderStaffCarouselTab(
                                             <p class="mt-0.5 text-[10px] text-slate-500">
                                                 Age ${escapeStaffAttribute(s.age ?? '—')}
                                                 · ${escapeStaffAttribute(personality.displayName || personality.name || 'Unknown personality')}
+                                            </p>
+
+                                            <p class="mt-1 text-[10px] font-bold text-blue-800">
+                                                ${escapeStaffAttribute(tactical.displayName || tactical.name || 'Adaptive Strategist')}
+                                            </p>
+
+                                            <p class="mt-0.5 text-[9px] text-slate-600">
+                                                OFF: ${escapeStaffAttribute(preferredOffense)}
+                                                · DEF: ${escapeStaffAttribute(preferredDefense)}
+                                            </p>
+
+                                            <p class="mt-0.5 text-[9px] font-mono text-slate-500">
+                                                ${candidateRunPercent === null
+                                                    ? 'Tendency projection unavailable'
+                                                    : `RUN ${candidateRunPercent}% / PASS ${candidatePassPercent}% · BLITZ ${Math.round(Number(candidateTendencies.defenseAggressiveness) || 0)}% · 4TH ${Math.round(Number(candidateTendencies.fourthDownBravery) || 0)}%`
+                                                }
                                             </p>
 
                                             <button
