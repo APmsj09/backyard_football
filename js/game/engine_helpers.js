@@ -5,7 +5,10 @@ import {
     getGameDayRosterObjects
 } from './state.js';
 import { calculateSlotSuitability } from './player.js';
-import { getPriority } from './depth_chart.js';
+import {
+    getPriority,
+    isPlayerViableForPosition
+} from './depth_chart.js';
 import { offenseFormations, defenseFormations, routeTree } from '../data.js';
 import { getDistance } from './physics.js';
 import { TICK_DURATION_SECONDS, scalePerTickAlpha } from './simulation_config.js';
@@ -98,15 +101,45 @@ export function resolveDepthForPlay(offense, defense) {
 
         const rosterIds = getGameDayRosterObjects(team)
             .map(player => player.id);
+        const rosterIdSet = new Set(rosterIds.map(id => String(id)));
+
         const usedThisPlay = new Set();
         const sortedSlots = [...formationData.slots].sort((a, b) => getPriority(b) - getPriority(a));
+
+        const getSpecialistRating = (player, group, attribute, fallback = 50) => {
+            const value = Number(player?.attributes?.[group]?.[attribute]);
+            return Number.isFinite(value) ? value : fallback;
+        };
+
+        const getSpecialistFitScore = (player, role) => {
+            if (role === 'PR') {
+                return (
+                    getSpecialistRating(player, 'physical', 'speed') * 0.35 +
+                    getSpecialistRating(player, 'physical', 'agility') * 0.25 +
+                    getSpecialistRating(player, 'technical', 'catchingHands') * 0.30 +
+                    getSpecialistRating(player, 'mental', 'playbookIQ') * 0.10
+                );
+            }
+
+            return (
+                getSpecialistRating(
+                    player,
+                    'technical',
+                    'throwPower',
+                    getSpecialistRating(player, 'physical', 'strength')
+                ) * 0.45 +
+                getSpecialistRating(player, 'technical', 'throwingAccuracy') * 0.35 +
+                getSpecialistRating(player, 'physical', 'strength') * 0.10 +
+                getSpecialistRating(player, 'mental', 'playbookIQ') * 0.10
+            );
+        };
 
         sortedSlots.forEach(slot => {
             let pId;
             if (slot === 'PR') {
                 pId = team.specialTeams?.PR || team.depthChart?.specialTeams?.PR;
             } else if (formationName === 'Punt' && slot === 'QB1') {
-                pId = team.specialTeams?.P || team.depthChart?.specialTeams?.P || team.depthChart[side]?.[slot];
+                pId = team.specialTeams?.P || team.depthChart?.specialTeams?.P;
             } else if (slot === 'RB2' || slot === 'FB') {
                 pId = team.specialists?.FB || team.depthChart[side]?.[slot];
             } else if (slot === 'WR3') {
@@ -117,12 +150,32 @@ export function resolveDepthForPlay(offense, defense) {
                 pId = team.depthChart[side]?.[slot];
             }
 
+            const specialistRole = slot === 'PR'
+                ? 'PR'
+                : (formationName === 'Punt' && slot === 'QB1' ? 'P' : null);
+
+            const specialistEligibility = specialistRole === 'PR'
+                ? 'WR'
+                : (specialistRole === 'P' ? 'QB' : null);
+
             const assignedPlayer = pId ? getPlayer(pId) : null;
+
             const isAssignedAvailable = Boolean(
                 assignedPlayer &&
+                (!specialistRole || (
+                    rosterIdSet.has(String(pId)) &&
+                    isPlayerViableForPosition(
+                        assignedPlayer,
+                        specialistEligibility
+                    )
+                )) &&
                 !usedThisPlay.has(pId) &&
                 !['departed', 'retired'].includes(assignedPlayer.status?.type) &&
-                (!assignedPlayer.status || assignedPlayer.status.duration === 0 || assignedPlayer.status.type === 'temporary')
+                (
+                    !assignedPlayer.status ||
+                    assignedPlayer.status.duration === 0 ||
+                    assignedPlayer.status.type === 'temporary'
+                )
             );
 
             if (!isAssignedAvailable) {
@@ -132,9 +185,29 @@ export function resolveDepthForPlay(offense, defense) {
                         p &&
                         !usedThisPlay.has(p.id) &&
                         !['departed', 'retired'].includes(p.status?.type) &&
-                        (!p.status || p.status.duration === 0 || p.status.type === 'temporary')
+                        (
+                            !p.status ||
+                            p.status.duration === 0 ||
+                            p.status.type === 'temporary'
+                        ) &&
+                        (
+                            !specialistEligibility ||
+                            isPlayerViableForPosition(p, specialistEligibility)
+                        )
                     )
-                    .sort((a, b) => calculateSlotSuitability(b, slot, side, team) - calculateSlotSuitability(a, slot, side, team));
+                    .sort((a, b) => {
+                        if (specialistRole) {
+                            return (
+                                getSpecialistFitScore(b, specialistRole) -
+                                getSpecialistFitScore(a, specialistRole)
+                            );
+                        }
+
+                        return (
+                            calculateSlotSuitability(b, slot, side, team) -
+                            calculateSlotSuitability(a, slot, side, team)
+                        );
+                    });
 
                 pId = candidates[0]?.id || null;
             }
