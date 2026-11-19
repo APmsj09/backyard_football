@@ -12271,17 +12271,25 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     const domActiveStaffTab = container.querySelector(
         '.staff-hub-tab-btn.bg-slate-900'
     )?.dataset.staffTab;
+
     if (domActiveStaffTab) {
-        activeStaffHubTab = domActiveStaffTab === 'staff' ? 'overview' : domActiveStaffTab;
+        activeStaffHubTab = domActiveStaffTab === 'overview'
+            ? 'staff'
+            : domActiveStaffTab;
+    } else if (activeStaffHubTab === 'overview') {
+        activeStaffHubTab = 'profile';
     }
-    if (!['overview', 'priorities', 'advanced'].includes(activeStaffHubTab)) {
-        activeStaffHubTab = 'overview';
+
+    if (!['profile', 'staff', 'priorities', 'advanced'].includes(activeStaffHubTab)) {
+        activeStaffHubTab = 'profile';
     }
 
     window.app_switchStaffTab = tab => {
-        const normalizedTab = tab === 'staff' ? 'overview' : tab;
+        const normalizedTab = tab === 'overview' ? 'staff' : tab;
+
         const allowedTabs = [
-            'overview',
+            'profile',
+            'staff',
             'priorities',
             'advanced'
         ];
@@ -12294,7 +12302,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             const active = button.dataset.staffTab === normalizedTab;
 
             button.className =
-                `staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide transition ${
+                `staff-hub-tab-btn w-full rounded px-2 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wide transition ${
                     active
                         ? 'bg-slate-900 text-white shadow-sm'
                         : 'text-slate-500 hover:text-slate-800'
@@ -12311,20 +12319,28 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
     html += `
         <nav
-            class="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1"
+            class="mb-3 grid grid-cols-2 sm:grid-cols-4 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1"
             aria-label="Staff management sections">
 
             <button
                 type="button"
-                class="staff-hub-tab-btn flex-1 rounded bg-slate-900 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-sm"
-                data-staff-tab="overview"
-                onclick="app_switchStaffTab('overview')">
-                👔 Coaches &amp; Departments
+                class="staff-hub-tab-btn w-full rounded px-2 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wide text-slate-500"
+                data-staff-tab="profile"
+                onclick="app_switchStaffTab('profile')">
+                👤 My GM
             </button>
 
             <button
                 type="button"
-                class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
+                class="staff-hub-tab-btn w-full rounded px-2 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wide text-slate-500"
+                data-staff-tab="staff"
+                onclick="app_switchStaffTab('staff')">
+                👔 Coaching Staff
+            </button>
+
+            <button
+                type="button"
+                class="staff-hub-tab-btn w-full rounded px-2 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wide text-slate-500"
                 data-staff-tab="priorities"
                 onclick="app_switchStaffTab('priorities')">
                 🎛️ Control &amp; Priorities
@@ -12332,7 +12348,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
             <button
                 type="button"
-                class="staff-hub-tab-btn flex-1 rounded px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-500"
+                class="staff-hub-tab-btn w-full rounded px-2 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wide text-slate-500"
                 data-staff-tab="advanced"
                 onclick="app_switchStaffTab('advanced')">
                 🕒 Weekly Hours
@@ -12751,12 +12767,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 individual staff assignments in the Workload tab.
             </p>
         </div>
-
-        <div
-            class="staff-hub-pane"
-            data-staff-pane="overview">
-
     `;
+
+    // The GM and staff panes are opened after their profile data is assembled.
 
     // Compact coaching overview. Detailed information lives in coach cards.
     const overviewEscape = value =>
@@ -14030,6 +14043,182 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         0
     );
 
+    const userCoachOverview = overviewCoaches.find(
+        entry => entry.coach?.isUserCoach
+    ) || null;
+
+    html += `
+        <div
+            class="staff-hub-pane hidden"
+            data-staff-pane="profile">
+
+            <section class="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h4 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                            My Coaching Profile
+                        </h4>
+                        <p class="mt-0.5 text-[10px] text-slate-500">
+                            Your personal coaching abilities and football identity.
+                        </p>
+                    </div>
+
+                    ${userCoachOverview ? `
+                        <span class="text-xl font-black tabular-nums text-slate-900">
+                            ${userCoachOverview.overall ?? '—'}
+                            <span class="text-[9px] font-bold text-slate-400">OVERALL</span>
+                        </span>
+                    ` : ''}
+                </div>
+
+                ${userCoachOverview ? `
+                    <div class="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <h5 class="text-sm font-black text-slate-900">
+                                    ${overviewEscape(userCoachOverview.coach.name || 'Your Coach Profile')}
+                                </h5>
+                                <p class="text-[10px] text-slate-500">
+                                    ${overviewEscape(userCoachOverview.styleSummary)}
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                onclick="app.openCoachCard('${userCoachOverview.coachId}')"
+                                class="rounded border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-50">
+                                Full Profile &amp; Ratings →
+                            </button>
+                        </div>
+
+                        <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div class="rounded border border-slate-200 bg-white p-2">
+                                <span class="block text-[9px] font-bold uppercase text-slate-500">
+                                    Strongest Skills
+                                </span>
+                                <span class="text-[11px] font-bold text-emerald-800">
+                                    ${overviewEscape(userCoachOverview.strengthsSummary)}
+                                </span>
+                            </div>
+
+                            <div class="rounded border border-slate-200 bg-white p-2">
+                                <span class="block text-[9px] font-bold uppercase text-slate-500">
+                                    Development Area
+                                </span>
+                                <span class="text-[11px] font-bold text-slate-800">
+                                    ${overviewEscape(userCoachOverview.lowestSkillSummary)}
+                                </span>
+                            </div>
+
+                            <div class="rounded border border-slate-200 bg-white p-2">
+                                <span class="block text-[9px] font-bold uppercase text-slate-500">
+                                    Weekly Workload
+                                </span>
+                                <span class="text-[11px] font-bold text-slate-800">
+                                    ${userCoachOverview.workload} hrs · ${overviewEscape(userCoachOverview.availability)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                ` : `
+                    <p class="mt-3 text-xs text-slate-500">
+                        Your coaching profile is not currently available.
+                    </p>
+                `}
+            </section>
+
+            <section class="mb-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="min-w-0">
+                        <h5 class="text-xs font-black uppercase tracking-wide text-indigo-950">
+                            My Coaching Philosophy
+                        </h5>
+                        <p class="mt-0.5 text-[10px] text-slate-600">
+                            Choose how strongly you prioritize your system versus adapting to your coaches and roster.
+                        </p>
+                    </div>
+
+                    <select
+                        class="min-w-[190px] rounded border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-slate-800"
+                        value="${selectedManagementApproach}"
+                        onchange="window.app_setManagementApproach(this.value)">
+
+                        <option value="system_first"
+                            ${selectedManagementApproach === 'system_first' ? 'selected' : ''}>
+                            System-First
+                        </option>
+
+                        <option value="balanced"
+                            ${selectedManagementApproach === 'balanced' ? 'selected' : ''}>
+                            Balanced
+                        </option>
+
+                        <option value="personnel_first"
+                            ${selectedManagementApproach === 'personnel_first' ? 'selected' : ''}>
+                            Personnel-First
+                        </option>
+                    </select>
+                </div>
+
+                <details class="mt-2 border-t border-indigo-200 pt-2">
+                    <summary class="cursor-pointer text-[10px] font-bold text-indigo-800 hover:text-indigo-950">
+                        View management influence &amp; tactical impact
+                    </summary>
+
+                    <p class="mt-2 text-[10px] leading-relaxed text-indigo-900">
+                        ${
+                            selectedManagementApproach === 'system_first'
+                                ? 'You expect coaches and personnel to fit your established football philosophy.'
+                                : selectedManagementApproach === 'personnel_first'
+                                    ? 'You are willing to change your system and tactical approach to maximize available talent.'
+                                    : 'You maintain a recognizable football identity while allowing adjustments for personnel and coaching expertise.'
+                        }
+                    </p>
+
+                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div class="rounded border border-indigo-100 bg-white p-2">
+                            <span class="block text-[9px] font-bold uppercase text-slate-500">
+                                Control Structure
+                            </span>
+                            <span class="text-xs font-black text-indigo-900">
+                                ${managementAutonomyLabel}
+                            </span>
+                        </div>
+
+                        <div class="rounded border border-indigo-100 bg-white p-2">
+                            <span class="block text-[9px] font-bold uppercase text-slate-500">
+                                Coach Influence
+                            </span>
+                            <span class="text-xs font-black text-indigo-900">
+                                ${managementCoachInfluence}%
+                            </span>
+                        </div>
+
+                        <div class="rounded border border-indigo-100 bg-white p-2">
+                            <span class="block text-[9px] font-bold uppercase text-slate-500">
+                                Tactical Friction
+                            </span>
+                            <span class="text-xs font-black text-indigo-900">
+                                ${Number.isFinite(schemeConflictMultiplier)
+                                    ? `${schemeConflictMultiplier.toFixed(2)}×`
+                                    : '1.00×'}
+                            </span>
+                        </div>
+                    </div>
+
+                    <p class="mt-2 text-[9px] text-slate-500">
+                        This reflects your influence over staff decisions, not a restriction
+                        on available formations or playcalling choices.
+                    </p>
+                </details>
+            </section>
+        </div>
+
+        <div
+            class="staff-hub-pane hidden"
+            data-staff-pane="staff">
+    `;
+
     html += `
         <section class="mb-4 space-y-3">
 
@@ -14111,9 +14300,18 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </p>
             </div>
 
-            ${staffRelationshipPanelHtml}
+            <details class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <summary class="cursor-pointer list-none text-xs font-bold text-slate-800">
+                    Staff Dynamics &amp; Relationships
+                    <span class="ml-2 text-[10px] font-normal text-slate-500">
+                        Pair chemistry and detailed group-fit metrics
+                    </span>
+                </summary>
 
-            ${(() => {
+                <div class="pt-3">
+                    ${staffRelationshipPanelHtml}
+
+                    ${(() => {
                 const groupFit = getCoachingGroupFit(team) || {};
 
                 const readScore = value => {
@@ -14231,90 +14429,11 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     </section>
                 `;
             })()}
-
-            <section class="mb-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                    <div class="min-w-0">
-                        <h5 class="text-xs font-black uppercase tracking-wide text-indigo-950">
-                            My Coaching Philosophy
-                        </h5>
-                        <p class="mt-1 text-[10px] text-slate-600">
-                            Decide how strongly you prioritize your preferred system
-                            versus adapting to your available coaches and roster.
-                        </p>
-                    </div>
-
-                    <select
-                        class="min-w-[190px] rounded border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-slate-800"
-                        value="${selectedManagementApproach}"
-                        onchange="window.app_setManagementApproach(this.value)">
-
-                        <option value="system_first"
-                            ${selectedManagementApproach === 'system_first' ? 'selected' : ''}>
-                            System-First
-                        </option>
-
-                        <option value="balanced"
-                            ${selectedManagementApproach === 'balanced' ? 'selected' : ''}>
-                            Balanced
-                        </option>
-
-                        <option value="personnel_first"
-                            ${selectedManagementApproach === 'personnel_first' ? 'selected' : ''}>
-                            Personnel-First
-                        </option>
-                    </select>
                 </div>
-
-                <p class="mt-2 text-[10px] leading-relaxed text-indigo-900">
-                    ${
-                        selectedManagementApproach === 'system_first'
-                            ? 'You expect coaches and personnel to fit your established football philosophy.'
-                            : selectedManagementApproach === 'personnel_first'
-                                ? 'You are willing to change your system and tactical approach to maximize available talent.'
-                                : 'You maintain a recognizable football identity while allowing adjustments for personnel and coaching expertise.'
-                    }
-                </p>
-
-                <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div class="rounded border border-indigo-100 bg-white p-2">
-                        <span class="block text-[9px] font-bold uppercase text-slate-500">
-                            Control Structure
-                        </span>
-                        <span class="text-xs font-black text-indigo-900">
-                            ${managementAutonomyLabel}
-                        </span>
-                    </div>
-
-                    <div class="rounded border border-indigo-100 bg-white p-2">
-                        <span class="block text-[9px] font-bold uppercase text-slate-500">
-                            Coach Influence
-                        </span>
-                        <span class="text-xs font-black text-indigo-900">
-                            ${managementCoachInfluence}%
-                        </span>
-                    </div>
-
-                    <div class="rounded border border-indigo-100 bg-white p-2">
-                        <span class="block text-[9px] font-bold uppercase text-slate-500">
-                            Tactical Friction
-                        </span>
-                        <span class="text-xs font-black text-indigo-900">
-                            ${Number.isFinite(schemeConflictMultiplier)
-                                ? `${schemeConflictMultiplier.toFixed(2)}×`
-                                : '1.00×'}
-                        </span>
-                    </div>
-                </div>
-
-                <p class="mt-2 text-[9px] text-slate-500">
-                    This reflects your influence over staff decisions, not a restriction
-                    on available formations or playcalling choices.
-                </p>
-            </section>
+            </details>
 
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                ${overviewCoaches.map(entry => {
+                ${overviewCoaches.filter(entry => !entry.coach.isUserCoach).map(entry => {
                     const outlook = staffOutlooks.get(String(entry.coach.id));
                     const isNPC = !outlook?.isUserCoach;
                     const identity = staffIdentities.get(
