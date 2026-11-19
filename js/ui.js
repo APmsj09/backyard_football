@@ -14432,7 +14432,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </div>
             </details>
 
-            <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 gap-3">
                 ${overviewCoaches.filter(entry => !entry.coach.isUserCoach).map(entry => {
                     const outlook = staffOutlooks.get(String(entry.coach.id));
                     const isNPC = !outlook?.isUserCoach;
@@ -14446,105 +14446,144 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             : fallback;
 
                     const identitySummaryHtml = identity ? `
-                        <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div class="rounded border border-blue-100 bg-blue-50/60 p-2">
-                                <span class="block text-[9px] font-black uppercase tracking-wide text-blue-800">
-                                    Offensive Identity
-                                </span>
-                                <p class="mt-0.5 text-[10px] font-bold text-slate-900">
+                        <div class="xl:col-span-5 grid grid-cols-1 lg:grid-cols-3 gap-2">
+
+                            <div class="rounded-lg border border-blue-200 bg-blue-50/60 p-3">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-[9px] font-black uppercase tracking-wide text-blue-800">
+                                        Offensive Identity
+                                    </span>
+                                    <span class="rounded bg-white/80 px-1.5 py-0.5 text-[8px] font-bold uppercase text-blue-700">
+                                        Offense
+                                    </span>
+                                </div>
+
+                                <p class="mt-2 text-xs font-black leading-snug text-slate-900">
                                     ${overviewEscape(identity.offenseIdentity)}
                                 </p>
-                                <p class="mt-1 text-[9px] text-slate-600">
-                                    Formations: ${identityList(identity.offenseFormations)}
-                                </p>
+
+                                <div class="mt-2 border-t border-blue-200 pt-2">
+                                    <span class="block text-[8px] font-bold uppercase tracking-wide text-slate-500">
+                                        Preferred Formations
+                                    </span>
+                                    <p class="mt-1 text-[10px] leading-relaxed font-semibold text-slate-700">
+                                        ${identityList(identity.offenseFormations)}
+                                    </p>
+                                </div>
                             </div>
 
-                            <div class="rounded border border-rose-100 bg-rose-50/60 p-2">
-                                <span class="block text-[9px] font-black uppercase tracking-wide text-rose-800">
-                                    Defensive Identity
-                                </span>
-                                <p class="mt-0.5 text-[10px] font-bold text-slate-900">
+                            <div class="rounded-lg border border-rose-200 bg-rose-50/60 p-3">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-[9px] font-black uppercase tracking-wide text-rose-800">
+                                        Defensive Identity
+                                    </span>
+                                    <span class="rounded bg-white/80 px-1.5 py-0.5 text-[8px] font-bold uppercase text-rose-700">
+                                        Defense
+                                    </span>
+                                </div>
+
+                                <p class="mt-2 text-xs font-black leading-snug text-slate-900">
                                     ${overviewEscape(identity.defenseIdentity)}
                                 </p>
-                                <p class="mt-1 text-[9px] text-slate-600">
-                                    Formations: ${identityList(identity.defenseFormations)}
-                                </p>
+
+                                <div class="mt-2 border-t border-rose-200 pt-2">
+                                    <span class="block text-[8px] font-bold uppercase tracking-wide text-slate-500">
+                                        Preferred Formations
+                                    </span>
+                                    <p class="mt-1 text-[10px] leading-relaxed font-semibold text-slate-700">
+                                        ${identityList(identity.defenseFormations)}
+                                    </p>
+                                </div>
                             </div>
 
-                            <div class="sm:col-span-2 rounded border border-emerald-100 bg-emerald-50/60 p-2">
-                                <span class="block text-[9px] font-black uppercase tracking-wide text-emerald-800">
-                                    Recruiting Position Priorities
-                                </span>
-                                <p class="mt-0.5 text-[10px] font-bold text-slate-800">
+                            <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-[9px] font-black uppercase tracking-wide text-emerald-800">
+                                        Recruiting Priorities
+                                    </span>
+                                    <span class="rounded bg-white/80 px-1.5 py-0.5 text-[8px] font-bold uppercase text-emerald-700">
+                                        Personnel
+                                    </span>
+                                </div>
+
+                                <p class="mt-2 text-xs font-black leading-snug text-slate-900">
+                                    Positions this coach emphasizes
+                                </p>
+
+                                <p class="mt-2 border-t border-emerald-200 pt-2 text-[10px] leading-relaxed font-semibold text-slate-700">
                                     ${identityList(identity.recruitingPositions)}
                                 </p>
                             </div>
+
                         </div>
                     ` : '';
 
                     const identityDetailsHtml = identity ? `
-                        <details class="mt-2 rounded border border-slate-200 bg-white">
-                            <summary class="cursor-pointer px-2.5 py-2 text-[10px] font-black text-blue-800 hover:bg-slate-50">
+                        <details class="xl:col-span-3 rounded border border-slate-200 bg-white">
+                            <summary class="cursor-pointer px-3 py-2.5 text-[10px] font-black text-blue-800 hover:bg-slate-50">
                                 Full Tactical &amp; Player Evaluation Profile
                             </summary>
 
-                            <div class="border-t border-slate-100 p-2.5 space-y-3 text-[10px]">
-                                <div>
-                                    <span class="block text-[9px] font-black uppercase tracking-wide text-blue-800">
-                                        Offensive Play Preferences
-                                    </span>
-                                    <p class="mt-1 text-slate-700 leading-relaxed">
-                                        ${identityList(identity.offensePlayTypes)}
-                                    </p>
-                                </div>
+                            <div class="border-t border-slate-100 p-3">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
 
-                                <div>
-                                    <span class="block text-[9px] font-black uppercase tracking-wide text-rose-800">
-                                        Defensive Play Preferences
-                                    </span>
-                                    <p class="mt-1 text-slate-700 leading-relaxed">
-                                        ${identityList(identity.defensePlayTypes)}
-                                    </p>
-                                </div>
+                                    <div class="rounded-lg border border-blue-100 bg-blue-50/50 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-blue-800">
+                                            Offensive Play Preferences
+                                        </span>
+                                        <p class="mt-1.5 leading-relaxed text-slate-700">
+                                            ${identityList(identity.offensePlayTypes)}
+                                        </p>
+                                    </div>
 
-                                <div>
-                                    <span class="block text-[9px] font-black uppercase tracking-wide text-emerald-800">
-                                        Types of Players They Want
-                                    </span>
-                                    <ul class="mt-1 list-disc pl-4 space-y-0.5 text-slate-700">
-                                        ${(identity.preferredPlayerTypes || []).map(type => `
-                                            <li>${overviewEscape(type)}</li>
-                                        `).join('')}
-                                    </ul>
-                                </div>
+                                    <div class="rounded-lg border border-rose-100 bg-rose-50/50 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-rose-800">
+                                            Defensive Play Preferences
+                                        </span>
+                                        <p class="mt-1.5 leading-relaxed text-slate-700">
+                                            ${identityList(identity.defensePlayTypes)}
+                                        </p>
+                                    </div>
 
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div>
-                                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                    <div class="md:col-span-2 rounded-lg border border-emerald-100 bg-emerald-50/50 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-emerald-800">
+                                            Types of Players They Want
+                                        </span>
+
+                                        <ul class="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 list-disc pl-4 text-slate-700">
+                                            ${(identity.preferredPlayerTypes || []).map(type => `
+                                                <li>${overviewEscape(type)}</li>
+                                            `).join('') || '<li>Not specified</li>'}
+                                        </ul>
+                                    </div>
+
+                                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-600">
                                             System Skill Priorities
                                         </span>
-                                        <p class="mt-1 text-slate-700 leading-relaxed">
+                                        <p class="mt-1.5 leading-relaxed text-slate-700">
                                             ${identityList(identity.systemSkills)}
                                         </p>
                                     </div>
 
-                                    <div>
-                                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-600">
                                             Scouting Evaluation Focus
                                         </span>
-                                        <p class="mt-1 text-slate-700 leading-relaxed">
+                                        <p class="mt-1.5 leading-relaxed text-slate-700">
                                             ${identityList(identity.scoutingSkills)}
                                         </p>
                                     </div>
-                                </div>
 
-                                <div class="rounded bg-slate-50 p-2">
-                                    <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500">
-                                        Scouting Philosophy · ${overviewEscape(identity.scoutingIdentity)}
-                                    </span>
-                                    <p class="mt-0.5 text-slate-700">
-                                        ${overviewEscape(identity.scoutingDescription)}
-                                    </p>
+                                    <div class="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-600">
+                                            Scouting Philosophy · ${overviewEscape(identity.scoutingIdentity)}
+                                        </span>
+                                        <p class="mt-1.5 leading-relaxed text-slate-700">
+                                            ${overviewEscape(identity.scoutingDescription)}
+                                        </p>
+                                    </div>
+
                                 </div>
                             </div>
                         </details>
@@ -14643,49 +14682,132 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                         if (!relationships.length) {
                             return `
-                                <p class="mt-2 text-[10px] text-slate-500">
-                                    No established working relationships yet.
-                                </p>
+                                <div class="xl:col-span-2 flex min-h-full flex-col justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4">
+                                    <span class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                        Staff Chemistry
+                                    </span>
+                                    <p class="mt-1 text-xs font-bold text-slate-700">
+                                        Relationships are still developing
+                                    </p>
+                                    <p class="mt-1 text-[10px] leading-relaxed text-slate-500">
+                                        No established working relationships yet. Chemistry scores will appear as this coach works alongside the other staff members.
+                                    </p>
+                                </div>
                             `;
                         }
 
+                        const averageChemistry = Math.round(
+                            relationships.reduce(
+                                (sum, relationship) => sum + relationship.score,
+                                0
+                            ) / relationships.length
+                        );
+
+                        const chemistryStyle = score =>
+                            score >= 75
+                                ? {
+                                    text: 'text-emerald-700',
+                                    bar: 'bg-emerald-500',
+                                    background: 'bg-emerald-50',
+                                    border: 'border-emerald-200',
+                                    label: 'Strong partnership'
+                                }
+                                : score >= 55
+                                    ? {
+                                        text: 'text-blue-700',
+                                        bar: 'bg-blue-500',
+                                        background: 'bg-blue-50',
+                                        border: 'border-blue-200',
+                                        label: 'Works well together'
+                                    }
+                                    : score >= 40
+                                        ? {
+                                            text: 'text-amber-700',
+                                            bar: 'bg-amber-500',
+                                            background: 'bg-amber-50',
+                                            border: 'border-amber-200',
+                                            label: 'Some friction'
+                                        }
+                                        : {
+                                            text: 'text-rose-700',
+                                            bar: 'bg-rose-500',
+                                            background: 'bg-rose-50',
+                                            border: 'border-rose-200',
+                                            label: 'Strained relationship'
+                                        };
+
                         return `
-                            <details class="mt-2 rounded border border-slate-200 bg-white">
-                                <summary class="cursor-pointer px-2.5 py-2 text-[10px] font-bold text-blue-800 hover:bg-slate-50">
-                                    Relationship Breakdown (${relationships.length})
+                            <details class="xl:col-span-2 rounded-lg border border-slate-200 bg-white">
+                                <summary class="flex cursor-pointer items-center justify-between gap-2 px-3 py-2.5 text-[10px] font-bold text-blue-800 hover:bg-slate-50">
+                                    <span>
+                                        Relationship Breakdown
+                                        <span class="ml-1 font-normal text-slate-500">
+                                            (${relationships.length} pairings)
+                                        </span>
+                                    </span>
+
+                                    <span class="shrink-0 rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-[9px] font-black text-slate-700">
+                                        Avg ${averageChemistry}/100
+                                    </span>
                                 </summary>
 
-                                <div class="border-t border-slate-100 px-2.5">
+                                <div class="grid grid-cols-1 gap-2 border-t border-slate-100 bg-slate-50/50 p-2.5">
                                     ${relationships.map(relationship => {
-                                        const tone = relationship.score >= 75
-                                            ? 'text-emerald-700'
-                                            : relationship.score >= 55
-                                                ? 'text-blue-700'
-                                                : relationship.score >= 40
-                                                    ? 'text-amber-700'
-                                                    : 'text-rose-700';
+                                        const style = chemistryStyle(
+                                            relationship.score
+                                        );
 
-                                        const trend = relationship.change === null
-                                            ? 'Baseline unavailable'
-                                            : relationship.change > 0
-                                                ? `+${relationship.change} since joining`
-                                                : relationship.change < 0
-                                                    ? `${relationship.change} since joining`
-                                                    : 'At initial baseline';
+                                        const trendLabel =
+                                            relationship.change === null
+                                                ? 'Baseline unavailable'
+                                                : relationship.change > 0
+                                                    ? `+${relationship.change} since baseline`
+                                                    : relationship.change < 0
+                                                        ? `${relationship.change} since baseline`
+                                                        : 'No change from baseline';
+
+                                        const trendClass =
+                                            relationship.change === null
+                                                ? 'text-slate-500'
+                                                : relationship.change > 0
+                                                    ? 'text-emerald-700'
+                                                    : relationship.change < 0
+                                                        ? 'text-rose-700'
+                                                        : 'text-slate-500';
 
                                         return `
-                                            <div class="flex items-center justify-between gap-3 border-b border-slate-100 py-2 last:border-b-0">
-                                                <div class="min-w-0">
-                                                    <p class="text-[10px] font-bold text-slate-800">
-                                                        ${overviewEscape(relationship.name)}
-                                                    </p>
-                                                    <p class="text-[9px] text-slate-500">
-                                                        ${relationship.weeks} weeks together · ${trend}
-                                                    </p>
+                                            <div class="rounded-lg border ${style.border} ${style.background} p-2.5">
+                                                <div class="flex items-center justify-between gap-2">
+                                                    <div class="min-w-0">
+                                                        <p class="truncate text-[10px] font-black text-slate-900">
+                                                            ${overviewEscape(relationship.name)}
+                                                        </p>
+                                                        <p class="mt-0.5 text-[9px] font-semibold ${style.text}">
+                                                            ${style.label}
+                                                        </p>
+                                                    </div>
+
+                                                    <span class="shrink-0 font-mono text-sm font-black ${style.text}">
+                                                        ${relationship.score}
+                                                        <span class="text-[9px] font-semibold opacity-60">/100</span>
+                                                    </span>
                                                 </div>
-                                                <span class="shrink-0 font-mono text-xs font-black ${tone}">
-                                                    ${relationship.score}/100
-                                                </span>
+
+                                                <div class="mt-2 h-2 overflow-hidden rounded-full bg-white/80">
+                                                    <div
+                                                        class="h-full rounded-full ${style.bar} transition-all"
+                                                        style="width:${relationship.score}%">
+                                                    </div>
+                                                </div>
+
+                                                <div class="mt-2 flex flex-wrap items-center justify-between gap-1">
+                                                    <span class="text-[9px] text-slate-500">
+                                                        ${relationship.weeks} weeks working together
+                                                    </span>
+                                                    <span class="text-[9px] font-bold ${trendClass}">
+                                                        ${trendLabel}
+                                                    </span>
+                                                </div>
                                             </div>
                                         `;
                                     }).join('')}
@@ -14709,18 +14831,44 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         : 'No department lead';
 
                     const clashBanner = isNPC && outlook.schemeClash > 0
-                        ? `<div class="mt-2 rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[10px] text-amber-950">
+                        ? `<div class="xl:col-span-5 rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[10px] text-amber-950">
                             <b>⚠️ Tactical Friction (-${outlook.schemeClash} IQ):</b> Your playcalling sliders clash with this coach's ${overviewEscape(outlook.tacticalName)} style.
                            </div>`
                         : '';
 
-                    const schemeActionsHtml = isNPC && outlook.schemeMismatch
-                        ? `<button type="button"
-                            onclick="event.stopPropagation(); window.app_adoptCoachScheme('${overviewEscape(outlook.preferredOffense || '')}', '${overviewEscape(outlook.preferredDefense || '')}')"
-                            class="rounded border border-blue-200 bg-blue-50 px-2 py-1 text-[9px] font-bold text-blue-800 hover:bg-blue-100">
-                            Try Coach's Schemes (${overviewEscape(outlook.preferredOffense || '—')} / ${overviewEscape(outlook.preferredDefense || '—')})
-                           </button>`
-                        : '';
+                    const offenseNeedsChange = Boolean(
+                        outlook?.preferredOffense &&
+                        currentOffenseKey !== outlook.preferredOffense
+                    );
+
+                    const defenseNeedsChange = Boolean(
+                        outlook?.preferredDefense &&
+                        currentDefenseKey !== outlook.preferredDefense
+                    );
+
+                    const schemeChangeLabel =
+                        offenseNeedsChange && defenseNeedsChange
+                            ? 'Both Schemes'
+                            : offenseNeedsChange
+                                ? 'Offense'
+                                : 'Defense';
+
+                    const adoptedOffenseKey = offenseNeedsChange
+                        ? outlook.preferredOffense
+                        : currentOffenseKey;
+
+                    const adoptedDefenseKey = defenseNeedsChange
+                        ? outlook.preferredDefense
+                        : currentDefenseKey;
+
+                    const schemeActionsHtml =
+                        isNPC && (offenseNeedsChange || defenseNeedsChange)
+                            ? `<button type="button"
+                                onclick="event.stopPropagation(); window.app_adoptCoachScheme('${overviewEscape(adoptedOffenseKey || '')}', '${overviewEscape(adoptedDefenseKey || '')}')"
+                                class="rounded border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[9px] font-bold text-blue-800 hover:border-blue-300 hover:bg-blue-100">
+                                Adopt Coach's ${schemeChangeLabel}
+                               </button>`
+                            : '';
 
                     const practiceActionHtml = isNPC
                         ? `<button type="button"
@@ -14776,6 +14924,67 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         )
                         : 'Flexible';
 
+                    const currentOffenseKey =
+                        team.formations?.offense || '';
+
+                    const currentDefenseKey =
+                        team.formations?.defense || '';
+
+                    const currentOffenseLabel = currentOffenseKey
+                        ? (
+                            offenseFormations[currentOffenseKey]?.name ||
+                            currentOffenseKey
+                        )
+                        : 'Not set';
+
+                    const currentDefenseLabel = currentDefenseKey
+                        ? (
+                            defenseFormations[currentDefenseKey]?.name ||
+                            currentDefenseKey
+                        )
+                        : 'Not set';
+
+                    const getSchemePreferenceStatus = (
+                        currentKey,
+                        preferredKey
+                    ) => {
+                        if (!preferredKey) {
+                            return {
+                                label: 'Flexible',
+                                class: 'border-slate-200 bg-slate-50 text-slate-600'
+                            };
+                        }
+
+                        if (!currentKey) {
+                            return {
+                                label: 'Team scheme not set',
+                                class: 'border-slate-200 bg-slate-50 text-slate-600'
+                            };
+                        }
+
+                        if (currentKey === preferredKey) {
+                            return {
+                                label: 'Match',
+                                class: 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                            };
+                        }
+
+                        return {
+                            label: 'Different',
+                            class: 'border-amber-200 bg-amber-50 text-amber-800'
+                        };
+                    };
+
+                    const offenseSchemeStatus = getSchemePreferenceStatus(
+                        currentOffenseKey,
+                        outlook?.preferredOffense
+                    );
+
+                    const defenseSchemeStatus = getSchemePreferenceStatus(
+                        currentDefenseKey,
+                        outlook?.preferredDefense
+                    );
+
                     const makeHeadCoachActionHtml =
                         isNPC && !isHeadCoach
                             ? `
@@ -14789,9 +14998,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             : '';
 
                     return `
-                        <article class="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm flex flex-col justify-between gap-2.5">
-                            <div>
-                                <div class="flex items-start justify-between gap-2">
+                        <article class="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm flex flex-col justify-between gap-3 overflow-hidden">
+                            <div class="grid grid-cols-1 xl:grid-cols-5 gap-3">
+                                <div class="xl:col-span-5 flex items-start justify-between gap-3 border-b border-slate-200 pb-2">
                                     <div class="min-w-0">
                                         <div class="flex flex-wrap items-center gap-1.5">
                                             <button type="button"
@@ -14813,37 +15022,74 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                             ${overviewEscape(outlook?.personalityName || '')} · ${overviewEscape(outlook?.tacticalName || '')} · ${overviewEscape(outlook?.scheduleLabel || '')}
                                         </p>
                                     </div>
-                                    <div class="text-right shrink-0">
-                                        <span class="block text-[9px] uppercase text-slate-400">Overall</span>
+                                    <div class="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-center">
+                                        <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-400">Overall</span>
                                         <span class="text-xl font-black tabular-nums text-slate-900">${entry.overall ?? '—'}</span>
                                     </div>
                                 </div>
 
-                                <div class="mt-2 grid grid-cols-2 gap-2 text-[10px] bg-slate-50 rounded border border-slate-100 p-2">
-                                    <div>
-                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Leads</span>
-                                        <span class="font-semibold text-slate-800">${overviewEscape(leadsLabel)}</span>
-                                    </div>
-                                    <div>
-                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Weekly Hours</span>
-                                        <span class="font-mono font-bold text-slate-800">${entry.workload}/${outlook?.weeklyCapacity ?? 8}h</span>
-                                    </div>
-                                    <div>
-                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Strengths</span>
-                                        <span class="font-semibold text-emerald-800">${overviewEscape(entry.strengthsSummary)}</span>
-                                    </div>
-                                    <div>
-                                        <span class="text-[9px] font-bold uppercase text-slate-400 block">Preferred Schemes</span>
-                                        <span class="font-semibold text-slate-800">
-                                            ${overviewEscape(offenseSchemeLabel)}
-                                            /
-                                            ${overviewEscape(defenseSchemeLabel)}
+                                <div class="xl:col-span-2 grid grid-cols-2 gap-2">
+
+                                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-400">
+                                            Department Leads
+                                        </span>
+                                        <span class="mt-1 block text-[10px] font-bold leading-relaxed text-slate-800">
+                                            ${overviewEscape(leadsLabel)}
                                         </span>
                                     </div>
+
+                                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-400">
+                                            Weekly Workload
+                                        </span>
+                                        <span class="mt-1 block font-mono text-sm font-black text-slate-900">
+                                            ${entry.workload}/${outlook?.weeklyCapacity ?? 8}h
+                                        </span>
+                                    </div>
+
+                                    <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-emerald-800">
+                                            Strongest Skills
+                                        </span>
+                                        <span class="mt-1 block text-[10px] font-bold leading-relaxed text-emerald-900">
+                                            ${overviewEscape(entry.strengthsSummary)}
+                                        </span>
+                                    </div>
+
+                                    <div class="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5">
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-amber-800">
+                                            Development Area
+                                        </span>
+                                        <span class="mt-1 block text-[10px] font-bold leading-relaxed text-amber-900">
+                                            ${overviewEscape(entry.lowestSkillSummary)}
+                                        </span>
+                                    </div>
+
+                                    <div class="col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                                        <div class="flex flex-wrap items-center justify-between gap-2">
+                                            <span class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                                Preferred Schemes
+                                            </span>
+                                            <span class="text-[9px] font-semibold text-slate-400">
+                                                Offense / Defense
+                                            </span>
+                                        </div>
+                                        <div class="mt-1 flex flex-wrap items-center gap-2 text-[10px] font-bold text-slate-800">
+                                            <span class="rounded border border-blue-200 bg-blue-50 px-2 py-1">
+                                                ${overviewEscape(offenseSchemeLabel)}
+                                            </span>
+                                            <span class="text-slate-400">/</span>
+                                            <span class="rounded border border-rose-200 bg-rose-50 px-2 py-1">
+                                                ${overviewEscape(defenseSchemeLabel)}
+                                            </span>
+                                        </div>
+                                    </div>
+
                                 </div>
 
                                 ${outlook ? `
-                                    <div class="mt-2 rounded border border-blue-200 bg-blue-50/40 p-2 text-[10px] text-slate-700">
+                                    <div class="xl:col-span-3 rounded border border-blue-200 bg-blue-50/40 p-2 text-[10px] text-slate-700">
                                         <span class="font-black uppercase text-[9px] text-blue-900 block">
                                             Football Identity
                                         </span>
@@ -14856,31 +15102,139 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                             ${overviewEscape(outlook.tacticalDesc || 'No tactical description available.')}
                                         </p>
 
-                                        <div class="mt-2 border-t border-blue-200 pt-2">
+                                        <div class="mt-3 rounded-lg border border-slate-200 bg-white p-2.5">
+                                            <div class="flex items-center justify-between gap-2">
+                                                <span class="text-[9px] font-black uppercase tracking-wide text-slate-600">
+                                                    Team Scheme Compatibility
+                                                </span>
+                                                <span class="text-[8px] font-semibold text-slate-400">
+                                                    Team vs. Coach
+                                                </span>
+                                            </div>
+
+                                            <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+
+                                                <div class="rounded-lg border border-blue-100 bg-blue-50/70 p-2.5">
+                                                    <div class="flex flex-wrap items-center justify-between gap-1">
+                                                        <span class="text-[9px] font-black uppercase tracking-wide text-blue-700">
+                                                            Offense
+                                                        </span>
+                                                        <span class="rounded border px-1.5 py-0.5 text-[8px] font-black uppercase ${offenseSchemeStatus.class}">
+                                                            ${offenseSchemeStatus.label}
+                                                        </span>
+                                                    </div>
+
+                                                    <div class="mt-2">
+                                                        <span class="block text-[8px] font-bold uppercase text-slate-500">
+                                                            Team currently runs
+                                                        </span>
+                                                        <span class="mt-0.5 block text-[11px] font-black text-slate-900">
+                                                            ${overviewEscape(currentOffenseLabel)}
+                                                        </span>
+                                                    </div>
+
+                                                    <div class="mt-2 border-t border-blue-200 pt-2">
+                                                        <span class="block text-[8px] font-bold uppercase text-slate-500">
+                                                            Coach prefers
+                                                        </span>
+                                                        <span class="mt-0.5 block text-[10px] font-semibold text-slate-700">
+                                                            ${overviewEscape(offenseSchemeLabel)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                <div class="rounded-lg border border-rose-100 bg-rose-50/70 p-2.5">
+                                                    <div class="flex flex-wrap items-center justify-between gap-1">
+                                                        <span class="text-[9px] font-black uppercase tracking-wide text-rose-700">
+                                                            Defense
+                                                        </span>
+                                                        <span class="rounded border px-1.5 py-0.5 text-[8px] font-black uppercase ${defenseSchemeStatus.class}">
+                                                            ${defenseSchemeStatus.label}
+                                                        </span>
+                                                    </div>
+
+                                                    <div class="mt-2">
+                                                        <span class="block text-[8px] font-bold uppercase text-slate-500">
+                                                            Team currently runs
+                                                        </span>
+                                                        <span class="mt-0.5 block text-[11px] font-black text-slate-900">
+                                                            ${overviewEscape(currentDefenseLabel)}
+                                                        </span>
+                                                    </div>
+
+                                                    <div class="mt-2 border-t border-rose-200 pt-2">
+                                                        <span class="block text-[8px] font-bold uppercase text-slate-500">
+                                                            Coach prefers
+                                                        </span>
+                                                        <span class="mt-0.5 block text-[10px] font-semibold text-slate-700">
+                                                            ${overviewEscape(defenseSchemeLabel)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                            </div>
+                                        </div>
+
+                                        <div class="mt-3 border-t border-blue-200 pt-2">
                                             <span class="font-black uppercase text-[9px] text-slate-500 block">
                                                 Projected Play-Calling Tendencies
                                             </span>
 
-                                            <div class="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
-                                                <div>
-                                                    <span class="block text-[9px] text-slate-500">Run / Pass</span>
-                                                    <b>${formatTendency(runTendency)} / ${formatTendency(passTendency)}</b>
+                                            <div class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+
+                                                <div class="min-w-0 rounded border border-slate-200 bg-white p-2">
+                                                    <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                                        Run / Pass
+                                                    </span>
+                                                    <b class="mt-1 block font-mono text-xs text-slate-900">
+                                                        ${formatTendency(runTendency)} / ${formatTendency(passTendency)}
+                                                    </b>
+                                                    <div class="mt-2 flex h-1.5 overflow-hidden rounded-full bg-slate-100">
+                                                        <div class="h-full bg-emerald-500" style="width:${runTendency ?? 0}%"></div>
+                                                        <div class="h-full bg-blue-500" style="width:${passTendency ?? 0}%"></div>
+                                                    </div>
+                                                    <div class="mt-1 flex justify-between text-[8px] text-slate-400">
+                                                        <span>Run</span>
+                                                        <span>Pass</span>
+                                                    </div>
                                                 </div>
 
-                                                <div>
-                                                    <span class="block text-[9px] text-slate-500">3rd & Long Aggro</span>
-                                                    <b>${formatTendency(thirdLongTendency)}</b>
+                                                <div class="min-w-0 rounded border border-slate-200 bg-white p-2">
+                                                    <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                                        3rd &amp; Long Aggro
+                                                    </span>
+                                                    <b class="mt-1 block font-mono text-xs text-slate-900">
+                                                        ${formatTendency(thirdLongTendency)}
+                                                    </b>
+                                                    <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                                                        <div class="h-full rounded-full bg-amber-500" style="width:${thirdLongTendency ?? 0}%"></div>
+                                                    </div>
                                                 </div>
 
-                                                <div>
-                                                    <span class="block text-[9px] text-slate-500">Blitz</span>
-                                                    <b>${formatTendency(blitzTendency)}</b>
+                                                <div class="min-w-0 rounded border border-slate-200 bg-white p-2">
+                                                    <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                                        Blitz Tendency
+                                                    </span>
+                                                    <b class="mt-1 block font-mono text-xs text-slate-900">
+                                                        ${formatTendency(blitzTendency)}
+                                                    </b>
+                                                    <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                                                        <div class="h-full rounded-full bg-rose-500" style="width:${blitzTendency ?? 0}%"></div>
+                                                    </div>
                                                 </div>
 
-                                                <div>
-                                                    <span class="block text-[9px] text-slate-500">4th Down Aggro</span>
-                                                    <b>${formatTendency(fourthDownTendency)}</b>
+                                                <div class="min-w-0 rounded border border-slate-200 bg-white p-2">
+                                                    <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                                        4th Down Aggro
+                                                    </span>
+                                                    <b class="mt-1 block font-mono text-xs text-slate-900">
+                                                        ${formatTendency(fourthDownTendency)}
+                                                    </b>
+                                                    <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                                                        <div class="h-full rounded-full bg-violet-500" style="width:${fourthDownTendency ?? 0}%"></div>
+                                                    </div>
                                                 </div>
+
                                             </div>
 
                                             <p class="mt-1 text-[9px] text-slate-500">
@@ -14895,26 +15249,47 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 ${individualRelationshipDetailsHtml}
 
                                 ${isNPC ? `
-                                    <div class="mt-2 rounded border border-slate-200 bg-slate-50/80 p-2 text-[10px] text-slate-700">
-                                        <span class="font-black uppercase text-[9px] text-slate-500 block">Coach's Weekly Idea</span>
-                                        <p class="mt-0.5 italic">"${overviewEscape(outlook.practiceReason)}"</p>
-                                        <p class="mt-1 text-[9px] text-slate-500 font-mono">
-                                            Prefers ~${outlook.tendencies.earlyDownTendency}% Run · ${outlook.tendencies.defenseAggressiveness}% Blitz · ${outlook.tendencies.fourthDownBravery}% 4th-Down Aggro
-                                        </p>
+                                    <div class="xl:col-span-5 rounded border border-slate-200 bg-slate-50/80 p-3 text-[10px] text-slate-700">
+                                        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1.5fr)_minmax(220px,1fr)] gap-3 items-stretch">
+
+                                            <div class="min-w-0">
+                                                <span class="font-black uppercase text-[9px] tracking-wide text-slate-500 block">
+                                                    Coach's Weekly Idea
+                                                </span>
+                                                <p class="mt-1 leading-relaxed text-slate-800">
+                                                    "${overviewEscape(outlook.practiceReason || 'No weekly practice rationale is available.')}"
+                                                </p>
+                                            </div>
+
+                                            <div class="flex flex-col justify-center rounded border border-emerald-200 bg-emerald-50 p-3">
+                                                <span class="block text-[9px] font-black uppercase tracking-wide text-emerald-800">
+                                                    Recommended Practice Focus
+                                                </span>
+
+                                                <span class="mt-1 text-sm font-black text-emerald-950">
+                                                    ${overviewEscape(outlook.recommendedPracticeLabel || 'No recommendation')}
+                                                </span>
+
+                                                <span class="mt-1 text-[9px] leading-relaxed text-emerald-800">
+                                                    Based on this coach's assessment of the team's current needs.
+                                                </span>
+                                            </div>
+
+                                        </div>
                                     </div>
                                 ` : ''}
 
                                 ${clashBanner}
                             </div>
 
-                            <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                            <div class="mt-1 -mx-3.5 -mb-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-3.5 py-3">
                                 <div class="flex flex-wrap gap-1.5">
                                     ${makeHeadCoachActionHtml}
                                     ${practiceActionHtml}
                                     ${schemeActionsHtml}
                                 </div>
                                 <button type="button"
-                                    class="text-[10px] font-bold text-blue-700 hover:text-blue-900 ml-auto"
+                                    class="ml-auto shrink-0 rounded border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-blue-700 hover:border-blue-300 hover:bg-blue-50"
                                     onclick="app.openCoachCard('${entry.coachId}')">
                                     Full Profile &amp; Ratings →
                                 </button>
