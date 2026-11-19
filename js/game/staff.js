@@ -1549,6 +1549,38 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
 
     ego = Math.max(15, Math.min(95, ego));
 
+    // Give each staff member persistent formation preferences
+    // that reflect their individual tactical philosophy.
+    const schemePreferencesByTacticalStyle = {
+        power_run_specialist: {
+            offense: ['Power', 'Jumbo', 'TwinTE'],
+            defense: ['4-2-2', '3-2-3']
+        },
+        spread_passing_specialist: {
+            offense: ['Spread', 'Empty', 'Trips'],
+            defense: ['3-0-5', '3-1-4', '2-2-4']
+        },
+        pressure_oriented_defender: {
+            offense: ['Balanced', 'Pistol', 'Trips'],
+            defense: ['3-1-4', '4-2-2', '2-2-4']
+        },
+        conservative_game_manager: {
+            offense: ['Balanced', 'Pistol', 'TwinTE'],
+            defense: ['3-2-3', '2-2-4']
+        },
+        adaptive_strategist: {
+            offense: ['Balanced', 'Pistol', 'Trips', 'TripsLeft'],
+            defense: ['2-2-4', '3-2-3', '3-1-4']
+        }
+    };
+
+    const schemePreferences =
+        schemePreferencesByTacticalStyle[tactical.id] ||
+        schemePreferencesByTacticalStyle.adaptive_strategist;
+
+    const preferredOffense = getRandom(schemePreferences.offense);
+    const preferredDefense = getRandom(schemePreferences.defense);
+
     const staffMember = {
         id: crypto.randomUUID(),
         name: formerPlayer ? formerPlayer.name : `${firstName} ${lastName}`,
@@ -1568,6 +1600,11 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
 
         // Personal commitment outside the community league
         availability,
+
+        // Persistent preferred offensive and defensive formations
+        preferredOffense,
+        preferredDefense,
+
         ratings: {
             // Tactical Acumen & Gameplanning
             offSchemeMastery: formerPlayer?.pos === 'QB' ? getRandomInt(65, 85) : baseVal(),
@@ -15538,4 +15575,4 @@ export function generateWeeklyStaffReport(team, gameState, userMatch = null) {
         recommendations,
         outcomes
     };
-}
+}   
