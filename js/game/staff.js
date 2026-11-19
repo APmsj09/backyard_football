@@ -922,7 +922,106 @@ export function getStaffBehaviorTendency(staff, tendencyKey) {
 }
 
 /**
- * Adds persistent personality values used by offseason staff negotiations.
+ * Gives each AI GM a persistent management approach independent of
+ * strategic intent. Higher adaptability means greater willingness to
+ * adjust the system around the available coach and personnel.
+ */
+function ensureAiGmManagementApproach(gm) {
+    if (!gm || typeof gm !== 'object') return 'balanced';
+
+    const adaptabilityByApproach = {
+        system_first: 25,
+        balanced: 55,
+        personnel_first: 85
+    };
+
+    let approach = gm.managementApproach;
+
+    if (!Object.prototype.hasOwnProperty.call(
+        adaptabilityByApproach,
+        approach
+    )) {
+        const storedAdaptability = Number(gm.managementAdaptability);
+        const adaptability = Number.isFinite(storedAdaptability)
+            ? Math.max(0, Math.min(100, storedAdaptability))
+            : getStaffBehaviorTendency(gm, 'adaptability');
+
+        approach = adaptability <= 40
+            ? 'system_first'
+            : adaptability >= 70
+                ? 'personnel_first'
+                : 'balanced';
+    }
+
+    gm.managementApproach = approach;
+    gm.managementAdaptability = adaptabilityByApproach[approach];
+
+    return approach;
+}
+
+function ensureAiGmManagementPreset(team) {
+    if (!team || team.isPlayerControlled) return null;
+
+    const gm = team.aiGmProfile || team.staff?.gm || null;
+    const managementApproach = ensureAiGmManagementApproach(gm);
+
+    const presetByApproach = {
+        system_first: 'hands_on_gm',
+        balanced: 'casual_gm',
+        personnel_first: 'director_of_football_operations'
+    };
+
+    const presetKey = presetByApproach[managementApproach];
+
+    if (team.aiGmManagementApproachApplied === managementApproach) {
+        return ensureTeamInstructions(team);
+    }
+
+    applyManagementPreset(team, presetKey);
+
+    team.aiGmManagementApproachApplied = managementApproach;
+
+    // Force the next weekly workload to reflect the new preset.
+    team.aiStaffWorkPlanKey = null;
+    team.aiStaffWorkPlanPhaseKey = null;
+
+    // A Head Coach's negotiated authority takes precedence over
+    // the default playcaller selected by the management preset.
+    const headCoach =
+        team.staff?.coach ||
+        team.coach ||
+        null;
+
+    const authority =
+        team.gameplan?.coachSchemeAuthority ||
+        headCoach?.hiringAgreement?.schemeAuthority ||
+        null;
+
+    if (
+        ['GM_CHOICE', 'SHARED_CONTROL', 'COACH_CHOICE'].includes(authority)
+    ) {
+        if (!team.gameplan.situational ||
+            typeof team.gameplan.situational !== 'object') {
+            team.gameplan.situational = {
+                playcaller: 'COACH'
+            };
+        }
+
+        team.gameplan.coachSchemeAuthority = authority;
+
+        team.gameplan.situational.playcaller =
+            authority === 'GM_CHOICE' ? 'GM' : 'COACH';
+
+        if (team.gameplan.situational.playcaller === 'COACH') {
+            aiSetSituationalGameplan(team);
+        }
+    }
+
+    return team.teamInstructions;
+}
+
+/**
+ * Adds persistent personality values used by staff negotiations.
  * Older staff records receive these once; existing values are preserved.
  */
 export function ensureStaffNegotiationProfile(staff) {
@@ -1573,6 +1672,8 @@ export function initializeTeamStaff(team) {
         aiGmProfile.strategicDirective ||
         gmStrategyByArchetype[gmArchetype.id] ||
         'COACH_AUTONOMY';
+
+    ensureAiGmManagementApproach(aiGmProfile);
 
     aiGmProfile.teamId = team.id;
     team.aiGmProfile = aiGmProfile;
@@ -2906,6 +3007,13 @@ export function ensureTeamCoachingStaff(team) {
     });
 
     if (!team.isPlayerControlled) {
+        const aiGm =
+            team.aiGmProfile ||
+            team.staff?.gm ||
+            null;
+
+        ensureAiGmManagementApproach(aiGm);
+
         team.coaches = npcCoaches;
 
         team.coaches.forEach(ensureCoachDevelopmentProfile);
@@ -2921,6 +3029,30 @@ export function ensureTeamCoachingStaff(team) {
             : null) ||
         team.userCoachProfile ||
         {};
+
+    const validManagementApproaches = [
+        'system_first',
+        'balanced',
+        'personnel_first'
+    ];
+
+    const requestedManagementApproach = String(
+        gmProfile.managementApproach ||
+        existingUserCoach.managementApproach ||
+        'balanced'
+    );
+
+    const managementApproach = validManagementApproaches.includes(
+        requestedManagementApproach
+    )
+        ? requestedManagementApproach
+        : 'balanced';
+
+    const managementAdaptability = {
+        system_first: 25,
+        balanced: 55,
+        personnel_first: 85
+    }[managementApproach];
 
     const expertisePositions = Array.isArray(gmProfile.expertisePositions)
         ? [...gmProfile.expertisePositions]
@@ -2945,6 +3077,12 @@ export function ensureTeamCoachingStaff(team) {
         gmBackgroundId: gmProfile.backgroundId || null,
         gmArchetypeId: gmProfile.archetypeId || null,
         gmExpertiseId: gmProfile.expertiseId || null,
+
+        // User-controlled philosophy for balancing system identity
+        // against the strengths of the available coaching personnel.
+        managementApproach,
+        managementAdaptability,
+
         expertisePositions,
         scoutingAccuracyBonus,
         preferredOffense: gmProfile.offensiveIdentity ||
@@ -4169,8 +4307,36 @@ export function setDepartmentControlMode(team, area, mode) {
         depts.gameplan.autonomy = mode;
         team.gameplan.delegateGameplan = mode !== 'direct';
     } else if (area === 'playcaller') {
+        const headCoach =
+            team.staff?.coach ||
+            team.coach ||
+            null;
+
+        const authorityAgreement =
+            team.gameplan.coachSchemeAuthority ||
+            headCoach?.hiringAgreement?.schemeAuthority ||
+            null;
+
+        if (
+            authorityAgreement === 'GM_CHOICE' &&
+            mode !== 'direct'
+        ) {
+            team.gameplan.situational.playcaller = 'GM';
+            return instructions;
+        }
+
+        if (
+            authorityAgreement === 'COACH_CHOICE' &&
+            mode === 'direct'
+        ) {
+            team.gameplan.situational.playcaller = 'COACH';
+            aiSetSituationalGameplan(team);
+            return instructions;
+        }
+
         const nextCaller = mode === 'direct' ? 'GM' : 'COACH';
         team.gameplan.situational.playcaller = nextCaller;
+
         if (nextCaller === 'COACH') {
             aiSetSituationalGameplan(team);
         }
@@ -4291,8 +4457,15 @@ export function getCoachWeeklyOutlook(coach, team, gameState = null) {
     );
     const schemeClash = isHeadCoach ? calculateSchemeClash(team) : 0;
 
+    const managementProfile =
+        getTeamCoachingManagementProfile(team);
+
     return {
         isUserCoach: Boolean(coach.isUserCoach),
+        managementApproach: managementProfile.approach,
+        managementAutonomyLevel: managementProfile.autonomyLevel,
+        managementAutonomyLabel: managementProfile.autonomyLabel,
+        managementCoachInfluence: managementProfile.coachInfluence,
         personalityName: personalityObj.displayName || personalityObj.name || 'Coach',
         personalityDesc: personalityObj.desc || '',
         tacticalName: tacticalObj.displayName || tacticalObj.name || 'Adaptive Strategist',
@@ -9450,10 +9623,21 @@ export function processAiRecruitingDay(gameState) {
             recruitingInstructions.autonomy || 'guided'
         ).toLowerCase();
 
-        // Guided staff follow GM priorities more closely.
-        // Delegated staff retain somewhat more discretion.
-        const priorityInfluence =
-            recruitingAutonomy === 'delegate' ? 0.65 : 1;
+        const aiManagementApproach = isPlayerControlledTeam
+            ? null
+            : ensureAiGmManagementApproach(
+                team.aiGmProfile || team.staff?.gm
+            );
+
+        // AI GMs differ in how strongly their own recruiting priorities
+        // influence staff prospect evaluations.
+        const priorityInfluence = isPlayerControlledTeam
+            ? (recruitingAutonomy === 'delegate' ? 0.65 : 1)
+            : aiManagementApproach === 'system_first'
+                ? 1.35
+                : aiManagementApproach === 'personnel_first'
+                    ? 0.65
+                    : 1;
 
         const priorityAdjustments = {
             must: 12,
@@ -10230,20 +10414,42 @@ export function processAiRecruitingDay(gameState) {
                     if (['DL', 'LB'].includes(position)) programDirectionAdjustment += 7;
                 }
 
+                const approachRecruitingWeights = {
+                    system_first: {
+                        rosterNeed: 1.25,
+                        footballFit: 0.80,
+                        programDirection: 1.25
+                    },
+                    balanced: {
+                        rosterNeed: 1.00,
+                        footballFit: 1.00,
+                        programDirection: 1.00
+                    },
+                    personnel_first: {
+                        rosterNeed: 0.85,
+                        footballFit: 1.35,
+                        programDirection: 0.75
+                    }
+                };
+
+                const recruitingWeights =
+                    approachRecruitingWeights[aiManagementApproach] ||
+                    approachRecruitingWeights.balanced;
+
                 const score =
-                    rosterNeed * 7 +
+                    rosterNeed * 7 * recruitingWeights.rosterNeed +
                     (hasKnownFriend ? 16 : 0) +
                     Math.min(
                         8,
                         Math.max(0, knownFriendCount - 1) * 3
                     ) +
                     (hasKnownRival ? -25 : 0) +
-                    footballRoleBonus +
+                    footballRoleBonus * recruitingWeights.footballFit +
                     ageBonus +
                     ownInterest * 0.20 +
                     scoutingAdjustment +
                     scoutingPreferenceAdjustment +
-                    programDirectionAdjustment +
+                    programDirectionAdjustment * recruitingWeights.programDirection +
                     competitionAdjustment +
                     recruitingPriority.adjustment * priorityInfluence +
                     targetJudgmentNoise;
@@ -11055,13 +11261,38 @@ function getAiGmDelegationAdjustment(gm, task) {
     const archetypeAdjustment =
         archetypePreferences[archetypeId]?.[task] || 0;
 
-    // Personality and archetype both influence delegation, but their
-    // combined effect remains bounded.
+    const managementApproach = ensureAiGmManagementApproach(gm);
+
+    const approachDelegationAdjustments = {
+        system_first: {
+            scouting: 0,
+            offensePrep: -3,
+            defensePrep: -3
+        },
+        balanced: {
+            scouting: 0,
+            offensePrep: 0,
+            defensePrep: 0
+        },
+        personnel_first: {
+            scouting: 0,
+            offensePrep: 3,
+            defensePrep: 3
+        }
+    };
+
+    const managementAdjustment =
+        approachDelegationAdjustments[managementApproach]?.[task] || 0;
+
+    // Personality, archetype, and management approach all influence
+    // delegation, while keeping the combined effect bounded.
     const combinedAdjustment = Math.max(
-        -8,
+        -10,
         Math.min(
-            8,
-            personalityAdjustment + archetypeAdjustment
+            10,
+            personalityAdjustment +
+            archetypeAdjustment +
+            managementAdjustment
         )
     );
 
@@ -11212,6 +11443,8 @@ export function ensureAiStaffWorkPlan(
     ) {
         return null;
     }
+
+    ensureAiGmManagementPreset(team);
 
     const weekKey = `${year}:${week}`;
 
@@ -12707,12 +12940,21 @@ export function resolveCoachCarousel(
                         ? 'FUN_SCRIMMAGE'
                         : 'BALANCED';
 
+        const managementApproach = ensureAiGmManagementApproach(
+            team.aiGmProfile || team.staff?.gm
+        );
+
+        const schemePromise =
+            managementApproach === 'system_first'
+                ? 'GM_CHOICE'
+                : managementApproach === 'personnel_first'
+                    ? 'COACH_CHOICE'
+                    : 'SHARED_CONTROL';
+
         const pitch = {
             cashOffered: offeredStipend,
             tokensOffered: offeredTokens,
-            schemePromise: directive === 'COACH_AUTONOMY'
-                ? 'COACH_CHOICE'
-                : 'GM_CHOICE',
+            schemePromise,
             practiceFocus
         };
 
@@ -12731,6 +12973,10 @@ export function resolveCoachCarousel(
     };
 
     for (const team of teams) {
+        ensureAiGmManagementApproach(
+            team.aiGmProfile || team.staff?.gm
+        );
+
         let vacancies = getVacancies(team);
 
         if (!Array.isArray(team.coaches)) {
@@ -13005,6 +13251,17 @@ export function resolveCoachCarousel(
             newHire.role = 'coach';
             newHire.weeksUnemployed = 0;
 
+            newHire.hiringAgreement = {
+                year,
+                role: 'coach',
+                schemeAuthority: negotiation.schemePromise ||
+                    chosen.pitch.schemePromise,
+                practiceFocus: negotiation.practiceFocus ||
+                    chosen.pitch.practiceFocus,
+                upfrontStipend: finalCashOffer,
+                favorTokens: finalTokenOffer
+            };
+
             if (
                 !team.coaches.some(coach =>
                     String(coach?.id) === String(newHire.id)
@@ -13063,6 +13320,37 @@ export function resolveCoachCarousel(
 
         team.staff.coach = headCoach;
         team.coach = headCoach;
+
+        const headCoachAuthority =
+            headCoach?.hiringAgreement?.schemeAuthority || null;
+
+        if (
+            ['GM_CHOICE', 'SHARED_CONTROL', 'COACH_CHOICE'].includes(
+                headCoachAuthority
+            )
+        ) {
+            if (!team.gameplan || typeof team.gameplan !== 'object') {
+                team.gameplan = {};
+            }
+
+            team.gameplan.coachSchemeAuthority = headCoachAuthority;
+
+            if (
+                !team.gameplan.situational ||
+                typeof team.gameplan.situational !== 'object'
+            ) {
+                team.gameplan.situational = {
+                    playcaller: 'COACH'
+                };
+            }
+
+            team.gameplan.situational.playcaller =
+                headCoachAuthority === 'GM_CHOICE' ? 'GM' : 'COACH';
+
+            if (team.gameplan.situational.playcaller === 'COACH') {
+                aiSetSituationalGameplan(team);
+            }
+        }
 
         // Preserve valid assignments where possible, while preventing
         // different staff roles from pointing to the same coach when
@@ -13222,6 +13510,75 @@ export function getTeamCoachingSpecialist(team, task = 'general') {
     return bestCoach;
 }
 
+/**
+ * Returns the player's preferred balance between GM control and
+ * coach influence. Shared by tactical alignment and future hiring.
+ */
+export function getTeamCoachingManagementProfile(team) {
+    const userCoach =
+        team?.coaches?.find(coach => coach?.isUserCoach) ||
+        team?.userCoachProfile ||
+        {};
+
+    const approach = String(
+        team?.gmProfile?.managementApproach ||
+        userCoach.managementApproach ||
+        'balanced'
+    );
+
+    const defaults = {
+        system_first: 25,
+        balanced: 55,
+        personnel_first: 85
+    };
+
+    const normalizedApproach = Object.prototype.hasOwnProperty.call(
+        defaults,
+        approach
+    )
+        ? approach
+        : 'balanced';
+
+    const storedAdaptability = Number(
+        userCoach.managementAdaptability
+    );
+
+    const adaptability = Number.isFinite(storedAdaptability)
+        ? Math.max(0, Math.min(100, storedAdaptability))
+        : defaults[normalizedApproach];
+
+    const autonomyLevel = normalizedApproach === 'system_first'
+        ? 'gm_directed'
+        : normalizedApproach === 'personnel_first'
+            ? 'coach_influenced'
+            : 'shared';
+
+    const autonomyLabel = normalizedApproach === 'system_first'
+        ? 'GM-directed'
+        : normalizedApproach === 'personnel_first'
+            ? 'Coach-influenced'
+            : 'Shared control';
+
+    // System-first increases disagreement costs; personnel-first
+    // reduces them because the GM is more willing to accommodate coaches.
+    const schemeConflictMultiplier = Math.max(
+        0.85,
+        Math.min(
+            1.15,
+            1.15 - ((adaptability - 25) / 60) * 0.30
+        )
+    );
+
+    return {
+        approach: normalizedApproach,
+        adaptability,
+        autonomyLevel,
+        autonomyLabel,
+        coachInfluence: adaptability / 100,
+        schemeConflictMultiplier
+    };
+}
+
 export function calculateSchemeClash(team) {
     if (!team || !team.gameplan || !team.gameplan.situational) return 0;
     if (team.gameplan.situational.playcaller !== 'GM') return 0;
@@ -13260,8 +13617,16 @@ export function calculateSchemeClash(team) {
     const totalClash = (runDiff + aggroDiff) / 2;
     if (totalClash <= 15) return 0;
 
-    // Max penalty is around -18 IQ for total philosophical opposites.
-    return Math.floor((totalClash - 15) * 0.35);
+    const basePenalty = Math.floor((totalClash - 15) * 0.35);
+
+    const managementProfile =
+        getTeamCoachingManagementProfile(team);
+
+    // A system-first GM expects the staff to follow the chosen system.
+    // A personnel-first GM is more willing to accommodate the coach.
+    return Math.round(
+        basePenalty * managementProfile.schemeConflictMultiplier
+    );
 }
 
 export function previewCoachTendencies(coach, team) {
@@ -13481,7 +13846,62 @@ export function aiBuildGameplan(team, opponent = null, gmDirective = 'COACH_AUTO
     const defenseEmphasis =
         gameplanInstructions.defenseEmphasis || {};
 
+    const aiGmAuthority = (() => {
+        if (team.isPlayerControlled) return null;
+
+        const gm = team.aiGmProfile || team.staff?.gm || null;
+        const managementApproach = ensureAiGmManagementApproach(gm);
+
+        const authorityByApproach = {
+            system_first: 'GM_CHOICE',
+            balanced: 'SHARED_CONTROL',
+            personnel_first: 'COACH_CHOICE'
+        };
+
+        const headCoach =
+            team.staff?.coach ||
+            team.coach ||
+            null;
+
+        const savedAuthority =
+            team.gameplan.coachSchemeAuthority ||
+            headCoach?.hiringAgreement?.schemeAuthority ||
+            null;
+
+        const authority = [
+            'GM_CHOICE',
+            'SHARED_CONTROL',
+            'COACH_CHOICE'
+        ].includes(savedAuthority)
+            ? savedAuthority
+            : authorityByApproach[managementApproach];
+
+        team.gameplan.coachSchemeAuthority = authority;
+
+        if (authority !== 'GM_CHOICE') {
+            if (
+                !team.gameplan.situational ||
+                typeof team.gameplan.situational !== 'object'
+            ) {
+                team.gameplan.situational = {
+                    playcaller: 'COACH'
+                };
+            } else {
+                team.gameplan.situational.playcaller = 'COACH';
+            }
+        }
+
+        return authority;
+    })();
+
     aiSetSituationalGameplan(team);
+
+    if (
+        aiGmAuthority === 'GM_CHOICE' &&
+        team.gameplan.situational
+    ) {
+        team.gameplan.situational.playcaller = 'GM';
+    }
 
     const offenseCoach = getTeamCoachingSpecialist(team, 'offensePrep');
     const defenseCoach = getTeamCoachingSpecialist(team, 'defensePrep');
@@ -14469,6 +14889,12 @@ export function aiChooseWeeklyPractice(
         offensePracticeEmphasis !== null ||
         defensePracticeEmphasis !== null;
 
+    const gm = team.aiGmProfile || team.staff?.gm || null;
+
+    const managementApproach = team.isPlayerControlled
+        ? 'balanced'
+        : ensureAiGmManagementApproach(gm);
+
     if (
         hasPracticeEmphasis &&
         Math.abs(
@@ -14486,15 +14912,24 @@ export function aiChooseWeeklyPractice(
     }
 
     // GM directives define the program's strategic priorities.
-    if (gmDirective === 'DEVELOP_YOUTH') {
+    if (
+        managementApproach !== 'personnel_first' &&
+        gmDirective === 'DEVELOP_YOUTH'
+    ) {
         return 'chalk_talk';
     }
 
-    if (gmDirective === 'HARD_CONDITIONING') {
+    if (
+        managementApproach !== 'personnel_first' &&
+        gmDirective === 'HARD_CONDITIONING'
+    ) {
         return 'conditioning';
     }
 
-    if (gmDirective === 'WIN_NOW') {
+    if (
+        managementApproach !== 'personnel_first' &&
+        gmDirective === 'WIN_NOW'
+    ) {
         if (balance < 2.00) return 'hustle';
 
         return hasUpcomingOpponent

@@ -9335,6 +9335,19 @@ function ensureHireStaffHandler() {
             );
 
         const tokensAvailable = team.socialProfile?.favorTokens || 0;
+
+        const managementApproach = String(
+            team.gmProfile?.managementApproach ||
+            team.userCoachProfile?.managementApproach ||
+            'balanced'
+        );
+
+        const defaultSchemePromise = {
+            system_first: 'GM_CHOICE',
+            balanced: 'SHARED_CONTROL',
+            personnel_first: 'COACH_CHOICE'
+        }[managementApproach] || 'SHARED_CONTROL';
+
         const isCoachPoolHire = roleKey === 'coach';
         const showSchemeAutonomy =
             isCoachPoolHire &&
@@ -9572,11 +9585,52 @@ function ensureHireStaffHandler() {
                         <label class="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
                             Scheme Autonomy & Play-Calling Rights${hasCurrentHeadCoach && !hasOpenCoachingSlot ? ' (Applies if replacing Head Coach)' : ''}
                         </label>
-                        <input type="hidden" id="staff-scheme-promise" value="COACH_CHOICE">
+                        <input
+                            type="hidden"
+                            id="staff-scheme-promise"
+                            value="${defaultSchemePromise}"
+                        >
+
                         <div class="grid grid-cols-1 gap-1 sm:grid-cols-3" role="group" aria-label="Scheme autonomy">
-                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="COACH_CHOICE" aria-pressed="true" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'COACH_CHOICE')" class="rounded-sm border border-emerald-700 bg-emerald-50 px-2 py-2 text-left text-[10px] font-bold text-emerald-900">Coach autonomy<span class="mt-0.5 block text-[9px] font-normal text-slate-600">Coach controls both schemes</span></button>
-                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="SHARED_CONTROL" aria-pressed="false" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'SHARED_CONTROL')" class="rounded-sm border border-slate-200 bg-white px-2 py-2 text-left text-[10px] font-bold text-slate-700">Shared control<span class="mt-0.5 block text-[9px] font-normal text-slate-500">GM and coach agree on schemes</span></button>
-                            <button type="button" data-staff-pitch-control="staff-scheme-promise" data-staff-pitch-value="GM_CHOICE" aria-pressed="false" onclick="window.app_setStaffPitchChoice('staff-scheme-promise', 'GM_CHOICE')" class="rounded-sm border border-slate-200 bg-white px-2 py-2 text-left text-[10px] font-bold text-slate-700">GM control<span class="mt-0.5 block text-[9px] font-normal text-slate-500">Front office controls both</span></button>
+                            ${[
+                                [
+                                    'GM_CHOICE',
+                                    'GM control',
+                                    'You control the football system'
+                                ],
+                                [
+                                    'SHARED_CONTROL',
+                                    'Shared control',
+                                    'GM and coach shape the system together'
+                                ],
+                                [
+                                    'COACH_CHOICE',
+                                    'Coach autonomy',
+                                    'Coach controls the gameplan'
+                                ]
+                            ].map(([value, label, detail]) => {
+                                const selected = defaultSchemePromise === value;
+
+                                return `
+                                    <button
+                                        type="button"
+                                        data-staff-pitch-control="staff-scheme-promise"
+                                        data-staff-pitch-value="${value}"
+                                        aria-pressed="${selected}"
+                                        onclick="window.app_setStaffPitchChoice('staff-scheme-promise', '${value}')"
+                                        class="rounded-sm border px-2 py-2 text-left text-[10px] font-bold ${
+                                            selected
+                                                ? 'border-emerald-700 bg-emerald-50 text-emerald-900'
+                                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                        }"
+                                    >
+                                        ${label}
+                                        <span class="mt-0.5 block text-[9px] font-normal text-slate-600">
+                                            ${detail}
+                                        </span>
+                                    </button>
+                                `;
+                            }).join('')}
                         </div>
                     </div>` : ''}
 
@@ -9719,7 +9773,7 @@ function ensureHireStaffHandler() {
 
             const schemePromise = pitchOverride?.schemePromise ||
                 document.getElementById('staff-scheme-promise')?.value ||
-                'GM_CHOICE';
+                defaultSchemePromise;
 
             const practiceFocus = pitchOverride?.practiceFocus ||
                 document.getElementById('staff-practice-focus')?.value ||
@@ -10282,14 +10336,6 @@ function ensureHireStaffHandler() {
                     favorTokens: tokensOffered
                 };
 
-                if (roleKey === 'coach') {
-                    if (!team.gameplan) {
-                        team.gameplan = {};
-                    }
-
-                    team.gameplan.coachSchemeAuthority = schemePromise;
-                }
-
                 if (!team.staff) {
                     team.staff = {};
                 }
@@ -10362,6 +10408,31 @@ function ensureHireStaffHandler() {
                     if (replacesLegacyLeadCoach) {
                         team.coach = staff;
                         team.staff.coach = staff;
+
+                        if (
+                            !team.gameplan ||
+                            typeof team.gameplan !== 'object'
+                        ) {
+                            team.gameplan = {};
+                        }
+
+                        team.gameplan.coachSchemeAuthority = schemePromise;
+
+                        if (
+                            !team.gameplan.situational ||
+                            typeof team.gameplan.situational !== 'object'
+                        ) {
+                            team.gameplan.situational = {
+                                playcaller: 'COACH'
+                            };
+                        }
+
+                        team.gameplan.situational.playcaller =
+                            schemePromise === 'GM_CHOICE' ? 'GM' : 'COACH';
+
+                        if (team.gameplan.situational.playcaller === 'COACH') {
+                            Game.aiSetSituationalGameplan(team);
+                        }
                     }
 
                     // Keep legacy staff references aligned with the active
@@ -10556,6 +10627,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     if (!container || !gameState?.playerTeam) return;
 
     const team = gameState.playerTeam;
+
+    const selectedManagementApproach = String(
+        team.gmProfile?.managementApproach ||
+        team.userCoachProfile?.managementApproach ||
+        'balanced'
+    );
+
     if (!team.staff) Game.initializeTeamStaff(team);
     if (!gameState.availableStaff) gameState.availableStaff = Game.generateStaffPool(6);
 
@@ -10591,6 +10669,67 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         (sum, o) => sum + (Number(o?.assignedHours) || 0),
         0
     );
+
+    const managementOutlook = [...staffOutlooks.values()].find(
+        outlook => outlook?.managementApproach
+    ) || null;
+
+    const managementAutonomyLabel =
+        managementOutlook?.managementAutonomyLabel || 'Shared control';
+
+    const managementCoachInfluence = Math.round(
+        (Number(managementOutlook?.managementCoachInfluence) || 0) * 100
+    );
+
+    const schemeConflictMultiplier = Number(
+        managementOutlook?.schemeConflictMultiplier
+    );
+
+    window.app_setManagementApproach = approach => {
+        const latestState = Game.getGameState() || gameState;
+        const currentTeam = latestState?.playerTeam;
+
+        const approachAdaptability = {
+            system_first: 25,
+            balanced: 55,
+            personnel_first: 85
+        };
+
+        if (
+            !currentTeam ||
+            !Object.prototype.hasOwnProperty.call(
+                approachAdaptability,
+                approach
+            )
+        ) {
+            return;
+        }
+
+        if (
+            !currentTeam.gmProfile ||
+            typeof currentTeam.gmProfile !== 'object'
+        ) {
+            currentTeam.gmProfile = {};
+        }
+
+        currentTeam.gmProfile.managementApproach = approach;
+
+        const userCoach =
+            currentTeam.coaches?.find(coach => coach?.isUserCoach) ||
+            currentTeam.userCoachProfile;
+
+        if (userCoach) {
+            userCoach.managementApproach = approach;
+            userCoach.managementAdaptability =
+                approachAdaptability[approach];
+        }
+
+        // Rebuild the canonical user-coach profile from saved GM settings.
+        Game.ensureTeamCoachingStaff?.(currentTeam);
+
+        saveGameState();
+        renderStaffTab(latestState);
+    };
 
     window.app_setUnifiedControl = (area, mode, stayOnScreen = null) => {
         const gs = getGameState();
@@ -14092,6 +14231,87 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     </section>
                 `;
             })()}
+
+            <section class="mb-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <h5 class="text-xs font-black uppercase tracking-wide text-indigo-950">
+                            My Coaching Philosophy
+                        </h5>
+                        <p class="mt-1 text-[10px] text-slate-600">
+                            Decide how strongly you prioritize your preferred system
+                            versus adapting to your available coaches and roster.
+                        </p>
+                    </div>
+
+                    <select
+                        class="min-w-[190px] rounded border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-slate-800"
+                        value="${selectedManagementApproach}"
+                        onchange="window.app_setManagementApproach(this.value)">
+
+                        <option value="system_first"
+                            ${selectedManagementApproach === 'system_first' ? 'selected' : ''}>
+                            System-First
+                        </option>
+
+                        <option value="balanced"
+                            ${selectedManagementApproach === 'balanced' ? 'selected' : ''}>
+                            Balanced
+                        </option>
+
+                        <option value="personnel_first"
+                            ${selectedManagementApproach === 'personnel_first' ? 'selected' : ''}>
+                            Personnel-First
+                        </option>
+                    </select>
+                </div>
+
+                <p class="mt-2 text-[10px] leading-relaxed text-indigo-900">
+                    ${
+                        selectedManagementApproach === 'system_first'
+                            ? 'You expect coaches and personnel to fit your established football philosophy.'
+                            : selectedManagementApproach === 'personnel_first'
+                                ? 'You are willing to change your system and tactical approach to maximize available talent.'
+                                : 'You maintain a recognizable football identity while allowing adjustments for personnel and coaching expertise.'
+                    }
+                </p>
+
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div class="rounded border border-indigo-100 bg-white p-2">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Control Structure
+                        </span>
+                        <span class="text-xs font-black text-indigo-900">
+                            ${managementAutonomyLabel}
+                        </span>
+                    </div>
+
+                    <div class="rounded border border-indigo-100 bg-white p-2">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Coach Influence
+                        </span>
+                        <span class="text-xs font-black text-indigo-900">
+                            ${managementCoachInfluence}%
+                        </span>
+                    </div>
+
+                    <div class="rounded border border-indigo-100 bg-white p-2">
+                        <span class="block text-[9px] font-bold uppercase text-slate-500">
+                            Tactical Friction
+                        </span>
+                        <span class="text-xs font-black text-indigo-900">
+                            ${Number.isFinite(schemeConflictMultiplier)
+                                ? `${schemeConflictMultiplier.toFixed(2)}×`
+                                : '1.00×'}
+                        </span>
+                    </div>
+                </div>
+
+                <p class="mt-2 text-[9px] text-slate-500">
+                    This reflects your influence over staff decisions, not a restriction
+                    on available formations or playcalling choices.
+                </p>
+            </section>
 
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
                 ${overviewCoaches.map(entry => {
@@ -20638,12 +20858,60 @@ export function renderPlaybookManager(gameState) {
         };
     }
 
-    if (!team.gameplan.situational) {
+    let authorityStateChanged = false;
+
+    if (
+        !team.gameplan.situational ||
+        typeof team.gameplan.situational !== 'object' ||
+        Array.isArray(team.gameplan.situational)
+    ) {
+        team.gameplan.situational = {
+            playcaller: 'COACH'
+        };
+
         Game.aiSetSituationalGameplan(team);
+        authorityStateChanged = true;
+    }
+
+    const headCoach =
+        team.staff?.coach ||
+        team.coach ||
+        null;
+
+    const authorityAgreement =
+        team.gameplan.coachSchemeAuthority ||
+        headCoach?.hiringAgreement?.schemeAuthority ||
+        null;
+
+    if (
+        authorityAgreement === 'GM_CHOICE' &&
+        team.gameplan.situational.playcaller !== 'GM'
+    ) {
+        team.gameplan.situational.playcaller = 'GM';
+        authorityStateChanged = true;
+    } else if (
+        authorityAgreement === 'COACH_CHOICE' &&
+        team.gameplan.situational.playcaller !== 'COACH'
+    ) {
+        team.gameplan.situational.playcaller = 'COACH';
+        Game.aiSetSituationalGameplan(team);
+        authorityStateChanged = true;
+    }
+
+    if (authorityStateChanged) {
+        scheduleSaveGameState();
     }
 
     const sit = team.gameplan.situational;
+
+    const gmControlLocked = authorityAgreement === 'GM_CHOICE';
+    const coachControlLocked = authorityAgreement === 'COACH_CHOICE';
+
+    const coachButtonDisabled = gmControlLocked ? 'disabled' : '';
+    const gmButtonDisabled = coachControlLocked ? 'disabled' : '';
+
     const isGM = sit.playcaller === 'GM';
+
     const clash = Game.calculateSchemeClash(team);
     const disabledAttr = isGM ? '' : 'disabled';
     const sliderOpac = isGM ? 'opacity-100' : 'opacity-50 cursor-not-allowed';
@@ -20832,8 +21100,8 @@ const offAvailable = Object.entries(offensivePlaybook || {}).filter(([k]) => k !
                         <p id="clipboard-clash-warning" class="text-[11px] mt-0.5">${clashHtml}</p>
                     </div>
                     <div class="flex rounded border border-slate-300 bg-white p-0.5" role="group" aria-label="Playcaller control">
-                        <button type="button" aria-pressed="${!isGM}" onclick="app_updateClipboard('playcaller', 'COACH')" class="rounded-sm px-2 py-1.5 text-[10px] font-bold ${!isGM ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">Coach</button>
-                        <button type="button" aria-pressed="${isGM}" onclick="app_updateClipboard('playcaller', 'GM')" class="rounded-sm px-2 py-1.5 text-[10px] font-bold ${isGM ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}">GM</button>
+                        <button type="button" aria-pressed="${!isGM}" ${coachButtonDisabled} onclick="app_updateClipboard('playcaller', 'COACH')" class="rounded-sm px-2 py-1.5 text-[10px] font-bold ${!isGM ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'} ${coachButtonDisabled ? 'opacity-40 cursor-not-allowed' : ''}">Coach</button>
+                        <button type="button" aria-pressed="${isGM}" ${gmButtonDisabled} onclick="app_updateClipboard('playcaller', 'GM')" class="rounded-sm px-2 py-1.5 text-[10px] font-bold ${isGM ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'} ${gmButtonDisabled ? 'opacity-40 cursor-not-allowed' : ''}">GM</button>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 ${sliderOpac}">

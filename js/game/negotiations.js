@@ -1707,13 +1707,26 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
         ? Math.max(0, rawCashBalance)
         : 0;
 
+    const managementApproach = String(
+        team?.gmProfile?.managementApproach ||
+        team?.aiGmProfile?.managementApproach ||
+        team?.userCoachProfile?.managementApproach ||
+        'balanced'
+    );
+
+    const defaultSchemePromise = {
+        system_first: 'GM_CHOICE',
+        balanced: 'SHARED_CONTROL',
+        personnel_first: 'COACH_CHOICE'
+    }[managementApproach] || 'SHARED_CONTROL';
+
     const schemePromise = [
         'GM_CHOICE',
         'SHARED_CONTROL',
         'COACH_CHOICE'
     ].includes(pitchDetails.schemePromise)
         ? pitchDetails.schemePromise
-        : 'GM_CHOICE';
+        : defaultSchemePromise;
 
     const practiceFocus =
         pitchDetails.practiceFocus || 'BALANCED';
@@ -1948,6 +1961,11 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
         reasons,
         quote,
         schemePromise,
+        autonomyLabel: {
+            GM_CHOICE: 'GM Control',
+            SHARED_CONTROL: 'Shared Control',
+            COACH_CHOICE: 'Coach Autonomy'
+        }[schemePromise],
         practiceFocus
     };
 }
