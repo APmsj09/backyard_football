@@ -14047,6 +14047,112 @@ export function renderStaffTab(gameState, targetContainerId = null) {
         entry => entry.coach?.isUserCoach
     ) || null;
 
+    const userCoachIdentity = userCoachOverview
+        ? staffIdentities.get(String(userCoachOverview.coach.id)) || null
+        : null;
+
+    const userCoachOutlook = userCoachOverview
+        ? staffOutlooks.get(String(userCoachOverview.coach.id)) || null
+        : null;
+
+    const userIdentityList = values =>
+        Array.isArray(values) && values.length > 0
+            ? values.map(value => overviewEscape(value)).join(' · ')
+            : 'Not specified';
+
+    const getUserCoachTendency = key => {
+        const value = Number(userCoachOutlook?.tendencies?.[key]);
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, Math.round(value)))
+            : null;
+    };
+
+    const userRunTendency = getUserCoachTendency('earlyDownTendency');
+
+    const userPassTendency = userRunTendency === null
+        ? null
+        : 100 - userRunTendency;
+
+    const userThirdLongTendency = getUserCoachTendency(
+        'thirdAndLongAggressiveness'
+    );
+
+    const userBlitzTendency = getUserCoachTendency(
+        'defenseAggressiveness'
+    );
+
+    const userFourthDownTendency = getUserCoachTendency(
+        'fourthDownBravery'
+    );
+
+    const formatUserTendency = value =>
+        value === null ? '—' : `${value}%`;
+
+    const getUserCoachSkill = key => {
+        const value = Number(
+            userCoachOverview?.coach?.ratings?.[key]
+        );
+
+        return Number.isFinite(value)
+            ? Math.max(0, Math.min(100, Math.round(value)))
+            : null;
+    };
+
+    const getUserCoachSkillAverage = keys =>
+        overviewSkillAverage(
+            keys.map(getUserCoachSkill)
+        );
+
+    const userCoachSkillAreas = userCoachOverview ? [
+        {
+            label: 'Offensive Scheme',
+            value: getUserCoachSkill('offSchemeMastery'),
+            description: 'Offensive system knowledge and execution.',
+            color: 'bg-blue-500'
+        },
+        {
+            label: 'Defensive Scheme',
+            value: getUserCoachSkill('defSchemeMastery'),
+            description: 'Defensive system knowledge and execution.',
+            color: 'bg-rose-500'
+        },
+        {
+            label: 'Scouting & Evaluation',
+            value: getUserCoachSkillAverage([
+                'evalPhysicals',
+                'evalTechnique',
+                'evalCharacter'
+            ]),
+            description: 'Evaluating player ability and potential.',
+            color: 'bg-emerald-500'
+        },
+        {
+            label: 'Teaching',
+            value: getUserCoachSkill('teaching'),
+            description: 'Developing players through instruction.',
+            color: 'bg-violet-500'
+        },
+        {
+            label: 'Game Planning',
+            value: getUserCoachSkillAverage([
+                'gameplanInstinct',
+                'inGameAdjustments'
+            ]),
+            description: 'Preparation, strategy, and adjustments.',
+            color: 'bg-amber-500'
+        },
+        {
+            label: 'Practice',
+            value: getUserCoachSkillAverage([
+                'practiceDiscipline',
+                'conditioning'
+            ]),
+            description: 'Practice organization and conditioning.',
+            color: 'bg-cyan-500'
+        }
+    ] : [];
+
     html += `
         <div
             class="staff-hub-pane hidden"
@@ -14072,53 +14178,67 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </div>
 
                 ${userCoachOverview ? `
-                    <div class="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
+
+                        <div class="sm:col-span-2 xl:col-span-2 flex flex-col justify-between gap-3 rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-3">
                             <div>
-                                <h5 class="text-sm font-black text-slate-900">
+                                <span class="text-[9px] font-black uppercase tracking-wider text-indigo-700">
+                                    Your Coaching Identity
+                                </span>
+
+                                <h5 class="mt-2 text-base font-black text-slate-900">
                                     ${overviewEscape(userCoachOverview.coach.name || 'Your Coach Profile')}
                                 </h5>
-                                <p class="text-[10px] text-slate-500">
+
+                                <p class="mt-1 text-[10px] leading-relaxed text-slate-600">
                                     ${overviewEscape(userCoachOverview.styleSummary)}
                                 </p>
                             </div>
 
-                            <button
-                                type="button"
-                                onclick="app.openCoachCard('${userCoachOverview.coachId}')"
-                                class="rounded border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-50">
-                                Full Profile &amp; Ratings →
-                            </button>
-                        </div>
+                            <div class="flex flex-wrap items-center justify-between gap-2 border-t border-indigo-100 pt-2">
+                                <span class="text-[9px] font-semibold text-slate-500">
+                                    Personal Coaching Profile
+                                </span>
 
-                        <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <div class="rounded border border-slate-200 bg-white p-2">
-                                <span class="block text-[9px] font-bold uppercase text-slate-500">
-                                    Strongest Skills
-                                </span>
-                                <span class="text-[11px] font-bold text-emerald-800">
-                                    ${overviewEscape(userCoachOverview.strengthsSummary)}
-                                </span>
-                            </div>
-
-                            <div class="rounded border border-slate-200 bg-white p-2">
-                                <span class="block text-[9px] font-bold uppercase text-slate-500">
-                                    Development Area
-                                </span>
-                                <span class="text-[11px] font-bold text-slate-800">
-                                    ${overviewEscape(userCoachOverview.lowestSkillSummary)}
-                                </span>
-                            </div>
-
-                            <div class="rounded border border-slate-200 bg-white p-2">
-                                <span class="block text-[9px] font-bold uppercase text-slate-500">
-                                    Weekly Workload
-                                </span>
-                                <span class="text-[11px] font-bold text-slate-800">
-                                    ${userCoachOverview.workload} hrs · ${overviewEscape(userCoachOverview.availability)}
-                                </span>
+                                <button
+                                    type="button"
+                                    onclick="app.openCoachCard('${userCoachOverview.coachId}')"
+                                    class="rounded border border-indigo-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-indigo-800 hover:bg-indigo-50">
+                                    Full Profile &amp; Ratings →
+                                </button>
                             </div>
                         </div>
+
+                        <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                            <span class="block text-[9px] font-black uppercase tracking-wide text-emerald-800">
+                                Strongest Skills
+                            </span>
+                            <p class="mt-2 text-xs font-black leading-relaxed text-emerald-950">
+                                ${overviewEscape(userCoachOverview.strengthsSummary)}
+                            </p>
+                        </div>
+
+                        <div class="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                            <span class="block text-[9px] font-black uppercase tracking-wide text-amber-800">
+                                Development Area
+                            </span>
+                            <p class="mt-2 text-xs font-black leading-relaxed text-amber-950">
+                                ${overviewEscape(userCoachOverview.lowestSkillSummary)}
+                            </p>
+                        </div>
+
+                        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                Weekly Workload
+                            </span>
+                            <p class="mt-2 text-base font-black tabular-nums text-slate-900">
+                                ${userCoachOverview.workload} hrs
+                            </p>
+                            <p class="mt-1 text-[9px] leading-relaxed text-slate-500">
+                                ${overviewEscape(userCoachOverview.availability)}
+                            </p>
+                        </div>
+
                     </div>
                 ` : `
                     <p class="mt-3 text-xs text-slate-500">
@@ -14127,90 +14247,459 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 `}
             </section>
 
-            <section class="mb-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
-                <div class="flex flex-wrap items-center justify-between gap-2">
+            ${userCoachIdentity ? `
+                <section class="mb-4 rounded-xl border border-slate-200 bg-white p-3 sm:p-4 shadow-sm">
+
+                    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <h5 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                                My Football Identity
+                            </h5>
+                            <p class="mt-1 text-[10px] text-slate-500">
+                                Your tactical preferences and the types of players you value.
+                            </p>
+                        </div>
+
+                        <span class="rounded border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[9px] font-bold uppercase text-indigo-800">
+                            Your Coaching Philosophy
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+
+                        <div class="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+                            <span class="block text-[9px] font-black uppercase tracking-wide text-blue-800">
+                                Offensive Identity
+                            </span>
+
+                            <p class="mt-2 text-sm font-black leading-snug text-slate-900">
+                                ${overviewEscape(userCoachIdentity.offenseIdentity || 'Not specified')}
+                            </p>
+
+                            <div class="mt-3 border-t border-blue-200 pt-2">
+                                <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                    Preferred Formations
+                                </span>
+                                <p class="mt-1 text-[10px] leading-relaxed font-semibold text-slate-700">
+                                    ${userIdentityList(userCoachIdentity.offenseFormations)}
+                                </p>
+                            </div>
+
+                            <div class="mt-3 border-t border-blue-200 pt-2">
+                                <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                    Play Preferences
+                                </span>
+                                <p class="mt-1 text-[10px] leading-relaxed text-slate-700">
+                                    ${userIdentityList(userCoachIdentity.offensePlayTypes)}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="rounded-lg border border-rose-200 bg-rose-50/50 p-3">
+                            <span class="block text-[9px] font-black uppercase tracking-wide text-rose-800">
+                                Defensive Identity
+                            </span>
+
+                            <p class="mt-2 text-sm font-black leading-snug text-slate-900">
+                                ${overviewEscape(userCoachIdentity.defenseIdentity || 'Not specified')}
+                            </p>
+
+                            <div class="mt-3 border-t border-rose-200 pt-2">
+                                <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                    Preferred Formations
+                                </span>
+                                <p class="mt-1 text-[10px] leading-relaxed font-semibold text-slate-700">
+                                    ${userIdentityList(userCoachIdentity.defenseFormations)}
+                                </p>
+                            </div>
+
+                            <div class="mt-3 border-t border-rose-200 pt-2">
+                                <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                    Play Preferences
+                                </span>
+                                <p class="mt-1 text-[10px] leading-relaxed text-slate-700">
+                                    ${userIdentityList(userCoachIdentity.defensePlayTypes)}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                            <span class="block text-[9px] font-black uppercase tracking-wide text-emerald-800">
+                                Recruiting Identity
+                            </span>
+
+                            <p class="mt-2 text-sm font-black leading-snug text-slate-900">
+                                Players You Value
+                            </p>
+
+                            <div class="mt-3 border-t border-emerald-200 pt-2">
+                                <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                    Position Priorities
+                                </span>
+                                <p class="mt-1 text-[10px] leading-relaxed font-semibold text-slate-700">
+                                    ${userIdentityList(userCoachIdentity.recruitingPositions)}
+                                </p>
+                            </div>
+
+                            <div class="mt-3 border-t border-emerald-200 pt-2">
+                                <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                    Preferred Player Types
+                                </span>
+                                <p class="mt-1 text-[10px] leading-relaxed text-slate-700">
+                                    ${userIdentityList(userCoachIdentity.preferredPlayerTypes)}
+                                </p>
+                            </div>
+                        </div>
+
+                    </div>
+                </section>
+            ` : ''}
+
+            ${userCoachOverview ? (() => {
+                const personalTendencies =
+                    staffOutlooks.get(String(userCoachOverview.coach.id))
+                        ?.tendencies || {};
+
+                const readPersonalTendency = key => {
+                    const value = Number(personalTendencies[key]);
+
+                    return Number.isFinite(value)
+                        ? Math.max(0, Math.min(100, Math.round(value)))
+                        : null;
+                };
+
+                const personalRun = readPersonalTendency('earlyDownTendency');
+                const personalPass = personalRun === null
+                    ? null
+                    : 100 - personalRun;
+
+                const personalThirdLong = readPersonalTendency(
+                    'thirdAndLongAggressiveness'
+                );
+
+                const personalBlitz = readPersonalTendency(
+                    'defenseAggressiveness'
+                );
+
+                const personalFourthDown = readPersonalTendency(
+                    'fourthDownBravery'
+                );
+
+                const formatPersonalTendency = value =>
+                    value === null ? '—' : `${value}%`;
+
+                const tendencyCards = [
+                    {
+                        label: 'Run / Pass',
+                        value: `${formatPersonalTendency(personalRun)} / ${formatPersonalTendency(personalPass)}`,
+                        color: 'bg-emerald-500',
+                        secondaryColor: 'bg-blue-500',
+                        primaryWidth: personalRun ?? 0,
+                        secondaryWidth: personalPass ?? 0,
+                        split: true,
+                        description: 'Early-down offensive preference.'
+                    },
+                    {
+                        label: '3rd & Long Aggression',
+                        value: formatPersonalTendency(personalThirdLong),
+                        color: 'bg-amber-500',
+                        width: personalThirdLong ?? 0,
+                        description: 'Willingness to attack on passing downs.'
+                    },
+                    {
+                        label: 'Blitz Aggression',
+                        value: formatPersonalTendency(personalBlitz),
+                        color: 'bg-rose-500',
+                        width: personalBlitz ?? 0,
+                        description: 'Preference for pressure and blitz packages.'
+                    },
+                    {
+                        label: '4th-Down Aggression',
+                        value: formatPersonalTendency(personalFourthDown),
+                        color: 'bg-violet-500',
+                        width: personalFourthDown ?? 0,
+                        description: 'Willingness to stay on the field on fourth down.'
+                    }
+                ];
+
+                return `
+                    <section class="mb-4 rounded-xl border border-slate-200 bg-white p-3 sm:p-4 shadow-sm">
+
+                        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <h5 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                                    My Playcalling Tendencies
+                                </h5>
+                                <p class="mt-1 text-[10px] text-slate-500">
+                                    The tactical preferences associated with your coaching profile.
+                                </p>
+                            </div>
+
+                            <span class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase text-slate-500">
+                                Projected tendencies
+                            </span>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
+
+                            ${tendencyCards.map(card => `
+                                <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+
+                                    <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                        ${card.label}
+                                    </span>
+
+                                    <span class="mt-2 block text-xl font-black font-mono tabular-nums text-slate-900">
+                                        ${card.value}
+                                    </span>
+
+                                    ${card.split ? `
+                                        <div class="mt-3 flex h-2 overflow-hidden rounded-full bg-slate-200">
+                                            <div class="${card.color}" style="width:${card.primaryWidth}%"></div>
+                                            <div class="${card.secondaryColor}" style="width:${card.secondaryWidth}%"></div>
+                                        </div>
+
+                                        <div class="mt-1 flex justify-between text-[8px] font-semibold text-slate-400">
+                                            <span>Run</span>
+                                            <span>Pass</span>
+                                        </div>
+                                    ` : `
+                                        <div class="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+                                            <div class="h-full rounded-full ${card.color}"
+                                                style="width:${card.width}%">
+                                            </div>
+                                        </div>
+                                    `}
+
+                                    <p class="mt-2 text-[9px] leading-relaxed text-slate-500">
+                                        ${card.description}
+                                    </p>
+                                </div>
+                            `).join('')}
+
+                        </div>
+
+                        <p class="mt-3 text-[9px] text-slate-400">
+                            These are coaching-profile tendencies, not fixed playcalling instructions. Actual decisions can vary with game situations and team strategy.
+                        </p>
+                    </section>
+                `;
+            })() : ''}
+
+            ${userCoachOverview ? `
+                <section class="mb-4 rounded-xl border border-slate-200 bg-white p-3 sm:p-4 shadow-sm">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <div>
+                            <h5 class="text-sm font-black uppercase tracking-wide text-slate-900">
+                                My Coaching Skill Profile
+                            </h5>
+                            <p class="mt-1 text-[10px] text-slate-500">
+                                Your current coaching abilities across six areas.
+                            </p>
+                        </div>
+
+                        <span class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center">
+                            <span class="block text-[8px] font-bold uppercase tracking-wide text-slate-400">
+                                Overall
+                            </span>
+                            <span class="text-xl font-black tabular-nums text-slate-900">
+                                ${userCoachOverview.overall ?? '—'}
+                            </span>
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                        ${userCoachSkillAreas.map(area => `
+                            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-[10px] font-black text-slate-800">
+                                        ${area.label}
+                                    </span>
+
+                                    <span class="font-mono text-sm font-black tabular-nums ${
+                                        area.value === null
+                                            ? 'text-slate-400'
+                                            : 'text-slate-900'
+                                    }">
+                                        ${area.value ?? '—'}
+                                    </span>
+                                </div>
+
+                                <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+                                    <div
+                                        class="h-full rounded-full ${area.color}"
+                                        style="width:${area.value ?? 0}%">
+                                    </div>
+                                </div>
+
+                                <p class="mt-2 text-[9px] leading-relaxed text-slate-500">
+                                    ${area.description}
+                                </p>
+
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <p class="mt-3 text-[9px] text-slate-400">
+                        Scouting and Game Planning are averages of their underlying skills. Ratings are on a 0–100 scale.
+                    </p>
+                </section>
+            ` : ''}
+
+            <section class="mb-4 overflow-hidden rounded-xl border border-indigo-200 bg-white shadow-sm">
+
+                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-100 bg-indigo-50/70 p-3 sm:p-4">
                     <div class="min-w-0">
-                        <h5 class="text-xs font-black uppercase tracking-wide text-indigo-950">
+                        <span class="text-[9px] font-black uppercase tracking-widest text-indigo-600">
+                            Your Leadership Identity
+                        </span>
+                        <h5 class="mt-1 text-base font-black text-indigo-950">
                             My Coaching Philosophy
                         </h5>
-                        <p class="mt-0.5 text-[10px] text-slate-600">
-                            Choose how strongly you prioritize your system versus adapting to your coaches and roster.
+                        <p class="mt-1 text-[10px] text-slate-600">
+                            Decide how strongly your football system should influence coaching and roster decisions.
                         </p>
                     </div>
 
-                    <select
-                        class="min-w-[190px] rounded border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-slate-800"
-                        value="${selectedManagementApproach}"
-                        onchange="window.app_setManagementApproach(this.value)">
+                    <div class="min-w-[190px]">
+                        <label class="mb-1 block text-[9px] font-black uppercase tracking-wide text-indigo-800">
+                            Management Approach
+                        </label>
+                        <select
+                            class="w-full rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-xs font-black text-slate-800 shadow-sm"
+                            value="${selectedManagementApproach}"
+                            onchange="window.app_setManagementApproach(this.value)">
 
-                        <option value="system_first"
-                            ${selectedManagementApproach === 'system_first' ? 'selected' : ''}>
-                            System-First
-                        </option>
+                            <option value="system_first"
+                                ${selectedManagementApproach === 'system_first' ? 'selected' : ''}>
+                                System-First
+                            </option>
 
-                        <option value="balanced"
-                            ${selectedManagementApproach === 'balanced' ? 'selected' : ''}>
-                            Balanced
-                        </option>
+                            <option value="balanced"
+                                ${selectedManagementApproach === 'balanced' ? 'selected' : ''}>
+                                Balanced
+                            </option>
 
-                        <option value="personnel_first"
-                            ${selectedManagementApproach === 'personnel_first' ? 'selected' : ''}>
-                            Personnel-First
-                        </option>
-                    </select>
+                            <option value="personnel_first"
+                                ${selectedManagementApproach === 'personnel_first' ? 'selected' : ''}>
+                                Personnel-First
+                            </option>
+                        </select>
+                    </div>
                 </div>
 
-                <details class="mt-2 border-t border-indigo-200 pt-2">
-                    <summary class="cursor-pointer text-[10px] font-bold text-indigo-800 hover:text-indigo-950">
-                        View management influence &amp; tactical impact
-                    </summary>
+                <div class="p-3 sm:p-4">
+                    <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] gap-3">
 
-                    <p class="mt-2 text-[10px] leading-relaxed text-indigo-900">
-                        ${
-                            selectedManagementApproach === 'system_first'
-                                ? 'You expect coaches and personnel to fit your established football philosophy.'
-                                : selectedManagementApproach === 'personnel_first'
-                                    ? 'You are willing to change your system and tactical approach to maximize available talent.'
-                                    : 'You maintain a recognizable football identity while allowing adjustments for personnel and coaching expertise.'
-                        }
-                    </p>
+                        <div class="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
+                            <span class="block text-[9px] font-black uppercase tracking-wide text-indigo-700">
+                                Your Philosophy in Practice
+                            </span>
 
-                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <div class="rounded border border-indigo-100 bg-white p-2">
-                            <span class="block text-[9px] font-bold uppercase text-slate-500">
-                                Control Structure
-                            </span>
-                            <span class="text-xs font-black text-indigo-900">
-                                ${managementAutonomyLabel}
-                            </span>
+                            <h6 class="mt-2 text-sm font-black text-slate-900">
+                                ${selectedManagementApproach === 'system_first'
+                                    ? 'The System Comes First'
+                                    : selectedManagementApproach === 'personnel_first'
+                                        ? 'Adapt to Your Personnel'
+                                        : 'Identity with Flexibility'}
+                            </h6>
+
+                            <p class="mt-2 text-xs leading-relaxed text-slate-700">
+                                ${
+                                    selectedManagementApproach === 'system_first'
+                                        ? 'You expect coaches and personnel to fit your established football philosophy. Your tactical vision takes priority, and staff are expected to execute within that framework.'
+                                        : selectedManagementApproach === 'personnel_first'
+                                            ? 'You are willing to change your system and tactical approach to maximize available talent. Coaches have greater influence when their expertise or the roster suggests a better direction.'
+                                            : 'You maintain a recognizable football identity while allowing adjustments for personnel and coaching expertise. You balance your preferred approach with the practical strengths of your staff and roster.'
+                                }
+                            </p>
+
+                            <div class="mt-3 border-t border-indigo-200 pt-2">
+                                <span class="text-[9px] font-bold uppercase tracking-wide text-indigo-700">
+                                    Leadership Principle
+                                </span>
+                                <p class="mt-1 text-[10px] font-semibold text-indigo-950">
+                                    ${selectedManagementApproach === 'system_first'
+                                        ? 'Find the right people to execute your vision.'
+                                        : selectedManagementApproach === 'personnel_first'
+                                            ? 'Build the best system around the people you have.'
+                                            : 'Preserve your identity while using your staff intelligently.'}
+                                </p>
+                            </div>
                         </div>
 
-                        <div class="rounded border border-indigo-100 bg-white p-2">
-                            <span class="block text-[9px] font-bold uppercase text-slate-500">
-                                Coach Influence
-                            </span>
-                            <span class="text-xs font-black text-indigo-900">
-                                ${managementCoachInfluence}%
-                            </span>
-                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-1 gap-2">
 
-                        <div class="rounded border border-indigo-100 bg-white p-2">
-                            <span class="block text-[9px] font-bold uppercase text-slate-500">
-                                Tactical Friction
-                            </span>
-                            <span class="text-xs font-black text-indigo-900">
-                                ${Number.isFinite(schemeConflictMultiplier)
-                                    ? `${schemeConflictMultiplier.toFixed(2)}×`
-                                    : '1.00×'}
-                            </span>
+                            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                        Control Structure
+                                    </span>
+                                    <span class="text-[9px] font-bold text-indigo-700">
+                                        AUTHORITY
+                                    </span>
+                                </div>
+                                <span class="mt-2 block text-sm font-black text-slate-900">
+                                    ${managementAutonomyLabel}
+                                </span>
+                                <p class="mt-1 text-[9px] leading-relaxed text-slate-500">
+                                    How decisions and tactical authority are shared between you and your coaches.
+                                </p>
+                            </div>
+
+                            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                        Coach Influence
+                                    </span>
+                                    <span class="text-[9px] font-bold text-blue-700">
+                                        STAFF VOICE
+                                    </span>
+                                </div>
+                                <div class="mt-1 flex items-baseline gap-1">
+                                    <span class="text-xl font-black tabular-nums text-slate-900">
+                                        ${managementCoachInfluence}%
+                                    </span>
+                                </div>
+                                <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                                    <div class="h-full rounded-full bg-blue-500"
+                                        style="width:${managementCoachInfluence}%">
+                                    </div>
+                                </div>
+                                <p class="mt-1 text-[9px] leading-relaxed text-slate-500">
+                                    The degree to which coaches influence staff decisions.
+                                </p>
+                            </div>
+
+                            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                        Tactical Friction
+                                    </span>
+                                    <span class="text-[9px] font-bold text-amber-700">
+                                        SCHEME IMPACT
+                                    </span>
+                                </div>
+                                <span class="mt-2 block text-sm font-black text-slate-900">
+                                    ${Number.isFinite(schemeConflictMultiplier)
+                                        ? `${schemeConflictMultiplier.toFixed(2)}×`
+                                        : '1.00×'}
+                                </span>
+                                <p class="mt-1 text-[9px] leading-relaxed text-slate-500">
+                                    How your management philosophy affects tactical disagreements with your coaching staff.
+                                </p>
+                            </div>
+
                         </div>
                     </div>
 
-                    <p class="mt-2 text-[9px] text-slate-500">
-                        This reflects your influence over staff decisions, not a restriction
-                        on available formations or playcalling choices.
-                    </p>
-                </details>
+                    <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-[9px] leading-relaxed text-slate-500">
+                            Your management approach affects staff influence and tactical alignment. It does not restrict which formations or plays you can choose.
+                        </p>
+                    </div>
+                </div>
             </section>
         </div>
 
