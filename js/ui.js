@@ -21,6 +21,8 @@ import {
     ensureTeamInstructions,
     setDepartmentControlMode,
     getCoachWeeklyOutlook,
+    getCoachIdentityProfile,
+    getCoachingGroupFit,
     aiChooseWeeklyPractice
 } from './game/staff.js';
 import { DEFAULT_PLAYBACK_INTERVAL_MS, getPlaybackIntervalMs } from './game/simulation_config.js';
@@ -10571,6 +10573,15 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             getCoachWeeklyOutlook(c, team, gameState)
         ])
     );
+
+    const staffIdentities = new Map(
+        (Array.isArray(team.coaches) ? team.coaches.filter(Boolean) : []).map(c => [
+            String(c.id),
+            getCoachIdentityProfile(c)
+        ])
+    );
+
+    const staffGroupFit = getCoachingGroupFit(team);
     const totalWeeklyStaffHours = [...staffOutlooks.values()].reduce(
         (sum, o) => sum + (Number(o?.weeklyCapacity) || 0),
         0
@@ -13731,10 +13742,186 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </span>
             </div>
 
+            <div class="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <h5 class="text-xs font-black uppercase tracking-wide text-slate-900">
+                            Coaching Group Fit
+                        </h5>
+                        <p class="mt-0.5 text-[10px] text-slate-500">
+                            How well your coaches and GM align while bringing complementary perspectives.
+                        </p>
+                    </div>
+                    <span class="text-lg font-black tabular-nums text-slate-900">
+                        ${staffGroupFit?.score ?? '—'}<span class="text-[10px] font-bold text-slate-400"> / 100</span>
+                    </span>
+                </div>
+
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <div class="flex justify-between items-center text-[10px] mb-1">
+                            <span class="font-bold uppercase text-slate-600">Strategic Alignment</span>
+                            <span class="font-mono font-black text-slate-800">
+                                ${staffGroupFit?.alignment ?? '—'}%
+                            </span>
+                        </div>
+                        <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                            <div class="h-full rounded-full bg-blue-500"
+                                style="width:${staffGroupFit?.alignment ?? 0}%"></div>
+                        </div>
+                        <p class="mt-1 text-[9px] text-slate-500">
+                            Agreement on tactical direction and working approach.
+                        </p>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between items-center text-[10px] mb-1">
+                            <span class="font-bold uppercase text-slate-600">Complementarity</span>
+                            <span class="font-mono font-black text-slate-800">
+                                ${staffGroupFit?.complementarity ?? '—'}%
+                            </span>
+                        </div>
+                        <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                            <div class="h-full rounded-full bg-emerald-500"
+                                style="width:${staffGroupFit?.complementarity ?? 0}%"></div>
+                        </div>
+                        <p class="mt-1 text-[9px] text-slate-500">
+                            Different tactical and scouting strengths that broaden the group.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                    <span class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-700">
+                        ${overviewEscape(staffGroupFit?.label || 'Fit unavailable')}
+                    </span>
+                    <span class="text-[9px] text-slate-500">
+                        ${staffGroupFit?.coachCount ?? 0} profiles assessed${staffGroupFit?.includesUserCoach ? ', including you' : ''}
+                    </span>
+                </div>
+
+                <p class="mt-2 text-[10px] leading-relaxed text-slate-600">
+                    ${overviewEscape(staffGroupFit?.summary || 'More coaches are needed to assess group compatibility.')}
+                </p>
+            </div>
+
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
                 ${overviewCoaches.map(entry => {
                     const outlook = staffOutlooks.get(String(entry.coach.id));
                     const isNPC = !outlook?.isUserCoach;
+                    const identity = staffIdentities.get(
+                        String(entry.coach.id)
+                    );
+
+                    const identityList = (values, fallback = 'Not specified') =>
+                        Array.isArray(values) && values.length > 0
+                            ? values.map(value => overviewEscape(value)).join(' · ')
+                            : fallback;
+
+                    const identitySummaryHtml = identity ? `
+                        <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div class="rounded border border-blue-100 bg-blue-50/60 p-2">
+                                <span class="block text-[9px] font-black uppercase tracking-wide text-blue-800">
+                                    Offensive Identity
+                                </span>
+                                <p class="mt-0.5 text-[10px] font-bold text-slate-900">
+                                    ${overviewEscape(identity.offenseIdentity)}
+                                </p>
+                                <p class="mt-1 text-[9px] text-slate-600">
+                                    Formations: ${identityList(identity.offenseFormations)}
+                                </p>
+                            </div>
+
+                            <div class="rounded border border-rose-100 bg-rose-50/60 p-2">
+                                <span class="block text-[9px] font-black uppercase tracking-wide text-rose-800">
+                                    Defensive Identity
+                                </span>
+                                <p class="mt-0.5 text-[10px] font-bold text-slate-900">
+                                    ${overviewEscape(identity.defenseIdentity)}
+                                </p>
+                                <p class="mt-1 text-[9px] text-slate-600">
+                                    Formations: ${identityList(identity.defenseFormations)}
+                                </p>
+                            </div>
+
+                            <div class="sm:col-span-2 rounded border border-emerald-100 bg-emerald-50/60 p-2">
+                                <span class="block text-[9px] font-black uppercase tracking-wide text-emerald-800">
+                                    Recruiting Position Priorities
+                                </span>
+                                <p class="mt-0.5 text-[10px] font-bold text-slate-800">
+                                    ${identityList(identity.recruitingPositions)}
+                                </p>
+                            </div>
+                        </div>
+                    ` : '';
+
+                    const identityDetailsHtml = identity ? `
+                        <details class="mt-2 rounded border border-slate-200 bg-white">
+                            <summary class="cursor-pointer px-2.5 py-2 text-[10px] font-black text-blue-800 hover:bg-slate-50">
+                                Full Tactical &amp; Player Evaluation Profile
+                            </summary>
+
+                            <div class="border-t border-slate-100 p-2.5 space-y-3 text-[10px]">
+                                <div>
+                                    <span class="block text-[9px] font-black uppercase tracking-wide text-blue-800">
+                                        Offensive Play Preferences
+                                    </span>
+                                    <p class="mt-1 text-slate-700 leading-relaxed">
+                                        ${identityList(identity.offensePlayTypes)}
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <span class="block text-[9px] font-black uppercase tracking-wide text-rose-800">
+                                        Defensive Play Preferences
+                                    </span>
+                                    <p class="mt-1 text-slate-700 leading-relaxed">
+                                        ${identityList(identity.defensePlayTypes)}
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <span class="block text-[9px] font-black uppercase tracking-wide text-emerald-800">
+                                        Types of Players They Want
+                                    </span>
+                                    <ul class="mt-1 list-disc pl-4 space-y-0.5 text-slate-700">
+                                        ${(identity.preferredPlayerTypes || []).map(type => `
+                                            <li>${overviewEscape(type)}</li>
+                                        `).join('')}
+                                    </ul>
+                                </div>
+
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                            System Skill Priorities
+                                        </span>
+                                        <p class="mt-1 text-slate-700 leading-relaxed">
+                                            ${identityList(identity.systemSkills)}
+                                        </p>
+                                    </div>
+
+                                    <div>
+                                        <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                            Scouting Evaluation Focus
+                                        </span>
+                                        <p class="mt-1 text-slate-700 leading-relaxed">
+                                            ${identityList(identity.scoutingSkills)}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div class="rounded bg-slate-50 p-2">
+                                    <span class="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                                        Scouting Philosophy · ${overviewEscape(identity.scoutingIdentity)}
+                                    </span>
+                                    <p class="mt-0.5 text-slate-700">
+                                        ${overviewEscape(identity.scoutingDescription)}
+                                    </p>
+                                </div>
+                            </div>
+                        </details>
+                    ` : '';
                     const moraleBadge = isNPC
                         ? `<span class="rounded border px-1.5 py-0.5 text-[9px] font-bold ${
                             outlook.happiness >= 70
@@ -13930,13 +14117,15 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     </div>
                                 ` : ''}
 
+                                ${identitySummaryHtml}
+                                ${identityDetailsHtml}
+
                                 ${isNPC ? `
                                     <div class="mt-2 rounded border border-slate-200 bg-slate-50/80 p-2 text-[10px] text-slate-700">
-                                        <span class="font-black uppercase text-[9px] text-slate-500 block">
-                                            Coach's Weekly Idea
-                                        </span>
-                                        <p class="mt-0.5 italic">
-                                            "${overviewEscape(outlook.practiceReason)}"
+                                        <span class="font-black uppercase text-[9px] text-slate-500 block">Coach's Weekly Idea</span>
+                                        <p class="mt-0.5 italic">"${overviewEscape(outlook.practiceReason)}"</p>
+                                        <p class="mt-1 text-[9px] text-slate-500 font-mono">
+                                            Prefers ~${outlook.tendencies.earlyDownTendency}% Run · ${outlook.tendencies.defenseAggressiveness}% Blitz · ${outlook.tendencies.fourthDownBravery}% 4th-Down Aggro
                                         </p>
                                     </div>
                                 ` : ''}

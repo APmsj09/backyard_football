@@ -9,8 +9,13 @@ import {
     ensureTeamStaffWorkPlan,
     WEEKLY_COACH_HOURS,
     getTeamCoachingSpecialist,
-    recordCoachDevelopmentOutcome
+    recordCoachDevelopmentOutcome,
+    getCoachRecruitingPreferenceFit
 } from './staff.js';
+import {
+    offensivePlaybook,
+    defensivePlaybook
+} from '../data.js';
 
 const OFFENSE = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const DEFENSE = ['DL', 'LB', 'DB'];
@@ -1845,10 +1850,35 @@ function snapshotScoutingEvaluator(evaluator) {
         evaluator?.scoutingBias ||
         'Objective Scout';
 
+    const copyProfile = profile => ({
+        ...(typeof profile?.id === 'string'
+            ? { id: profile.id }
+            : {}),
+        ...(typeof profile?.name === 'string'
+            ? { name: profile.name }
+            : {})
+    });
+
     return {
         id: evaluator?.id || null,
         name: evaluator?.name || 'Staff Scout',
         isUserCoach: Boolean(evaluator?.isUserCoach),
+        profileIds: {
+            ...(evaluator?.profileIds || {})
+        },
+        preferredOffense: evaluator?.preferredOffense ?? null,
+        preferredDefense: evaluator?.preferredDefense ?? null,
+        expertisePositions: Array.isArray(evaluator?.expertisePositions)
+            ? [...evaluator.expertisePositions]
+            : [],
+        biases: {
+            personality: copyProfile(evaluator?.biases?.personality),
+            tactical: copyProfile(evaluator?.biases?.tactical),
+            scouting: {
+                ...copyProfile(evaluator?.biases?.scouting),
+                name: scoutingBias
+            }
+        },
         ratings: {
             evalPhysicals: Number(ratings.evalPhysicals ?? 50),
             evalTechnique: Number(ratings.evalTechnique ?? 50),
@@ -1898,7 +1928,14 @@ function getScoutingTargetIds(team, gameState, assignment) {
     return null;
 }
 
-function getScoutingCandidates(team, gameState, assignment, year, week) {
+function getScoutingCandidates(
+    team,
+    gameState,
+    assignment,
+    year,
+    week,
+    evaluator = null
+) {
     const players = Array.isArray(gameState.players)
         ? gameState.players
         : [];
@@ -2074,10 +2111,27 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
         // Fully scouted players no longer consume routine scouting time.
         if ((Number(previous?.level) || 0) >= 4) continue;
 
+        // The assigned evaluator favors prospects that fit their systems.
+        // This uses public position and this team's stored scouting report.
+        const coachFit = evaluator
+            ? getCoachRecruitingPreferenceFit(
+                evaluator,
+                team,
+                player
+            )
+            : null;
+
+        const coachFitScore = Number.isFinite(
+            Number(coachFit?.score)
+        )
+            ? clamp(Number(coachFit.score), -5, 5)
+            : 0;
+
         candidates.push({
             player,
             previous,
-            instructionPriority
+            instructionPriority,
+            coachFitScore
         });
     }
 
@@ -2127,6 +2181,15 @@ function getScoutingCandidates(team, gameState, assignment, year, week) {
 
         if (aProgress > 0 && aProgress !== bProgress) {
             return bProgress - aProgress;
+        }
+
+        // After GM priorities and existing report progress, prefer
+        // prospects who better fit the assigned coach's identity.
+        const aCoachFit = Number(a.coachFitScore) || 0;
+        const bCoachFit = Number(b.coachFitScore) || 0;
+
+        if (aCoachFit !== bCoachFit) {
+            return bCoachFit - aCoachFit;
         }
 
         // Rotate prospects deterministically within each priority tier.
@@ -2201,6 +2264,95 @@ function getScheduledOpponentId(team, gameState, week) {
     return match.home.id;
 }
 
+const LEGACY_PREPARATION_TACTICAL_IDS = {
+    'Smashmouth Zealot': 'power_run_specialist',
+    'Air Raid Purist': 'spread_passing_specialist',
+    'Blitz Addict': 'pressure_oriented_defender',
+    'Conservative Turtler': 'conservative_game_manager',
+    'Balanced Tactician': 'adaptive_strategist'
+};
+
+function getPreparationTacticalId(coach) {
+    return (
+        coach?.profileIds?.tactical ||
+        coach?.biases?.tactical?.id ||
+        LEGACY_PREPARATION_TACTICAL_IDS[
+            coach?.biases?.tactical?.name
+        ] ||
+        LEGACY_PREPARATION_TACTICAL_IDS[
+            coach?.tacticalBias
+        ] ||
+        'adaptive_strategist'
+    );
+}
+
+/**
+ * A small preference bonus for plays that fit the assigned coach's
+ * tactical identity. This affects preparation priorities, not eligibility.
+ */
+function getPreparationPlayPreferenceScore(
+    coach,
+    isOffense,
+    playKey
+) {
+    const tacticalId = getPreparationTacticalId(coach);
+    const play = isOffense
+        ? offensivePlaybook[playKey]
+        : defensivePlaybook[playKey];
+
+    if (!play) return 0;
+
+    const tags = Array.isArray(play.tags)
+        ? play.tags.map(tag => String(tag).toLowerCase())
+        : [];
+
+    if (isOffense) {
+        const playType = String(play.type || '').toLowerCase();
+
+        if (tacticalId === 'power_run_specialist') {
+            return (
+                (playType === 'run' ? 5 : 0) +
+                (tags.includes('pa') ? 1.5 : 0)
+            );
+        }
+
+        if (tacticalId === 'spread_passing_specialist') {
+            return (
+                (playType === 'pass' ? 5 : 0) +
+                (
+                    tags.some(tag =>
+                        ['quick', 'screen', 'vertical'].includes(tag)
+                    )
+                        ? 1.5
+                        : 0
+                )
+            );
+        }
+
+        if (tacticalId === 'conservative_game_manager') {
+            return (
+                (playType === 'run' ? 2.5 : 0) -
+                (tags.includes('trick') ? 1.5 : 0)
+            );
+        }
+
+        return 0;
+    }
+
+    if (tacticalId === 'pressure_oriented_defender') {
+        return (
+            (play.blitz ? 5 : 0) +
+            (tags.includes('pressure') ? 1.5 : 0)
+        );
+    }
+
+    if (tacticalId === 'conservative_game_manager') {
+        return play.blitz ? -1.5 : 3;
+    }
+
+    return 0;
+}
+
 function applyWeeklyGamePreparation(
     team,
     coach,
@@ -2272,27 +2424,34 @@ function applyWeeklyGamePreparation(
             assignment.playKeys.filter(key => availablePlays.has(key))
         )]
         : (() => {
-            // Focus preparation on a small group of priority plays.
-            const priorityInstalled = [
-                ...new Set(
-                    installedPlays
+            // Keep the existing installed-play order as the baseline.
+            // The assigned coach's philosophy can move compatible plays
+            // ahead, but cannot introduce uninstalled non-foundation plays.
+            const candidates = [
+                ...new Set([
+                    ...installedPlays
                         .slice(0, 8)
-                        .filter(key => availablePlays.has(key))
-                )
-            ].slice(0, 4);
-
-            // Use foundation plays to fill any remaining slots.
-            const foundationFallback = foundationPlays
-                .filter(key =>
-                    availablePlays.has(key) &&
-                    !priorityInstalled.includes(key)
-                )
-                .slice(0, Math.max(0, 4 - priorityInstalled.length));
-
-            return [
-                ...priorityInstalled,
-                ...foundationFallback
+                        .filter(key => availablePlays.has(key)),
+                    ...foundationPlays.filter(key =>
+                        availablePlays.has(key)
+                    )
+                ])
             ];
+
+            candidates.sort((a, b) =>
+                getPreparationPlayPreferenceScore(
+                    coach,
+                    isOffense,
+                    b
+                ) -
+                getPreparationPlayPreferenceScore(
+                    coach,
+                    isOffense,
+                    a
+                )
+            );
+
+            return candidates.slice(0, 4);
         })();
 
     // Hours produce a modest preparation score, influenced by coaching skill.
@@ -2792,7 +2951,8 @@ export function processWeeklyScoutingAssignments(
                 gameState,
                 passAssignment,
                 year,
-                week
+                week,
+                coach
             );
             if (passCandidates.length === 0) return { targeted: 0, spent: 0 };
 
@@ -3129,7 +3289,8 @@ export function applyBankedDraftScoutingReports(
             gameState,
             assignment,
             year,
-            week
+            week,
+            evaluator
         );
 
         if (candidates.length === 0) continue;

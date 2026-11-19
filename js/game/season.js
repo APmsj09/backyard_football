@@ -36,6 +36,7 @@ import {
     getEffectiveStaffWorkHours, processWeeklyStaffPreparation,
     processCoachOffseasonRetention, resolveCoachCarousel,
     processStaffMarketDecay, getStaffBehaviorTendency,
+    getCoachRecruitingPreferenceFit,
     buildRecruitingTeamAppealSnapshot, buildAutomatedStaffAssignmentsForTeam
 } from './staff.js';
 import {
@@ -5207,15 +5208,35 @@ export function processOffseasonFADay(
                 const instinctAdjustment =
                     (coachInstinct - 50) * 0.08;
 
+                // Coaches slightly favor prospects who fit their systems
+                // and recruiting preferences. The helper uses only this
+                // team's scouting estimates and public player information.
+                const coachFit = getCoachRecruitingPreferenceFit(
+                    coach,
+                    aiTeam,
+                    prospect
+                );
+
+                const coachFitAdjustment = Number.isFinite(
+                    Number(coachFit?.score)
+                )
+                    ? Math.max(
+                        -5,
+                        Math.min(5, Number(coachFit.score))
+                    )
+                    : 0;
+
                 const targetScore =
                     evalResult.desireScore +
                     marketMomentumBonus +
                     instinctAdjustment +
+                    coachFitAdjustment +
                     decisionNoise;
 
                 return {
                     prospect,
                     ...evalResult,
+                    coachFitAdjustment,
                     targetScore
                 };
             })

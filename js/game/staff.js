@@ -3887,6 +3887,853 @@ export function getCoachWeeklyOutlook(coach, team, gameState = null) {
 }
 
 /**
+ * Returns the football identity of a coach.
+ *
+ * The profile combines the coach's tactical system with their scouting
+ * bias. It is descriptive and does not expose hidden player ratings.
+ */
+export function getCoachIdentityProfile(coach) {
+    if (!coach) return null;
+
+    const tacticalId =
+        getStaffProfileId(coach, 'tactical') ||
+        'adaptive_strategist';
+
+    const scoutingId =
+        getStaffProfileId(coach, 'scouting') ||
+        'balanced_evaluator';
+
+    const systems = {
+        power_run_specialist: {
+            offense: 'Power-run / downhill attack',
+            offensePlays: [
+                'Inside and downhill runs',
+                'Power running concepts',
+                'Play-action passing'
+            ],
+            offenseFormations: ['Power', 'Jumbo', 'Pistol'],
+            defense: 'Physical, assignment-sound defense',
+            defensePlays: [
+                'Run fits and gap control',
+                'Tackling and containment',
+                'Balanced coverage'
+            ],
+            playerTypes: [
+                'Strong, downhill running backs',
+                'Technically sound, powerful offensive linemen',
+                'Blocking-capable tight ends',
+                'Physical front-seven defenders'
+            ],
+            positions: ['RB', 'OL', 'TE', 'DL', 'LB'],
+            systemSkills: [
+                'Strength',
+                'Blocking',
+                'Carrying',
+                'Toughness',
+                'Stamina'
+            ],
+            runPass: 1,
+            defensiveAggression: 0
+        },
+
+        spread_passing_specialist: {
+            offense: 'Spread / space-oriented passing attack',
+            offensePlays: [
+                'Quick passing concepts',
+                'Spread and vertical passing',
+                'Screens and space plays'
+            ],
+            offenseFormations: [
+                'Spread',
+                'Trips',
+                'TripsLeft',
+                'Empty'
+            ],
+            defense: 'Space-aware, coverage-oriented defense',
+            defensePlays: [
+                'Zone coverage',
+                'Man matchups',
+                'Open-field tackling'
+            ],
+            playerTypes: [
+                'Accurate quarterbacks with strong decision-making',
+                'Quick, reliable receivers',
+                'Agile running backs who can threaten in space',
+                'Mobile, pass-protecting offensive linemen'
+            ],
+            positions: ['QB', 'WR', 'RB', 'OL', 'DB'],
+            systemSkills: [
+                'Throwing Accuracy',
+                'Throw Power',
+                'Catching Hands',
+                'Speed',
+                'Agility',
+                'Playbook IQ'
+            ],
+            runPass: -1,
+            defensiveAggression: 0
+        },
+
+        pressure_oriented_defender: {
+            offense: 'Flexible, personnel-driven offense',
+            offensePlays: [
+                'Situational run and pass concepts',
+                'Quick attacks',
+                'Explosive opportunities'
+            ],
+            offenseFormations: [
+                'Balanced',
+                'Pistol',
+                'Spread'
+            ],
+            defense: 'Aggressive pressure defense',
+            defensePlays: [
+                'Blitz and pressure packages',
+                'Disruptive front play',
+                'Aggressive man coverage'
+            ],
+            playerTypes: [
+                'Explosive edge rushers',
+                'Disruptive interior defenders',
+                'Fast, aggressive linebackers',
+                'Physical, confident coverage defenders'
+            ],
+            positions: ['DE', 'DT', 'DL', 'LB', 'CB'],
+            systemSkills: [
+                'Speed',
+                'Explosiveness',
+                'Strength',
+                'Block Shedding',
+                'Tackling',
+                'Coverage'
+            ],
+            runPass: 0,
+            defensiveAggression: 1
+        },
+
+        conservative_game_manager: {
+            offense: 'Controlled, low-variance offense',
+            offensePlays: [
+                'Ball-control running game',
+                'Short and safe passing',
+                'Possession-oriented concepts'
+            ],
+            offenseFormations: [
+                'Balanced',
+                'Pistol',
+                'Jumbo'
+            ],
+            defense: 'Containment and disciplined coverage',
+            defensePlays: [
+                'Zone coverage',
+                'Run containment',
+                'Assignment-sound tackling'
+            ],
+            playerTypes: [
+                'Reliable ball carriers with good ball security',
+                'Consistent offensive linemen',
+                'Dependable possession receivers',
+                'Disciplined defensive backs and linebackers'
+            ],
+            positions: ['RB', 'OL', 'TE', 'LB', 'DB'],
+            systemSkills: [
+                'Decision Making',
+                'Consistency',
+                'Carrying',
+                'Tackling',
+                'Coverage',
+                'Playbook IQ'
+            ],
+            runPass: 0.35,
+            defensiveAggression: -0.8
+        },
+
+        adaptive_strategist: {
+            offense: 'Balanced, situational offense',
+            offensePlays: [
+                'Balanced run and pass concepts',
+                'Situational play selection',
+                'Personnel-based adjustments'
+            ],
+            offenseFormations: [
+                'Balanced',
+                'Pistol',
+                'Trips'
+            ],
+            defense: 'Adaptable, multiple-look defense',
+            defensePlays: [
+                'Situational zone and man coverage',
+                'Flexible pressure packages',
+                'Sound tackling and run fits'
+            ],
+            playerTypes: [
+                'Versatile players who can fill multiple roles',
+                'Smart, assignment-reliable players',
+                'Athletes with complementary skill sets',
+                'Consistent two-way contributors'
+            ],
+            positions: ['QB', 'RB', 'WR', 'OL', 'DL', 'LB', 'DB'],
+            systemSkills: [
+                'Playbook IQ',
+                'Decision Making',
+                'Consistency',
+                'Agility',
+                'Tackling',
+                'Catching Hands'
+            ],
+            runPass: 0,
+            defensiveAggression: 0
+        }
+    };
+
+    const scoutingProfiles = {
+        athletic_bias_evaluator: {
+            name: 'Athletic tools first',
+            description: 'Prioritizes measurable athletic ability and physical upside.',
+            traits: [
+                'Speed',
+                'Agility',
+                'Explosiveness',
+                'Jumping',
+                'Strength',
+                'Stamina'
+            ]
+        },
+
+        technique_first_evaluator: {
+            name: 'Technique first',
+            description: 'Prioritizes position-specific execution over raw athleticism.',
+            traits: [
+                'Throwing Accuracy',
+                'Throw Power',
+                'Catching Hands',
+                'Carrying',
+                'Blocking',
+                'Block Shedding',
+                'Tackling',
+                'Coverage'
+            ]
+        },
+
+        character_focused_evaluator: {
+            name: 'Character and football IQ',
+            description: 'Prioritizes leadership, work habits, consistency, and coachability.',
+            traits: [
+                'Playbook IQ',
+                'Decision Making',
+                'Consistency',
+                'Toughness',
+                'Work Ethic',
+                'Leadership'
+            ]
+        },
+
+        balanced_evaluator: {
+            name: 'Balanced evaluation',
+            description: 'Looks for a well-rounded combination of athleticism, technique, and football intelligence.',
+            traits: [
+                'Speed',
+                'Agility',
+                'Playbook IQ',
+                'Consistency',
+                'Technique',
+                'Position versatility'
+            ]
+        }
+    };
+
+    const system = systems[tacticalId] || systems.adaptive_strategist;
+
+    const scouting =
+        scoutingProfiles[scoutingId] ||
+        scoutingProfiles.balanced_evaluator;
+
+    const availableOffenseFormations = Object.keys(
+        offenseFormations || {}
+    ).filter(key => key !== 'Punt');
+
+    const explicitOffense =
+        coach.preferredOffense &&
+        availableOffenseFormations.includes(coach.preferredOffense)
+            ? coach.preferredOffense
+            : null;
+
+    const preferredOffenseFormations = [
+        ...new Set([
+            explicitOffense,
+            ...system.offenseFormations
+        ].filter(Boolean))
+    ].filter(key =>
+        availableOffenseFormations.includes(key)
+    ).slice(0, 3);
+
+    // Derive defensive formation preferences from the actual available
+    // formations. Numeric formations represent DL-LB-DB personnel groups.
+    const defensiveFormationEntries = Object.keys(
+        defenseFormations || {}
+    )
+        .filter(key => key !== 'Punt_Return')
+        .map(key => {
+            const normalized = key.replace(/\s/g, '');
+            const match = normalized.match(/^(\d+)-(\d+)-(\d+)$/);
+
+            if (!match) {
+                return { key, score: -100 };
+            }
+
+            const dl = Number(match[1]);
+            const lb = Number(match[2]);
+            const db = Number(match[3]);
+
+            let score = 0;
+
+            if (tacticalId === 'pressure_oriented_defender') {
+                score = dl * 1.2 + lb * 0.8 - db * 0.35;
+            } else if (
+                tacticalId === 'conservative_game_manager'
+            ) {
+                score = db * 1.2 - dl * 0.35;
+            } else {
+                score = -(
+                    Math.abs(dl - 3) +
+                    Math.abs(lb - 2) +
+                    Math.abs(db - 3)
+                );
+            }
+
+            return { key, score };
+        })
+        .sort((a, b) => b.score - a.score);
+
+    const explicitDefense =
+        coach.preferredDefense &&
+        Object.prototype.hasOwnProperty.call(
+            defenseFormations || {},
+            coach.preferredDefense
+        )
+            ? coach.preferredDefense
+            : null;
+
+    const preferredDefenseFormations = [
+        ...new Set([
+            explicitDefense,
+            ...defensiveFormationEntries
+                .filter(entry => entry.score > -100)
+                .map(entry => entry.key)
+        ].filter(Boolean))
+    ].slice(0, 3);
+
+    const systemSkills = system.systemSkills.slice(0, 3);
+    const scoutingSkills = scouting.traits.slice(0, 3);
+
+    const prioritySkills = [
+        ...new Set([
+            ...systemSkills,
+            ...scoutingSkills
+        ])
+    ].slice(0, 6);
+
+    const targetPositions = [...system.positions];
+
+    if (
+        coach.isUserCoach &&
+        Array.isArray(coach.expertisePositions)
+    ) {
+        for (const position of coach.expertisePositions) {
+            if (
+                typeof position === 'string' &&
+                !targetPositions.includes(position.toUpperCase())
+            ) {
+                targetPositions.unshift(position.toUpperCase());
+            }
+        }
+    }
+
+    return {
+        tacticalId,
+        scoutingId,
+
+        offenseIdentity: system.offense,
+        offensePlayTypes: [...system.offensePlays],
+        offenseFormations: preferredOffenseFormations,
+
+        defenseIdentity: system.defense,
+        defensePlayTypes: [...system.defensePlays],
+        defenseFormations: preferredDefenseFormations,
+
+        recruitingPositions: targetPositions,
+        preferredPlayerTypes: [...system.playerTypes],
+
+        scoutingIdentity: scouting.name,
+        scoutingDescription: scouting.description,
+        scoutingTraits: [...scouting.traits],
+
+        systemSkills,
+        scoutingSkills,
+        prioritySkills,
+
+        isUserCoach: Boolean(coach.isUserCoach)
+    };
+}
+
+/**
+ * Measures how well an outside prospect fits a coach's recruiting identity.
+ *
+ * Uses the team's own scouting estimates, never the player's hidden
+ * attributes or actual archetype. The result is a modest ranking modifier,
+ * not a reason to ignore roster need.
+ */
+const COACH_RECRUITING_ATTRIBUTE_MAP = {
+    strength: ['physical', 'strength'],
+    blocking: ['technical', 'blocking'],
+    carrying: ['technical', 'carrying'],
+    toughness: ['mental', 'toughness'],
+    stamina: ['physical', 'stamina'],
+    throwingaccuracy: ['technical', 'throwingAccuracy'],
+    throwpower: ['technical', 'throwPower'],
+    catchinghands: ['technical', 'catchingHands'],
+    speed: ['physical', 'speed'],
+    agility: ['physical', 'agility'],
+    playbookiq: ['mental', 'playbookIQ'],
+    decisionmaking: ['mental', 'decisionMaking'],
+    tackling: ['technical', 'tackling'],
+    blockshedding: ['technical', 'blockShedding'],
+    coverage: ['technical', 'coverage'],
+    consistency: ['mental', 'consistency'],
+    jumping: ['physical', 'jumping']
+};
+
+export function getCoachRecruitingPreferenceFit(
+    coach,
+    team,
+    prospect
+) {
+    const neutralResult = {
+        score: 0,
+        positionFit: null,
+        archetypeFit: false,
+        estimatedSkillFit: null,
+        skillsEvaluated: 0,
+        scoutingConfidence: 0
+    };
+
+    if (!coach || !team || !prospect?.id) {
+        return neutralResult;
+    }
+
+    const identity = getCoachIdentityProfile(coach);
+
+    if (!identity) return neutralResult;
+
+    const clamp = (value, min, max) =>
+        Math.max(min, Math.min(max, value));
+
+    const position = String(
+        prospect.pos ||
+        prospect.position ||
+        prospect.Pos ||
+        ''
+    ).trim().toUpperCase();
+
+    const preferredPositions = (
+        Array.isArray(identity.recruitingPositions)
+            ? identity.recruitingPositions
+            : []
+    ).map(value => String(value).trim().toUpperCase());
+
+    const positionFit = preferredPositions.length > 0 && position
+        ? preferredPositions.includes(position)
+        : null;
+
+    // Only evaluate skills that this team has actually scouted.
+    const report = getTeamScoutingReport(team, prospect.id);
+    const ranges = report?.attributeRanges || {};
+
+    const rawConfidence = Number(report?.confidence);
+    const scoutingConfidence = Number.isFinite(rawConfidence)
+        ? clamp(rawConfidence, 0, 1)
+        : 0;
+
+    const preferredSkills = (
+        Array.isArray(identity.prioritySkills) &&
+        identity.prioritySkills.length > 0
+            ? identity.prioritySkills
+            : Array.isArray(identity.systemSkills)
+                ? identity.systemSkills
+                : []
+    );
+
+    const evaluatedSkills = [];
+
+    for (const skill of preferredSkills) {
+        const normalizedSkill = String(skill)
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '');
+
+        const attributeKey = Object.keys(
+            COACH_RECRUITING_ATTRIBUTE_MAP
+        ).find(key =>
+            normalizedSkill === key ||
+            normalizedSkill.includes(key)
+        );
+
+        if (!attributeKey) continue;
+
+        const [category, attribute] =
+            COACH_RECRUITING_ATTRIBUTE_MAP[attributeKey];
+
+        const range = ranges?.[category]?.[attribute];
+        const low = Number(range?.low);
+        const high = Number(range?.high);
+
+        if (
+            !Number.isFinite(low) ||
+            !Number.isFinite(high) ||
+            high < low
+        ) {
+            continue;
+        }
+
+        evaluatedSkills.push(
+            clamp((low + high) / 2, 0, 100)
+        );
+    }
+
+    const estimatedSkillFit = evaluatedSkills.length > 0
+        ? evaluatedSkills.reduce((sum, value) => sum + value, 0) /
+            evaluatedSkills.length
+        : null;
+
+    // A coach receives a small bonus for a preferred position and a
+    // smaller penalty when a known position falls outside that preference.
+    const positionAdjustment = positionFit === null
+        ? 0
+        : positionFit
+            ? 1.8
+            : -0.7;
+
+    // Stronger estimates matter more, but only in proportion to scouting
+    // confidence. Unscouted prospects receive no skill-based adjustment.
+    const skillAdjustment = estimatedSkillFit === null
+        ? 0
+        : ((estimatedSkillFit - 50) / 50) *
+            3.5 *
+            scoutingConfidence;
+
+    // Compare the coach's preferred player types with the archetype
+    // projected from this team's scouting estimates.
+    const projectedArchetype = String(
+        report?.evaluation?.projectedArchetype || ''
+    ).toLowerCase();
+
+    const preferredPlayerTypes = (
+        Array.isArray(identity.preferredPlayerTypes)
+            ? identity.preferredPlayerTypes
+            : []
+    ).map(value => String(value).toLowerCase());
+
+    const archetypeWords = projectedArchetype
+        .split(/[^a-z0-9]+/)
+        .filter(word =>
+            word.length >= 4 &&
+            !['player', 'type', 'role', 'style'].includes(word)
+        );
+
+    const archetypeFit = Boolean(
+        projectedArchetype &&
+        scoutingConfidence > 0 &&
+        preferredPlayerTypes.some(preference => {
+            const normalizedPreference = preference.trim();
+
+            if (!normalizedPreference) return false;
+
+            return (
+                normalizedPreference.includes(projectedArchetype) ||
+                projectedArchetype.includes(normalizedPreference) ||
+                archetypeWords.some(word =>
+                    normalizedPreference.includes(word)
+                )
+            );
+        })
+    );
+
+    const archetypeAdjustment = archetypeFit
+        ? 1.75 * scoutingConfidence
+        : 0;
+
+    const score = clamp(
+        positionAdjustment +
+        skillAdjustment +
+        archetypeAdjustment,
+        -5,
+        5
+    );
+
+    return {
+        score: Math.round(score * 100) / 100,
+        positionFit,
+        archetypeFit,
+        estimatedSkillFit: estimatedSkillFit === null
+            ? null
+            : Math.round(estimatedSkillFit),
+        skillsEvaluated: evaluatedSkills.length,
+        scoutingConfidence: Math.round(scoutingConfidence * 100)
+    };
+}
+
+/**
+ * Evaluates the coaching group's strategic alignment and complementarity.
+ *
+ * A good group needs shared direction without identical tactical and
+ * scouting approaches. Includes the user-coach profile when present.
+ */
+export function getCoachingGroupFit(team) {
+    if (!team) return null;
+
+    const coaches = ensureTeamCoachingStaff(team)
+        .filter(coach => coach?.id != null);
+
+    const uniqueCoaches = [
+        ...new Map(
+            coaches.map(coach => [String(coach.id), coach])
+        ).values()
+    ];
+
+    if (uniqueCoaches.length < 2) {
+        return {
+            coachCount: uniqueCoaches.length,
+            score: null,
+            alignment: null,
+            complementarity: null,
+            label: 'More coaches needed',
+            summary: 'Add another coach to evaluate how the group fits together.',
+            includesUserCoach: uniqueCoaches.some(
+                coach => coach.isUserCoach
+            )
+        };
+    }
+
+    const vectors = uniqueCoaches.map(coach => {
+        const profile = getCoachIdentityProfile(coach);
+
+        let runPass = {
+            power_run_specialist: 1,
+            spread_passing_specialist: -1,
+            conservative_game_manager: 0.35,
+            pressure_oriented_defender: 0,
+            adaptive_strategist: 0
+        }[profile.tacticalId] ?? 0;
+
+        let defensiveAggression = {
+            pressure_oriented_defender: 1,
+            conservative_game_manager: -0.8
+        }[profile.tacticalId] ?? 0;
+
+        // A user-created GM identity can refine the default tactical vector.
+        const offensePreference = String(
+            coach.preferredOffense || ''
+        ).toLowerCase();
+
+        if (/power|jumbo/.test(offensePreference)) {
+            runPass = 0.8;
+        } else if (/spread|trips|empty/.test(offensePreference)) {
+            runPass = -0.8;
+        }
+
+        const defensePreference = String(
+            coach.preferredDefense || ''
+        ).toLowerCase();
+
+        if (/blitz|pressure|aggressive/.test(defensePreference)) {
+            defensiveAggression = 0.8;
+        } else if (/zone|shell|prevent/.test(defensePreference)) {
+            defensiveAggression = -0.6;
+        }
+
+        const tendencies = {
+            riskTolerance: getStaffBehaviorTendency(
+                coach,
+                'riskTolerance'
+            ),
+            discipline: getStaffBehaviorTendency(
+                coach,
+                'discipline'
+            ),
+            adaptability: getStaffBehaviorTendency(
+                coach,
+                'adaptability'
+            ),
+            relationshipOrientation: getStaffBehaviorTendency(
+                coach,
+                'relationshipOrientation'
+            ),
+            developmentFocus: getStaffBehaviorTendency(
+                coach,
+                'developmentFocus'
+            )
+        };
+
+        return {
+            coach,
+            profile,
+            runPass,
+            defensiveAggression,
+            tendencies
+        };
+    });
+
+    const behaviorWeights = {
+        riskTolerance: 0.20,
+        discipline: 0.20,
+        adaptability: 0.20,
+        relationshipOrientation: 0.20,
+        developmentFocus: 0.20
+    };
+
+    let pairAlignmentTotal = 0;
+    let pairComplementarityTotal = 0;
+    let pairCount = 0;
+
+    for (let i = 0; i < vectors.length; i++) {
+        for (let j = i + 1; j < vectors.length; j++) {
+            const a = vectors[i];
+            const b = vectors[j];
+
+            const runDifference =
+                Math.abs(a.runPass - b.runPass) / 2;
+
+            const defenseDifference =
+                Math.abs(
+                    a.defensiveAggression -
+                    b.defensiveAggression
+                ) / 2;
+
+            const strategicAlignment = Math.max(
+                0,
+                100 - runDifference * 45 - defenseDifference * 45
+            );
+
+            let behaviorGap = 0;
+            let totalWeight = 0;
+
+            for (const [key, weight] of Object.entries(behaviorWeights)) {
+                behaviorGap +=
+                    Math.abs(
+                        a.tendencies[key] -
+                        b.tendencies[key]
+                    ) * weight;
+
+                totalWeight += weight;
+            }
+
+            const behaviorHarmony = Math.max(
+                0,
+                Math.min(100, 100 - behaviorGap / totalWeight)
+            );
+
+            const pairAlignment =
+                strategicAlignment * 0.60 +
+                behaviorHarmony * 0.40;
+
+            const scoutingDifference =
+                a.profile.scoutingId !== b.profile.scoutingId;
+
+            const tacticalDifference =
+                a.profile.tacticalId !== b.profile.tacticalId;
+
+            const pairComplementarity =
+                (scoutingDifference ? 65 : 0) +
+                (tacticalDifference ? 35 : 0);
+
+            pairAlignmentTotal += pairAlignment;
+            pairComplementarityTotal += pairComplementarity;
+            pairCount++;
+        }
+    }
+
+    const alignment = Math.round(
+        pairAlignmentTotal / pairCount
+    );
+
+    const pairComplementarity = Math.round(
+        pairComplementarityTotal / pairCount
+    );
+
+    const tacticalVariety =
+        new Set(vectors.map(entry => entry.profile.tacticalId)).size;
+
+    const scoutingVariety =
+        new Set(vectors.map(entry => entry.profile.scoutingId)).size;
+
+    const varietyScale = Math.max(
+        1,
+        Math.min(3, uniqueCoaches.length) - 1
+    );
+
+    const tacticalDiversity = Math.min(
+        100,
+        ((tacticalVariety - 1) / varietyScale) * 100
+    );
+
+    const scoutingDiversity = Math.min(
+        100,
+        ((scoutingVariety - 1) / varietyScale) * 100
+    );
+
+    const diversity = Math.round(
+        tacticalDiversity * 0.40 +
+        scoutingDiversity * 0.60
+    );
+
+    const complementarity = Math.round(
+        pairComplementarity * 0.50 +
+        diversity * 0.50
+    );
+
+    const score = Math.round(
+        alignment * 0.75 +
+        complementarity * 0.25
+    );
+
+    let label;
+    let summary;
+
+    if (score >= 85) {
+        label = 'Strong, complementary staff';
+        summary = 'The group shares a clear direction while bringing different tactical and scouting perspectives.';
+    } else if (score >= 75) {
+        label = 'Good staff fit';
+        summary = "The coaches generally agree on the program's direction, with useful differences in how they evaluate players.";
+    } else if (score >= 62) {
+        label = 'Mixed but workable';
+        summary = 'The group has some healthy disagreement. Clear priorities will help turn different perspectives into an advantage.';
+    } else {
+        label = 'Significant philosophical friction';
+        summary = 'The group has competing ideas about team identity and player priorities. More alignment may be needed.';
+    }
+
+    if (alignment >= 82 && complementarity < 35) {
+        summary = 'The group is highly aligned, but its approaches are very similar. A different scouting or tactical perspective could add useful coverage.';
+    }
+
+    return {
+        coachCount: uniqueCoaches.length,
+        score,
+        alignment,
+        complementarity,
+        tacticalDiversity,
+        scoutingDiversity,
+        tacticalVariety,
+        scoutingVariety,
+        label,
+        summary,
+        includesUserCoach: uniqueCoaches.some(
+            coach => coach.isUserCoach
+        )
+    };
+}
+
+/**
  * Creates and migrates persistent GM instructions.
  *
  * Instructions represent what the GM wants.
@@ -11471,78 +12318,142 @@ export function resolveCoachCarousel(
             const newHire = chosen.candidate;
 
             // Make the initial offer only after selecting the candidate.
+            let finalPitch = { ...chosen.pitch };
+
             let negotiation = evaluateStaffNegotiation(
                 newHire,
                 team,
                 'coach',
-                chosen.pitch
+                finalPitch
             );
 
-            let finalCashOffer = chosen.offeredStipend;
-            let finalTokenOffer = chosen.offeredTokens;
+            let finalCashOffer = Math.max(
+                0,
+                Number(finalPitch.cashOffered) || 0
+            );
 
-            // Severely understaffed teams may make one improved offer
-            // when the candidate appears reasonably close to accepting.
-            // The candidate remains free to reject both offers.
-            const initialInterest = Number(negotiation.interestScore);
+            let finalTokenOffer = Math.max(
+                0,
+                Math.floor(Number(finalPitch.tokensOffered) || 0)
+            );
 
-            if (
-                !negotiation.accepted &&
-                currentCoachCount <= 1 &&
-                Number.isFinite(initialInterest) &&
-                initialInterest >= 35
+            const cashBalance = Number(team.finances?.balance);
+            const availableCash = team.finances &&
+                Number.isFinite(cashBalance)
+                    ? Math.max(0, cashBalance)
+                    : 5;
+
+            const availableTokens = Math.max(
+                0,
+                Math.floor(Number(team.socialProfile?.favorTokens) || 0)
+            );
+
+            // Keep concessions within a modest portion of the team's
+            // available funds. The stipend is a one-time joining payment.
+            const maximumStipend = Math.min(
+                availableCash,
+                Math.max(
+                    finalCashOffer,
+                    Math.round(availableCash * 0.10)
+                )
+            );
+
+            // Opening offer plus up to two counteroffers.
+            for (
+                let counterRound = 0;
+                counterRound < 2 && !negotiation.accepted;
+                counterRound++
             ) {
-                const cashBalance = Number(team.finances?.balance);
-                const availableCash = team.finances &&
-                    Number.isFinite(cashBalance)
-                        ? Math.max(0, cashBalance)
-                        : 0;
-
-                const availableTokens = Math.max(
-                    0,
-                    Math.floor(
-                        Number(team.socialProfile?.favorTokens) || 0
-                    )
+                const counteroffer = buildStaffCounteroffer(
+                    newHire,
+                    team,
+                    'coach',
+                    finalPitch,
+                    negotiation
                 );
 
-                // The improved offer is deliberately modest:
-                // at most one additional dollar and one additional token.
-                const counterCashOffer = Math.min(
-                    availableCash,
-                    finalCashOffer + 1
-                );
+                const counterTerms = counteroffer?.terms || {};
+                const nextPitch = { ...finalPitch };
 
-                const counterTokenOffer = Math.min(
-                    2,
-                    availableTokens,
-                    finalTokenOffer + 1
-                );
-
-                const counterOfferImprovesTerms =
-                    counterCashOffer > finalCashOffer ||
-                    counterTokenOffer > finalTokenOffer;
-
-                if (counterOfferImprovesTerms) {
-                    const counterPitch = {
-                        ...chosen.pitch,
-                        cashOffered: counterCashOffer,
-                        tokensOffered: counterTokenOffer
-                    };
-
-                    const counterNegotiation =
-                        evaluateStaffNegotiation(
-                            newHire,
-                            team,
-                            'coach',
-                            counterPitch
-                        );
-
-                    if (counterNegotiation.accepted) {
-                        negotiation = counterNegotiation;
-                        finalCashOffer = counterCashOffer;
-                        finalTokenOffer = counterTokenOffer;
-                    }
+                // Only accept recognized scheme-authority preferences.
+                if (
+                    [
+                        'GM_CHOICE',
+                        'SHARED_CONTROL',
+                        'COACH_CHOICE'
+                    ].includes(counterTerms.schemePromise)
+                ) {
+                    nextPitch.schemePromise =
+                        counterTerms.schemePromise;
                 }
+
+                // Keep practice promises within the supported options.
+                if (
+                    [
+                        'CONDITIONING',
+                        'CHALK_TALK',
+                        'FUN_SCRIMMAGE',
+                        'BALANCED'
+                    ].includes(counterTerms.practiceFocus)
+                ) {
+                    nextPitch.practiceFocus =
+                        counterTerms.practiceFocus;
+                }
+
+                const requestedCash = Number(counterTerms.cashOffered);
+
+                if (Number.isFinite(requestedCash)) {
+                    nextPitch.cashOffered = Math.max(
+                        finalCashOffer,
+                        Math.min(
+                            maximumStipend,
+                            Math.max(0, requestedCash)
+                        )
+                    );
+                }
+
+                const requestedTokens = Number(
+                    counterTerms.tokensOffered
+                );
+
+                if (Number.isFinite(requestedTokens)) {
+                    nextPitch.tokensOffered = Math.max(
+                        finalTokenOffer,
+                        Math.min(
+                            2,
+                            availableTokens,
+                            Math.max(0, Math.floor(requestedTokens))
+                        )
+                    );
+                }
+
+                const termsChanged =
+                    nextPitch.schemePromise !== finalPitch.schemePromise ||
+                    nextPitch.practiceFocus !== finalPitch.practiceFocus ||
+                    nextPitch.cashOffered !== finalPitch.cashOffered ||
+                    nextPitch.tokensOffered !== finalPitch.tokensOffered;
+
+                // Do not repeat an offer the AI cannot improve.
+                if (!termsChanged) break;
+
+                finalPitch = nextPitch;
+
+                finalCashOffer = Math.max(
+                    0,
+                    Number(finalPitch.cashOffered) || 0
+                );
+
+                finalTokenOffer = Math.max(
+                    0,
+                    Math.floor(Number(finalPitch.tokensOffered) || 0)
+                );
+
+                negotiation = evaluateStaffNegotiation(
+                    newHire,
+                    team,
+                    'coach',
+                    finalPitch
+                );
             }
 
             // After two unsuccessful offers, stop approaching this
@@ -11580,6 +12491,15 @@ export function resolveCoachCarousel(
                     finalTokenOffer
                 );
             }
+
+            newHire.hiringAgreement = {
+                year: Number(gameState.year) || null,
+                role: 'coach',
+                schemeAuthority: finalPitch.schemePromise || 'GM_CHOICE',
+                practiceFocus: finalPitch.practiceFocus || 'BALANCED',
+                oneTimeStipend: finalCashOffer,
+                tokensOffered: finalTokenOffer
+            };
 
             newHire.teamId = team.id;
             newHire.role = 'coach';
@@ -13018,7 +13938,26 @@ export function aiChooseWeeklyPractice(
         return 'hustle';
     }
 
-        // Explicit practice priorities take precedence over broad GM directives
+    // Honor the assigned training coach's accepted practice-focus
+    // agreement after fatigue and emergency financial safeguards.
+    const practiceAgreement =
+        coach?.retentionAgreement ||
+        coach?.hiringAgreement ||
+        null;
+
+    const committedPracticeFocus = {
+        CONDITIONING: 'conditioning',
+        CHALK_TALK: 'chalk_talk',
+        FUN_SCRIMMAGE: 'scrimmage'
+    }[
+        String(practiceAgreement?.practiceFocus || '').toUpperCase()
+    ];
+
+    if (committedPracticeFocus) {
+        return committedPracticeFocus;
+    }
+
+    // Explicit practice priorities take precedence over broad GM directives
     // and personality preferences, but not fatigue or financial safeguards.
     const offenseEmphasisScore =
         offensePracticeEmphasis ?? 0;
