@@ -10,7 +10,8 @@ import {
     WEEKLY_COACH_HOURS,
     getTeamCoachingSpecialist,
     recordCoachDevelopmentOutcome,
-    getCoachRecruitingPreferenceFit
+    getCoachRecruitingPreferenceFit,
+    getCoachingGroupFit
 } from './staff.js';
 import {
     offensivePlaybook,
@@ -2386,10 +2387,29 @@ function applyWeeklyGamePreparation(
     const instinct = clamp(Number(ratings.gameplanInstinct ?? 50), 1, 99);
     const adjustments = clamp(Number(ratings.inGameAdjustments ?? 50), 1, 99);
 
-    const effectiveness = clamp(
+    const baseEffectiveness = clamp(
         0.65 + skillRating / 250 + instinct / 500 + adjustments / 1000,
         0.75,
         1.25
+    );
+
+    // Staff chemistry affects coordination, not individual coaching skill.
+    // A balanced, complementary group can prepare more efficiently.
+    const staffGroupFit = getCoachingGroupFit(team);
+    const groupFitScore = Number(staffGroupFit?.score);
+
+    const groupCoordinationMultiplier = Number.isFinite(groupFitScore)
+        ? clamp(
+            1 + (groupFitScore - 50) * 0.0016,
+            0.92,
+            1.08
+        )
+        : 1;
+
+    const effectiveness = clamp(
+        baseEffectiveness * groupCoordinationMultiplier,
+        0.70,
+        1.32
     );
 
     const workWeekKey = `${year}:${week}`;

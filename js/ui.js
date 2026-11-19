@@ -23,7 +23,8 @@ import {
     getCoachWeeklyOutlook,
     getCoachIdentityProfile,
     getCoachingGroupFit,
-    aiChooseWeeklyPractice
+    aiChooseWeeklyPractice,
+    getCoachGroupChemistryPreview
 } from './game/staff.js';
 import { DEFAULT_PLAYBACK_INTERVAL_MS, getPlaybackIntervalMs } from './game/simulation_config.js';
 import {
@@ -13719,6 +13720,172 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             coach.careerHistory.length > 0
     ).length;
 
+    // Pair-level chemistry is stored by the weekly staff-dynamics resolver.
+    const savedCoachRelationships =
+        team.coachRelationships &&
+        typeof team.coachRelationships === 'object'
+            ? team.coachRelationships
+            : {};
+
+    const staffRelationshipPairs = [];
+
+    for (let i = 0; i < overviewCoaches.length; i++) {
+        for (let j = i + 1; j < overviewCoaches.length; j++) {
+            const coachA = overviewCoaches[i].coach;
+            const coachB = overviewCoaches[j].coach;
+
+            const pairIds = [
+                String(coachA.id),
+                String(coachB.id)
+            ].sort();
+
+            const pairKey = pairIds.join('::');
+
+            const relationship =
+                savedCoachRelationships[pairKey] ||
+                Object.values(savedCoachRelationships).find(item =>
+                    Array.isArray(item?.coachIds) &&
+                    item.coachIds.length === 2 &&
+                    pairIds.every(id =>
+                        item.coachIds.map(String).includes(id)
+                    )
+                );
+
+            const rawScore = Number(relationship?.score);
+            const hasHistory = Number.isFinite(rawScore);
+
+            const score = hasHistory
+                ? Math.max(0, Math.min(100, rawScore))
+                : null;
+
+            const baseline = Number(relationship?.baseline);
+            const change = hasHistory && Number.isFinite(baseline)
+                ? Math.round(score - baseline)
+                : null;
+
+            const relationshipLabel = !hasHistory
+                ? 'Building familiarity'
+                : score >= 78
+                    ? 'Strong partnership'
+                    : score >= 65
+                        ? 'Works well together'
+                        : score >= 50
+                            ? 'Functional relationship'
+                            : score >= 35
+                                ? 'Some friction'
+                                : 'Strained relationship';
+
+            const color = !hasHistory
+                ? 'slate'
+                : score >= 75
+                    ? 'emerald'
+                    : score >= 60
+                        ? 'blue'
+                        : score >= 45
+                            ? 'amber'
+                            : 'rose';
+
+            staffRelationshipPairs.push({
+                nameA: coachA.name || 'Unnamed Coach',
+                nameB: coachB.name || 'Unnamed Coach',
+                score,
+                change,
+                relationshipLabel,
+                color,
+                weeksWorked: Math.max(
+                    0,
+                    Number(relationship?.weeksWorkedTogether) || 0
+                )
+            });
+        }
+    }
+
+    const relationshipAverage = staffRelationshipPairs
+        .filter(pair => pair.score !== null)
+        .map(pair => pair.score);
+
+    const averageStaffRelationship =
+        relationshipAverage.length > 0
+            ? Math.round(
+                relationshipAverage.reduce(
+                    (sum, value) => sum + value,
+                    0
+                ) / relationshipAverage.length
+            )
+            : null;
+
+    const staffRelationshipPanelHtml = `
+        <section class="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div>
+                    <h4 class="text-xs font-black uppercase tracking-wide text-slate-900">
+                        Staff Relationships
+                    </h4>
+                    <p class="text-[10px] text-slate-500 mt-0.5">
+                        How well your coaches work with one another over time.
+                    </p>
+                </div>
+                <div class="text-right">
+                    <span class="block text-[9px] uppercase text-slate-400">
+                        Average Relationship
+                    </span>
+                    <span class="text-lg font-black tabular-nums text-slate-900">
+                        ${averageStaffRelationship ?? '—'}
+                    </span>
+                </div>
+            </div>
+
+            ${staffRelationshipPairs.length > 0 ? `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    ${staffRelationshipPairs.map(pair => `
+                        <div class="rounded border border-slate-200 bg-slate-50 p-2">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="min-w-0 text-[10px] font-bold text-slate-800">
+                                    ${overviewEscape(pair.nameA)}
+                                    <span class="text-slate-400 mx-0.5">↔</span>
+                                    ${overviewEscape(pair.nameB)}
+                                </span>
+                                <span class="shrink-0 text-[10px] font-black tabular-nums text-slate-700">
+                                    ${pair.score === null ? '—' : Math.round(pair.score)}
+                                </span>
+                            </div>
+
+                            <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                                <div
+                                    class="h-full rounded-full bg-${pair.color}-500"
+                                    style="width: ${pair.score ?? 0}%">
+                                </div>
+                            </div>
+
+                            <div class="mt-1 flex flex-wrap items-center justify-between gap-1">
+                                <span class="text-[9px] font-bold text-${pair.color}-700">
+                                    ${pair.relationshipLabel}
+                                </span>
+                                <span class="text-[9px] text-slate-500">
+                                    ${pair.weeksWorked} shared work weeks
+                                    ${pair.change === null
+                                        ? ''
+                                        : ` · ${pair.change > 0 ? '+' : ''}${pair.change} since baseline`}
+                                </span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : `
+                <p class="rounded border border-dashed border-slate-300 bg-slate-50 p-3 text-center text-[10px] text-slate-500">
+                    No active coach pairings to display.
+                </p>
+            `}
+
+            ${averageStaffRelationship === null ? `
+                <p class="mt-2 text-[9px] text-slate-500">
+                    Relationship scores begin recording when the weekly staff dynamics resolve.
+                    Coaches need to work during the same week to build familiarity.
+                </p>
+            ` : ''}
+        </section>
+    `;
+
     const totalAssignedHours = developmentRows.reduce(
         (sum, row) => sum + row.assignedHours,
         0
@@ -13804,6 +13971,127 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     ${overviewEscape(staffGroupFit?.summary || 'More coaches are needed to assess group compatibility.')}
                 </p>
             </div>
+
+            ${staffRelationshipPanelHtml}
+
+            ${(() => {
+                const groupFit = getCoachingGroupFit(team) || {};
+
+                const readScore = value => {
+                    const score = Number(value);
+
+                    return Number.isFinite(score)
+                        ? Math.max(0, Math.min(100, Math.round(score)))
+                        : null;
+                };
+
+                const alignment = readScore(groupFit.alignment);
+                const complementarity = readScore(groupFit.complementarity);
+
+                // Only count relationships that belong to currently active coaches.
+                const activeCoachIds = new Set(
+                    overviewCoaches
+                        .map(entry => String(entry.coach?.id))
+                        .filter(Boolean)
+                );
+
+                const relationshipRecords = Object.values(
+                    team.coachRelationships || {}
+                ).filter(record =>
+                    Array.isArray(record?.coachIds) &&
+                    record.coachIds.length === 2 &&
+                    record.coachIds.every(id =>
+                        activeCoachIds.has(String(id))
+                    ) &&
+                    Number.isFinite(Number(record.score))
+                );
+
+                const relationshipScore = relationshipRecords.length
+                    ? readScore(
+                        relationshipRecords.reduce(
+                            (sum, record) => sum + Number(record.score),
+                            0
+                        ) / relationshipRecords.length
+                    )
+                    : null;
+
+                const scoreTone = score =>
+                    score >= 70
+                        ? 'text-emerald-700'
+                        : score >= 50
+                            ? 'text-amber-700'
+                            : 'text-rose-700';
+
+                const barTone = score =>
+                    score >= 70
+                        ? 'bg-emerald-500'
+                        : score >= 50
+                            ? 'bg-amber-500'
+                            : 'bg-rose-500';
+
+                const renderGroupMetric = (label, score, explanation) => `
+                    <div class="rounded-lg border border-slate-200 bg-white p-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-[10px] font-black uppercase tracking-wide text-slate-600">
+                                ${label}
+                            </span>
+                            <span class="font-mono text-lg font-black ${
+                                score === null ? 'text-slate-400' : scoreTone(score)
+                            }">
+                                ${score === null ? '—' : `${score}/100`}
+                            </span>
+                        </div>
+
+                        <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                                class="h-full rounded-full ${
+                                    score === null ? 'bg-slate-300' : barTone(score)
+                                }"
+                                style="width:${score === null ? 0 : score}%">
+                            </div>
+                        </div>
+
+                        <p class="mt-2 text-[10px] leading-relaxed text-slate-500">
+                            ${explanation}
+                        </p>
+                    </div>
+                `;
+
+                return `
+                    <section class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <div class="mb-3">
+                            <h5 class="text-xs font-black uppercase tracking-wide text-slate-800">
+                                How Your Coaching Staff Fits Together
+                            </h5>
+                            <p class="mt-1 text-[10px] text-slate-500">
+                                Similar systems, complementary approaches, and real working relationships are measured separately.
+                            </p>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            ${renderGroupMetric(
+                                'Tactical Alignment',
+                                alignment,
+                                'How closely the coaches share offensive and defensive philosophies. High alignment means more agreement, not automatically better coaching.'
+                            )}
+
+                            ${renderGroupMetric(
+                                'Complementarity',
+                                complementarity,
+                                'Whether the staff brings useful differences in philosophy and approach instead of everyone thinking alike.'
+                            )}
+
+                            ${renderGroupMetric(
+                                'Working Relationships',
+                                relationshipScore,
+                                relationshipScore === null
+                                    ? 'Not established yet. Pair chemistry develops as coaches work together.'
+                                    : `Average chemistry across ${relationshipRecords.length} established staff pairing${relationshipRecords.length === 1 ? '' : 's'}.`
+                            )}
+                        </div>
+                    </section>
+                `;
+            })()}
 
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
                 ${overviewCoaches.map(entry => {
@@ -13922,6 +14210,151 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             </div>
                         </details>
                     ` : '';
+
+                    const activeStaffIds = new Set(
+                        overviewCoaches.map(entry =>
+                            String(entry.coach?.id)
+                        )
+                    );
+
+                    const coachRelationshipScores = Object.values(
+                        team.coachRelationships || {}
+                    )
+                        .filter(record =>
+                            Array.isArray(record?.coachIds) &&
+                            record.coachIds.length === 2 &&
+                            record.coachIds.some(
+                                id => String(id) === String(entry.coach.id)
+                            ) &&
+                            record.coachIds.every(id =>
+                                activeStaffIds.has(String(id))
+                            ) &&
+                            Number.isFinite(Number(record.score))
+                        )
+                        .map(record => Number(record.score));
+
+                    const individualChemistry = coachRelationshipScores.length
+                        ? Math.round(
+                            coachRelationshipScores.reduce(
+                                (sum, score) => sum + score,
+                                0
+                            ) / coachRelationshipScores.length
+                        )
+                        : null;
+
+                    const individualChemistryBadge = individualChemistry === null
+                        ? `<span class="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">Chemistry: New</span>`
+                        : `<span class="rounded border px-1.5 py-0.5 text-[9px] font-bold ${
+                            individualChemistry >= 75
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                : individualChemistry >= 55
+                                    ? 'border-blue-200 bg-blue-50 text-blue-800'
+                                    : individualChemistry >= 40
+                                        ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                        : 'border-rose-200 bg-rose-50 text-rose-800'
+                        }">Chemistry: ${individualChemistry}</span>`;
+
+                    const individualRelationshipDetailsHtml = (() => {
+                        const relationships = Object.values(
+                            team.coachRelationships || {}
+                        )
+                            .filter(record =>
+                                Array.isArray(record?.coachIds) &&
+                                record.coachIds.length === 2 &&
+                                record.coachIds.some(
+                                    id => String(id) === String(entry.coach.id)
+                                ) &&
+                                record.coachIds.every(id =>
+                                    activeStaffIds.has(String(id))
+                                ) &&
+                                Number.isFinite(Number(record.score))
+                            )
+                            .map(record => {
+                                const otherId = record.coachIds.find(
+                                    id => String(id) !== String(entry.coach.id)
+                                );
+
+                                const otherCoach = overviewCoaches.find(
+                                    other =>
+                                        String(other.coach.id) === String(otherId)
+                                );
+
+                                const score = Math.round(
+                                    Math.max(0, Math.min(100, Number(record.score)))
+                                );
+
+                                const baseline = Number(record.baselineScore);
+                                const change = Number.isFinite(baseline)
+                                    ? score - Math.round(baseline)
+                                    : null;
+
+                                const weeks = Math.max(
+                                    0,
+                                    Number(record.weeksWorkedTogether) || 0
+                                );
+
+                                return {
+                                    name: otherCoach?.coach?.name || 'Other Coach',
+                                    score,
+                                    change,
+                                    weeks
+                                };
+                            })
+                            .sort((a, b) => a.score - b.score);
+
+                        if (!relationships.length) {
+                            return `
+                                <p class="mt-2 text-[10px] text-slate-500">
+                                    No established working relationships yet.
+                                </p>
+                            `;
+                        }
+
+                        return `
+                            <details class="mt-2 rounded border border-slate-200 bg-white">
+                                <summary class="cursor-pointer px-2.5 py-2 text-[10px] font-bold text-blue-800 hover:bg-slate-50">
+                                    Relationship Breakdown (${relationships.length})
+                                </summary>
+
+                                <div class="border-t border-slate-100 px-2.5">
+                                    ${relationships.map(relationship => {
+                                        const tone = relationship.score >= 75
+                                            ? 'text-emerald-700'
+                                            : relationship.score >= 55
+                                                ? 'text-blue-700'
+                                                : relationship.score >= 40
+                                                    ? 'text-amber-700'
+                                                    : 'text-rose-700';
+
+                                        const trend = relationship.change === null
+                                            ? 'Baseline unavailable'
+                                            : relationship.change > 0
+                                                ? `+${relationship.change} since joining`
+                                                : relationship.change < 0
+                                                    ? `${relationship.change} since joining`
+                                                    : 'At initial baseline';
+
+                                        return `
+                                            <div class="flex items-center justify-between gap-3 border-b border-slate-100 py-2 last:border-b-0">
+                                                <div class="min-w-0">
+                                                    <p class="text-[10px] font-bold text-slate-800">
+                                                        ${overviewEscape(relationship.name)}
+                                                    </p>
+                                                    <p class="text-[9px] text-slate-500">
+                                                        ${relationship.weeks} weeks together · ${trend}
+                                                    </p>
+                                                </div>
+                                                <span class="shrink-0 font-mono text-xs font-black ${tone}">
+                                                    ${relationship.score}/100
+                                                </span>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </details>
+                        `;
+                    })();
+
                     const moraleBadge = isNPC
                         ? `<span class="rounded border px-1.5 py-0.5 text-[9px] font-bold ${
                             outlook.happiness >= 70
@@ -14035,6 +14468,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                                 ${overviewEscape(entry.role)}
                                             </span>
                                             ${moraleBadge}
+                                            ${individualChemistryBadge}
                                         </div>
                                         <p class="mt-0.5 text-[10px] text-slate-500">
                                             ${overviewEscape(outlook?.personalityName || '')} · ${overviewEscape(outlook?.tacticalName || '')} · ${overviewEscape(outlook?.scheduleLabel || '')}
@@ -14119,6 +14553,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                                 ${identitySummaryHtml}
                                 ${identityDetailsHtml}
+                                ${individualRelationshipDetailsHtml}
 
                                 ${isNPC ? `
                                     <div class="mt-2 rounded border border-slate-200 bg-slate-50/80 p-2 text-[10px] text-slate-700">
@@ -16181,6 +16616,51 @@ export function renderStaffCarouselTab(
 
         const currentTeam = latestState.playerTeam || team;
 
+        const groupChemistry = getCoachGroupChemistryPreview(
+            currentTeam,
+            candidate
+        );
+
+        const chemistryScore = Number(groupChemistry.score);
+
+        const chemistryTone = Number.isFinite(chemistryScore)
+            ? chemistryScore >= 65
+                ? 'text-emerald-700'
+                : chemistryScore >= 45
+                    ? 'text-amber-700'
+                    : 'text-rose-700'
+            : 'text-slate-500';
+
+        const chemistryAdjustment = Number.isFinite(
+            Number(groupChemistry.adjustment)
+        )
+            ? `${Number(groupChemistry.adjustment) > 0 ? '+' : ''}${Number(groupChemistry.adjustment).toFixed(1)}`
+            : '—';
+
+        const groupChemistryRows = (
+            Array.isArray(groupChemistry.comparisons)
+                ? groupChemistry.comparisons
+                : []
+        ).map(comparison => {
+            const score = Number(comparison.score);
+            const tone = score >= 65
+                ? 'text-emerald-700'
+                : score >= 45
+                    ? 'text-amber-700'
+                    : 'text-rose-700';
+
+            return `
+                <div class="flex items-center justify-between gap-3 border-t border-slate-200 py-2">
+                    <span class="text-xs font-semibold text-slate-700">
+                        ${escapeProfileText(comparison.coachName)}
+                    </span>
+                    <span class="font-mono text-xs font-black ${tone}">
+                        ${Number.isFinite(score) ? `${score}/100` : '—'}
+                    </span>
+                </div>
+            `;
+        }).join('');
+
         const tendencies =
             typeof Game.previewCoachTendencies === 'function'
                 ? Game.previewCoachTendencies(candidate, currentTeam)
@@ -16211,6 +16691,54 @@ export function renderStaffCarouselTab(
                             ${escapeProfileText(candidate.formerPlayerBio)}
                         </p>
                     ` : ''}
+                </section>
+
+                <section class="rounded-lg border border-slate-200 bg-white p-3">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h5 class="text-xs font-black uppercase tracking-wide text-slate-700">
+                                Predicted Group Chemistry
+                            </h5>
+                            <p class="mt-1 text-[10px] text-slate-500">
+                                Estimated compatibility with your current coaching staff.
+                            </p>
+                        </div>
+
+                        <div class="text-right">
+                            <span class="block font-mono text-2xl font-black ${chemistryTone}">
+                                ${groupChemistry.score ?? '—'}${groupChemistry.score == null ? '' : '/100'}
+                            </span>
+                            <span class="text-[10px] font-bold text-slate-600">
+                                ${escapeProfileText(groupChemistry.label)}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="mt-3 rounded bg-slate-50 p-2">
+                        <span class="text-[10px] text-slate-500">
+                            Estimated hiring-evaluation adjustment
+                        </span>
+                        <span class="ml-2 font-mono text-xs font-black text-slate-800">
+                            ${chemistryAdjustment}
+                        </span>
+                    </div>
+
+                    <div class="mt-3">
+                        <h6 class="mb-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
+                            Compatibility with each current coach
+                        </h6>
+
+                        ${groupChemistryRows || `
+                            <p class="py-2 text-xs text-slate-500">
+                                No current staff members available for comparison.
+                            </p>
+                        `}
+                    </div>
+
+                    <p class="mt-2 text-[10px] leading-relaxed text-slate-500">
+                        This is a prediction based on coaching styles and personalities.
+                        Actual working relationships can improve or deteriorate over time.
+                    </p>
                 </section>
 
                 <section>
@@ -16624,6 +17152,22 @@ export function renderStaffCarouselTab(
                             const personality = s.biases?.personality || {};
                             const tactical = s.biases?.tactical || {};
 
+                            const chemistry = getCoachGroupChemistryPreview(team, s);
+
+                            const chemistryScore = Number(chemistry.score);
+
+                            const chemistryTone = !Number.isFinite(chemistryScore)
+                                ? 'text-slate-500'
+                                : chemistryScore >= 65
+                                    ? 'text-emerald-700'
+                                    : chemistryScore >= 45
+                                        ? 'text-amber-700'
+                                        : 'text-rose-700';
+
+                            const chemistrySummary = Number.isFinite(chemistryScore)
+                                ? `${chemistryScore}/100 · ${chemistry.label}`
+                                : chemistry.label;
+
                             const candidateTendencies =
                                 typeof Game.previewCoachTendencies === 'function'
                                     ? Game.previewCoachTendencies(s, team)
@@ -16719,6 +17263,10 @@ export function renderStaffCarouselTab(
                                                     ? 'Tendency projection unavailable'
                                                     : `RUN ${candidateRunPercent}% / PASS ${candidatePassPercent}% · BLITZ ${Math.round(Number(candidateTendencies.defenseAggressiveness) || 0)}% · 4TH ${Math.round(Number(candidateTendencies.fourthDownBravery) || 0)}%`
                                                 }
+                                            </p>
+
+                                            <p class="mt-1 text-[10px] font-bold ${chemistryTone}">
+                                                GROUP FIT: ${escapeStaffAttribute(chemistrySummary)}
                                             </p>
 
                                             <button

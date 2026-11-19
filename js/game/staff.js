@@ -2044,6 +2044,426 @@ function getCoachMentorMultiplier(coach, skill, coaches, hoursByCoach) {
     return 1.15;
 }
 
+function getCoachRelationshipKey(coachA, coachB) {
+    return [
+        String(coachA?.id ?? ''),
+        String(coachB?.id ?? '')
+    ].sort().join('::');
+}
+
+function getInitialCoachRelationshipScore(coachA, coachB) {
+    const tacticalA =
+        getStaffProfileId(coachA, 'tactical') ||
+        'adaptive_strategist';
+
+    const tacticalB =
+        getStaffProfileId(coachB, 'tactical') ||
+        'adaptive_strategist';
+
+    const conflicts = [
+        ['power_run_specialist', 'spread_passing_specialist'],
+        ['pressure_oriented_defender', 'conservative_game_manager']
+    ];
+
+    const hasDirectConflict = conflicts.some(([first, second]) =>
+        (
+            tacticalA === first &&
+            tacticalB === second
+        ) ||
+        (
+            tacticalA === second &&
+            tacticalB === first
+        )
+    );
+
+    let compatibility = 62;
+
+    if (tacticalA === tacticalB) {
+        compatibility += 5;
+    } else if (hasDirectConflict) {
+        compatibility -= 18;
+    } else {
+        // Different but non-opposing philosophies can complement each other.
+        compatibility += 2;
+    }
+
+    const adaptabilityA = getStaffBehaviorTendency(
+        coachA,
+        'adaptability'
+    );
+    const adaptabilityB = getStaffBehaviorTendency(
+        coachB,
+        'adaptability'
+    );
+
+    const relationshipA = getStaffBehaviorTendency(
+        coachA,
+        'relationshipOrientation'
+    );
+    const relationshipB = getStaffBehaviorTendency(
+        coachB,
+        'relationshipOrientation'
+    );
+
+    const riskA = getStaffBehaviorTendency(
+        coachA,
+        'riskTolerance'
+    );
+    const riskB = getStaffBehaviorTendency(
+        coachB,
+        'riskTolerance'
+    );
+
+    compatibility += (
+        (adaptabilityA + adaptabilityB) / 2 - 50
+    ) * 0.04;
+
+    compatibility += (
+        (relationshipA + relationshipB) / 2 - 50
+    ) * 0.025;
+
+    compatibility -= Math.abs(riskA - riskB) * 0.035;
+
+    const egoA = Number(coachA?.ego ?? 50);
+    const egoB = Number(coachB?.ego ?? 50);
+
+    if (Number.isFinite(egoA) && Number.isFinite(egoB)) {
+        compatibility -= Math.abs(egoA - egoB) * 0.015;
+    }
+
+    return Math.max(25, Math.min(88, compatibility));
+}
+
+/**
+ * Predicts how a prospective hire would fit with the team's current staff.
+ * This is a preview only; it does not create or modify relationships.
+ */
+export function getCoachGroupChemistryPreview(team, candidate) {
+    const emptyResult = {
+        score: null,
+        adjustment: 0,
+        label: 'No comparison available',
+        comparisons: []
+    };
+
+    if (!team || !candidate?.id) {
+        return emptyResult;
+    }
+
+    // Include the user-coach profile as well as the NPC coaching staff.
+    const existingStaff = [
+        ...(Array.isArray(team.coaches) ? team.coaches : []),
+        team.coach,
+        team.staff?.coach,
+        team.staff?.scout,
+        team.staff?.trainer
+    ];
+
+    const uniqueStaff = new Map();
+
+    for (const coach of existingStaff) {
+        if (
+            coach?.id == null ||
+            String(coach.id) === String(candidate.id) ||
+            coach.teamId != null &&
+                String(coach.teamId) !== String(team.id)
+        ) {
+            continue;
+        }
+
+        uniqueStaff.set(String(coach.id), coach);
+    }
+
+    const comparisons = [...uniqueStaff.values()].map(coach => ({
+        coachId: String(coach.id),
+        coachName: coach.name || 'Current Coach',
+        score: Math.round(
+            getInitialCoachRelationshipScore(candidate, coach)
+        )
+    }));
+
+    if (comparisons.length === 0) {
+        return {
+            ...emptyResult,
+            label: 'No current staff to compare'
+        };
+    }
+
+    const score = Math.round(
+        comparisons.reduce(
+            (sum, comparison) => sum + comparison.score,
+            0
+        ) / comparisons.length
+    );
+
+    const adjustment = Math.round(
+        Math.max(
+            -4,
+            Math.min(3.5, (score - 60) * 0.12)
+        ) * 100
+    ) / 100;
+
+    const label = score >= 78
+        ? 'Strong chemistry fit'
+        : score >= 65
+            ? 'Likely complementary'
+            : score >= 50
+                ? 'Mixed compatibility'
+                : score >= 35
+                    ? 'Potential friction'
+                    : 'Difficult personality mix';
+
+    return {
+        score,
+        adjustment,
+        label,
+        comparisons
+    };
+}
+
+/**
+ * Updates persistent relationships among the active coaching group.
+ * Shared work builds familiarity; unresolved tactical and personality
+ * friction can gradually damage relationships and morale.
+ */
+function processCoachingGroupDynamics(
+    team,
+    coaches,
+    hoursByCoach,
+    year,
+    week
+) {
+    const weekKey = `${year}:${week}`;
+
+    if (
+        team.coachingGroupDynamics?.lastResolvedWeekKey === weekKey
+    ) {
+        return team.coachingGroupDynamics;
+    }
+
+    if (
+        !team.coachRelationships ||
+        typeof team.coachRelationships !== 'object' ||
+        Array.isArray(team.coachRelationships)
+    ) {
+        team.coachRelationships = {};
+    }
+
+    const relationships = team.coachRelationships;
+    const relationshipScores = new Map();
+
+    for (let i = 0; i < coaches.length; i++) {
+        for (let j = i + 1; j < coaches.length; j++) {
+            const coachA = coaches[i];
+            const coachB = coaches[j];
+
+            const key = getCoachRelationshipKey(coachA, coachB);
+            const baseline = getInitialCoachRelationshipScore(
+                coachA,
+                coachB
+            );
+
+            let relationship = relationships[key];
+
+            if (
+                !relationship ||
+                typeof relationship !== 'object' ||
+                Array.isArray(relationship)
+            ) {
+                relationship = {
+                    coachIds: [
+                        String(coachA.id),
+                        String(coachB.id)
+                    ],
+                    score: baseline,
+                    baseline,
+                    weeksWorkedTogether: 0
+                };
+
+                relationships[key] = relationship;
+            }
+
+            const previousScore = Number(relationship.score);
+            const currentScore = Number.isFinite(previousScore)
+                ? Math.max(0, Math.min(100, previousScore))
+                : baseline;
+
+            const workloadA =
+                hoursByCoach.get(String(coachA.id)) || {};
+            const workloadB =
+                hoursByCoach.get(String(coachB.id)) || {};
+
+            const activeTasksA = Object.keys(
+                COACH_DEVELOPMENT_TASK_SKILLS
+            ).filter(task => Number(workloadA[task]) > 0);
+
+            const activeTasksB = Object.keys(
+                COACH_DEVELOPMENT_TASK_SKILLS
+            ).filter(task => Number(workloadB[task]) > 0);
+
+            const bothWorked =
+                Number(workloadA.total) > 0 &&
+                Number(workloadB.total) > 0;
+
+            if (bothWorked) {
+                const complementaryAssignments = activeTasksA.some(
+                    task => activeTasksB.some(otherTask => task !== otherTask)
+                );
+
+                const averageAdaptability = (
+                    getStaffBehaviorTendency(coachA, 'adaptability') +
+                    getStaffBehaviorTendency(coachB, 'adaptability')
+                ) / 2;
+
+                const averageRelationshipOrientation = (
+                    getStaffBehaviorTendency(
+                        coachA,
+                        'relationshipOrientation'
+                    ) +
+                    getStaffBehaviorTendency(
+                        coachB,
+                        'relationshipOrientation'
+                    )
+                ) / 2;
+
+                const averageEgo = (
+                    Math.max(0, Math.min(100, Number(coachA.ego) || 50)) +
+                    Math.max(0, Math.min(100, Number(coachB.ego) || 50))
+                ) / 2;
+
+                const collaborationGain =
+                    0.12 +
+                    averageAdaptability * 0.002 +
+                    averageRelationshipOrientation * 0.001 +
+                    (complementaryAssignments ? 0.12 : 0);
+
+                const tacticalFriction =
+                    Math.max(0, 55 - baseline) *
+                    (1 - averageAdaptability / 100) *
+                    0.07;
+
+                const egoFriction =
+                    Math.max(0, averageEgo - 60) * 0.008;
+
+                const relationshipBuffer =
+                    averageRelationshipOrientation * 0.001;
+
+                const tension = Math.max(
+                    0,
+                    tacticalFriction +
+                    egoFriction -
+                    relationshipBuffer
+                );
+
+                // Small natural drift keeps relationships from becoming fixed.
+                const familiarityDrift = (50 - currentScore) * 0.001;
+
+                relationship.score = Math.max(
+                    0,
+                    Math.min(
+                        100,
+                        currentScore +
+                        collaborationGain -
+                        tension +
+                        familiarityDrift
+                    )
+                );
+
+                relationship.weeksWorkedTogether =
+                    (Number(relationship.weeksWorkedTogether) || 0) + 1;
+            } else {
+                relationship.score = currentScore;
+            }
+
+            relationship.baseline = baseline;
+            relationship.lastInteractionYear = year;
+            relationship.lastInteractionWeek = week;
+
+            relationshipScores.set(
+                String(coachA.id),
+                [
+                    ...(relationshipScores.get(String(coachA.id)) || []),
+                    relationship.score
+                ]
+            );
+
+            relationshipScores.set(
+                String(coachB.id),
+                [
+                    ...(relationshipScores.get(String(coachB.id)) || []),
+                    relationship.score
+                ]
+            );
+        }
+    }
+
+    const coachChemistry = [];
+
+    for (const coach of coaches) {
+        const scores = relationshipScores.get(String(coach.id)) || [];
+
+        if (scores.length === 0) continue;
+
+        const averageRelationship = scores.reduce(
+            (sum, value) => sum + value,
+            0
+        ) / scores.length;
+
+        // Very poor relationships gradually affect staff morale.
+        // Healthy relationships provide a smaller positive benefit.
+        let moraleChange = 0;
+
+        if (averageRelationship < 35) {
+            moraleChange = -Math.min(
+                0.40,
+                (35 - averageRelationship) * 0.015
+            );
+        } else if (averageRelationship > 75) {
+            moraleChange = Math.min(
+                0.10,
+                (averageRelationship - 75) * 0.004
+            );
+        }
+
+        if (
+            !coach.isUserCoach &&
+            Number.isFinite(Number(coach.happiness))
+        ) {
+            coach.happiness = Math.max(
+                0,
+                Math.min(
+                    100,
+                    Number(coach.happiness) + moraleChange
+                )
+            );
+        }
+
+        coach.staffChemistry = {
+            averageRelationship: Math.round(averageRelationship),
+            moraleChange: Math.round(moraleChange * 100) / 100,
+            updatedYear: year,
+            updatedWeek: week
+        };
+
+        coachChemistry.push(averageRelationship);
+    }
+
+    const averageRelationship = coachChemistry.length > 0
+        ? coachChemistry.reduce((sum, value) => sum + value, 0) /
+            coachChemistry.length
+        : null;
+
+    team.coachingGroupDynamics = {
+        lastResolvedWeekKey: weekKey,
+        averageRelationship: averageRelationship === null
+            ? null
+            : Math.round(averageRelationship),
+        pairCount: coachChemistry.length
+    };
+
+    return team.coachingGroupDynamics;
+}
+
 /**
  * Advances coach development once per team, year, and week.
  *
@@ -2343,6 +2763,15 @@ export function processWeeklyCoachDevelopment(team, year, week) {
 
         development.lastResolvedWeekKey = weekKey;
     }
+
+    // Resolve coaching relationships once per team and week.
+    processCoachingGroupDynamics(
+        team,
+        coaches,
+        hoursByCoach,
+        year,
+        week
+    );
 
     return improvements;
 }
@@ -4690,9 +5119,39 @@ export function getCoachingGroupFit(team) {
         diversity * 0.50
     );
 
-    const score = Math.round(
+    const baseScore =
         alignment * 0.75 +
-        complementarity * 0.25
+        complementarity * 0.25;
+
+    const activeCoachIds = new Set(
+        ensureTeamCoachingStaff(team)
+            .filter(coach => coach?.id != null)
+            .map(coach => String(coach.id))
+    );
+
+    const currentRelationships = Object.values(
+        team.coachRelationships || {}
+    ).filter(relationship =>
+        Array.isArray(relationship?.coachIds) &&
+        relationship.coachIds.length === 2 &&
+        relationship.coachIds.every(id =>
+            activeCoachIds.has(String(id))
+        ) &&
+        Number.isFinite(Number(relationship.score))
+    );
+
+    const relationshipScore = currentRelationships.length > 0
+        ? currentRelationships.reduce(
+            (sum, relationship) => sum +
+                Math.max(0, Math.min(100, Number(relationship.score))),
+            0
+        ) / currentRelationships.length
+        : baseScore;
+
+    // Relationships gradually become part of the group's overall fit.
+    const score = Math.round(
+        baseScore * 0.85 +
+        relationshipScore * 0.15
     );
 
     let label;
@@ -12124,11 +12583,48 @@ export function resolveCoachCarousel(
             }
         }
 
+        // Estimate how the candidate would mesh with the existing staff.
+        // This is a prediction; actual relationships develop after hiring.
+        const existingGroupRelationships = existingStaffCoaches
+            .filter(existing =>
+                existing?.id != null &&
+                String(existing.id) !== String(candidate.id)
+            )
+            .map(existing =>
+                getInitialCoachRelationshipScore(
+                    candidate,
+                    existing
+                )
+            )
+            .filter(Number.isFinite);
+
+        const groupChemistryScore =
+            existingGroupRelationships.length > 0
+                ? existingGroupRelationships.reduce(
+                    (sum, value) => sum + value,
+                    0
+                ) / existingGroupRelationships.length
+                : 60;
+
+        // A compatible addition receives a modest bonus.
+        // A potentially difficult fit receives a modest penalty.
+        const groupChemistryAdjustment =
+            existingGroupRelationships.length > 0
+                ? Math.max(
+                    -4,
+                    Math.min(
+                        3.5,
+                        (groupChemistryScore - 60) * 0.12
+                    )
+                )
+                : 0;
+
         let fitScore =
             rep * 0.45 +
             roleFit * 0.55 +
             careerAdjustment +
-            complementarityBonus;
+            complementarityBonus +
+            groupChemistryAdjustment;
 
         const tacticalId = getStaffProfileId(candidate, 'tactical');
         const offense = team.formations?.offense || '';
@@ -12226,7 +12722,11 @@ export function resolveCoachCarousel(
             pitch,
             offeredStipend,
             offeredTokens,
-            fitScore
+            fitScore,
+            groupChemistryScore: Math.round(groupChemistryScore),
+            groupChemistryAdjustment: Math.round(
+                groupChemistryAdjustment * 100
+            ) / 100
         };
     };
 
