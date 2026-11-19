@@ -21611,44 +21611,1638 @@ export function updateMessagesNotification(messages) {
 }
 
 export function renderOffseasonScreen(report, year) {
-    if (elements.offseasonYear) elements.offseasonYear.textContent = year;
+    const gameState = getGameState();
 
-    // 1. Player Development List
-    const devContainer = elements.playerDevelopmentContainer;
-    if (devContainer) {
-        if (report?.developmentResults && report.developmentResults.length > 0) {
-            devContainer.innerHTML = report.developmentResults.map(r => `
-                <div class="p-2.5 bg-white rounded border border-green-200 text-xs mb-1 shadow-sm">
-                    <span class="font-bold text-gray-900">${r.player.name} (${r.player.age}yo)</span>
-                    <div class="text-green-700 font-semibold mt-1">
-                        ${r.improvements.map(i => `<span class="bg-green-50 px-1.5 py-0.5 rounded border border-green-200 mr-1">${i.attr} +${i.increase}</span>`).join('') || '<span class="text-gray-400">No gains</span>'}
-                    </div>
-                </div>
-            `).join('');
-        } else {
-            devContainer.innerHTML = '<p class="text-gray-400 italic text-xs p-2">No player improvements this year.</p>';
+    // The game year has already advanced by the time this screen opens.
+    // Prefer the explicit completed-season value saved during rollover.
+    const savedCompletedYear = Number(
+        gameState?.offseasonState?.completedSeasonYear
+    );
+
+    const passedYear = Number(year);
+
+    const completedSeasonYear =
+        Number.isInteger(savedCompletedYear) && savedCompletedYear > 0
+            ? savedCompletedYear
+            : Number.isInteger(passedYear) && passedYear > 1
+                ? passedYear - 1
+                : passedYear;
+
+    if (elements.offseasonYear) {
+        elements.offseasonYear.textContent = Number.isFinite(completedSeasonYear)
+            ? completedSeasonYear
+            : year;
+    }
+
+    const seasonEntry = [
+        ...(gameState?.history?.seasons || [])
+    ].reverse().find(season =>
+        Number(season?.year) === completedSeasonYear
+    );
+
+    // Normalize the report collections so older or partial saves
+    // can still render the offseason screen safely.
+    const developmentResults = Array.isArray(report?.developmentResults)
+        ? report.developmentResults
+        : [];
+
+    const retiredPlayers = Array.isArray(report?.retiredPlayers)
+        ? report.retiredPlayers
+        : [];
+
+    const leavingPlayers = Array.isArray(report?.leavingPlayers)
+        ? report.leavingPlayers
+        : [];
+
+    const hofInductees = Array.isArray(report?.hofInductees)
+        ? report.hofInductees
+        : [];
+
+    const escapeOffseasonHtml = value =>
+        String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]);
+
+    // Find the user's final league position from the completed season.
+    // The detailed report snapshot is preferred; older season records
+    // can fall back to their original standings list.
+    const playerTeam = gameState?.playerTeam;
+
+    const teamMatchesRecord = record =>
+        (
+            playerTeam?.id != null &&
+            record?.id != null &&
+            String(record.id) === String(playerTeam.id)
+        ) ||
+        (
+            playerTeam?.name &&
+            String(record?.name) === String(playerTeam.name)
+        );
+
+    let teamFinish = null;
+
+    const seasonLeagues = [
+        {
+            key: 'premier',
+            label: 'Premier League'
+        },
+        {
+            key: 'sandlot',
+            label: 'Sandlot League'
+        }
+    ];
+
+    for (const league of seasonLeagues) {
+        const standings = seasonEntry?.reportSnapshot?.leagues?.[league.key]?.standings;
+
+        if (!Array.isArray(standings)) continue;
+
+        const standing = standings.find(teamMatchesRecord);
+
+        if (standing) {
+            teamFinish = {
+                leagueLabel: league.label,
+                standing
+            };
+
+            break;
         }
     }
 
-    // 2. Retirements List
+    // Legacy-save fallback: older season entries stored standings
+    // outside reportSnapshot.
+    if (!teamFinish && Array.isArray(seasonEntry?.standings)) {
+        const legacyStanding = seasonEntry.standings.find(teamMatchesRecord);
+
+        if (legacyStanding) {
+            const sameLeagueStandings = seasonEntry.standings.filter(team =>
+                Number(team?.tier) === Number(legacyStanding?.tier)
+            );
+
+            const legacyPlace =
+                sameLeagueStandings.findIndex(teamMatchesRecord) + 1;
+
+            teamFinish = {
+                leagueLabel:
+                    Number(legacyStanding.tier) === 1
+                        ? 'Premier League'
+                        : 'Sandlot League',
+                standing: {
+                    ...legacyStanding,
+                    place: legacyPlace > 0 ? legacyPlace : null
+                }
+            };
+        }
+    }
+
+    // Insert the panel immediately below the season header.
+    // Creating it here avoids requiring another HTML change.
+    const performanceRoot = document.getElementById('offseason-screen');
+
+    let performancePanel = document.getElementById(
+        'offseason-team-performance'
+    );
+
+    if (!performancePanel) {
+        const reportPage =
+            performanceRoot?.querySelector('.max-w-7xl') ||
+            performanceRoot;
+
+        const reportHeader =
+            reportPage?.querySelector('.rounded-xl.bg-slate-900');
+
+        const insertionPoint =
+            reportHeader || reportPage?.firstElementChild;
+
+        if (insertionPoint?.parentElement) {
+            performancePanel = document.createElement('section');
+            performancePanel.id = 'offseason-team-performance';
+
+            insertionPoint.insertAdjacentElement(
+                'afterend',
+                performancePanel
+            );
+        }
+    }
+
+    if (performancePanel) {
+        if (teamFinish) {
+            const standing = teamFinish.standing;
+
+            const wins = Number(standing?.wins) || 0;
+            const losses = Number(standing?.losses) || 0;
+            const ties = Number(standing?.ties) || 0;
+            const place = Number(standing?.place);
+
+            const placeSuffix =
+                place % 100 >= 11 && place % 100 <= 13
+                    ? 'th'
+                    : place % 10 === 1
+                        ? 'st'
+                        : place % 10 === 2
+                            ? 'nd'
+                            : place % 10 === 3
+                                ? 'rd'
+                                : 'th';
+
+            const placeLabel =
+                Number.isInteger(place) && place > 0
+                    ? `${place}${placeSuffix}`
+                    : '—';
+
+            const recordLabel =
+                `${wins}-${losses}${ties > 0 ? `-${ties}` : ''}`;
+
+            const finishLabel =
+                place === 1
+                    ? 'League Champion'
+                    : place === 2
+                        ? 'Runner-up'
+                        : Number.isInteger(place) && place > 0
+                            ? `${placeLabel} place`
+                            : 'Final position unavailable';
+
+            const teamName = escapeOffseasonHtml(
+                playerTeam?.name || standing?.name || 'Your Team'
+            );
+
+            const leagueName = escapeOffseasonHtml(
+                teamFinish.leagueLabel
+            );
+
+            const wasPromoted = (seasonEntry?.promoted || []).some(name =>
+                String(name) === String(playerTeam?.name)
+            );
+
+            const wasRelegated = (seasonEntry?.relegated || []).some(name =>
+                String(name) === String(playerTeam?.name)
+            );
+
+            const movementBadge = wasPromoted
+                ? `
+                    <span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-800">
+                        ↑ Promoted
+                    </span>
+                `
+                : wasRelegated
+                    ? `
+                        <span class="inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-rose-800">
+                            ↓ Relegated
+                        </span>
+                    `
+                    : '';
+
+            const finishColor =
+                place === 1
+                    ? 'text-amber-600'
+                    : place <= 2 && place > 0
+                        ? 'text-emerald-700'
+                        : 'text-slate-900';
+
+            performancePanel.className =
+                'rounded-xl border border-slate-200 bg-white p-4 shadow-sm';
+
+            performancePanel.innerHTML = `
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                            Your Season
+                        </p>
+
+                        <h3 class="mt-1 text-base font-black text-slate-900">
+                            ${teamName}
+                        </h3>
+
+                        <p class="mt-0.5 text-xs font-semibold text-slate-500">
+                            ${leagueName}
+                        </p>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600">
+                            ${escapeOffseasonHtml(finishLabel)}
+                        </span>
+
+                        ${movementBadge}
+                    </div>
+                </div>
+
+                <div class="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+                    <div class="rounded-lg bg-slate-50 p-3">
+                        <p class="text-[9px] font-black uppercase tracking-wider text-slate-400">
+                            Final Record
+                        </p>
+
+                        <p class="mt-1 text-2xl font-black tabular-nums text-slate-900">
+                            ${recordLabel}
+                        </p>
+                    </div>
+
+                    <div class="rounded-lg bg-slate-50 p-3">
+                        <p class="text-[9px] font-black uppercase tracking-wider text-slate-400">
+                            League Finish
+                        </p>
+
+                        <p class="mt-1 text-2xl font-black tabular-nums ${finishColor}">
+                            ${placeLabel}
+                        </p>
+                    </div>
+
+                    <div class="col-span-2 rounded-lg border border-slate-100 bg-white p-3 md:col-span-1">
+                        <p class="text-[9px] font-black uppercase tracking-wider text-slate-400">
+                            Season Result
+                        </p>
+
+                        <p class="mt-1 text-sm font-black text-slate-800">
+                            ${escapeOffseasonHtml(finishLabel)}
+                        </p>
+
+                        <p class="mt-1 text-[10px] text-slate-500">
+                            Final recorded league standings
+                        </p>
+                    </div>
+                </div>
+            `;
+        } else {
+            performancePanel.className =
+                'rounded-xl border border-slate-200 bg-white p-4 shadow-sm';
+
+            performancePanel.innerHTML = `
+                <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                    Your Season
+                </p>
+
+                <p class="mt-2 text-sm font-bold text-slate-700">
+                    Team standings unavailable
+                </p>
+
+                <p class="mt-1 text-xs text-slate-500">
+                    This save does not contain a final league standing for your team in this season.
+                </p>
+            `;
+        }
+    }
+
+    // League-wide season recap: champions and Premier League leaders.
+    const premierSnapshot =
+        seasonEntry?.reportSnapshot?.leagues?.premier;
+
+    const leagueChampions = [
+        {
+            label: 'Premier League',
+            name: seasonEntry?.champion
+        },
+        {
+            label: 'Sandlot League',
+            name: seasonEntry?.tier2Champion
+        },
+        {
+            label: 'Pee Wee League',
+            name: seasonEntry?.youthChampion
+        }
+    ];
+
+    const leaderCategories = [
+        {
+            key: 'passing',
+            label: 'Passing',
+            unit: 'YDS',
+            legacyKey: 'passer'
+        },
+        {
+            key: 'rushing',
+            label: 'Rushing',
+            unit: 'YDS',
+            legacyKey: 'rusher'
+        },
+        {
+            key: 'receiving',
+            label: 'Receiving',
+            unit: 'YDS'
+        },
+        {
+            key: 'defense',
+            label: 'Tackles',
+            unit: 'TKL',
+            legacyKey: 'tackler'
+        },
+        {
+            key: 'scoring',
+            label: 'Touchdowns',
+            unit: 'TD'
+        }
+    ];
+
+    const leaderCards = leaderCategories.map(category => {
+        const leader =
+            premierSnapshot?.leaders?.[category.key]?.[0];
+
+        if (leader) {
+            const value = Number(leader.value);
+
+            return `
+                <article class="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
+                    <p class="text-[9px] font-black uppercase tracking-wider text-slate-400">
+                        ${category.label}
+                    </p>
+
+                    <p class="mt-2 truncate text-xs font-black text-slate-900">
+                        ${escapeOffseasonHtml(leader.name || 'Unknown')}
+                    </p>
+
+                    <p class="mt-1 text-lg font-black tabular-nums text-slate-800">
+                        ${Number.isFinite(value)
+                            ? value.toLocaleString()
+                            : '—'}
+                        <span class="text-[9px] font-bold text-slate-400">
+                            ${category.unit}
+                        </span>
+                    </p>
+
+                    <p class="mt-1 truncate text-[9px] text-slate-500">
+                        ${escapeOffseasonHtml(leader.teamName || 'Unknown Team')}
+                        ${leader.position
+                            ? ` · ${escapeOffseasonHtml(leader.position)}`
+                            : ''}
+                    </p>
+                </article>
+            `;
+        }
+
+        const legacyValue = category.legacyKey
+            ? seasonEntry?.leaders?.[category.legacyKey]
+            : null;
+
+        return `
+            <article class="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
+                <p class="text-[9px] font-black uppercase tracking-wider text-slate-400">
+                    ${category.label}
+                </p>
+
+                <p class="mt-2 text-xs font-bold text-slate-700">
+                    ${escapeOffseasonHtml(
+                        legacyValue && legacyValue !== 'None'
+                            ? legacyValue
+                            : 'No leader recorded'
+                    )}
+                </p>
+            </article>
+        `;
+    }).join('');
+
+    let leagueHighlightsPanel = document.getElementById(
+        'offseason-league-highlights'
+    );
+
+    const leagueHighlightsAnchor =
+        performancePanel ||
+        performanceRoot?.querySelector('.rounded-xl.bg-slate-900');
+
+    if (!leagueHighlightsPanel && leagueHighlightsAnchor?.parentElement) {
+        leagueHighlightsPanel = document.createElement('section');
+        leagueHighlightsPanel.id = 'offseason-league-highlights';
+
+        leagueHighlightsAnchor.insertAdjacentElement(
+            'afterend',
+            leagueHighlightsPanel
+        );
+    } else if (
+        leagueHighlightsPanel &&
+        leagueHighlightsAnchor &&
+        leagueHighlightsPanel !== leagueHighlightsAnchor.nextElementSibling
+    ) {
+        leagueHighlightsAnchor.insertAdjacentElement(
+            'afterend',
+            leagueHighlightsPanel
+        );
+    }
+
+    if (leagueHighlightsPanel) {
+        leagueHighlightsPanel.className =
+            'rounded-xl border border-slate-200 bg-slate-50 p-4';
+
+        leagueHighlightsPanel.innerHTML = `
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                        Around the League
+                    </p>
+
+                    <h3 class="mt-1 text-base font-black text-slate-900">
+                        Year ${escapeOffseasonHtml(completedSeasonYear)} in Review
+                    </h3>
+                </div>
+
+                <span class="rounded-full border border-slate-200 bg-white px-3 py-1 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                    League Honors
+                </span>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                ${leagueChampions.map(champion => `
+                    <div class="flex min-w-0 items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-lg">
+                            🏆
+                        </span>
+
+                        <div class="min-w-0">
+                            <p class="text-[9px] font-black uppercase tracking-wider text-amber-700">
+                                ${champion.label}
+                            </p>
+
+                            <p class="mt-1 truncate text-xs font-black text-amber-950">
+                                ${escapeOffseasonHtml(
+                                    champion.name || 'Not recorded'
+                                )}
+                            </p>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+
+            <div class="mt-5">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                    <h4 class="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                        Premier League Statistical Leaders
+                    </h4>
+
+                    <span class="text-[9px] text-slate-400">
+                        Season totals
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                    ${leaderCards}
+                </div>
+            </div>
+        `;
+    }
+
+    // 5. Coaching Staff Recap
+    const teamStaffDepartures = (
+        Array.isArray(report?.staffDepartures)
+            ? report.staffDepartures
+            : []
+    ).filter(departure =>
+        playerTeamId != null &&
+        String(departure?.teamId) === playerTeamId
+    );
+
+    const departedCoachIds = new Set(
+        teamStaffDepartures
+            .filter(departure => departure?.coachId != null)
+            .map(departure => String(departure.coachId))
+    );
+
+    const teamStaffHappinessChanges = (
+        Array.isArray(report?.staffHappinessChanges)
+            ? report.staffHappinessChanges
+            : []
+    ).filter(change =>
+        playerTeamId != null &&
+        String(change?.teamId) === playerTeamId &&
+        !departedCoachIds.has(String(change?.coachId))
+    ).sort((a, b) =>
+        (Number(a?.change) || 0) - (Number(b?.change) || 0)
+    );
+
+    let staffRecapPanel = document.getElementById(
+        'offseason-staff-recap'
+    );
+
+    const staffRecapAnchor =
+        leagueHighlightsPanel ||
+        performancePanel;
+
+    if (!staffRecapPanel && staffRecapAnchor?.parentElement) {
+        staffRecapPanel = document.createElement('section');
+        staffRecapPanel.id = 'offseason-staff-recap';
+
+        staffRecapAnchor.insertAdjacentElement(
+            'afterend',
+            staffRecapPanel
+        );
+    } else if (
+        staffRecapPanel &&
+        staffRecapAnchor &&
+        staffRecapPanel !== staffRecapAnchor.nextElementSibling
+    ) {
+        staffRecapAnchor.insertAdjacentElement(
+            'afterend',
+            staffRecapPanel
+        );
+    }
+
+    if (staffRecapPanel) {
+        const departureCards = teamStaffDepartures.length > 0
+            ? teamStaffDepartures.map(departure => {
+                const coachName = escapeOffseasonHtml(
+                    departure?.coachName || 'Unknown Coach'
+                );
+
+                const reason = escapeOffseasonHtml(
+                    departure?.reason || 'Departure reason not recorded'
+                );
+
+                const departureType = departure?.lifeEvent
+                    ? 'Personal circumstances'
+                    : 'Staffing change';
+
+                return `
+                    <article class="flex min-w-0 items-start gap-3 rounded-lg border border-rose-100 bg-white p-3">
+                        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-50 text-lg">
+                            👋
+                        </span>
+
+                        <div class="min-w-0 flex-1">
+                            <p class="truncate text-xs font-black text-slate-900">
+                                ${coachName}
+                            </p>
+
+                            <p class="mt-1 text-[9px] font-bold uppercase tracking-wide text-rose-700">
+                                ${departureType}
+                            </p>
+
+                            <p class="mt-1 text-[10px] leading-relaxed text-slate-600">
+                                ${reason}
+                            </p>
+                        </div>
+                    </article>
+                `;
+            }).join('')
+            : `
+                <div class="rounded-lg border border-dashed border-slate-200 bg-white p-3 text-center">
+                    <span class="text-xl">🤝</span>
+
+                    <p class="mt-1 text-[10px] font-semibold text-slate-600">
+                        No coaching staff departures this season.
+                    </p>
+                </div>
+            `;
+
+        const happinessCards = teamStaffHappinessChanges.length > 0
+            ? teamStaffHappinessChanges.map(change => {
+                const coachName = escapeOffseasonHtml(
+                    change?.coachName || 'Unknown Coach'
+                );
+
+                const previousHappiness = Number(
+                    change?.previousHappiness
+                );
+
+                const currentHappiness = Number(
+                    change?.happiness
+                );
+
+                const happinessChange = Number(change?.change);
+
+                const changeIsPositive =
+                    Number.isFinite(happinessChange) &&
+                    happinessChange > 0;
+
+                const changeIsNegative =
+                    Number.isFinite(happinessChange) &&
+                    happinessChange < 0;
+
+                const changeLabel =
+                    Number.isFinite(happinessChange)
+                        ? `${happinessChange > 0 ? '+' : ''}${happinessChange}`
+                        : '—';
+
+                const changeStyle = changeIsPositive
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    : changeIsNegative
+                        ? 'border-rose-200 bg-rose-50 text-rose-800'
+                        : 'border-slate-200 bg-slate-50 text-slate-600';
+
+                const happinessLabel =
+                    Number.isFinite(previousHappiness) &&
+                    Number.isFinite(currentHappiness)
+                        ? `${Math.round(previousHappiness)} → ${Math.round(currentHappiness)}`
+                        : Number.isFinite(currentHappiness)
+                            ? `${Math.round(currentHappiness)} / 100`
+                            : 'Not recorded';
+
+                const currentHappinessStyle =
+                    Number.isFinite(currentHappiness)
+                        ? currentHappiness >= 75
+                            ? 'text-emerald-700'
+                            : currentHappiness < 45
+                                ? 'text-rose-700'
+                                : 'text-slate-800'
+                        : 'text-slate-500';
+
+                return `
+                    <article class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                        <div class="min-w-0">
+                            <p class="truncate text-xs font-black text-slate-900">
+                                ${coachName}
+                            </p>
+
+                            <p class="mt-1 text-[9px] text-slate-500">
+                                Season-end happiness
+                            </p>
+
+                            <p class="mt-1 text-[10px] font-bold tabular-nums ${currentHappinessStyle}">
+                                ${happinessLabel}
+                            </p>
+                        </div>
+
+                        <span class="shrink-0 rounded border ${changeStyle} px-2.5 py-1 text-xs font-black tabular-nums">
+                            ${changeLabel}
+                        </span>
+                    </article>
+                `;
+            }).join('')
+            : `
+                <div class="rounded-lg border border-dashed border-slate-200 bg-white p-3 text-center">
+                    <span class="text-xl">📊</span>
+
+                    <p class="mt-1 text-[10px] font-semibold text-slate-600">
+                        No staff morale changes recorded.
+                    </p>
+                </div>
+            `;
+
+        staffRecapPanel.className =
+            'rounded-xl border border-slate-200 bg-slate-50 p-4';
+
+        staffRecapPanel.innerHTML = `
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                        Staff Room
+                    </p>
+
+                    <h3 class="mt-1 text-base font-black text-slate-900">
+                        Coaching Staff Recap
+                    </h3>
+                </div>
+
+                <span class="rounded-full border border-slate-200 bg-white px-3 py-1 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                    ${teamStaffDepartures.length} departure${teamStaffDepartures.length === 1 ? '' : 's'}
+                </span>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div class="min-w-0">
+                    <div class="mb-2 flex items-center justify-between gap-2">
+                        <h4 class="text-[10px] font-black uppercase tracking-wider text-slate-600">
+                            Staff Departures
+                        </h4>
+
+                        <span class="text-[9px] text-slate-400">
+                            ${teamStaffDepartures.length} total
+                        </span>
+                    </div>
+
+                    <div class="space-y-2">
+                        ${departureCards}
+                    </div>
+                </div>
+
+                <div class="min-w-0">
+                    <div class="mb-2 flex items-center justify-between gap-2">
+                        <h4 class="text-[10px] font-black uppercase tracking-wider text-slate-600">
+                            Staff Morale
+                        </h4>
+
+                        <span class="text-[9px] text-slate-400">
+                            Remaining coaches
+                        </span>
+                    </div>
+
+                    <div class="space-y-2">
+                        ${happinessCards}
+                    </div>
+                </div>
+            </div>
+
+            <p class="mt-3 text-[10px] leading-relaxed text-slate-500">
+                Review staff vacancies and coach relationships during the upcoming Coaching Staff Review.
+            </p>
+        `;
+    }
+
+    // Your team's players who appeared among the saved league leaders.
+    const previousTeamLeadersPanel = document.getElementById(
+        'offseason-team-leaders'
+    );
+
+    previousTeamLeadersPanel?.remove();
+
+    let teamLeadersNameKey = String(playerTeam?.name || '')
+        .trim()
+        .toLowerCase();
+
+    const teamLeaderLeagueEntries = Object.entries(
+        seasonEntry?.reportSnapshot?.leagues || {}
+    );
+
+    const teamLeaderLeagueEntry = teamLeaderLeagueEntries.find(
+        ([, league]) => {
+            return Array.isArray(league?.standings) &&
+                league.standings.some(team => {
+                    const sameId =
+                        playerTeam?.id != null &&
+                        team?.id != null &&
+                        String(team.id) === String(playerTeam.id);
+
+                    const sameName =
+                        teamLeadersNameKey &&
+                        String(team?.name || '')
+                            .trim()
+                            .toLowerCase() === teamLeadersNameKey;
+
+                    return sameId || sameName;
+                });
+        }
+    );
+
+    if (teamLeaderLeagueEntry) {
+        const [teamLeaderLeagueKey, teamLeaderLeague] =
+            teamLeaderLeagueEntry;
+
+        const historicalTeamEntry = (
+            teamLeaderLeague?.standings || []
+        ).find(team => {
+            const sameId =
+                playerTeam?.id != null &&
+                team?.id != null &&
+                String(team.id) === String(playerTeam.id);
+
+            const sameName =
+                String(team?.name || '')
+                    .trim()
+                    .toLowerCase() === teamLeadersNameKey;
+
+            return sameId || sameName;
+        });
+
+        if (historicalTeamEntry?.name) {
+            teamLeadersNameKey = String(historicalTeamEntry.name)
+                .trim()
+                .toLowerCase();
+        }
+
+        const teamLeaderLeagueLabels = {
+            premier: 'Premier League',
+            sandlot: 'Sandlot Circuit',
+            peewee: 'Pee Wee League'
+        };
+
+        const teamLeaderCategoryLabels = {
+            passing: {
+                label: 'Passing',
+                suffix: 'yds'
+            },
+            rushing: {
+                label: 'Rushing',
+                suffix: 'yds'
+            },
+            receiving: {
+                label: 'Receiving',
+                suffix: 'yds'
+            },
+            defense: {
+                label: 'Defense',
+                suffix: ''
+            },
+            tackling: {
+                label: 'Defense',
+                suffix: 'tackles'
+            },
+            scoring: {
+                label: 'Scoring',
+                suffix: 'TDs'
+            }
+        };
+
+        const savedTeamLeaderGroups = teamLeaderLeague?.leaders || {};
+
+        const savedTeamLeaderGroupsAvailable = Object.values(
+            savedTeamLeaderGroups
+        ).some(group => Array.isArray(group));
+
+        const teamLeaderRecords = Object.entries(
+            savedTeamLeaderGroups
+        ).flatMap(([category, entries]) => {
+            if (!Array.isArray(entries)) return [];
+
+            const categoryInfo =
+                teamLeaderCategoryLabels[category] || {
+                    label: category.charAt(0).toUpperCase() +
+                        category.slice(1),
+                    suffix: ''
+                };
+
+            return entries
+                .filter(leader => {
+                    return String(leader?.teamName || '')
+                        .trim()
+                        .toLowerCase() === teamLeadersNameKey;
+                })
+                .map(leader => ({
+                    category: categoryInfo.label,
+                    name: leader?.name || 'Unknown Player',
+                    position: leader?.position || '',
+                    value:
+                        leader?.value !== undefined &&
+                        leader?.value !== null &&
+                        leader?.value !== ''
+                            ? `${leader.value}${categoryInfo.suffix
+                                ? ` ${categoryInfo.suffix}`
+                                : ''}`
+                            : ''
+                }));
+        });
+
+        const teamLeaderLeagueLabel =
+            teamLeaderLeagueLabels[teamLeaderLeagueKey] ||
+            'Your League';
+
+        const teamLeaderPanelContent = teamLeaderRecords.length
+            ? `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    ${teamLeaderRecords.map(leader => `
+                        <div class="rounded-lg border border-slate-200 bg-white p-3">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="text-xs font-bold uppercase tracking-wide text-indigo-600">
+                                    ${escapeOffseasonHtml(leader.category)}
+                                </span>
+                                <span class="text-xs font-semibold text-slate-500">
+                                    ${escapeOffseasonHtml(leader.position)}
+                                </span>
+                            </div>
+
+                            <div class="mt-1 flex items-center justify-between gap-3">
+                                <span class="font-bold text-slate-900">
+                                    ${escapeOffseasonHtml(leader.name)}
+                                </span>
+                                <span class="text-sm font-bold text-slate-700 whitespace-nowrap">
+                                    ${escapeOffseasonHtml(leader.value)}
+                                </span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `
+            : savedTeamLeaderGroupsAvailable
+                ? `
+                    <p class="text-sm text-slate-500">
+                        None of your players appeared in the saved
+                        ${escapeOffseasonHtml(teamLeaderLeagueLabel)}
+                        leader groups this season.
+                    </p>
+                `
+                : `
+                    <p class="text-sm text-slate-500">
+                        Detailed player leader records are not available
+                        for this season.
+                    </p>
+                `;
+
+        const teamLeadersPanelAnchor =
+            document.getElementById('offseason-staff-recap') ||
+            document.getElementById('offseason-league-highlights') ||
+            document.getElementById('offseason-team-performance');
+
+        if (teamLeadersPanelAnchor) {
+            teamLeadersPanelAnchor.insertAdjacentHTML(
+                'afterend',
+                `
+                    <section id="offseason-team-leaders"
+                        class="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 shadow-sm">
+
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+                            <div>
+                                <h3 class="text-lg font-black text-slate-900">
+                                    Your Team's Season Leaders
+                                </h3>
+                                <p class="text-sm text-slate-500 mt-1">
+                                    Players who reached the top statistical groups
+                                    in the ${escapeOffseasonHtml(teamLeaderLeagueLabel)}
+                                </p>
+                            </div>
+
+                            <span class="rounded-full bg-white border border-indigo-200 px-3 py-1 text-xs font-bold text-indigo-700">
+                                ${teamLeaderRecords.length} Leader${teamLeaderRecords.length === 1 ? '' : 's'}
+                            </span>
+                        </div>
+
+                        ${teamLeaderPanelContent}
+                    </section>
+                `
+            );
+        }
+    }
+
+    const formatOffseasonAttribute = value => {
+        String(value ?? 'Attribute')
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+    const formatOffseasonIncrease = value => {
+        const increase = Number(value);
+
+        if (!Number.isFinite(increase)) return 'Improved';
+
+        const formatted = Number.isInteger(increase)
+            ? increase
+            : increase.toFixed(1);
+
+        return `+${formatted}`;
+    };
+
+    // Separate the user's roster from the rest of the league.
+    const playerTeamId = gameState?.playerTeam?.id != null
+        ? String(gameState.playerTeam.id)
+        : null;
+
+    const teamById = new Map(
+        (gameState?.teams || [])
+            .filter(team => team?.id != null)
+            .map(team => [String(team.id), team])
+    );
+
+    const getDevelopmentChanges = record =>
+        Array.isArray(record?.improvements)
+            ? record.improvements
+            : [];
+
+    const getChangeValue = improvement => {
+        const value = Number(improvement?.increase);
+
+        return Number.isFinite(value) ? value : 0;
+    };
+
+    const getPositiveChangeCount = record =>
+        getDevelopmentChanges(record).filter(
+            improvement => getChangeValue(improvement) > 0
+        ).length;
+
+    const getNegativeChangeCount = record =>
+        getDevelopmentChanges(record).filter(
+            improvement => getChangeValue(improvement) < 0
+        ).length;
+
+    const hasMeasuredChanges = record =>
+        getDevelopmentChanges(record).some(
+            improvement => getChangeValue(improvement) !== 0
+        );
+
+    const rosterDevelopmentResults = playerTeamId
+        ? developmentResults.filter(record =>
+            record?.player?.teamId != null &&
+            String(record.player.teamId) === playerTeamId
+        )
+        : developmentResults;
+
+    const leagueDevelopmentResults = playerTeamId
+        ? developmentResults.filter(record =>
+            record?.player?.teamId != null &&
+            String(record.player.teamId) !== playerTeamId
+        )
+        : [];
+
+    const rosterPlayersWithGains = rosterDevelopmentResults.filter(
+        record => getPositiveChangeCount(record) > 0
+    );
+
+    const rosterTotalAttributeGains = rosterDevelopmentResults.reduce(
+        (total, record) =>
+            total + getPositiveChangeCount(record),
+        0
+    );
+
+    const rosterDevelopmentCards = rosterDevelopmentResults
+        .filter(hasMeasuredChanges)
+        .sort((a, b) =>
+            getPositiveChangeCount(b) - getPositiveChangeCount(a) ||
+            getNegativeChangeCount(a) - getNegativeChangeCount(b) ||
+            String(a?.player?.name || '').localeCompare(
+                String(b?.player?.name || '')
+            )
+        );
+
+    // League-wide spotlight: show only a handful of notable cases,
+    // rather than rendering every player in every team.
+    const leagueDevelopmentSpotlight = leagueDevelopmentResults
+        .filter(record =>
+            getPositiveChangeCount(record) > 0
+        )
+        .sort((a, b) =>
+            getPositiveChangeCount(b) - getPositiveChangeCount(a) ||
+            getNegativeChangeCount(a) - getNegativeChangeCount(b) ||
+            String(a?.player?.name || '').localeCompare(
+                String(b?.player?.name || '')
+            )
+        )
+        .slice(0, 5);
+
+    const totalDepartures =
+        retiredPlayers.length + leavingPlayers.length;
+
+    const setOffseasonCount = (id, value) => {
+        const element = document.getElementById(id);
+
+        if (element) {
+            element.textContent = String(value);
+        }
+    };
+
+    // At-a-glance counts now reflect your team, not the entire league.
+    setOffseasonCount(
+        'offseason-development-player-count',
+        rosterPlayersWithGains.length
+    );
+
+    setOffseasonCount(
+        'offseason-improvement-count',
+        rosterTotalAttributeGains
+    );
+
+    setOffseasonCount(
+        'offseason-departure-count',
+        totalDepartures
+    );
+
+    setOffseasonCount(
+        'offseason-hof-count',
+        hofInductees.length
+    );
+
+    setOffseasonCount(
+        'offseason-retirement-count',
+        retiredPlayers.length
+    );
+
+    setOffseasonCount(
+        'offseason-other-departure-count',
+        leavingPlayers.length
+    );
+
+    const developmentSectionCount = document.getElementById(
+        'offseason-development-section-count'
+    );
+
+    const developmentSectionNumber =
+        developmentSectionCount?.querySelector('.text-lg');
+
+    if (developmentSectionNumber) {
+        developmentSectionNumber.textContent = String(
+            rosterPlayersWithGains.length
+        );
+    }
+
+    const developmentSummary = document.getElementById(
+        'player-development-summary'
+    );
+
+    if (developmentSummary) {
+        developmentSummary.textContent =
+            `${rosterPlayersWithGains.length} of your players improved · ` +
+            `${rosterTotalAttributeGains} positive attribute changes`;
+    }
+
+    // Format positive and negative development changes accurately.
+    const formatDevelopmentDelta = value => {
+        const increase = Number(value);
+
+        if (!Number.isFinite(increase)) return '—';
+
+        const formatted = Number.isInteger(increase)
+            ? Math.abs(increase)
+            : Math.abs(increase).toFixed(1);
+
+        if (increase > 0) return `+${formatted}`;
+        if (increase < 0) return `−${formatted}`;
+
+        return '±0';
+    };
+
+    const renderDevelopmentCard = (record, showTeam = false) => {
+        const player = record?.player || {};
+
+        const playerName = escapeOffseasonHtml(
+            player.name || 'Unknown Player'
+        );
+
+        const rawAge = Number(player.age);
+
+        const ageLabel = Number.isFinite(rawAge) && player.age != null
+            ? `Age ${rawAge}`
+            : 'Age not recorded';
+
+        const improvements = getDevelopmentChanges(record);
+        const positiveCount = getPositiveChangeCount(record);
+        const negativeCount = getNegativeChangeCount(record);
+
+        const isMixed = positiveCount > 0 && negativeCount > 0;
+
+        const statusLabel = isMixed
+            ? 'MIXED'
+            : positiveCount > 0
+                ? 'IMPROVED'
+                : negativeCount > 0
+                    ? 'REGRESSION'
+                    : 'NO CHANGE';
+
+        const statusStyle = isMixed
+            ? 'border-amber-200 bg-amber-50 text-amber-800'
+            : positiveCount > 0
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : negativeCount > 0
+                    ? 'border-rose-200 bg-rose-50 text-rose-800'
+                    : 'border-slate-200 bg-slate-50 text-slate-500';
+
+        const positionLabel = player.pos
+            ? escapeOffseasonHtml(player.pos)
+            : '';
+
+        const team = player.teamId != null
+            ? teamById.get(String(player.teamId))
+            : null;
+
+        const teamLabel = showTeam
+            ? escapeOffseasonHtml(team?.name || 'Free Agent')
+            : '';
+
+        const improvementBadges = improvements.map(improvement => {
+            const increase = getChangeValue(improvement);
+
+            const badgeStyle = increase > 0
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : increase < 0
+                    ? 'border-rose-200 bg-rose-50 text-rose-800'
+                    : 'border-slate-200 bg-slate-50 text-slate-600';
+
+            return `
+                <span class="inline-flex max-w-full items-center gap-1 rounded border ${badgeStyle} px-2 py-1 text-[9px] font-bold">
+                    <span class="min-w-0 break-words">
+                        ${escapeOffseasonHtml(formatOffseasonAttribute(improvement?.attr))}
+                    </span>
+
+                    <span class="shrink-0 font-black tabular-nums">
+                        ${escapeOffseasonHtml(formatDevelopmentDelta(improvement?.increase))}
+                    </span>
+                </span>
+            `;
+        }).join('');
+
+        return `
+            <article class="flex min-w-0 flex-col rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <h4 class="truncate text-xs font-black text-slate-900">
+                            ${playerName}
+                        </h4>
+
+                        <p class="mt-0.5 text-[9px] text-slate-500">
+                            ${positionLabel ? `${positionLabel} · ` : ''}
+                            ${ageLabel}
+                        </p>
+
+                        ${showTeam ? `
+                            <p class="mt-0.5 truncate text-[9px] font-semibold text-slate-400">
+                                ${teamLabel}
+                            </p>
+                        ` : ''}
+                    </div>
+
+                    <span class="shrink-0 rounded border ${statusStyle} px-2 py-1 text-[9px] font-black">
+                        ${statusLabel}
+                    </span>
+                </div>
+
+                <div class="mt-3 flex flex-wrap gap-1.5">
+                    ${improvementBadges || `
+                        <span class="text-[10px] italic text-slate-400">
+                            No attribute changes recorded.
+                        </span>
+                    `}
+                </div>
+            </article>
+        `;
+    };
+
+    // 1. Player Development
+    const devContainer = elements.playerDevelopmentContainer;
+
+    if (devContainer) {
+        const rosterCardsHtml = rosterDevelopmentCards.length > 0
+            ? rosterDevelopmentCards.map(record =>
+                renderDevelopmentCard(record)
+            ).join('')
+            : `
+                <div class="col-span-full rounded-lg border border-dashed border-slate-200 bg-white p-5 text-center">
+                    <span class="text-2xl">📈</span>
+
+                    <p class="mt-2 text-xs font-bold text-slate-600">
+                        No measured attribute changes
+                    </p>
+
+                    <p class="mt-1 text-[10px] text-slate-400">
+                        Your roster had no recorded offseason gains or regressions.
+                    </p>
+                </div>
+            `;
+
+        const leagueSpotlightHtml = leagueDevelopmentSpotlight.length > 0
+            ? leagueDevelopmentSpotlight.map(record =>
+                renderDevelopmentCard(record, true)
+            ).join('')
+            : `
+                <div class="col-span-full rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center">
+                    <p class="text-[10px] text-slate-400">
+                        No notable league-wide development changes recorded.
+                    </p>
+                </div>
+            `;
+
+        devContainer.innerHTML = `
+            <section class="col-span-full">
+                <div class="mb-3 flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                        <h4 class="text-sm font-black text-slate-900">
+                            Your Roster
+                        </h4>
+
+                        <p class="mt-0.5 text-[10px] text-slate-500">
+                            Players with recorded attribute changes, including regressions.
+                        </p>
+                    </div>
+
+                    <span class="rounded-full bg-slate-100 px-3 py-1 text-[9px] font-bold text-slate-600">
+                        ${rosterDevelopmentCards.length} shown
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                    ${rosterCardsHtml}
+                </div>
+            </section>
+
+            ${playerTeamId ? `
+                <section class="col-span-full mt-3 border-t border-slate-200 pt-4">
+                    <div class="mb-3 flex flex-wrap items-end justify-between gap-2">
+                        <div>
+                            <h4 class="text-sm font-black text-slate-800">
+                                Around the League
+                            </h4>
+
+                            <p class="mt-0.5 text-[10px] text-slate-500">
+                                A few of the biggest positive development reports from other teams.
+                            </p>
+                        </div>
+
+                        <span class="rounded-full bg-slate-100 px-3 py-1 text-[9px] font-bold text-slate-600">
+                            Top ${leagueDevelopmentSpotlight.length}
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+                        ${leagueSpotlightHtml}
+                    </div>
+                </section>
+            ` : ''}
+        `;
+    }
+
+    // 2. League Retirements & Graduations
     if (elements.retirementsList) {
-        elements.retirementsList.innerHTML = (report?.retiredPlayers || []).map(p =>
-            `<li class="flex items-center gap-2"><span>👴</span><span><b>${p.name}</b> (Age ${p.age}) hung up his cleats.</span></li>`
-        ).join('') || '<li class="text-gray-400 italic text-xs">No retirements this season.</li>';
+        elements.retirementsList.innerHTML = retiredPlayers.length > 0
+            ? retiredPlayers
+                .slice()
+                .sort((a, b) =>
+                    (Number(b?.careerStats?.touchdowns) || 0) -
+                    (Number(a?.careerStats?.touchdowns) || 0)
+                )
+                .map(player => {
+                    const name = escapeOffseasonHtml(
+                        player?.name || 'Unknown Player'
+                    );
+
+                    const position = escapeOffseasonHtml(
+                        player?.pos || 'ATH'
+                    );
+
+                    const age = Number(player?.age);
+                    const ageLabel =
+                        Number.isFinite(age) && player?.age != null
+                            ? `Graduated at age ${age}`
+                            : 'Graduated';
+
+                    const touchdowns =
+                        Number(player?.careerStats?.touchdowns) || 0;
+
+                    const seasons =
+                        Number(player?.careerStats?.seasonsPlayed);
+
+                    const careerSummary = [
+                        `${touchdowns.toLocaleString()} career TDs`,
+                        Number.isFinite(seasons) && seasons > 0
+                            ? `${seasons} seasons`
+                            : null
+                    ].filter(Boolean).join(' · ');
+
+                    return `
+                        <li class="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                            <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xl">
+                                🎓
+                            </span>
+
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <p class="truncate text-xs font-black text-slate-900">
+                                        ${name}
+                                    </p>
+
+                                    <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[8px] font-black uppercase text-slate-500">
+                                        ${position}
+                                    </span>
+                                </div>
+
+                                <p class="mt-1 text-[9px] text-slate-500">
+                                    ${ageLabel}
+                                </p>
+
+                                <p class="mt-1 text-[9px] font-semibold text-slate-600">
+                                    ${escapeOffseasonHtml(careerSummary)}
+                                </p>
+                            </div>
+                        </li>
+                    `;
+                }).join('')
+            : `
+                <li class="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center">
+                    <span class="text-xl">🎓</span>
+                    <p class="mt-2 text-[10px] font-semibold text-slate-500">
+                        No players graduated this season.
+                    </p>
+                </li>
+            `;
     }
 
-    // 3. Departures List
+    // 3. Other League Departures
     if (elements.leavingPlayersList) {
-        elements.leavingPlayersList.innerHTML = (report?.leavingPlayers || []).map(p =>
-            `<li class="flex items-center gap-2"><span>🏃</span><span><b>${p.player?.name || p.name}</b>: ${p.reason}</span></li>`
-        ).join('') || '<li class="text-gray-400 italic text-xs">No player departures.</li>';
+        elements.leavingPlayersList.innerHTML = leavingPlayers.length > 0
+            ? leavingPlayers
+                .slice()
+                .sort((a, b) =>
+                    String(a?.player?.name || a?.name || '').localeCompare(
+                        String(b?.player?.name || b?.name || '')
+                    )
+                )
+                .map(departure => {
+                    const player = departure?.player || {};
+
+                    const name = escapeOffseasonHtml(
+                        player?.name ||
+                        departure?.name ||
+                        'Unknown Player'
+                    );
+
+                    const reason = escapeOffseasonHtml(
+                        departure?.reason || 'Roster departure'
+                    );
+
+                    const teamName = departure?.teamName
+                        ? escapeOffseasonHtml(departure.teamName)
+                        : '';
+
+                    const position = player?.pos
+                        ? escapeOffseasonHtml(player.pos)
+                        : '';
+
+                    return `
+                        <li class="flex min-w-0 items-start gap-3 rounded-lg border border-rose-100 bg-white p-3">
+                            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-50 text-lg">
+                                🚪
+                            </span>
+
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <p class="truncate text-xs font-black text-slate-900">
+                                        ${name}
+                                    </p>
+
+                                    ${position ? `
+                                        <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[8px] font-black uppercase text-slate-500">
+                                            ${position}
+                                        </span>
+                                    ` : ''}
+                                </div>
+
+                                ${teamName ? `
+                                    <p class="mt-1 text-[9px] font-semibold text-slate-500">
+                                        Departed ${teamName}
+                                    </p>
+                                ` : ''}
+
+                                <p class="mt-1 text-[10px] leading-relaxed text-rose-700">
+                                    ${reason}
+                                </p>
+                            </div>
+                        </li>
+                    `;
+                }).join('')
+            : `
+                <li class="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center">
+                    <span class="text-xl">🤝</span>
+                    <p class="mt-2 text-[10px] font-semibold text-slate-500">
+                        No other player departures recorded.
+                    </p>
+                </li>
+            `;
     }
 
-    // 4. Hall of Fame List
-    if (elements.hofInducteesList) {
-        elements.hofInducteesList.innerHTML = (report?.hofInductees || []).map(p =>
-            `<li class="flex items-center gap-2"><span>🏆</span><span><b>${p.name}</b> (${p.careerStats?.touchdowns || 0} Career TDs)</span></li>`
-        ).join('') || '<li class="text-amber-800/60 italic text-xs">No new Hall of Fame inductees.</li>';
+    // 5. Offseason roadmap and next action.
+    // This screen's button opens staff review, not the rookie draft.
+    const continueButton = document.getElementById(
+        'go-to-next-draft-btn'
+    );
+
+    if (continueButton) {
+        continueButton.textContent = 'Review Coaching Staff →';
+
+        continueButton.setAttribute(
+            'aria-label',
+            'Continue to the two-day coaching staff review'
+        );
+
+        continueButton.title =
+            'Begin the offseason by reviewing your coaching staff';
+    }
+
+    const offseasonFooter = continueButton?.parentElement;
+
+    if (offseasonFooter) {
+        let roadmap = document.getElementById(
+            'offseason-roadmap'
+        );
+
+        if (!roadmap) {
+            roadmap = document.createElement('div');
+            roadmap.id = 'offseason-roadmap';
+
+            offseasonFooter.insertBefore(
+                roadmap,
+                continueButton
+            );
+        }
+
+        const offseasonSteps = [
+            {
+                number: '01',
+                title: 'Staff Review',
+                detail: '2 days',
+                icon: '👔',
+                active: true
+            },
+            {
+                number: '02',
+                title: 'Rookie Draft',
+                detail: 'Build your future',
+                icon: '🎓'
+            },
+            {
+                number: '03',
+                title: 'Free Agency',
+                detail: '7 recruiting days',
+                icon: '🤝'
+            },
+            {
+                number: '04',
+                title: 'Roster Finalization',
+                detail: 'Make your cuts',
+                icon: '📋'
+            },
+            {
+                number: '05',
+                title: 'New Season',
+                detail: 'Kickoff',
+                icon: '🏈'
+            }
+        ];
+
+        roadmap.className =
+            'mb-5 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm';
+
+        roadmap.innerHTML = `
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <p class="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">
+                        What's Next
+                    </p>
+
+                    <h3 class="mt-1 text-sm font-black text-slate-900">
+                        Your Offseason Roadmap
+                    </h3>
+                </div>
+
+                <span class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[9px] font-black uppercase tracking-wide text-blue-700">
+                    First Step: Staff Review
+                </span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                ${offseasonSteps.map(step => `
+                    <div class="rounded-lg border ${
+                        step.active
+                            ? 'border-blue-300 bg-blue-50'
+                            : 'border-slate-200 bg-slate-50'
+                    } p-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-[9px] font-black ${
+                                step.active
+                                    ? 'text-blue-700'
+                                    : 'text-slate-400'
+                            }">
+                                ${step.number}
+                            </span>
+
+                            <span class="text-lg">
+                                ${step.icon}
+                            </span>
+                        </div>
+
+                        <p class="mt-2 text-[10px] font-black ${
+                            step.active
+                                ? 'text-blue-950'
+                                : 'text-slate-700'
+                        }">
+                            ${step.title}
+                        </p>
+
+                        <p class="mt-1 text-[9px] ${
+                            step.active
+                                ? 'text-blue-700'
+                                : 'text-slate-500'
+                        }">
+                            ${step.detail}
+                        </p>
+
+                        ${step.active ? `
+                            <span class="mt-2 inline-flex rounded-full bg-blue-600 px-2 py-0.5 text-[8px] font-black uppercase tracking-wide text-white">
+                                Up next
+                            </span>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+
+            <p class="mt-3 text-[10px] leading-relaxed text-slate-500">
+                Review your coaches first. Then prepare for the rookie draft,
+                recruit free agents, finalize your roster, and get ready for kickoff.
+            </p>
+        `;
     }
 }
 
