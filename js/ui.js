@@ -15325,6 +15325,12 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                            </div>`
                         : '';
 
+                    const currentOffenseKey =
+                        team.formations?.offense || '';
+
+                    const currentDefenseKey =
+                        team.formations?.defense || '';
+
                     const offenseNeedsChange = Boolean(
                         outlook?.preferredOffense &&
                         currentOffenseKey !== outlook.preferredOffense
@@ -15412,12 +15418,6 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             outlook.preferredDefense
                         )
                         : 'Flexible';
-
-                    const currentOffenseKey =
-                        team.formations?.offense || '';
-
-                    const currentDefenseKey =
-                        team.formations?.defense || '';
 
                     const currentOffenseLabel = currentOffenseKey
                         ? (
