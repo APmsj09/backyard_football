@@ -2190,7 +2190,10 @@ export const defensivePlaybook = {
     }
 };
 
-// --- COACH PERSONALITIES (Neighborhood Archetypes) ---
+// --- LEGACY TEAM-GENERATION COACH ARCHETYPES ---
+// Retained for historical team generation and legacy player-team creation.
+// Current staff personality, experience, and evaluation preferences are
+// maintained separately by the staff system.
 export const coachPersonalities = [
     { type: 'The Has-Been Dad', preferredOffense: 'Power', preferredDefense: '4-2-2', attributePreferences: { physical: { strength: 1.8 }, mental: { toughness: 1.8 }, technical: { blocking: 1.8 } } },
     { type: 'The Techie Brother', preferredOffense: 'Spread', preferredDefense: '3-1-4', attributePreferences: { physical: { speed: 1.6 }, mental: { playbookIQ: 2.0 }, technical: { catchingHands: 1.5 } } },
@@ -2198,6 +2201,173 @@ export const coachPersonalities = [
     { type: 'The Playground Alpha', preferredOffense: 'Empty', preferredDefense: '3-0-5', attributePreferences: { physical: { speed: 1.8 }, mental: { clutch: 2.0 }, technical: { throwingAccuracy: 1.5 } } },
     { type: 'The Strict Parent', preferredOffense: 'Balanced', preferredDefense: '4-1-3', attributePreferences: { mental: { playbookIQ: 2.0, consistency: 1.5 }, technical: { blocking: 1.5, tackling: 1.5 } } }
 ];
+
+// --- COMMUNITY COACH: PERSONAL BACKGROUND ---
+// Describes how someone became involved in the local league.
+// These backgrounds do not grant coaching or scouting skill bonuses.
+export const communityCoachBackgrounds = [
+    {
+        id: 'family_volunteer',
+        name: 'Parent or Family Volunteer',
+        description: 'Got involved to support the players and families, helping wherever the team needed it.'
+    },
+    {
+        id: 'community_volunteer',
+        name: 'Neighborhood Volunteer',
+        description: 'A local resident who stepped up because community programs depend on people pitching in.'
+    },
+    {
+        id: 'rec_center_regular',
+        name: 'Rec-Center Regular',
+        description: 'Has strong connections to local recreation programs and the families around them.'
+    },
+    {
+        id: 'teacher_mentor',
+        name: 'Teacher or Youth Mentor',
+        description: 'Used to helping young people learn, build confidence, and work together.'
+    },
+    {
+        id: 'fitness_activity_leader',
+        name: 'Fitness or Recreation Leader',
+        description: 'Enjoys organizing physical activities and helping people stay active; football knowledge varies.'
+    },
+    {
+        id: 'recreational_player',
+        name: 'Recreational Player',
+        description: 'Has enjoyed backyard, pickup, flag, or community-league football.'
+    },
+    {
+        id: 'football_enthusiast',
+        name: 'Football Enthusiast',
+        description: 'Follows the game, enjoys learning about it, and volunteered to help locally.'
+    }
+];
+
+// --- COMMUNITY COACH: EXPERIENCE DIMENSIONS ---
+// Experience is recorded independently from personal background.
+// None is a valid choice in every category. No position specialty is assumed.
+export const coachExperienceDimensions = {
+    playing: {
+        label: 'Playing Experience',
+        options: [
+            {
+                id: 'none',
+                label: 'Never played',
+                description: 'No playing experience.'
+            },
+            {
+                id: 'informal',
+                label: 'Backyard or pickup games',
+                description: 'Casual, informal football with friends or the community.'
+            },
+            {
+                id: 'recreational',
+                label: 'Recreational league',
+                description: 'Played in local flag, rec-center, or community football.'
+            },
+            {
+                id: 'organized_amateur',
+                label: 'Organized amateur football',
+                description: 'Played in an organized school, youth, or amateur program.'
+            }
+        ]
+    },
+    coaching: {
+        label: 'Coaching Experience',
+        options: [
+            {
+                id: 'none',
+                label: 'First time volunteering',
+                description: 'Has never coached or formally helped coach a team.'
+            },
+            {
+                id: 'informal_helper',
+                label: 'Occasional helper',
+                description: 'Has helped at practices, events, or informal activities.'
+            },
+            {
+                id: 'assistant_volunteer',
+                label: 'Volunteer assistant',
+                description: 'Has assisted another community coach.'
+            },
+            {
+                id: 'community_head_coach',
+                label: 'Community head coach',
+                description: 'Has previously led a local recreational team.'
+            }
+        ]
+    },
+    youthDevelopment: {
+        label: 'Working With Young People',
+        options: [
+            {
+                id: 'none',
+                label: 'No prior experience',
+                description: 'Has not previously worked with or mentored young people.'
+            },
+            {
+                id: 'family_community',
+                label: 'Family or community involvement',
+                description: 'Experience supporting kids through family or neighborhood activities.'
+            },
+            {
+                id: 'teaching_mentoring',
+                label: 'Teaching or mentoring',
+                description: 'Has helped young people learn, develop, or stay motivated.'
+            },
+            {
+                id: 'youth_program',
+                label: 'Youth-program experience',
+                description: 'Has worked or volunteered in organized youth activities.'
+            }
+        ]
+    },
+    fitness: {
+        label: 'Fitness and Physical Activity',
+        options: [
+            {
+                id: 'none',
+                label: 'No particular background',
+                description: 'No specific fitness or sports instruction experience.'
+            },
+            {
+                id: 'personal_interest',
+                label: 'Personal interest',
+                description: 'Enjoys exercise, recreational sports, or staying active.'
+            },
+            {
+                id: 'group_activity',
+                label: 'Group activity leader',
+                description: 'Has organized or led recreational physical activities.'
+            },
+            {
+                id: 'fitness_instruction',
+                label: 'Fitness instruction',
+                description: 'Has experience teaching exercise or general physical conditioning.'
+            }
+        ]
+    },
+    footballFamiliarity: {
+        label: 'Football Familiarity',
+        options: [
+            {
+                id: 'casual',
+                label: 'Casual fan',
+                description: 'Enjoys watching football but has limited technical knowledge.'
+            },
+            {
+                id: 'rules',
+                label: 'Knows the rules and fundamentals',
+                description: 'Understands basic rules, positions, and common concepts.'
+            },
+            {
+                id: 'active_study',
+                label: 'Actively studies the game',
+                description: 'Enjoys learning strategies, formations, and how plays work.'
+            }
+        ]
+    }
+};
 
 // --- GM CHARACTER CREATION: BACKGROUND ---
 export const gmBackgrounds = [

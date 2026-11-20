@@ -10,7 +10,15 @@ import {
 } from './game/telemetry.js';
 import { isDebugMode, setDebugMode, debugCollector } from './game.js';
 import { positionOverallWeights, estimateBestPosition, calculateOverall, calculateSlotSuitability } from './game/player.js';
-import { gmBackgrounds, gmArchetypes, footballExpertises, offenseFormations, defenseFormations } from './data.js';
+import {
+    gmBackgrounds,
+    gmArchetypes,
+    footballExpertises,
+    communityCoachBackgrounds,
+    coachExperienceDimensions,
+    offenseFormations,
+    defenseFormations
+} from './data.js';
 import { formatHeight } from './utils.js';
 import {
     getCurrentRosterLimit,
@@ -37,6 +45,8 @@ import {
 } from './game/scouting.js';
 
 import {
+    COACH_EVALUATION_QUALITIES,
+    ensureCoachEvaluationPhilosophy,
     getEffectiveStaffWorkHours,
     applyRecruitingSweetener,
     buildAutomatedStaffAssignmentsForTeam,
@@ -668,6 +678,79 @@ function promptCoachCreation(teamId) {
         detail: item.effect,
         extra: item.tradeoff || item.lore
     }));
+
+    const coachCommunityBackgroundOptionsHtml =
+        communityCoachBackgrounds.map((item, index) =>
+            `<option value="${escapeHtml(item.id)}"${index === 0 ? ' selected' : ''}>${escapeHtml(item.name)}</option>`
+        ).join('');
+
+    const coachExperienceKeys = [
+        { id: 'playing', label: 'Playing experience' },
+        { id: 'coaching', label: 'Coaching experience' },
+        { id: 'youthDevelopment', label: 'Youth development experience' },
+        { id: 'fitness', label: 'Fitness or activity experience' },
+        { id: 'footballFamiliarity', label: 'Football familiarity' }
+    ];
+
+    const coachExperienceControlsHtml = coachExperienceKeys.map(dimensionInfo => {
+        const dimension = coachExperienceDimensions[dimensionInfo.id];
+        const options = Array.isArray(dimension?.options)
+            ? dimension.options
+            : [];
+
+        const optionsHtml = options.map((option, index) => {
+            const value = typeof option === 'string'
+                ? option
+                : option.id ?? option.value ?? option.key ?? option.label ?? option.name ?? '';
+
+            const label = typeof option === 'string'
+                ? option
+                : option.label ?? option.name ?? value;
+
+            return `<option value="${escapeHtml(value)}"${index === 0 ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+        }).join('');
+
+        return `
+            <label class="block">
+                <span class="block text-xs font-semibold text-slate-700 mb-1">
+                    ${dimensionInfo.label}
+                </span>
+                <select id="new-coach-experience-${dimensionInfo.id}"
+                    class="w-full p-2 border border-slate-300 rounded bg-white text-sm">
+                    ${optionsHtml}
+                </select>
+            </label>
+        `;
+    }).join('');
+
+    const defaultCoachEvaluationPriorities = [
+        'reliability',
+        'coachability',
+        'teamwork'
+    ];
+
+    const coachEvaluationPriorityControlsHtml =
+        COACH_EVALUATION_QUALITIES.map(quality => {
+            const checked = defaultCoachEvaluationPriorities.includes(quality.id);
+
+            return `
+                <label class="flex items-start gap-2 rounded border border-slate-200 bg-white p-2">
+                    <input type="checkbox"
+                        data-coach-evaluation-priority="${escapeHtml(quality.id)}"
+                        ${checked ? 'checked' : ''}
+                        class="mt-0.5 accent-amber-500">
+                    <span>
+                        <span class="block text-xs font-bold text-slate-800">
+                            ${escapeHtml(quality.label)}
+                        </span>
+                        <span class="block text-[10px] text-slate-500">
+                            ${escapeHtml(quality.description || '')}
+                        </span>
+                    </span>
+                </label>
+            `;
+        }).join('');
+
     const offenseChoices = builderFormationChoices(offenseFormations, 'Punt');
     const defenseChoices = builderFormationChoices(defenseFormations, 'Punt_Return');
     const initialOffense = offenseChoices.some(option => option.value === currentOffense)
@@ -719,7 +802,7 @@ function promptCoachCreation(teamId) {
     const coachSkillControlsHtml =
         '<div class="border-t border-slate-200 pt-4">' +
         '<label class="block text-xs font-bold text-slate-800 uppercase mb-1">' +
-        '4. Coaching Skill Allocation</label>' +
+        '6. Coaching Skill Allocation</label>' +
         '<p class="text-xs text-slate-600 mb-3">' +
         'Choose a starting profile or begin at the minimum and build it yourself.' +
         '</p>' +
@@ -767,9 +850,10 @@ function promptCoachCreation(teamId) {
         <div class="space-y-5 text-left">
             <p class="text-sm text-slate-600">
                 You are taking over <strong>${team.name}</strong>.
-                Your history shapes your reputation, your philosophy shapes
-                your decisions, and your football expertise shapes how you
-                evaluate talent.
+                Your management background shapes your front-office identity.
+                Your coaching background records how you got involved in the
+                community. Your coaching skill ratings determine your actual
+                starting ability.
             </p>
 
             <div>
@@ -807,6 +891,60 @@ function promptCoachCreation(teamId) {
                 <div id="gm-expertise-summary"
                     class="text-xs text-slate-600 mt-2 leading-relaxed"></div>
             </div>
+
+            <div class="border-t border-slate-200 pt-4">
+                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                    4. Coaching Background
+                </label>
+
+                <p class="text-xs text-slate-500 mb-2">
+                    How did you become involved in community football?
+                    You do not need to have played or coached before.
+                </p>
+
+                <label class="block text-xs font-semibold text-slate-700 mb-1">
+                    Community background
+                </label>
+                <select id="new-coach-community-background"
+                    class="w-full p-2 border border-slate-300 rounded bg-white text-sm">
+                    ${coachCommunityBackgroundOptionsHtml}
+                </select>
+
+                <div class="border-t border-slate-200 mt-4 pt-3">
+                    <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                        Previous Experience
+                    </label>
+                    <p class="text-xs text-slate-500 mb-3">
+                        Each area is independent. Choosing no experience is completely valid.
+                        These answers do not add coaching skill points.
+                    </p>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        ${coachExperienceControlsHtml}
+                    </div>
+                </div>
+            </div>
+
+            <div class="border-t border-slate-200 pt-4">
+                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                    5. What Do You Value in Players?
+                </label>
+                <p class="text-xs text-slate-500 mb-3">
+                    Choose the three qualities that matter most to you.
+                    These are personal priorities, not a measure of how accurately
+                    you evaluate players.
+                </p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    ${coachEvaluationPriorityControlsHtml}
+                </div>
+
+                <p id="coach-evaluation-priority-count"
+                    class="text-xs font-semibold text-slate-600 mt-2">
+                    Select 3 qualities. 3 / 3 selected.
+                </p>
+            </div>
+
              <!-- COACH_SKILL_ALLOCATION_BLOCK -->
             <div class="border-t border-slate-200 pt-4">
                 <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
@@ -842,6 +980,35 @@ function promptCoachCreation(teamId) {
         const off = document.getElementById('new-coach-offense').value;
         const def = document.getElementById('new-coach-defense').value;
 
+        const coachCommunityProfile = {
+            version: 1,
+            backgroundId: document.getElementById(
+                'new-coach-community-background'
+            ).value,
+            experience: Object.fromEntries(
+                coachExperienceKeys.map(({ id }) => [
+                    id,
+                    document.getElementById(
+                        `new-coach-experience-${id}`
+                    )?.value || ''
+                ])
+            )
+        };
+
+        const evaluationPriorities = [
+            ...document.querySelectorAll(
+                '[data-coach-evaluation-priority]:checked'
+            )
+        ].map(input => input.dataset.coachEvaluationPriority);
+
+        if (evaluationPriorities.length !== 3) {
+            UI.showModal(
+                'Choose Three Player Qualities',
+                'Please select exactly three qualities that matter most to you.'
+            );
+            return;
+        }
+
         const skillRatings = {};
 
         coachSkillDefinitions.forEach(skill => {
@@ -863,7 +1030,9 @@ function promptCoachCreation(teamId) {
             expertiseId,
             off,
             def,
-            skillRatings
+            skillRatings,
+            coachCommunityProfile,
+            evaluationPriorities
         });
     }, "Take the Job");
 
@@ -908,6 +1077,45 @@ function promptCoachCreation(teamId) {
     ].forEach(id => {
         document.getElementById(id)?.addEventListener('change', updateChoiceSummaries);
     });
+
+        const evaluationPriorityInputs = [
+        ...document.querySelectorAll('[data-coach-evaluation-priority]')
+    ];
+
+    const updateEvaluationPriorityControls = () => {
+        const selectedCount = evaluationPriorityInputs.filter(
+            input => input.checked
+        ).length;
+
+        const countLabel = document.getElementById(
+            'coach-evaluation-priority-count'
+        );
+
+        if (countLabel) {
+            countLabel.textContent =
+                `Select 3 qualities. ${selectedCount} / 3 selected.`;
+        }
+
+        evaluationPriorityInputs.forEach(input => {
+            input.disabled = selectedCount >= 3 && !input.checked;
+        });
+    };
+
+    evaluationPriorityInputs.forEach(input => {
+        input.addEventListener('change', () => {
+            const selectedCount = evaluationPriorityInputs.filter(
+                item => item.checked
+            ).length;
+
+            if (selectedCount > 3) {
+                input.checked = false;
+            }
+
+            updateEvaluationPriorityControls();
+        });
+    });
+
+    updateEvaluationPriorityControls();
 
     const coachSkillControls = coachSkillDefinitions
         .map(skill =>
@@ -1590,6 +1798,16 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
             expertiseName: expertise.name,
             expertisePositions: [...expertise.positions],
             expertiseScoutingBonus: expertise.scoutingAccuracyBonus,
+            coachCommunityProfile: {
+                version: 1,
+                backgroundId: coachDetails.coachCommunityProfile?.backgroundId || null,
+                experience: {
+                    ...(coachDetails.coachCommunityProfile?.experience || {})
+                }
+            },
+            evaluationPriorities: [
+                ...(coachDetails.evaluationPriorities || [])
+            ],
             offensiveIdentity: coachDetails.off,
             defensiveIdentity: coachDetails.def,
             bonuses
@@ -1721,6 +1939,20 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         userCoach.archetypeId = archetype.id;
         userCoach.expertiseId = expertise.id;
         userCoach.isUserCoach = true;
+
+        userCoach.communityProfile = {
+            version: 1,
+            backgroundId:
+                coachDetails?.coachCommunityProfile?.backgroundId || null,
+            experience: {
+                ...(coachDetails?.coachCommunityProfile?.experience || {})
+            }
+        };
+
+        ensureCoachEvaluationPhilosophy(
+            userCoach,
+            coachDetails?.evaluationPriorities
+        );
 
         // Apply the validated skill allocation.
         userCoach.ratings = {

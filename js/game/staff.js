@@ -8,7 +8,9 @@ import {
     defensivePlaybook,
     gmArchetypes,
     offenseFormations,
-    defenseFormations
+    defenseFormations,
+    communityCoachBackgrounds,
+    coachExperienceDimensions
 } from '../data.js';
 import {
     getRosterObjects,
@@ -1662,6 +1664,336 @@ export function getCoachAutonomyProfile(coach) {
     };
 }
 
+const COMMUNITY_COACH_BASE_EXPERIENCE_WEIGHTS = {
+    playing: {
+        none: 35,
+        informal: 25,
+        recreational: 30,
+        organized_amateur: 10
+    },
+    coaching: {
+        none: 45,
+        informal_helper: 25,
+        assistant_volunteer: 22,
+        community_head_coach: 8
+    },
+    youthDevelopment: {
+        none: 25,
+        family_community: 25,
+        teaching_mentoring: 25,
+        youth_program: 25
+    },
+    fitness: {
+        none: 35,
+        personal_interest: 40,
+        group_activity: 15,
+        fitness_instruction: 10
+    },
+    footballFamiliarity: {
+        casual: 40,
+        rules: 40,
+        active_study: 20
+    }
+};
+
+const COMMUNITY_COACH_BACKGROUND_WEIGHTS = {
+    family_volunteer: {
+        coaching: {
+            none: 40,
+            informal_helper: 35,
+            assistant_volunteer: 20,
+            community_head_coach: 5
+        },
+        youthDevelopment: {
+            none: 10,
+            family_community: 65,
+            teaching_mentoring: 15,
+            youth_program: 10
+        }
+    },
+    community_volunteer: {
+        youthDevelopment: {
+            none: 25,
+            family_community: 40,
+            teaching_mentoring: 15,
+            youth_program: 20
+        }
+    },
+    rec_center_regular: {
+        coaching: {
+            none: 25,
+            informal_helper: 25,
+            assistant_volunteer: 35,
+            community_head_coach: 15
+        },
+        youthDevelopment: {
+            none: 10,
+            family_community: 15,
+            teaching_mentoring: 20,
+            youth_program: 55
+        },
+        fitness: {
+            none: 15,
+            personal_interest: 30,
+            group_activity: 35,
+            fitness_instruction: 20
+        },
+        footballFamiliarity: {
+            casual: 20,
+            rules: 50,
+            active_study: 30
+        }
+    },
+    teacher_mentor: {
+        coaching: {
+            none: 35,
+            informal_helper: 20,
+            assistant_volunteer: 25,
+            community_head_coach: 20
+        },
+        youthDevelopment: {
+            none: 5,
+            family_community: 10,
+            teaching_mentoring: 55,
+            youth_program: 30
+        }
+    },
+    fitness_activity_leader: {
+        youthDevelopment: {
+            none: 25,
+            family_community: 15,
+            teaching_mentoring: 20,
+            youth_program: 40
+        },
+        fitness: {
+            none: 5,
+            personal_interest: 20,
+            group_activity: 45,
+            fitness_instruction: 30
+        }
+    },
+    recreational_player: {
+        playing: {
+            none: 5,
+            informal: 20,
+            recreational: 60,
+            organized_amateur: 15
+        },
+        coaching: {
+            none: 50,
+            informal_helper: 30,
+            assistant_volunteer: 15,
+            community_head_coach: 5
+        },
+        footballFamiliarity: {
+            casual: 10,
+            rules: 60,
+            active_study: 30
+        }
+    },
+    football_enthusiast: {
+        playing: {
+            none: 45,
+            informal: 20,
+            recreational: 20,
+            organized_amateur: 15
+        },
+        footballFamiliarity: {
+            casual: 20,
+            rules: 45,
+            active_study: 35
+        }
+    }
+};
+
+function chooseWeightedCoachExperience(dimensionKey, weights) {
+    const options =
+        coachExperienceDimensions?.[dimensionKey]?.options || [];
+
+    const weightedOptions = options
+        .map(option => ({
+            id: option.id,
+            weight: Math.max(
+                0,
+                Math.floor(Number(weights?.[option.id]) || 0)
+            )
+        }))
+        .filter(option => option.weight > 0);
+
+    const totalWeight = weightedOptions.reduce(
+        (total, option) => total + option.weight,
+        0
+    );
+
+    if (totalWeight <= 0) {
+        return options[0]?.id || null;
+    }
+
+    let roll = getRandomInt(1, totalWeight);
+
+    for (const option of weightedOptions) {
+        roll -= option.weight;
+
+        if (roll <= 0) {
+            return option.id;
+        }
+    }
+
+    return weightedOptions[weightedOptions.length - 1].id;
+}
+
+/**
+ * Creates a realistic local-league background and experience history.
+ *
+ * Backgrounds influence the likelihood of different experiences,
+ * but do not determine coaching ratings or position knowledge.
+ */
+function buildCoachCommunityProfile({
+    formerPlayer = false,
+    backgroundId = null
+} = {}) {
+    const requestedBackground = communityCoachBackgrounds.find(
+        background => background.id === backgroundId
+    );
+
+    const background = requestedBackground ||
+        (
+            formerPlayer
+                ? communityCoachBackgrounds.find(
+                    entry => entry.id === 'recreational_player'
+                )
+                : null
+        ) ||
+        getRandom(communityCoachBackgrounds);
+
+    const backgroundWeights =
+        COMMUNITY_COACH_BACKGROUND_WEIGHTS[background.id] || {};
+
+    const weightsFor = dimensionKey => {
+        const base =
+            COMMUNITY_COACH_BASE_EXPERIENCE_WEIGHTS[dimensionKey] || {};
+
+        const backgroundOverride =
+            backgroundWeights[dimensionKey] || {};
+
+        return {
+            ...base,
+            ...backgroundOverride
+        };
+    };
+
+    const experience = {
+        playing: chooseWeightedCoachExperience(
+            'playing',
+            formerPlayer
+                ? {
+                    none: 0,
+                    informal: 5,
+                    recreational: 75,
+                    organized_amateur: 20
+                }
+                : weightsFor('playing')
+        ),
+
+        coaching: chooseWeightedCoachExperience(
+            'coaching',
+            formerPlayer
+                ? {
+                    none: 60,
+                    informal_helper: 25,
+                    assistant_volunteer: 12,
+                    community_head_coach: 3
+                }
+                : weightsFor('coaching')
+        ),
+
+        youthDevelopment: chooseWeightedCoachExperience(
+            'youthDevelopment',
+            weightsFor('youthDevelopment')
+        ),
+
+        fitness: chooseWeightedCoachExperience(
+            'fitness',
+            weightsFor('fitness')
+        ),
+
+        footballFamiliarity: chooseWeightedCoachExperience(
+            'footballFamiliarity',
+            formerPlayer
+                ? {
+                    casual: 0,
+                    rules: 65,
+                    active_study: 35
+                }
+                : weightsFor('footballFamiliarity')
+        )
+    };
+
+    return {
+        version: 1,
+        backgroundId: background.id,
+        experience
+    };
+}
+
+/**
+ * Adds a community profile to older staff records without
+ * overwriting any valid profile already saved.
+ */
+function ensureCoachCommunityProfile(coach) {
+    if (!coach || typeof coach !== 'object') {
+        return null;
+    }
+
+    const existing =
+        coach.communityProfile &&
+        typeof coach.communityProfile === 'object'
+            ? coach.communityProfile
+            : {};
+
+    const validBackgroundIds = new Set(
+        communityCoachBackgrounds.map(background => background.id)
+    );
+
+    const backgroundId = validBackgroundIds.has(existing.backgroundId)
+        ? existing.backgroundId
+        : null;
+
+    const fallback = buildCoachCommunityProfile({
+        formerPlayer: Boolean(
+            coach.formerPlayerId || coach.formerPlayerBio
+        ),
+        backgroundId
+    });
+
+    const experience = {};
+
+    for (const dimensionKey of Object.keys(
+        coachExperienceDimensions
+    )) {
+        const validIds = new Set(
+            coachExperienceDimensions[dimensionKey].options.map(
+                option => option.id
+            )
+        );
+
+        const storedValue = existing.experience?.[dimensionKey];
+
+        experience[dimensionKey] = validIds.has(storedValue)
+            ? storedValue
+            : fallback.experience[dimensionKey];
+    }
+
+    coach.communityProfile = {
+        ...existing,
+        version: 1,
+        backgroundId: backgroundId || fallback.backgroundId,
+        experience
+    };
+
+    return coach.communityProfile;
+}
+
 export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, formerPlayer = null) {
     const firstName = formerPlayer ? formerPlayer.name.split(' ')[0] : getRandom(firstNames);
     const lastName = formerPlayer ? formerPlayer.name.split(' ').slice(1).join(' ') : getRandom(lastNames);
@@ -1745,6 +2077,13 @@ export function generateStaffMember(role = 'coach', minAge = 25, maxAge = 55, fo
         age,
         role, // 'gm', 'coach', 'scout', 'trainer'
         teamId: null,
+        ...(role === 'coach'
+            ? {
+                communityProfile: buildCoachCommunityProfile({
+                    formerPlayer: Boolean(formerPlayer)
+                })
+            }
+            : {}),
         formerPlayerId: formerPlayer?.id || null,
         formerPlayerBio: formerPlayer ? `Former ${formerPlayer.pos} legend (${formerPlayer.careerStats?.touchdowns || 0} TDs, ${formerPlayer.careerStats?.seasonsPlayed || 0} yrs played)` : null,
         // Financial & Market Demands
@@ -3190,6 +3529,7 @@ export function ensureTeamCoachingStaff(team) {
 
     npcCoaches.forEach(coach => {
         ensureCoachEvaluationPhilosophy(coach);
+        ensureCoachCommunityProfile(coach);
 
         coach.teamId = team.id;
 
