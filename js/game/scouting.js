@@ -370,7 +370,7 @@ function estimatePotential(team, player, evaluator, level, ranges) {
     };
 }
 
-function estimateCharacterSummary(team, player, evaluator, level) {
+function estimateCharacterEvidence(team, player, evaluator, level) {
     if (level < 3) return null;
 
     const personality = player?.personality;
@@ -417,6 +417,16 @@ function estimateCharacterSummary(team, player, evaluator, level) {
         return clamp(actual + noise * uncertainty, 0, 100);
     };
 
+    // Store only noisy estimates. Never store the underlying player values.
+    const traits = {
+        workEthic: estimate('workEthic'),
+        dependability: estimate('dependability'),
+        loyalty: estimate('loyalty'),
+        likeability: estimate('likeability'),
+        ego: estimate('ego'),
+        streetCred: estimate('streetCred')
+    };
+
     const average = values => {
         const validValues = values.filter(Number.isFinite);
 
@@ -427,23 +437,20 @@ function estimateCharacterSummary(team, player, evaluator, level) {
     };
 
     const effort = average([
-        estimate('workEthic'),
-        estimate('dependability'),
-        estimate('loyalty')
+        traits.workEthic,
+        traits.dependability,
+        traits.loyalty
     ]);
 
     const teamFit = average([
-        estimate('likeability'),
-        estimate('loyalty'),
-        (() => {
-            const ego = estimate('ego');
-            return ego === null ? null : 100 - ego;
-        })()
+        traits.likeability,
+        traits.loyalty,
+        traits.ego === null ? null : 100 - traits.ego
     ]);
 
     const presence = average([
-        estimate('streetCred'),
-        estimate('ego')
+        traits.streetCred,
+        traits.ego
     ]);
 
     if (effort === null && teamFit === null && presence === null) {
@@ -480,7 +487,15 @@ function estimateCharacterSummary(team, player, evaluator, level) {
         ? 'Character-focused: '
         : '';
 
-    return `${prefix}${notes.join('; ')}.`;
+    return {
+        summary: `${prefix}${notes.join('; ')}.`,
+        estimates: {
+            ...traits,
+            effort,
+            teamFit,
+            presence
+        }
+    };
 }
 
 function buildYouthPerformanceSummary(player, level) {
@@ -717,6 +732,13 @@ function generateEvaluation(team, player, evaluator, level, ranges) {
         defenseFit?.position || null
     );
 
+    const characterEvidence = estimateCharacterEvidence(
+        team,
+        player,
+        evaluator,
+        level
+    );
+
     return {
         potentialRange: estimatePotential(
             team,
@@ -738,12 +760,8 @@ function generateEvaluation(team, player, evaluator, level, ranges) {
                     : best >= 60
                         ? 'Developmental rotation option'
                         : 'Long-term development project',
-            characterSummary: estimateCharacterSummary(
-                team,
-                player,
-                evaluator,
-                level
-            ),
+            characterSummary: characterEvidence?.summary || null,
+            characterEstimates: characterEvidence?.estimates || null,
             summary: [
                 `${offenseFit ? `OFF ${offenseFit.position}` : 'OFF fit unclear'} / ${defenseFit ? `DEF ${defenseFit.position}` : 'DEF fit unclear'}; estimates reflect the evaluator's report.`,
                 buildYouthPerformanceSummary(player, level)

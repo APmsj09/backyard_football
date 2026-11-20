@@ -922,6 +922,164 @@ export function getStaffBehaviorTendency(staff, tendencyKey) {
 }
 
 /**
+ * Personal qualities a coach values when considering players.
+ *
+ * These are preferences, not evaluation skills. They must never
+ * directly improve scouting accuracy or reveal hidden player attributes.
+ */
+export const COACH_EVALUATION_QUALITIES = [
+    {
+        id: 'speed',
+        label: 'Speed',
+        description: 'How quickly a player moves and accelerates.'
+    },
+    {
+        id: 'athleticism',
+        label: 'Athleticism',
+        description: 'Overall movement, coordination, and physical tools.'
+    },
+    {
+        id: 'technique',
+        label: 'Technique',
+        description: 'Fundamentals and repeatable skills for their role.'
+    },
+    {
+        id: 'football_iq',
+        label: 'Football IQ',
+        description: 'Understanding assignments and making sound decisions.'
+    },
+    {
+        id: 'reliability',
+        label: 'Reliability',
+        description: 'Showing up, following through, and being dependable.'
+    },
+    {
+        id: 'work_ethic',
+        label: 'Work Ethic',
+        description: 'Effort, preparation, and willingness to keep working.'
+    },
+    {
+        id: 'coachability',
+        label: 'Coachability',
+        description: 'Listening, learning, and applying instruction.'
+    },
+    {
+        id: 'teamwork',
+        label: 'Teamwork',
+        description: 'Communication, cooperation, and putting the group first.'
+    },
+    {
+        id: 'physicality',
+        label: 'Physicality',
+        description: 'Strength, toughness, and willingness to play through contact.'
+    }
+];
+
+const COACH_EVALUATION_PRIORITY_COUNT = 3;
+
+const DEFAULT_USER_COACH_EVALUATION_PRIORITIES = [
+    'reliability',
+    'coachability',
+    'teamwork'
+];
+
+function buildDefaultCoachEvaluationPriorities(coach) {
+    // A new community coach should have personal preferences, even
+    // when their background includes no organized football experience.
+    if (coach?.isUserCoach) {
+        return [...DEFAULT_USER_COACH_EVALUATION_PRIORITIES];
+    }
+
+    // NPC coaches receive varied preferences. The result is stored
+    // on the coach, so it will not reroll on subsequent initialization.
+    const available = COACH_EVALUATION_QUALITIES.map(
+        quality => quality.id
+    );
+    const priorities = [];
+
+    while (
+        priorities.length < COACH_EVALUATION_PRIORITY_COUNT &&
+        available.length > 0
+    ) {
+        const selected = getRandom(available);
+        priorities.push(selected);
+
+        const selectedIndex = available.indexOf(selected);
+        if (selectedIndex >= 0) {
+            available.splice(selectedIndex, 1);
+        }
+    }
+
+    return priorities;
+}
+
+/**
+ * Ensures a coach has three persistent personal evaluation priorities.
+ *
+ * The priorities describe what the coach values, not how accurately
+ * they can assess those qualities. Existing valid selections are preserved.
+ */
+export function ensureCoachEvaluationPhilosophy(
+    coach,
+    requestedPriorities = null
+) {
+    if (!coach || typeof coach !== 'object') {
+        return null;
+    }
+
+    const existingProfile =
+        coach.evaluationPhilosophy &&
+        typeof coach.evaluationPhilosophy === 'object'
+            ? coach.evaluationPhilosophy
+            : {};
+
+    const validPriorityIds = new Set(
+        COACH_EVALUATION_QUALITIES.map(quality => quality.id)
+    );
+
+    const sourcePriorities = Array.isArray(requestedPriorities)
+        ? requestedPriorities
+        : Array.isArray(existingProfile.priorities)
+            ? existingProfile.priorities
+            : [];
+
+    const priorities = [
+        ...new Set(
+            sourcePriorities
+                .map(value => String(value || '').trim().toLowerCase())
+                .filter(value => validPriorityIds.has(value))
+        )
+    ].slice(0, COACH_EVALUATION_PRIORITY_COUNT);
+
+    const fallbackPriorities = buildDefaultCoachEvaluationPriorities(
+        coach
+    );
+
+    for (const priority of fallbackPriorities) {
+        if (
+            priorities.length >= COACH_EVALUATION_PRIORITY_COUNT
+        ) {
+            break;
+        }
+
+        if (!priorities.includes(priority)) {
+            priorities.push(priority);
+        }
+    }
+
+    coach.evaluationPhilosophy = {
+        ...existingProfile,
+        version: 1,
+        priorities: priorities.slice(
+            0,
+            COACH_EVALUATION_PRIORITY_COUNT
+        )
+    };
+
+    return coach.evaluationPhilosophy;
+}
+
+/**
  * Gives each AI GM a persistent management approach independent of
  * strategic intent. Higher adaptability means greater willingness to
  * adjust the system around the available coach and personnel.
@@ -3031,6 +3189,8 @@ export function ensureTeamCoachingStaff(team) {
     }
 
     npcCoaches.forEach(coach => {
+        ensureCoachEvaluationPhilosophy(coach);
+
         coach.teamId = team.id;
 
         if (
@@ -3184,6 +3344,11 @@ export function ensureTeamCoachingStaff(team) {
                 'analytical_planner'
         }
     };
+
+    ensureCoachEvaluationPhilosophy(
+        userCoach,
+        gmProfile.evaluationPriorities
+    );
 
     team.userCoachProfile = userCoach;
     team.coaches = [...npcCoaches, userCoach];
@@ -4534,6 +4699,9 @@ export function getCoachWeeklyOutlook(coach, team, gameState = null) {
 export function getCoachIdentityProfile(coach) {
     if (!coach) return null;
 
+    const evaluationPhilosophy =
+        ensureCoachEvaluationPhilosophy(coach);
+
     const tacticalId =
         getStaffProfileId(coach, 'tactical') ||
         'adaptive_strategist';
@@ -4911,6 +5079,10 @@ export function getCoachIdentityProfile(coach) {
         scoutingSkills,
         prioritySkills,
 
+        evaluationPriorities: [
+            ...(evaluationPhilosophy?.priorities || [])
+        ],
+
         isUserCoach: Boolean(coach.isUserCoach)
     };
 }
@@ -5043,6 +5215,131 @@ export function getCoachRecruitingPreferenceFit(
             evaluatedSkills.length
         : null;
 
+    // Read only estimates contained in this team's scouting report.
+    const getAttributeEstimate = (category, attribute) => {
+        const range = ranges?.[category]?.[attribute];
+
+        const low = Number(range?.low);
+        const high = Number(range?.high);
+
+        if (
+            !Number.isFinite(low) ||
+            !Number.isFinite(high) ||
+            high < low
+        ) {
+            return null;
+        }
+
+        return clamp((low + high) / 2, 0, 100);
+    };
+
+    const averageEstimates = values => {
+        const validValues = values.filter(Number.isFinite);
+
+        return validValues.length > 0
+            ? validValues.reduce((sum, value) => sum + value, 0) /
+                validValues.length
+            : null;
+    };
+
+    const getCategoryEstimate = category => {
+        const attributes = Object.keys(ranges?.[category] || {});
+
+        return averageEstimates(
+            attributes.map(attribute =>
+                getAttributeEstimate(category, attribute)
+            )
+        );
+    };
+
+    const getCharacterEstimate = key => {
+        const rawValue =
+            report?.evaluation?.characterEstimates?.[key];
+
+        if (rawValue == null) return null;
+
+        const value = Number(rawValue);
+
+        return Number.isFinite(value)
+            ? clamp(value, 0, 100)
+            : null;
+    };
+
+    // Each priority uses its own evidence source. Some qualities cannot
+    // yet be evaluated and correctly contribute no adjustment.
+    const priorityEstimateReaders = {
+        speed: () => getAttributeEstimate('physical', 'speed'),
+
+        athleticism: () => averageEstimates([
+            getAttributeEstimate('physical', 'speed'),
+            getAttributeEstimate('physical', 'agility'),
+            getAttributeEstimate('physical', 'explosiveness'),
+            getAttributeEstimate('physical', 'jumping'),
+            getAttributeEstimate('physical', 'stamina')
+        ]),
+
+        technique: () => getCategoryEstimate('technical'),
+
+        football_iq: () => averageEstimates([
+            getAttributeEstimate('mental', 'playbookIQ'),
+            getAttributeEstimate('mental', 'decisionMaking')
+        ]),
+
+        reliability: () => getCharacterEstimate('dependability'),
+
+        work_ethic: () => getCharacterEstimate('workEthic'),
+
+        // The player model does not yet contain a dedicated
+        // coachability trait. Do not substitute an unrelated rating.
+        coachability: () => null,
+
+        // Team fit is an imperfect proxy, not a direct teamwork measurement.
+        teamwork: () => getCharacterEstimate('teamFit'),
+
+        physicality: () => averageEstimates([
+            getAttributeEstimate('physical', 'strength'),
+            getAttributeEstimate('mental', 'toughness')
+        ])
+    };
+
+    const requestedPriorities = Array.isArray(
+        identity.evaluationPriorities
+    )
+        ? identity.evaluationPriorities
+        : [];
+
+    const evaluatedPriorities = requestedPriorities
+        .map(priority => {
+            const reader = priorityEstimateReaders[priority];
+
+            if (typeof reader !== 'function') return null;
+
+            const estimate = reader();
+
+            return Number.isFinite(estimate)
+                ? estimate
+                : null;
+        })
+        .filter(Number.isFinite);
+
+    const estimatedPriorityFit = averageEstimates(
+        evaluatedPriorities
+    );
+
+    const priorityCoverage = requestedPriorities.length > 0
+        ? evaluatedPriorities.length / requestedPriorities.length
+        : 0;
+
+    // A coach's stated priorities influence preference, not accuracy.
+    // The effect is scaled by scouting confidence and available evidence.
+    const evaluationPriorityAdjustment =
+        estimatedPriorityFit === null
+            ? 0
+            : ((estimatedPriorityFit - 50) / 50) *
+                2.0 *
+                scoutingConfidence *
+                priorityCoverage;
+
     // A coach receives a small bonus for a preferred position and a
     // smaller penalty when a known position falls outside that preference.
     const positionAdjustment = positionFit === null
@@ -5103,7 +5400,8 @@ export function getCoachRecruitingPreferenceFit(
     const score = clamp(
         positionAdjustment +
         skillAdjustment +
-        archetypeAdjustment,
+        archetypeAdjustment +
+        evaluationPriorityAdjustment,
         -5,
         5
     );
@@ -5115,6 +5413,12 @@ export function getCoachRecruitingPreferenceFit(
         estimatedSkillFit: estimatedSkillFit === null
             ? null
             : Math.round(estimatedSkillFit),
+        evaluationPriorityFit: estimatedPriorityFit === null
+            ? null
+            : Math.round(estimatedPriorityFit),
+        evaluationPrioritiesEvaluated: evaluatedPriorities.length,
+        evaluationPriorityAdjustment:
+            Math.round(evaluationPriorityAdjustment * 100) / 100,
         skillsEvaluated: evaluatedSkills.length,
         scoutingConfidence: Math.round(scoutingConfidence * 100)
     };
