@@ -21046,6 +21046,130 @@ export function renderHistoryTab(gameState) {
                     : 'No recorded leader';
             };
 
+            const yearbookAwardLeagues = [
+                { key: 'premier', label: 'Premier League' },
+                { key: 'sandlot', label: 'Sandlot Circuit' }
+            ];
+
+            const yearbookAwardStats = [
+                { key: 'passYards', label: 'Pass Yards' },
+                { key: 'rushYards', label: 'Rush Yards' },
+                { key: 'recYards', label: 'Receiving Yards' },
+                { key: 'touchdowns', label: 'Touchdowns' },
+                { key: 'tackles', label: 'Tackles' },
+                { key: 'sacks', label: 'Sacks' },
+                { key: 'interceptions', label: 'Interceptions' }
+            ];
+
+            const yearbookAwardCards = yearbookAwardLeagues.map(leagueInfo => {
+                const awards = selectedSeason.reportSnapshot
+                    ?.leagues?.[leagueInfo.key]?.awards;
+
+                if (!Array.isArray(awards) || awards.length === 0) {
+                    return '';
+                }
+
+                const cards = awards.map(award => {
+                    const winner = award?.winner;
+
+                    if (!winner) return '';
+
+                    const highlights = yearbookAwardStats
+                        .filter(stat =>
+                            Number(winner.stats?.[stat.key]) > 0
+                        )
+                        .slice(0, 3);
+
+                    const highlightsHtml = highlights.length > 0
+                        ? `
+                            <div class="flex flex-wrap gap-1.5 mt-2">
+                                ${highlights.map(stat => `
+                                    <span class="rounded bg-white border border-amber-200 px-2 py-1 text-[10px]">
+                                        <span class="text-slate-500">
+                                            ${escapeHistoryHtml(stat.label)}
+                                        </span>
+                                        <b class="ml-1 text-slate-900">
+                                            ${Number(winner.stats[stat.key]).toLocaleString()}
+                                        </b>
+                                    </span>
+                                `).join('')}
+                            </div>
+                        `
+                        : winner.record
+                            ? `
+                                <p class="mt-2 text-xs text-slate-600">
+                                    Team Record:
+                                    <b>
+                                        ${Number(winner.record.wins) || 0}–${Number(winner.record.losses) || 0}–${Number(winner.record.ties) || 0}
+                                    </b>
+                                </p>
+                            `
+                            : '';
+
+                    return `
+                        <div class="rounded-lg border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-3">
+                            <p class="text-[9px] font-black uppercase tracking-widest text-amber-700">
+                                ${escapeHistoryHtml(award.label || 'Season Award')}
+                            </p>
+
+                            <p class="mt-1 font-black text-slate-900">
+                                ${escapeHistoryHtml(winner.name || 'Unknown')}
+                            </p>
+
+                            <p class="text-[10px] text-slate-500">
+                                ${escapeHistoryHtml(winner.position || 'Head Coach')}
+                                ${winner.teamName
+                                    ? ` · ${escapeHistoryHtml(winner.teamName)}`
+                                    : ''}
+                            </p>
+
+                            ${highlightsHtml}
+                        </div>
+                    `;
+                }).filter(Boolean).join('');
+
+                if (!cards) return '';
+
+                return `
+                    <div class="mb-4 last:mb-0">
+                        <h6 class="mb-2 text-xs font-black uppercase tracking-wide text-slate-600">
+                            ${escapeHistoryHtml(leagueInfo.label)}
+                        </h6>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            ${cards}
+                        </div>
+                    </div>
+                `;
+            }).filter(Boolean).join('');
+
+            const yearbookAwardsHtml = `
+                <div class="px-4 pb-4">
+                    <div class="rounded-lg border border-amber-200 bg-amber-50/40 p-4">
+                        <div class="flex items-center justify-between gap-2 mb-3">
+                            <div>
+                                <p class="text-[9px] font-black uppercase tracking-widest text-amber-700">
+                                    League Honors
+                                </p>
+                                <h5 class="text-lg font-black text-slate-900">
+                                    Season Awards
+                                </h5>
+                            </div>
+                            <span class="text-xs text-slate-500">
+                                Year ${escapeHistoryHtml(selectedSeason.year)}
+                            </span>
+                        </div>
+
+                        ${yearbookAwardCards ||
+                            `<p class="text-sm text-slate-500">
+                                No award results were saved for this season.
+                                Awards are available for seasons completed under the awards system.
+                            </p>`
+                        }
+                    </div>
+                </div>
+            `;
+
             const hasSnapshot = !!selectedSeason.reportSnapshot;
 
             reportContentHtml = `
@@ -21124,6 +21248,8 @@ export function renderHistoryTab(gameState) {
                                 </p>
                             </div>
                         </div>
+
+                        ${yearbookAwardsHtml}
                     ` : `
                         <p class="px-4 pb-4 text-sm text-slate-500">
                             The detailed snapshot for this older season has
@@ -22375,6 +22501,170 @@ export function renderOffseasonScreen(report, year) {
 
     previousTeamLeadersPanel?.remove();
 
+        // Render season awards from the saved historical season snapshot.
+    const awardsSnapshot = seasonEntry?.reportSnapshot?.leagues || {};
+
+    const awardLeagueDefinitions = [
+        { key: 'premier', label: 'Premier League' },
+        { key: 'sandlot', label: 'Sandlot Circuit' }
+    ];
+
+    const awardStatLabels = [
+        { key: 'passYards', label: 'Pass Yards' },
+        { key: 'rushYards', label: 'Rush Yards' },
+        { key: 'recYards', label: 'Receiving Yards' },
+        { key: 'touchdowns', label: 'Touchdowns' },
+        { key: 'tackles', label: 'Tackles' },
+        { key: 'sacks', label: 'Sacks' },
+        { key: 'interceptions', label: 'Interceptions' },
+        { key: 'interceptionsThrown', label: 'INTs Thrown' },
+        { key: 'fumblesRecovered', label: 'Fumbles Recovered' },
+        { key: 'safeties', label: 'Safeties' }
+    ];
+
+    const awardLeagueCards = awardLeagueDefinitions.map(leagueInfo => {
+        const leagueSnapshot = awardsSnapshot[leagueInfo.key];
+        const awards = Array.isArray(leagueSnapshot?.awards)
+            ? leagueSnapshot.awards
+            : [];
+
+        if (awards.length === 0) return '';
+
+        const awardCards = awards.map(award => {
+            const winner = award?.winner;
+            if (!winner) return '';
+
+            const awardHighlights = awardStatLabels
+                .filter(stat => Number(winner.stats?.[stat.key]) > 0)
+                .slice(0, 3);
+
+            const awardHighlightsHtml = awardHighlights.length > 0
+                ? `
+                    <div class="flex flex-wrap gap-2 mt-3">
+                        ${awardHighlights.map(stat => `
+                            <span class="rounded bg-white/80 border border-amber-200 px-2 py-1 text-xs">
+                                <span class="text-slate-500">
+                                    ${escapeOffseasonHtml(stat.label)}
+                                </span>
+                                <b class="ml-1 text-slate-900">
+                                    ${Number(winner.stats[stat.key]).toLocaleString()}
+                                </b>
+                            </span>
+                        `).join('')}
+                    </div>
+                `
+                : winner.record
+                    ? `
+                        <p class="mt-3 text-xs font-semibold text-slate-600">
+                            Record:
+                            ${Number(winner.record.wins) || 0}–${Number(winner.record.losses) || 0}–${Number(winner.record.ties) || 0}
+                        </p>
+                    `
+                    : '';
+
+            return `
+                <div class="rounded-lg border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4">
+                    <div class="flex items-start justify-between gap-2">
+                        <span class="text-[10px] font-black uppercase tracking-widest text-amber-700">
+                            ${escapeOffseasonHtml(award.label || 'Season Award')}
+                        </span>
+                        ${award.key === 'mvp'
+                            ? '<span class="rounded-full bg-amber-400 px-2 py-0.5 text-[9px] font-black text-amber-950">MVP</span>'
+                            : ''}
+                    </div>
+
+                    <p class="mt-2 text-lg font-black text-slate-900">
+                        ${escapeOffseasonHtml(winner.name || 'Unknown')}
+                    </p>
+
+                    <p class="text-xs font-semibold text-slate-500">
+                        ${escapeOffseasonHtml(winner.position || 'Head Coach')}
+                        ${winner.teamName
+                            ? ` · ${escapeOffseasonHtml(winner.teamName)}`
+                            : ''}
+                    </p>
+
+                    ${winner.age != null
+                        ? `<p class="mt-1 text-[10px] text-slate-400">Age ${Number(winner.age)}</p>`
+                        : ''}
+
+                    ${awardHighlightsHtml}
+                </div>
+            `;
+        }).filter(Boolean).join('');
+
+        if (!awardCards) return '';
+
+        return `
+            <div class="rounded-xl border border-amber-200 bg-white p-4">
+                <div class="flex items-center justify-between gap-2 mb-3">
+                    <h4 class="font-black text-slate-900">
+                        ${escapeOffseasonHtml(leagueInfo.label)}
+                    </h4>
+                    <span class="text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                        ${awards.length} Awards
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    ${awardCards}
+                </div>
+            </div>
+        `;
+    }).filter(Boolean).join('');
+
+    document.getElementById('offseason-season-awards')?.remove();
+
+    const awardsPanelAnchor =
+        document.getElementById('offseason-staff-recap') ||
+        document.getElementById('offseason-league-highlights') ||
+        document.getElementById('offseason-team-performance');
+
+    if (awardsPanelAnchor) {
+        awardsPanelAnchor.insertAdjacentHTML(
+            'afterend',
+            `
+                <section id="offseason-season-awards"
+                    class="rounded-xl border border-amber-300 bg-amber-50/50 p-5 shadow-sm">
+
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-widest text-amber-700">
+                                The League Honors
+                            </p>
+                            <h3 class="text-xl font-black text-slate-900 mt-1">
+                                Season Awards
+                            </h3>
+                            <p class="text-sm text-slate-500 mt-1">
+                                Recognizing the standout players and coaches of the season
+                            </p>
+                        </div>
+
+                        <span class="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-800">
+                            Year ${escapeOffseasonHtml(
+                                seasonEntry?.year ?? savedCompletedYear
+                            )}
+                        </span>
+                    </div>
+
+                    ${awardLeagueCards
+                        ? `<div class="space-y-4">${awardLeagueCards}</div>`
+                        : `
+                            <div class="rounded-lg border border-dashed border-amber-300 bg-white p-4 text-center">
+                                <p class="font-bold text-slate-700">
+                                    No archived awards are available for this season.
+                                </p>
+                                <p class="mt-1 text-xs text-slate-500">
+                                    New award results will be saved with seasons completed under the awards system.
+                                </p>
+                            </div>
+                        `
+                    }
+                </section>
+            `
+        );
+    }
+
     let teamLeadersNameKey = String(playerTeam?.name || '')
         .trim()
         .toLowerCase();
@@ -22581,7 +22871,7 @@ export function renderOffseasonScreen(report, year) {
         }
     }
 
-    const formatOffseasonAttribute = value => {
+    const formatOffseasonAttribute = value =>
         String(value ?? 'Attribute')
             .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
             .replace(/[_-]+/g, ' ')

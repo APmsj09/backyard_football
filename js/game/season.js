@@ -940,6 +940,299 @@ function buildSeasonReportSnapshot(
                 });
         }
 
+        // Calculate awards from actual season production.
+        // Scores use within-league statistical comparisons rather than
+        // hidden player ratings or overall values.
+        const awardStatKeys = [
+            'passYards',
+            'rushYards',
+            'recYards',
+            'returnYards',
+            'pancakes',
+            'touchdowns',
+            'interceptionsThrown',
+            'fumblesLost',
+            'tackles',
+            'sacks',
+            'interceptions',
+            'fumblesRecovered',
+            'safeties'
+        ];
+
+        const awardStatMaxima = Object.fromEntries(
+            awardStatKeys.map(key => [
+                key,
+                leaguePlayers.reduce(
+                    (maximum, player) =>
+                        Math.max(maximum, readStat(player, key)),
+                    0
+                )
+            ])
+        );
+
+        const normalizedAwardStat = (player, key) => {
+            const maximum = awardStatMaxima[key] || 0;
+
+            return maximum > 0
+                ? readStat(player, key) / maximum
+                : 0;
+        };
+
+        const getOffensiveAwardScore = player => {
+            const hasOffensiveProduction = [
+                'passAttempts',
+                'rushAttempts',
+                'targets',
+                'receptions',
+                'passYards',
+                'rushYards',
+                'recYards',
+                'pancakes',
+                'returnYards'
+            ].some(key => readStat(player, key) > 0);
+
+            if (!hasOffensiveProduction) return 0;
+
+            const score =
+                normalizedAwardStat(player, 'passYards') * 0.85 +
+                normalizedAwardStat(player, 'rushYards') * 1.00 +
+                normalizedAwardStat(player, 'recYards') * 0.95 +
+                normalizedAwardStat(player, 'touchdowns') * 1.25 +
+                normalizedAwardStat(player, 'pancakes') * 0.75 +
+                normalizedAwardStat(player, 'returnYards') * 0.40 -
+                normalizedAwardStat(player, 'interceptionsThrown') * 0.30 -
+                normalizedAwardStat(player, 'fumblesLost') * 0.20;
+
+            return Math.max(0, score);
+        };
+
+        const getDefensiveAwardScore = player => {
+            const hasDefensiveProduction = [
+                'tackles',
+                'sacks',
+                'interceptions',
+                'fumblesRecovered',
+                'safeties'
+            ].some(key => readStat(player, key) > 0);
+
+            if (!hasDefensiveProduction) return 0;
+
+            return (
+                normalizedAwardStat(player, 'tackles') * 0.60 +
+                normalizedAwardStat(player, 'sacks') * 1.50 +
+                normalizedAwardStat(player, 'interceptions') * 1.50 +
+                normalizedAwardStat(player, 'fumblesRecovered') * 1.20 +
+                normalizedAwardStat(player, 'safeties') * 1.20
+            );
+        };
+
+        const pickPlayerAward = (
+            key,
+            label,
+            scoreFunction,
+            candidates = leaguePlayers
+        ) => {
+            const ranked = candidates
+                .map(player => ({
+                    player,
+                    score: scoreFunction(player)
+                }))
+                .filter(entry =>
+                    Number.isFinite(entry.score) &&
+                    entry.score > 0
+                )
+                .sort((a, b) =>
+                    b.score - a.score ||
+                    readStat(b.player, 'touchdowns') -
+                        readStat(a.player, 'touchdowns') ||
+                    String(a.player.name || '').localeCompare(
+                        String(b.player.name || '')
+                    )
+                );
+
+            const winner = ranked[0];
+
+            if (!winner) return null;
+
+            const player = winner.player;
+            const team = teamById.get(String(player.teamId));
+            const age = Number(player.age);
+
+            return {
+                key,
+                label,
+                winner: {
+                    id: player.id,
+                    name: player.name || 'Unknown',
+                    teamName: team?.name || 'Unknown',
+                    position: player.pos ||
+                        estimateBestPosition(player) ||
+                        'ATH',
+                    age: Number.isFinite(age) ? age : null,
+                    stats: copyStats(player),
+                    score: Math.round(winner.score * 1000) / 1000
+                }
+            };
+        };
+
+        // Rookie eligibility is based on completed prior seasons.
+        // The current season has not yet been added to this counter here.
+        const firstSeasonPlayers = leaguePlayers.filter(player => {
+            const mainLeagueHistory = Array.isArray(player.progression)
+                ? player.progression
+                : [];
+
+            const priorTeamHistory = Array.isArray(
+                player.playerHistory?.teamsPlayedFor
+            )
+                ? player.playerHistory.teamsPlayedFor
+                : [];
+
+            const totalSeasons = Number(
+                player.careerStats?.seasonsPlayed
+            );
+
+            const youthSeasons = Number(player.youthSeasonsPlayed);
+
+            // Career seasons include Pee Wee. Subtract completed youth
+            // seasons so a graduate's first main-league year still counts
+            // as a rookie season.
+            const estimatedMainLeagueSeasons =
+                Number.isFinite(totalSeasons)
+                    ? Math.max(
+                        0,
+                        totalSeasons -
+                            (
+                                Number.isFinite(youthSeasons)
+                                    ? Math.max(0, youthSeasons)
+                                    : 0
+                            )
+                    )
+                    : null;
+
+            return (
+                mainLeagueHistory.length === 0 &&
+                priorTeamHistory.length === 0 &&
+                (
+                    estimatedMainLeagueSeasons === null ||
+                    estimatedMainLeagueSeasons === 0
+                )
+            );
+        });
+
+        const seasonAwards = [];
+
+        // Formal player and coach awards apply to the two main leagues.
+        if (tier === 1 || tier === 2) {
+            const awardDefinitions = [
+                pickPlayerAward(
+                    'mvp',
+                    'Most Valuable Player',
+                    player =>
+                        (getOffensiveAwardScore(player) / 5.20) +
+                        (getDefensiveAwardScore(player) / 6.00)
+                ),
+                pickPlayerAward(
+                    'offensive_player',
+                    'Offensive Player of the Year',
+                    getOffensiveAwardScore
+                ),
+                pickPlayerAward(
+                    'defensive_player',
+                    'Defensive Player of the Year',
+                    getDefensiveAwardScore
+                ),
+                pickPlayerAward(
+                    'offensive_rookie',
+                    'Offensive Rookie of the Year',
+                    getOffensiveAwardScore,
+                    firstSeasonPlayers
+                ),
+                pickPlayerAward(
+                    'defensive_rookie',
+                    'Defensive Rookie of the Year',
+                    getDefensiveAwardScore,
+                    firstSeasonPlayers
+                )
+            ].filter(Boolean);
+
+            seasonAwards.push(...awardDefinitions);
+
+            // Coach of the Year goes to the head coach of the strongest
+            // regular-season team, considering record and point differential.
+            const rankedCoaches = safeTeams
+                .map((team, index) => {
+                    const wins = Number(team.wins) || 0;
+                    const losses = Number(team.losses) || 0;
+                    const ties = Number(team.ties) || 0;
+                    const games = wins + losses + ties;
+
+                    const winPercentage = games > 0
+                        ? (wins + ties * 0.5) / games
+                        : 0;
+
+                    const pointsFor = Number(
+                        team.seasonTeamStats?.pointsFor
+                    ) || 0;
+
+                    const pointsAgainst = Number(
+                        team.seasonTeamStats?.pointsAgainst
+                    ) || 0;
+
+                    const pointDifferentialPerGame = games > 0
+                        ? (pointsFor - pointsAgainst) / games
+                        : 0;
+
+                    const headCoach =
+                        team.coach ||
+                        team.staff?.coach ||
+                        null;
+
+                    return {
+                        team,
+                        headCoach,
+                        wins,
+                        losses,
+                        ties,
+                        score:
+                            winPercentage * 100 +
+                            pointDifferentialPerGame * 0.10 +
+                            (safeTeams.length - index) * 0.01
+                    };
+                })
+                .filter(entry =>
+                    entry.headCoach &&
+                    entry.headCoach.name
+                )
+                .sort((a, b) =>
+                    b.score - a.score ||
+                    b.wins - a.wins ||
+                    String(a.team.name || '').localeCompare(
+                        String(b.team.name || '')
+                    )
+                );
+
+            const coachWinner = rankedCoaches[0];
+
+            if (coachWinner) {
+                seasonAwards.push({
+                    key: 'coach_of_year',
+                    label: 'Coach of the Year',
+                    winner: {
+                        id: coachWinner.headCoach.id ?? null,
+                        name: coachWinner.headCoach.name,
+                        teamName: coachWinner.team.name || 'Unknown',
+                        record: {
+                            wins: coachWinner.wins,
+                            losses: coachWinner.losses,
+                            ties: coachWinner.ties
+                        },
+                        score: Math.round(coachWinner.score * 1000) / 1000
+                    }
+                });
+            }
+        }
+
         const totals = Object.fromEntries(
             SEASON_REPORT_TOTAL_KEYS.map(key => [
                 key,
@@ -1056,6 +1349,9 @@ function buildSeasonReportSnapshot(
             playerCount: leaguePlayers.length,
             standings,
             leaders,
+            ...(tier === 1 || tier === 2
+                ? { awards: seasonAwards }
+                : {}),
             totals,
             ...(debugEnabled
                 ? { productionByAge, productionByExperience }

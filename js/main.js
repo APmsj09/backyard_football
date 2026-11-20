@@ -3910,9 +3910,46 @@ async function handleAdvanceWeek() {
                     })[char]);
 
                 const premier = seasonEntry.reportSnapshot.leagues?.premier;
+                const sandlot = seasonEntry.reportSnapshot.leagues?.sandlot;
+
                 const passer = premier?.leaders?.passing?.[0];
                 const rusher = premier?.leaders?.rushing?.[0];
                 const scorer = premier?.leaders?.scoring?.[0];
+
+                // Summarize archived award winners without recalculating them.
+                const buildAwardSummary = (leagueSnapshot, leagueLabel) => {
+                    const awards = Array.isArray(leagueSnapshot?.awards)
+                        ? leagueSnapshot.awards
+                        : [];
+
+                    const winnerLines = awards
+                        .filter(award => award?.winner)
+                        .map(award => {
+                            const winner = award.winner;
+
+                            return `
+                                <p>
+                                    ${escapeReportText(award.label || 'Season Award')}:
+                                    <b>${escapeReportText(winner.name || 'Unknown')}</b>
+                                    ${winner.teamName
+                                        ? `(${escapeReportText(winner.teamName)})`
+                                        : ''}
+                                </p>
+                            `;
+                        });
+
+                    if (winnerLines.length === 0) return '';
+
+                    return `
+                        <p><b>${escapeReportText(leagueLabel)} Awards</b></p>
+                        ${winnerLines.join('')}
+                    `;
+                };
+
+                const awardsReportBody = [
+                    buildAwardSummary(premier, 'Premier League'),
+                    buildAwardSummary(sandlot, 'Sandlot Circuit')
+                ].filter(Boolean).join('');
 
                 const reportBody = [
                     `<p><b>Year ${completedYear} is in the books.</b></p>`,
@@ -3923,7 +3960,8 @@ async function handleAdvanceWeek() {
                     `<p>Passing: ${passer ? `${escapeReportText(passer.name)} — ${Number(passer.value).toLocaleString()} yards` : 'No recorded leader'}</p>`,
                     `<p>Rushing: ${rusher ? `${escapeReportText(rusher.name)} — ${Number(rusher.value).toLocaleString()} yards` : 'No recorded leader'}</p>`,
                     `<p>Touchdowns: ${scorer ? `${escapeReportText(scorer.name)} — ${Number(scorer.value).toLocaleString()}` : 'No recorded leader'}</p>`,
-                    '<p>Open the History yearbook for final standings, league leaders, and the graduating class.</p>'
+                    awardsReportBody,
+                    '<p>Open the History yearbook for final standings, league leaders, awards, and the graduating class.</p>'
                 ].join('');
 
                 Game.addMessage(
@@ -6660,6 +6698,88 @@ export function openPlayerCard(playerId) {
             ${seasonStatsTableHtml}
         </div>`;
 
+    // Retrieve individual awards from archived season snapshots.
+    // Awards remain attached to the player after team changes.
+    const escapePlayerAwardText = value =>
+        String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]);
+
+    const playerAwardHistory = (
+        Array.isArray(gs.history?.seasons)
+            ? gs.history.seasons
+            : []
+    ).flatMap(season => {
+        const leagueDefinitions = [
+            { key: 'premier', label: 'Premier League' },
+            { key: 'sandlot', label: 'Sandlot Circuit' }
+        ];
+
+        return leagueDefinitions.flatMap(leagueInfo => {
+            const awards = season.reportSnapshot
+                ?.leagues?.[leagueInfo.key]?.awards;
+
+            if (!Array.isArray(awards)) return [];
+
+            return awards
+                .filter(award =>
+                    award?.winner?.id != null &&
+                    String(award.winner.id) === String(sourcePlayer.id) &&
+                    award.key !== 'coach_of_year'
+                )
+                .map(award => ({
+                    year: Number(season.year) || 0,
+                    league: leagueInfo.label,
+                    label: award.label || 'Season Award'
+                }));
+        });
+    }).sort((a, b) =>
+        b.year - a.year ||
+        a.league.localeCompare(b.league) ||
+        a.label.localeCompare(b.label)
+    );
+
+    const awardHistoryHtml = playerAwardHistory.length > 0
+        ? `
+            <div class="space-y-2">
+                ${playerAwardHistory.map(award => `
+                    <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-white p-3">
+                        <div class="flex items-center gap-3 min-w-0">
+                            <div class="w-9 h-9 shrink-0 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center text-lg">
+                                🏆
+                            </div>
+                            <div class="min-w-0">
+                                <p class="font-black text-sm text-slate-900">
+                                    ${escapePlayerAwardText(award.label)}
+                                </p>
+                                <p class="text-xs text-slate-500">
+                                    ${escapePlayerAwardText(award.league)}
+                                </p>
+                            </div>
+                        </div>
+                        <span class="shrink-0 rounded-full bg-slate-900 text-white px-3 py-1 text-xs font-black">
+                            Year ${award.year}
+                        </span>
+                    </div>
+                `).join('')}
+            </div>
+        `
+        : `
+            <div class="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <div class="text-3xl mb-2">🏆</div>
+                <p class="font-bold text-slate-700 text-sm">
+                    No individual awards yet
+                </p>
+                <p class="text-xs text-slate-500 mt-1">
+                    Season honors will appear here when this player earns them.
+                </p>
+            </div>
+        `;
+
     const modalHtml = `
         <div class="flex flex-col gap-3">
             <!-- Top Identity Banner -->
@@ -6713,12 +6833,13 @@ export function openPlayerCard(playerId) {
             </div>
 
             <!-- Tab Buttons -->
-            <div class="flex bg-slate-100 p-1 rounded border border-slate-200 gap-1 text-xs">
+            <div class="flex flex-wrap bg-slate-100 p-1 rounded border border-slate-200 gap-1 text-xs">
                 <button class="pcard-tab-btn active px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition bg-slate-900 text-white shadow-sm" data-ptab="overview" onclick="app_switchPlayerCardTab('overview')">📋 Summary</button>
                 <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="attributes" onclick="app_switchPlayerCardTab('attributes')">📊 All Attributes</button>
                 ${isMyTeam ? `<button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="growth" onclick="app_switchPlayerCardTab('growth')">📈 Development History</button>` : ''}
                 <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="stats" onclick="app_switchPlayerCardTab('stats')">📜 Career Stats</button>
                 <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="recruiting" onclick="app_switchPlayerCardTab('recruiting')">🤝 Recruiting History</button>
+                <button class="pcard-tab-btn px-3 py-1.5 rounded font-bold text-xs uppercase tracking-wider transition text-slate-500 hover:text-slate-800 bg-slate-100" data-ptab="awards" onclick="app_switchPlayerCardTab('awards')">🏆 Awards</button>
             </div>
 
             <!-- PANE 1: SUMMARY -->
@@ -6923,6 +7044,11 @@ export function openPlayerCard(playerId) {
 
                     ${recruitingHistoryHtml}
                 </div>
+            </div>
+
+            <!-- PANE 6: AWARDS HISTORY -->
+            <div id="pcard-pane-awards" class="pcard-pane hidden max-h-72 overflow-y-auto">
+                ${awardHistoryHtml}
             </div>
 
             <!-- Bottom Actions -->
