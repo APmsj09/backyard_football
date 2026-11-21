@@ -1181,59 +1181,46 @@ function promptCoachCreation(teamId) {
             </div>
 
             <div class="border-t border-slate-200 pt-4">
-                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
-                    4. Coaching Background
-                </label>
-
-                <p class="text-xs text-slate-500 mb-2">
-                    How did you become involved in community football?
-                    You do not need to have played or coached before.
-                </p>
-
-                <label class="block text-xs font-semibold text-slate-700 mb-1">
-                    Community background
-                </label>
-                <select id="new-coach-community-background"
-                    class="w-full p-2 border border-slate-300 rounded bg-white text-sm">
-                    ${coachCommunityBackgroundOptionsHtml}
-                </select>
-
-                <div class="border-t border-slate-200 mt-4 pt-3">
-                    <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
-                        Previous Experience
-                    </label>
-                    <p class="text-xs text-slate-500 mb-3">
-                        Each area is independent. Choosing no experience is completely valid.
-                        These answers do not add coaching skill points.
-                    </p>
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        ${coachExperienceControlsHtml}
+                <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                            4. Coaching Background
+                        </label>
+                        <p id="coach-community-summary"
+                            class="text-xs text-slate-600">
+                            Community background and previous experience
+                        </p>
                     </div>
+
+                    <button type="button"
+                        data-coach-setup-open="coach-community-popout"
+                        class="shrink-0 px-3 py-2 rounded border border-slate-300 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50">
+                        Edit
+                    </button>
                 </div>
             </div>
 
             <div class="border-t border-slate-200 pt-4">
-                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
-                    5. What Do You Value in Players?
-                </label>
-                <p class="text-xs text-slate-500 mb-3">
-                    Choose the three qualities that matter most to you.
-                    These are personal priorities, not a measure of how accurately
-                    you evaluate players.
-                </p>
+                <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                            5. Player Evaluation Philosophy
+                        </label>
+                        <p id="coach-evaluation-summary"
+                            class="text-xs text-slate-600">
+                            Reliability · Technique · Football IQ
+                        </p>
+                    </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    ${coachEvaluationPriorityControlsHtml}
+                    <button type="button"
+                        data-coach-setup-open="coach-evaluation-popout"
+                        class="shrink-0 px-3 py-2 rounded border border-slate-300 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50">
+                        Edit
+                    </button>
                 </div>
-
-                <p id="coach-evaluation-priority-count"
-                    class="text-xs font-semibold text-slate-600 mt-2">
-                    Select 3 qualities. 3 / 3 selected.
-                </p>
             </div>
 
-             <!-- COACH_SKILL_ALLOCATION_BLOCK -->
+            <!-- COACH_SKILL_ALLOCATION_BLOCK -->
             <div class="border-t border-slate-200 pt-4">
                 <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
                     Offensive Identity
