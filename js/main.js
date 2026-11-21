@@ -518,8 +518,19 @@ function renderTeamChooser(gameState) {
 }
 
 function promptCoachCreation(teamId) {
+    if (!gameState || !Array.isArray(gameState.teams)) {
+        console.error(
+            'Coach creation unavailable: gameState or teams is missing.',
+            gameState
+        );
+        return;
+    }
+
     const team = gameState.teams.find(t => t.id === teamId);
-    if (!team) return;
+    if (!team) {
+        console.error('Coach creation unavailable: team not found.', teamId);
+        return;
+    }
 
     const escapeBuilderText = value => String(value ?? '').replace(
         /[&<>"']/g,
@@ -2237,8 +2248,20 @@ function launchOffseasonDraft({
 }
 
 function confirmFranchiseTakeover(teamId, coachDetails) {
+    if (!gameState || !Array.isArray(gameState.teams)) {
+        console.error(
+            'Franchise takeover failed: game state or teams are missing.',
+            gameState
+        );
+        return;
+    }
+
     const team = gameState.teams.find(t => t.id === teamId);
-    if (!team) return;
+
+    if (!team) {
+        console.error('Franchise takeover failed: team not found.', teamId);
+        return;
+    }
 
     const MIN_COACH_SKILL = MIN_STARTING_COACH_SKILL;
     const MAX_COACH_SKILL = MAX_STARTING_COACH_SKILL;
@@ -2373,6 +2396,14 @@ function confirmFranchiseTakeover(teamId, coachDetails) {
         );
 
         applyManagementPreset(team, 'casual_gm');
+
+        if (
+            !team.formations ||
+            typeof team.formations !== 'object' ||
+            Array.isArray(team.formations)
+        ) {
+            team.formations = {};
+        }
 
         team.formations.offense = coachDetails.off;
         team.formations.defense = coachDetails.def;
