@@ -1714,11 +1714,24 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
         'balanced'
     );
 
-    const defaultSchemePromise = {
-        system_first: 'GM_CHOICE',
-        balanced: 'SHARED_CONTROL',
-        personnel_first: 'COACH_CHOICE'
-    }[managementApproach] || 'SHARED_CONTROL';
+    const configuredControlStructure = String(
+        team?.gmProfile?.managementControlStructure || ''
+    );
+
+    const controlStructureSchemePromise = {
+        gm_directed: 'GM_CHOICE',
+        shared: 'SHARED_CONTROL',
+        coach_influenced: 'COACH_CHOICE'
+    }[configuredControlStructure];
+
+    // Preserve legacy behavior for older saves and AI teams
+    // that do not have the separately stored control structure.
+    const defaultSchemePromise =
+        controlStructureSchemePromise || {
+            system_first: 'GM_CHOICE',
+            balanced: 'SHARED_CONTROL',
+            personnel_first: 'COACH_CHOICE'
+        }[managementApproach] || 'SHARED_CONTROL';
 
     const schemePromise = [
         'GM_CHOICE',
@@ -1917,6 +1930,50 @@ export function evaluateStaffNegotiation(staff, team, roleKey, pitch = {}) {
         } else if (personality === 'Old-School Disciplinarian') {
             interest -= 18;
             reasons.push("Disgusted by lack of discipline and scrimmages (-18)");
+        }
+    }
+
+    // 3B. MANAGEMENT PHILOSOPHY COMPATIBILITY
+    // The head coach should be comfortable with the program's
+    // broader practice culture, not just the authority in their offer.
+    if (roleKey === 'coach') {
+        const normalizedManagementApproach = [
+            'system_first',
+            'balanced',
+            'personnel_first'
+        ].includes(managementApproach)
+            ? managementApproach
+            : 'balanced';
+
+        const approachPracticeFocus = {
+            system_first: 'CHALK_TALK',
+            balanced: 'BALANCED',
+            personnel_first: 'FUN_SCRIMMAGE'
+        }[normalizedManagementApproach];
+
+        if (practiceFocus === approachPracticeFocus) {
+            interest += 6;
+
+            reasons.push(
+                `🎯 Practice commitment reinforces the program's ` +
+                `${normalizedManagementApproach.replace('_', '-')} identity (+6)`
+            );
+        } else if (
+            (
+                normalizedManagementApproach === 'system_first' &&
+                practiceFocus === 'FUN_SCRIMMAGE'
+            ) ||
+            (
+                normalizedManagementApproach === 'personnel_first' &&
+                practiceFocus === 'CHALK_TALK'
+            )
+        ) {
+            interest -= 5;
+
+            reasons.push(
+                `⚠️ Practice commitment clashes with the program's ` +
+                `${normalizedManagementApproach.replace('_', '-')} identity (-5)`
+            );
         }
     }
 

@@ -10677,6 +10677,12 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     const managementAutonomyLabel =
         managementOutlook?.managementAutonomyLabel || 'Shared control';
 
+    const managementControlStructure = String(
+        managementOutlook?.managementAutonomyLevel ||
+        team.gmProfile?.managementControlStructure ||
+        'shared'
+    );
+
     const managementCoachInfluence = Math.round(
         (Number(managementOutlook?.managementCoachInfluence) || 0) * 100
     );
@@ -10726,6 +10732,62 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
         // Rebuild the canonical user-coach profile from saved GM settings.
         Game.ensureTeamCoachingStaff?.(currentTeam);
+
+        saveGameState();
+        renderStaffTab(latestState);
+    };
+
+    window.app_setManagementControlStructure = structure => {
+        const latestState = Game.getGameState() || gameState;
+        const currentTeam = latestState?.playerTeam;
+
+        const validStructures = [
+            'gm_directed',
+            'shared',
+            'coach_influenced'
+        ];
+
+        if (!currentTeam || !validStructures.includes(structure)) {
+            return;
+        }
+
+        if (
+            !currentTeam.gmProfile ||
+            typeof currentTeam.gmProfile !== 'object'
+        ) {
+            currentTeam.gmProfile = {};
+        }
+
+        currentTeam.gmProfile.managementControlStructure = structure;
+
+        // Immediately apply the new authority structure.
+        // Existing negotiated Head Coach agreements remain protected.
+        Game.ensureTeamCoachingStaff?.(currentTeam);
+
+        saveGameState();
+        renderStaffTab(latestState);
+    };
+
+    window.app_setManagementCoachInfluence = value => {
+        const latestState = Game.getGameState() || gameState;
+        const currentTeam = latestState?.playerTeam;
+        const influence = Number(value);
+
+        if (!currentTeam || !Number.isFinite(influence)) {
+            return;
+        }
+
+        if (
+            !currentTeam.gmProfile ||
+            typeof currentTeam.gmProfile !== 'object'
+        ) {
+            currentTeam.gmProfile = {};
+        }
+
+        currentTeam.gmProfile.managementCoachInfluence = Math.max(
+            0,
+            Math.min(100, Math.round(influence))
+        );
 
         saveGameState();
         renderStaffTab(latestState);
@@ -14789,11 +14851,30 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                         AUTHORITY
                                     </span>
                                 </div>
-                                <span class="mt-2 block text-sm font-black text-slate-900">
-                                    ${managementAutonomyLabel}
-                                </span>
-                                <p class="mt-1 text-[9px] leading-relaxed text-slate-500">
-                                    How decisions and tactical authority are shared between you and your coaches.
+
+                                <select
+                                    class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-800"
+                                    value="${managementControlStructure}"
+                                    onchange="window.app_setManagementControlStructure(this.value)">
+
+                                    <option value="gm_directed"
+                                        ${managementControlStructure === 'gm_directed' ? 'selected' : ''}>
+                                        GM-controlled
+                                    </option>
+
+                                    <option value="shared"
+                                        ${managementControlStructure === 'shared' ? 'selected' : ''}>
+                                        Shared authority
+                                    </option>
+
+                                    <option value="coach_influenced"
+                                        ${managementControlStructure === 'coach_influenced' ? 'selected' : ''}>
+                                        Coach-influenced
+                                    </option>
+                                </select>
+
+                                <p class="mt-2 text-[9px] leading-relaxed text-slate-500">
+                                    Determines how organizational and tactical authority is shared.
                                 </p>
                             </div>
 
@@ -14806,18 +14887,30 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                         STAFF VOICE
                                     </span>
                                 </div>
-                                <div class="mt-1 flex items-baseline gap-1">
+
+                                <div class="mt-1 flex items-baseline justify-between">
                                     <span class="text-xl font-black tabular-nums text-slate-900">
                                         ${managementCoachInfluence}%
                                     </span>
                                 </div>
-                                <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
-                                    <div class="h-full rounded-full bg-blue-500"
-                                        style="width:${managementCoachInfluence}%">
-                                    </div>
+
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    step="5"
+                                    value="${managementCoachInfluence}"
+                                    aria-label="Coach Influence"
+                                    class="mt-2 w-full cursor-pointer accent-blue-600"
+                                    onchange="window.app_setManagementCoachInfluence(this.value)">
+
+                                <div class="flex justify-between text-[9px] text-slate-400">
+                                    <span>GM-led</span>
+                                    <span>Staff-led</span>
                                 </div>
-                                <p class="mt-1 text-[9px] leading-relaxed text-slate-500">
-                                    The degree to which coaches influence staff decisions.
+
+                                <p class="mt-2 text-[9px] leading-relaxed text-slate-500">
+                                    Determines how much weight your coaching staff has in organizational decisions.
                                 </p>
                             </div>
 
@@ -14845,7 +14938,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                     <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                         <p class="text-[9px] leading-relaxed text-slate-500">
-                            Your management approach affects staff influence and tactical alignment. It does not restrict which formations or plays you can choose.
+                            Management Approach defines your football identity. Control Structure determines decision authority, while Coach Influence determines the weight of staff input. Tactical Friction is calculated automatically.
                         </p>
                     </div>
                 </div>

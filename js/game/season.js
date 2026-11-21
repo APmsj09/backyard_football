@@ -9666,7 +9666,7 @@ function getTeamDevelopmentPriority(team, player) {
         );
 
     // Individual player instructions take precedence over
-    // the broader position-group instructions.
+    // broader position-group instructions.
     const rawPriority = hasPlayerPriority
         ? playerPriorities[playerKey]
         : position
@@ -9681,11 +9681,39 @@ function getTeamDevelopmentPriority(team, player) {
         DEVELOPMENT_PRIORITY_RANKS[level] ??
         DEVELOPMENT_PRIORITY_RANKS.normal;
 
+    // Only adjust general position-group priorities.
+    // Explicit individual player instructions remain unchanged.
+    const hasPositionPriority =
+        !hasPlayerPriority &&
+        position &&
+        positionPriorities[position] != null;
+
+    const approach = String(
+        team?.gmProfile?.managementApproach ||
+        team?.userCoachProfile?.managementApproach ||
+        'balanced'
+    );
+
+    let adjustedRank = rank;
+
+    if (hasPositionPriority && rank > 0) {
+        const positionalPriorityWeight =
+            approach === 'system_first'
+                ? 1.25
+                : approach === 'personnel_first'
+                    ? 0.50
+                    : 1.00;
+
+        // System-first reinforces position-group priorities.
+        // Personnel-first moves generic priorities closer to neutral.
+        adjustedRank = 3 + ((rank - 3) * positionalPriorityWeight);
+    }
+
     return {
         level: DEVELOPMENT_PRIORITY_RANKS[level] === undefined
             ? 'normal'
             : level,
-        rank,
+        rank: adjustedRank,
         ignored: rank === 0
     };
 }

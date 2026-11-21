@@ -37,7 +37,8 @@ import { TICK_DURATION_SECONDS } from './simulation_config.js';
 import { calculateOverall, estimateBestPosition } from './player.js';
 import {
     recordCoachDevelopmentOutcome,
-    getEffectiveStaffWorkHours
+    getEffectiveStaffWorkHours,
+    calculateSchemeClash
 } from './staff.js';
 import {
     getOffensivePlayKnowledge,
@@ -1485,6 +1486,19 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
         )[0] ||
         null;
 
+    // Tactical Friction reduces the staff's ability to interpret
+    // situational knowledge and opponent tendencies.
+    // It does not change the coach's actual ratings.
+    const schemeClashPenalty = calculateSchemeClash(offense);
+
+    const effectiveOffenseCoachSkill = Math.max(
+        0,
+        Math.min(
+            100,
+            offenseSkill(coach) - schemeClashPenalty
+        )
+    );
+
     const getCoachTendency = (key, fallback = 50) => {
         const value = coach?.behaviorProfile?.tendencies?.[key];
 
@@ -2030,7 +2044,7 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
                 offense,
                 'offense',
                 playcallSituationKeys,
-                offenseSkill(coach),
+                effectiveOffenseCoachSkill,
                 offensivePrepPoints,
                 candidateFormationName
             );
@@ -2052,7 +2066,7 @@ export function determinePlayCall(offense, defense, down, yardsToGo, ballOn, sco
             candidateKnowledge: tacticalKnowledge,
             candidateSide: 'offense',
             prepPoints: offensiveOpponentPrepPoints,
-            coachSkill: offenseSkill(coach)
+            coachSkill: effectiveOffenseCoachSkill
         });
 
         const coachAdaptability = getCoachTendency(
@@ -2811,6 +2825,18 @@ export function determineDefensivePlayCall(
         ? getDefensiveCoachSkill(defensiveCoach)
         : 50;
 
+    // Apply the same organizational-coordination penalty
+    // to defensive tactical interpretation.
+    const schemeClashPenalty = calculateSchemeClash(defense);
+
+    const effectiveDefensiveCoachSkill = Math.max(
+        0,
+        Math.min(
+            100,
+            defensiveCoachSkill - schemeClashPenalty
+        )
+    );
+
     const getDefensiveCoachTendency = (key, fallback = 50) => {
         const value = defensiveCoach?.behaviorProfile?.tendencies?.[key];
 
@@ -2918,7 +2944,7 @@ export function determineDefensivePlayCall(
             defense,
             'defense',
             playcallSituationKeys,
-            defensiveCoachSkill,
+            effectiveDefensiveCoachSkill,
             defensivePrepPoints
         );
 
@@ -3102,7 +3128,7 @@ export function determineDefensivePlayCall(
             candidateKnowledge: playKnowledge,
             candidateSide: 'defense',
             prepPoints: defensivePrepPoints,
-            coachSkill: defensiveCoachSkill
+            coachSkill: effectiveDefensiveCoachSkill
         });
 
         const opponentAdjustmentValue = Number(opponentAdjustment);
