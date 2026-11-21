@@ -14060,6 +14060,117 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             ? values.map(value => overviewEscape(value)).join(' · ')
             : 'Not specified';
 
+    const coachCommunityBackgroundLabels = {
+        family_volunteer: 'Parent or Family Volunteer',
+        community_volunteer: 'Neighborhood Volunteer',
+        rec_center_regular: 'Rec-Center Regular',
+        teacher_mentor: 'Teacher or Youth Mentor',
+        fitness_activity_leader: 'Fitness or Recreation Leader',
+        recreational_player: 'Recreational Player',
+        football_enthusiast: 'Football Enthusiast'
+    };
+
+    const coachExperienceLabels = {
+        playing: {
+            none: 'No playing experience',
+            informal: 'Informal recreational play',
+            recreational: 'Organized recreational player',
+            organized_amateur: 'Organized amateur player'
+        },
+        coaching: {
+            none: 'First-time coach',
+            informal_helper: 'Informal coaching helper',
+            assistant_volunteer: 'Volunteer assistant',
+            community_head_coach: 'Community head coach'
+        },
+        youthDevelopment: {
+            none: 'No youth-development experience',
+            family_community: 'Family or community mentoring',
+            teaching_mentoring: 'Teaching or mentoring',
+            youth_program: 'Youth program experience'
+        },
+        fitness: {
+            none: 'No fitness-instruction experience',
+            personal_interest: 'Personal fitness interest',
+            group_activity: 'Group activity leader',
+            fitness_instruction: 'Fitness instructor'
+        },
+        footballFamiliarity: {
+            casual: 'Casual football fan',
+            rules: 'Knows football rules',
+            active_study: 'Actively studies football'
+        }
+    };
+
+    const coachExperienceCategories = [
+        ['playing', 'Playing'],
+        ['coaching', 'Coaching'],
+        ['youthDevelopment', 'Youth'],
+        ['fitness', 'Fitness'],
+        ['footballFamiliarity', 'Football knowledge']
+    ];
+
+    const userCommunityProfile =
+        userCoachOverview?.coach?.communityProfile ||
+        team.gmProfile?.coachCommunityProfile ||
+        null;
+
+    const userCommunityBackgroundLabel =
+        coachCommunityBackgroundLabels[userCommunityProfile?.backgroundId] ||
+        'Not recorded';
+
+    const userCommunityExperienceSummary = coachExperienceCategories
+        .filter(([key]) =>
+            userCommunityProfile?.experience?.[key] != null
+        )
+        .map(([key, label]) => {
+            const value = userCommunityProfile.experience[key];
+            const description =
+                coachExperienceLabels[key]?.[value] ||
+                String(value).replace(/_/g, ' ');
+
+            return `${label}: ${description}`;
+        })
+        .join(' · ');
+
+    const coachEvaluationPriorityLabels = {
+        speed: 'Speed',
+        athleticism: 'Athleticism',
+        technique: 'Technique',
+        football_iq: 'Football IQ',
+        reliability: 'Reliability',
+        work_ethic: 'Work Ethic',
+        coachability: 'Coachability',
+        teamwork: 'Teamwork (team-fit proxy)',
+        physicality: 'Physicality'
+    };
+
+    const userEvaluationPriorityIds =
+        Array.isArray(userCoachIdentity?.evaluationPriorities)
+            ? userCoachIdentity.evaluationPriorities
+            : Array.isArray(userCoachOverview?.coach?.evaluationPhilosophy?.priorities)
+                ? userCoachOverview.coach.evaluationPhilosophy.priorities
+                : Array.isArray(team.gmProfile?.evaluationPriorities)
+                    ? team.gmProfile.evaluationPriorities
+                    : [];
+
+    const userEvaluationPriorityHtml = userEvaluationPriorityIds.map(id => {
+        const label = coachEvaluationPriorityLabels[id] ||
+            String(id).replace(/_/g, ' ');
+
+        const notModeled = id === 'coachability';
+
+        return `
+            <span class="inline-flex items-center rounded border ${
+                notModeled
+                    ? 'border-slate-200 bg-slate-100 text-slate-500'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+            } px-2 py-1 text-[9px] font-bold">
+                ${overviewEscape(label)}${notModeled ? ' · Not active yet' : ''}
+            </span>
+        `;
+    }).join('');
+
     const getUserCoachTendency = key => {
         const value = Number(userCoachOutlook?.tendencies?.[key]);
 
@@ -14193,6 +14304,26 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 <p class="mt-1 text-[10px] leading-relaxed text-slate-600">
                                     ${overviewEscape(userCoachOverview.styleSummary)}
                                 </p>
+
+                                <div class="mt-3 border-t border-indigo-100 pt-2">
+                                    <span class="block text-[9px] font-black uppercase tracking-wide text-indigo-700">
+                                        Community Background
+                                    </span>
+                                    <p class="mt-1 text-[10px] font-bold text-slate-800">
+                                        ${overviewEscape(userCommunityBackgroundLabel)}
+                                    </p>
+
+                                    <p class="mt-1 text-[9px] leading-relaxed text-slate-500">
+                                        ${overviewEscape(
+                                            userCommunityExperienceSummary ||
+                                            'Previous experience not recorded.'
+                                        )}
+                                    </p>
+
+                                    <p class="mt-1 text-[9px] text-slate-400">
+                                        Personal history only · No automatic skill bonuses
+                                    </p>
+                                </div>
                             </div>
 
                             <div class="flex flex-wrap items-center justify-between gap-2 border-t border-indigo-100 pt-2">
@@ -14347,6 +14478,24 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 </span>
                                 <p class="mt-1 text-[10px] leading-relaxed text-slate-700">
                                     ${userIdentityList(userCoachIdentity.preferredPlayerTypes)}
+                                </p>
+                            </div>
+
+                            <div class="mt-3 border-t border-emerald-200 pt-2">
+                                <span class="block text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                    Player Evaluation Philosophy
+                                </span>
+
+                                <div class="mt-2 flex flex-wrap gap-1">
+                                    ${userEvaluationPriorityHtml ||
+                                        '<span class="text-[9px] text-slate-500">No priorities recorded</span>'}
+                                </div>
+
+                                <p class="mt-2 text-[9px] leading-relaxed text-slate-500">
+                                    These priorities influence which prospects
+                                    appeal to you. They do not improve scouting
+                                    accuracy. Teamwork uses an approximate
+                                    team-fit estimate.
                                 </p>
                             </div>
                         </div>

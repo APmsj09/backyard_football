@@ -679,77 +679,305 @@ function promptCoachCreation(teamId) {
         extra: item.tradeoff || item.lore
     }));
 
-    const coachCommunityBackgroundOptionsHtml =
-        communityCoachBackgrounds.map((item, index) =>
-            `<option value="${escapeHtml(item.id)}"${index === 0 ? ' selected' : ''}>${escapeHtml(item.name)}</option>`
-        ).join('');
-
     const coachExperienceKeys = [
-        { id: 'playing', label: 'Playing experience' },
-        { id: 'coaching', label: 'Coaching experience' },
-        { id: 'youthDevelopment', label: 'Youth development experience' },
-        { id: 'fitness', label: 'Fitness or activity experience' },
-        { id: 'footballFamiliarity', label: 'Football familiarity' }
+        { id: 'playing', label: 'Playing experience', shortLabel: 'Playing' },
+        { id: 'coaching', label: 'Coaching experience', shortLabel: 'Coaching' },
+        { id: 'youthDevelopment', label: 'Youth development', shortLabel: 'Youth' },
+        { id: 'fitness', label: 'Fitness or activity', shortLabel: 'Fitness' },
+        { id: 'footballFamiliarity', label: 'Football familiarity', shortLabel: 'Football' }
     ];
 
-    const coachExperienceControlsHtml = coachExperienceKeys.map(dimensionInfo => {
-        const dimension = coachExperienceDimensions[dimensionInfo.id];
-        const options = Array.isArray(dimension?.options)
-            ? dimension.options
-            : [];
+    const getCoachOptionValue = option =>
+        typeof option === 'string'
+            ? option
+            : String(
+                option?.id ??
+                option?.value ??
+                option?.key ??
+                option?.label ??
+                option?.name ??
+                ''
+            );
 
-        const optionsHtml = options.map((option, index) => {
-            const value = typeof option === 'string'
-                ? option
-                : option.id ?? option.value ?? option.key ?? option.label ?? option.name ?? '';
+    const getCoachOptionLabel = option =>
+        typeof option === 'string'
+            ? option
+            : option?.label ?? option?.name ?? getCoachOptionValue(option);
 
-            const label = typeof option === 'string'
-                ? option
-                : option.label ?? option.name ?? value;
+    const getCoachOptionDetail = option =>
+        typeof option === 'object' && option !== null
+            ? option.description || option.detail || option.lore || ''
+            : '';
 
-            return `<option value="${escapeHtml(value)}"${index === 0 ? ' selected' : ''}>${escapeHtml(label)}</option>`;
-        }).join('');
+    const coachExperienceOptions = Object.fromEntries(
+        coachExperienceKeys.map(({ id }) => [
+            id,
+            Array.isArray(coachExperienceDimensions[id]?.options)
+                ? coachExperienceDimensions[id].options
+                : []
+        ])
+    );
 
-        return `
-            <label class="block">
-                <span class="block text-xs font-semibold text-slate-700 mb-1">
-                    ${dimensionInfo.label}
-                </span>
-                <select id="new-coach-experience-${dimensionInfo.id}"
-                    class="w-full p-2 border border-slate-300 rounded bg-white text-sm">
-                    ${optionsHtml}
-                </select>
-            </label>
-        `;
-    }).join('');
+    const initialCoachExperience = Object.fromEntries(
+        coachExperienceKeys.map(({ id }) => [
+            id,
+            getCoachOptionValue(coachExperienceOptions[id][0] ?? '')
+        ])
+    );
+
+    const initialCommunityBackground =
+        communityCoachBackgrounds[0]?.id || '';
+
+    // Only qualities with a usable scouting estimate are selectable.
+    const coachEvaluationQualities =
+        COACH_EVALUATION_QUALITIES.filter(quality =>
+            !['coachability', 'teamwork'].includes(quality.id)
+        );
 
     const defaultCoachEvaluationPriorities = [
         'reliability',
-        'coachability',
-        'teamwork'
+        'technique',
+        'football_iq'
     ];
 
+    const coachCommunityPanelHtml = `
+        <div id="coach-community-popout"
+            data-coach-setup-popout
+            class="fixed inset-0 z-[90] hidden bg-slate-950/50 p-3 sm:p-6">
+
+            <section role="dialog" aria-modal="true"
+                aria-labelledby="coach-community-title"
+                class="mx-auto flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl">
+
+                <header class="flex items-center justify-between gap-3 border-b border-slate-200 p-4">
+                    <div>
+                        <h3 id="coach-community-title"
+                            class="text-sm font-black uppercase tracking-wide text-slate-900">
+                            Coaching Background & Experience
+                        </h3>
+                        <p class="mt-1 text-xs text-slate-500">
+                            Your personal story in community football.
+                        </p>
+                    </div>
+                    <button type="button" data-coach-setup-close
+                        class="rounded border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-700">
+                        Done
+                    </button>
+                </header>
+
+                <div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+
+                    <div>
+                        <h4 class="text-xs font-black uppercase tracking-wide text-slate-800">
+                            How did you get involved?
+                        </h4>
+                        <p class="mb-3 mt-1 text-[11px] text-slate-500">
+                            This describes your background, not your coaching ability.
+                        </p>
+
+                        <input type="hidden"
+                            id="new-coach-community-background"
+                            value="${escapeBuilderText(initialCommunityBackground)}">
+
+                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            ${communityCoachBackgrounds.map((item, index) => `
+                                <button type="button"
+                                    data-coach-community-background="${escapeBuilderText(item.id)}"
+                                    aria-pressed="${String(index === 0)}"
+                                    class="rounded border px-3 py-2 text-left ${
+                                        index === 0
+                                            ? 'border-amber-500 bg-amber-50'
+                                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                                    }">
+
+                                    <span class="block text-xs font-bold text-slate-800">
+                                        ${escapeBuilderText(item.name)}
+                                    </span>
+
+                                    <span class="mt-1 block text-[10px] leading-relaxed text-slate-600">
+                                        ${escapeBuilderText(
+                                            item.description ||
+                                            item.lore ||
+                                            item.detail ||
+                                            'A personal route into community football.'
+                                        )}
+                                    </span>
+                                </button>
+                            `).join('')}
+                        </div>
+
+                        <p class="mt-2 text-[10px] text-slate-500">
+                            Effect: biography and identity only. No automatic skill bonuses.
+                        </p>
+                    </div>
+
+                    <div class="border-t border-slate-200 pt-4">
+                        <h4 class="text-xs font-black uppercase tracking-wide text-slate-800">
+                            Previous Experience
+                        </h4>
+                        <p class="mb-3 mt-1 text-[11px] text-slate-500">
+                            Choose independently in each category. No experience is a valid choice.
+                        </p>
+
+                        ${coachExperienceKeys.map(({ id, label }) => `
+                            <fieldset class="mt-4">
+                                <legend class="mb-2 text-xs font-bold text-slate-700">
+                                    ${label}
+                                </legend>
+
+                                <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                    ${coachExperienceOptions[id].map(option => {
+                                        const value = getCoachOptionValue(option);
+                                        const selected =
+                                            value === initialCoachExperience[id];
+
+                                        return `
+                                            <button type="button"
+                                                data-coach-experience-dimension="${id}"
+                                                data-coach-experience-value="${escapeBuilderText(value)}"
+                                                aria-pressed="${String(selected)}"
+                                                class="rounded border px-2 py-2 text-left ${
+                                                    selected
+                                                        ? 'border-amber-500 bg-amber-50'
+                                                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                                                }">
+
+                                                <span class="block text-[11px] font-bold text-slate-800">
+                                                    ${escapeBuilderText(getCoachOptionLabel(option))}
+                                                </span>
+
+                                                ${getCoachOptionDetail(option) ? `
+                                                    <span class="mt-1 block text-[9px] leading-relaxed text-slate-500">
+                                                        ${escapeBuilderText(getCoachOptionDetail(option))}
+                                                    </span>
+                                                ` : ''}
+                                            </button>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </fieldset>
+                        `).join('')}
+
+                        ${coachExperienceKeys.map(({ id }) => `
+                            <input type="hidden"
+                                id="new-coach-experience-${id}"
+                                value="${escapeBuilderText(initialCoachExperience[id])}">
+                        `).join('')}
+
+                        <p class="mt-4 rounded bg-slate-50 p-3 text-[10px] leading-relaxed text-slate-500">
+                            Effect: records your experience on your coach profile.
+                            It does not add coaching, teaching, or scouting skill points.
+                        </p>
+                    </div>
+                </div>
+
+                <footer class="border-t border-slate-200 p-3 text-right">
+                    <button type="button" data-coach-setup-close
+                        class="rounded bg-slate-900 px-4 py-2 text-xs font-bold text-white">
+                        Save Background
+                    </button>
+                </footer>
+            </section>
+        </div>
+    `;
+
     const coachEvaluationPriorityControlsHtml =
-        COACH_EVALUATION_QUALITIES.map(quality => {
-            const checked = defaultCoachEvaluationPriorities.includes(quality.id);
+        coachEvaluationQualities.map(quality => {
+            const checked =
+                defaultCoachEvaluationPriorities.includes(quality.id);
+
+            const effects = {
+                speed: 'Favors stronger estimated speed.',
+                athleticism: 'Favors stronger estimated physical tools.',
+                technique: 'Favors stronger estimated technical skills.',
+                football_iq: 'Favors stronger estimated football IQ and decisions.',
+                reliability: 'Favors stronger estimated dependability.',
+                work_ethic: 'Favors stronger estimated work ethic.',
+                physicality: 'Favors stronger estimated strength and toughness.'
+            };
 
             return `
-                <label class="flex items-start gap-2 rounded border border-slate-200 bg-white p-2">
+                <label data-coach-evaluation-card
+                    class="flex cursor-pointer items-start gap-2 rounded border ${
+                        checked
+                            ? 'border-amber-500 bg-amber-50'
+                            : 'border-slate-200 bg-white'
+                    } p-3">
+
                     <input type="checkbox"
-                        data-coach-evaluation-priority="${escapeHtml(quality.id)}"
+                        data-coach-evaluation-priority="${escapeBuilderText(quality.id)}"
                         ${checked ? 'checked' : ''}
                         class="mt-0.5 accent-amber-500">
+
                     <span>
                         <span class="block text-xs font-bold text-slate-800">
-                            ${escapeHtml(quality.label)}
+                            ${escapeBuilderText(quality.label)}
                         </span>
-                        <span class="block text-[10px] text-slate-500">
-                            ${escapeHtml(quality.description || '')}
+                        <span class="mt-1 block text-[10px] leading-relaxed text-slate-600">
+                            ${escapeBuilderText(effects[quality.id] || quality.description || '')}
                         </span>
                     </span>
                 </label>
             `;
         }).join('');
+
+    const coachEvaluationPanelHtml = `
+        <div id="coach-evaluation-popout"
+            data-coach-setup-popout
+            class="fixed inset-0 z-[90] hidden bg-slate-950/50 p-3 sm:p-6">
+
+            <section role="dialog" aria-modal="true"
+                aria-labelledby="coach-evaluation-title"
+                class="mx-auto flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl">
+
+                <header class="flex items-center justify-between gap-3 border-b border-slate-200 p-4">
+                    <div>
+                        <h3 id="coach-evaluation-title"
+                            class="text-sm font-black uppercase tracking-wide text-slate-900">
+                            Player Evaluation Philosophy
+                        </h3>
+                        <p class="mt-1 text-xs text-slate-500">
+                            Choose exactly three qualities that matter most to you.
+                        </p>
+                    </div>
+                    <button type="button" data-coach-setup-close
+                        class="rounded border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-700">
+                        Done
+                    </button>
+                </header>
+
+                <div class="min-h-0 flex-1 overflow-y-auto p-4">
+                    <div class="mb-3 flex items-center justify-between rounded bg-slate-900 px-3 py-2 text-white">
+                        <span class="text-xs font-bold uppercase">
+                            Your priorities
+                        </span>
+                        <span id="coach-evaluation-priority-count"
+                            class="text-xs font-black tabular-nums">
+                            3 / 3 selected
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        ${coachEvaluationPriorityControlsHtml}
+                    </div>
+
+                    <p class="mt-4 rounded bg-slate-50 p-3 text-[10px] leading-relaxed text-slate-600">
+                        Effect: these preferences provide a small recruiting-fit adjustment
+                        of up to two points. They use your team's scouting estimates;
+                        they do not improve scouting accuracy. Some qualities require
+                        detailed scouting before they can influence a prospect's score.
+                    </p>
+                </div>
+
+                <footer class="border-t border-slate-200 p-3 text-right">
+                    <button type="button" data-coach-setup-close
+                        class="rounded bg-slate-900 px-4 py-2 text-xs font-bold text-white">
+                        Save Priorities
+                    </button>
+                </footer>
+            </section>
+        </div>
+    `;
 
     const offenseChoices = builderFormationChoices(offenseFormations, 'Punt');
     const defenseChoices = builderFormationChoices(defenseFormations, 'Punt_Return');
@@ -845,6 +1073,66 @@ function promptCoachCreation(teamId) {
         '<p class="text-xs text-slate-500 mt-2">' +
         'Starting skills range from 20 to 70. Presets leave points available for personal tuning.' +
         '</p></div>';
+
+    const coachSkillSummaryHtml = `
+        <div class="border-t border-slate-200 pt-4">
+            <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                        6. Coaching Skills
+                    </label>
+                    <p id="new-coach-skill-summary"
+                        class="text-xs text-slate-600">
+                        Balanced profile · 330 / 330 points
+                    </p>
+                </div>
+                <button type="button"
+                    data-coach-setup-open="coach-skills-popout"
+                    class="shrink-0 px-3 py-2 rounded border border-slate-300 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50">
+                    Customize
+                </button>
+            </div>
+        </div>
+    `;
+
+    const coachSkillPopoutHtml = `
+        <div id="coach-skills-popout"
+            data-coach-setup-popout
+            class="hidden fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/70 p-3"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="coach-skills-popout-title">
+
+            <div class="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-2xl">
+                <div class="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+                    <div>
+                        <h3 id="coach-skills-popout-title"
+                            class="text-base font-black text-slate-900">
+                            Coaching Skill Allocation
+                        </h3>
+                        <p class="text-xs text-slate-500">
+                            These ratings determine your actual starting coaching ability.
+                        </p>
+                    </div>
+
+                    <button type="button"
+                        data-coach-setup-close
+                        class="px-3 py-2 rounded border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                        Done
+                    </button>
+                </div>
+
+                <div class="p-4">
+                    ${coachSkillControlsHtml}
+                </div>
+            </div>
+        </div>
+    `;
+
+    const coachSetupPopoutsHtml =
+        coachCommunityPanelHtml +
+        coachEvaluationPanelHtml +
+        coachSkillPopoutHtml;
 
     const modalHtml = `
         <div class="space-y-5 text-left">
@@ -1078,7 +1366,132 @@ function promptCoachCreation(teamId) {
         document.getElementById(id)?.addEventListener('change', updateChoiceSummaries);
     });
 
-        const evaluationPriorityInputs = [
+    // ------------------------------------------
+    // COACH SETUP POPOUTS
+    // ------------------------------------------
+
+    const closeCoachSetupPanels = () => {
+        document.querySelectorAll('[data-coach-setup-popout]').forEach(panel => {
+            panel.classList.add('hidden');
+        });
+    };
+
+    // Open the requested panel.
+    document.querySelectorAll('[data-coach-setup-open]').forEach(button => {
+        button.addEventListener('click', () => {
+            const panelId = button.dataset.coachSetupOpen;
+            const panel = document.getElementById(panelId);
+
+            if (!panel) return;
+
+            closeCoachSetupPanels();
+            panel.classList.remove('hidden');
+        });
+    });
+
+    // Close buttons inside each panel.
+    document.querySelectorAll('[data-coach-setup-close]').forEach(button => {
+        button.addEventListener('click', closeCoachSetupPanels);
+    });
+
+    // Clicking the dark backdrop closes that panel.
+    document.querySelectorAll('[data-coach-setup-popout]').forEach(panel => {
+        panel.addEventListener('click', event => {
+            if (event.target === panel) {
+                closeCoachSetupPanels();
+            }
+        });
+    });
+
+    // ------------------------------------------
+    // COMMUNITY BACKGROUND AND EXPERIENCE
+    // ------------------------------------------
+
+    const setCoachSetupCardState = (card, selected) => {
+        if (!card) return;
+
+        card.setAttribute('aria-pressed', String(selected));
+
+        card.classList.remove(
+            'border-slate-200',
+            'bg-white',
+            'border-amber-600'
+        );
+
+        card.classList.toggle('border-amber-500', selected);
+        card.classList.toggle('bg-amber-50', selected);
+
+        if (!selected) {
+            card.classList.add('border-slate-200', 'bg-white');
+        }
+    };
+
+    const updateCommunityBackgroundCards = () => {
+        const selectedBackground =
+            document.getElementById('new-coach-community-background')?.value;
+
+        document.querySelectorAll('[data-coach-community-background]').forEach(card => {
+            setCoachSetupCardState(
+                card,
+                card.dataset.coachCommunityBackground === selectedBackground
+            );
+        });
+    };
+
+    document.querySelectorAll('[data-coach-community-background]').forEach(card => {
+        card.addEventListener('click', () => {
+            const backgroundInput = document.getElementById(
+                'new-coach-community-background'
+            );
+
+            if (!backgroundInput) return;
+
+            backgroundInput.value = card.dataset.coachCommunityBackground;
+
+            updateCommunityBackgroundCards();
+            updateCoachCreationSummaries();
+        });
+    });
+
+    const updateCoachExperienceCards = () => {
+        coachExperienceKeys.forEach(dimension => {
+            const selectedValue = document.getElementById(
+                `new-coach-experience-${dimension.id}`
+            )?.value;
+
+            document.querySelectorAll(
+                `[data-coach-experience-dimension="${dimension.id}"]`
+            ).forEach(card => {
+                setCoachSetupCardState(
+                    card,
+                    card.dataset.coachExperienceValue === selectedValue
+                );
+            });
+        });
+    };
+
+    document.querySelectorAll('[data-coach-experience-dimension]').forEach(card => {
+        card.addEventListener('click', () => {
+            const dimensionId = card.dataset.coachExperienceDimension;
+            const selectedValue = card.dataset.coachExperienceValue;
+            const input = document.getElementById(
+                `new-coach-experience-${dimensionId}`
+            );
+
+            if (!input) return;
+
+            input.value = selectedValue;
+
+            updateCoachExperienceCards();
+            updateCoachCreationSummaries();
+        });
+    });
+
+    // ------------------------------------------
+    // PLAYER EVALUATION PRIORITIES
+    // ------------------------------------------
+
+    const evaluationPriorityInputs = [
         ...document.querySelectorAll('[data-coach-evaluation-priority]')
     ];
 
@@ -1098,6 +1511,10 @@ function promptCoachCreation(teamId) {
 
         evaluationPriorityInputs.forEach(input => {
             input.disabled = selectedCount >= 3 && !input.checked;
+
+            const card = input.closest('[data-coach-evaluation-card]');
+
+            setCoachSetupCardState(card, input.checked);
         });
     };
 
@@ -1112,10 +1529,93 @@ function promptCoachCreation(teamId) {
             }
 
             updateEvaluationPriorityControls();
+            updateCoachCreationSummaries();
         });
     });
 
+    // ------------------------------------------
+    // MAIN SCREEN SUMMARY ROWS
+    // ------------------------------------------
+
+    const getSelectedExperienceLabel = (dimensionId, selectedValue) => {
+        const selectedCard = [
+            ...document.querySelectorAll('[data-coach-experience-dimension]')
+        ].find(card =>
+            card.dataset.coachExperienceDimension === dimensionId &&
+            card.dataset.coachExperienceValue === selectedValue
+        );
+
+        if (!selectedCard) return selectedValue || 'Not selected';
+
+        const labelElement =
+            selectedCard.querySelector('[data-coach-option-label]') ||
+            selectedCard.querySelector('.font-bold') ||
+            selectedCard;
+
+        return labelElement.textContent.replace(/\s+/g, ' ').trim();
+    };
+
+    const updateCoachCreationSummaries = () => {
+        const communitySummary = document.getElementById(
+            'coach-community-summary'
+        );
+
+        const backgroundId = document.getElementById(
+            'new-coach-community-background'
+        )?.value;
+
+        const background = communityCoachBackgrounds.find(
+            item => getCoachOptionValue(item) === backgroundId
+        );
+
+        const backgroundLabel = background
+            ? getCoachOptionLabel(background)
+            : 'No background selected';
+
+        const experienceLabels = coachExperienceKeys.map(dimension => {
+            const selectedValue = document.getElementById(
+                `new-coach-experience-${dimension.id}`
+            )?.value || '';
+
+            const selectedLabel = getSelectedExperienceLabel(
+                dimension.id,
+                selectedValue
+            );
+
+            return `${dimension.shortLabel}: ${selectedLabel}`;
+        });
+
+        if (communitySummary) {
+            communitySummary.textContent =
+                `${backgroundLabel} · ${experienceLabels.join(' / ')}`;
+        }
+
+        const evaluationSummary = document.getElementById(
+            'coach-evaluation-summary'
+        );
+
+        const selectedPriorities = evaluationPriorityInputs
+            .filter(input => input.checked)
+            .map(input => {
+                const quality = COACH_EVALUATION_QUALITIES.find(
+                    item => item.id === input.dataset.coachEvaluationPriority
+                );
+
+                return quality?.label || input.dataset.coachEvaluationPriority;
+            });
+
+        if (evaluationSummary) {
+            evaluationSummary.textContent = selectedPriorities.length === 3
+                ? selectedPriorities.join(' · ')
+                : `Choose 3 priorities (${selectedPriorities.length} selected)`;
+        }
+    };
+
+    // Set the initial selected-card styles and summaries.
+    updateCommunityBackgroundCards();
+    updateCoachExperienceCards();
     updateEvaluationPriorityControls();
+    updateCoachCreationSummaries();
 
     const coachSkillControls = coachSkillDefinitions
         .map(skill =>
@@ -1154,6 +1654,42 @@ function promptCoachCreation(teamId) {
                 ? `${remaining} points available`
                 : `${Math.abs(remaining)} points over budget`;
             remainingElement.classList.toggle('text-rose-300', remaining < 0);
+        }
+
+        // Keep the compact setup-screen summary synchronized.
+        const skillSummaryElement = document.getElementById(
+            'new-coach-skill-summary'
+        );
+
+        if (skillSummaryElement) {
+            const activePreset = activeCoachSkillPreset
+                ? coachSkillPresets[activeCoachSkillPreset]
+                : null;
+
+            const profileLabel = activePreset?.label || 'Custom';
+
+            const shortSkillLabels = {
+                offense: 'Off',
+                defense: 'Def',
+                evaluation: 'Eval',
+                teaching: 'Teach',
+                planning: 'Plan',
+                practice: 'Practice'
+            };
+
+            const allocationDetails = coachSkillDefinitions.map(skill => {
+                const control = document.getElementById(
+                    'new-coach-skill-' + skill.id
+                );
+
+                const value = Number(control?.value || 0);
+                const label = shortSkillLabels[skill.id] || skill.label;
+
+                return `${label} ${value}`;
+            }).join(' / ');
+
+            skillSummaryElement.textContent =
+                `${profileLabel} · ${total}/${coachSkillBudget} points · ${allocationDetails}`;
         }
 
         document.querySelectorAll('[data-coach-skill-preset]').forEach(button => {

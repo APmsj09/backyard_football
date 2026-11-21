@@ -5464,6 +5464,10 @@ export function getCoachRecruitingPreferenceFit(
         positionFit: null,
         archetypeFit: false,
         estimatedSkillFit: null,
+        evaluationPriorityFit: null,
+        evaluationPrioritiesEvaluated: 0,
+        evaluationPriorityCoverage: 0,
+        evaluationPriorityAdjustment: 0,
         skillsEvaluated: 0,
         scoutingConfidence: 0
     };
@@ -5737,6 +5741,148 @@ export function getCoachRecruitingPreferenceFit(
         ? 1.75 * scoutingConfidence
         : 0;
 
+    // Evaluate personal preferences using this team's scouting estimates.
+    // Missing or unsupported evidence receives no score.
+    const readRangeEstimate = (category, attribute) => {
+        const range = ranges?.[category]?.[attribute];
+
+        const low = Number(range?.low);
+        const high = Number(range?.high);
+
+        if (
+            Number.isFinite(low) &&
+            Number.isFinite(high) &&
+            high >= low
+        ) {
+            return clamp((low + high) / 2, 0, 100);
+        }
+
+        return null;
+    };
+
+    const averageAvailable = values => {
+        const available = values.filter(Number.isFinite);
+
+        return available.length
+            ? available.reduce((sum, value) => sum + value, 0) /
+                available.length
+            : null;
+    };
+
+    const readCharacterEstimate = key => {
+        const value = report?.evaluation?.characterEstimates?.[key];
+
+        if (value == null) return null;
+
+        if (typeof value === 'object') {
+            const estimate = Number(
+                value.estimate ?? value.value
+            );
+
+            if (Number.isFinite(estimate)) {
+                return clamp(estimate, 0, 100);
+            }
+
+            const low = Number(value.low);
+            const high = Number(value.high);
+
+            if (
+                Number.isFinite(low) &&
+                Number.isFinite(high) &&
+                high >= low
+            ) {
+                return clamp((low + high) / 2, 0, 100);
+            }
+
+            return null;
+        }
+
+        const estimate = Number(value);
+
+        return Number.isFinite(estimate)
+            ? clamp(estimate, 0, 100)
+            : null;
+    };
+
+    const priorityEstimateReaders = {
+        speed: () =>
+            readRangeEstimate('physical', 'speed'),
+
+        athleticism: () =>
+            averageAvailable([
+                readRangeEstimate('physical', 'speed'),
+                readRangeEstimate('physical', 'agility'),
+                readRangeEstimate('physical', 'explosiveness'),
+                readRangeEstimate('physical', 'jumping'),
+                readRangeEstimate('physical', 'stamina')
+            ]),
+
+        technique: () =>
+            averageAvailable(
+                Object.keys(ranges?.technical || {}).map(attribute =>
+                    readRangeEstimate('technical', attribute)
+                )
+            ),
+
+        football_iq: () =>
+            averageAvailable([
+                readRangeEstimate('mental', 'playbookIQ'),
+                readRangeEstimate('mental', 'decisionMaking')
+            ]),
+
+        reliability: () =>
+            readCharacterEstimate('dependability'),
+
+        work_ethic: () =>
+            readCharacterEstimate('workEthic'),
+
+        // No dedicated player estimate exists for coachability yet.
+        coachability: () => null,
+
+        // Teamwork currently uses the imperfect team-fit estimate.
+        teamwork: () =>
+            readCharacterEstimate('teamFit'),
+
+        physicality: () =>
+            averageAvailable([
+                readRangeEstimate('physical', 'strength'),
+                readRangeEstimate('mental', 'toughness')
+            ])
+    };
+
+    const evaluationPriorities = Array.isArray(
+        identity.evaluationPriorities
+    )
+        ? identity.evaluationPriorities
+        : [];
+
+    const priorityEstimates = evaluationPriorities
+        .map(priorityId => {
+            const reader = priorityEstimateReaders[priorityId];
+
+            if (typeof reader !== 'function') return null;
+
+            return reader();
+        })
+        .filter(Number.isFinite);
+
+    const evaluationPriorityFit = averageAvailable(
+        priorityEstimates
+    );
+
+    const evaluationPriorityCoverage =
+        evaluationPriorities.length > 0
+            ? priorityEstimates.length / evaluationPriorities.length
+            : 0;
+
+    const evaluationPriorityAdjustment =
+        evaluationPriorityFit === null
+            ? 0
+            : ((evaluationPriorityFit - 50) / 50) *
+                2 *
+                scoutingConfidence *
+                evaluationPriorityCoverage;
+
     const score = clamp(
         positionAdjustment +
         skillAdjustment +
@@ -5753,14 +5899,22 @@ export function getCoachRecruitingPreferenceFit(
         estimatedSkillFit: estimatedSkillFit === null
             ? null
             : Math.round(estimatedSkillFit),
-        evaluationPriorityFit: estimatedPriorityFit === null
-            ? null
-            : Math.round(estimatedPriorityFit),
-        evaluationPrioritiesEvaluated: evaluatedPriorities.length,
-        evaluationPriorityAdjustment:
-            Math.round(evaluationPriorityAdjustment * 100) / 100,
         skillsEvaluated: evaluatedSkills.length,
-        scoutingConfidence: Math.round(scoutingConfidence * 100)
+        scoutingConfidence: Math.round(scoutingConfidence * 100),
+
+        evaluationPriorityFit: evaluationPriorityFit === null
+            ? null
+            : Math.round(evaluationPriorityFit),
+
+        evaluationPrioritiesEvaluated: priorityEstimates.length,
+
+        evaluationPriorityCoverage: Math.round(
+            evaluationPriorityCoverage * 100
+        ),
+
+        evaluationPriorityAdjustment: Math.round(
+            evaluationPriorityAdjustment * 100
+        ) / 100
     };
 }
 

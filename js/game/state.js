@@ -433,6 +433,92 @@ function normalizeScoutingNotes(notes) {
         .map(note => note.trim().slice(0, 160));
 }
 
+function normalizeScoutingCharacterEstimates(estimates) {
+    if (
+        !estimates ||
+        typeof estimates !== 'object' ||
+        Array.isArray(estimates)
+    ) {
+        return null;
+    }
+
+    const allowedKeys = [
+        'workEthic',
+        'dependability',
+        'loyalty',
+        'likeability',
+        'ego',
+        'streetCred',
+        'effort',
+        'teamFit',
+        'presence'
+    ];
+
+    const normalized = {};
+
+    for (const key of allowedKeys) {
+        const rawValue = estimates[key];
+
+        if (rawValue == null || rawValue === '') continue;
+
+        const value = Number(rawValue);
+
+        if (!Number.isFinite(value)) continue;
+
+        normalized[key] = Math.max(
+            0,
+            Math.min(100, value)
+        );
+    }
+
+    return Object.keys(normalized).length > 0
+        ? normalized
+        : null;
+}
+
+function normalizeScoutingCharacterEstimates(estimates) {
+    if (
+        !estimates ||
+        typeof estimates !== 'object' ||
+        Array.isArray(estimates)
+    ) {
+        return null;
+    }
+
+    const allowedKeys = [
+        'workEthic',
+        'dependability',
+        'loyalty',
+        'likeability',
+        'ego',
+        'streetCred',
+        'effort',
+        'teamFit',
+        'presence'
+    ];
+
+    const normalized = {};
+
+    for (const key of allowedKeys) {
+        const rawValue = estimates[key];
+
+        if (rawValue == null || rawValue === '') continue;
+
+        const value = Number(rawValue);
+
+        if (!Number.isFinite(value)) continue;
+
+        normalized[key] = Math.max(
+            0,
+            Math.min(100, value)
+        );
+    }
+
+    return Object.keys(normalized).length > 0
+        ? normalized
+        : null;
+}
+
 function normalizePotentialRange(range) {
     if (!range || typeof range !== 'object') return null;
 
@@ -727,6 +813,9 @@ export function setTeamScoutingReport(team, playerId, report) {
             characterSummary: typeof evaluation.characterSummary === 'string'
                 ? evaluation.characterSummary.slice(0, 160)
                 : null,
+            characterEstimates: normalizeScoutingCharacterEstimates(
+                evaluation.characterEstimates
+            ),
             summary: typeof evaluation.summary === 'string'
                 ? evaluation.summary.slice(0, 500)
                 : null
