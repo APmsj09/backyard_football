@@ -12421,7 +12421,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             data-staff-pane="priorities">
 
             <!-- 1. MANAGEMENT PRESETS -->
-            <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
+            <section class="mb-2 rounded border border-slate-200 bg-white p-2.5 shadow-sm">
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <div>
                         <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-900">
@@ -12461,7 +12461,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             </section>
 
             <!-- 2. PROGRAM DIRECTION (ROSTER-LED IDENTITY) -->
-            <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
+            <section class="mb-2 rounded border border-slate-200 bg-white p-2.5 shadow-sm">
                 <div class="mb-2">
                     <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-900">
                         Program Direction (Team Identity)
@@ -12494,7 +12494,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
             </section>
 
             <!-- 3. RECRUITING POLICY LIMITS (GIFT CEILING & AUTO-OFFER) -->
-            <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
+            <section class="mb-2 rounded border border-slate-200 bg-white p-2.5 shadow-sm">
                 <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-900 mb-2">
                     Recruiting Automation & Spending Limits
                 </h4>
@@ -12549,7 +12549,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </div>
             </section>
 
-            <section class="mb-3 rounded border border-slate-200 bg-white p-3 shadow-sm">
+            <section class="mb-2 rounded border border-slate-200 bg-white p-2.5 shadow-sm">
                 <div class="mb-2.5 flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-900">
@@ -12561,7 +12561,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
                     ${[
                         {
                             area: 'practice',
@@ -12675,7 +12675,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </div>
             </section>
 
-            <div class="space-y-3">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                 ${strategyDepartmentCards.map(department => {
                     const renderActiveOverrideChips = (deptKey, mapName, labelFn) => {
                         const entries = Object.entries(gmStrategyDepartments[deptKey]?.[mapName] || {})
@@ -12696,7 +12696,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     };
 
                     return `
-                    <section class="rounded border border-slate-200 bg-white p-3">
+                    <section class="h-full rounded border border-slate-200 bg-white p-2.5">
                         <div class="mb-2">
                             <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
                                 ${department.label} Priorities
@@ -12743,11 +12743,12 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 }).join('')}
             </div>
 
-            <section class="mt-3 rounded border border-slate-200 bg-white p-3">
-                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-                    <div>
-                        <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
-                            Individual Prospect Priorities
+            <div class="mt-2 grid grid-cols-1 xl:grid-cols-2 gap-2">
+                <section class="h-full rounded border border-slate-200 bg-white p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div>
+                            <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
+                                Individual Prospect Priorities
                         </h4>
                         <p class="mt-0.5 text-[10px] text-slate-500">
                             Override position priorities for specific external prospects.
@@ -12785,7 +12786,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </div>
             </section>
 
-            <section class="mt-3 rounded border border-slate-200 bg-white p-3">
+                <section class="h-full rounded border border-slate-200 bg-white p-3">
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <div>
                         <h4 class="text-[11px] font-black uppercase tracking-wide text-slate-800">
@@ -12822,7 +12823,8 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             : '<p class="text-[10px] italic text-slate-400">No individual player overrides set.</p>';
                     })()}
                 </div>
-            </section>
+                </section>
+            </div>
 
             <p class="mt-3 text-[10px] text-slate-500">
                 Changes are saved immediately. You can still override
@@ -21146,7 +21148,7 @@ function renderHistorySimulationHealth(season) {
                     <h5 class="font-black text-slate-800 uppercase tracking-wide mb-3">
                         Data Integrity Checks
                     </h5>
-                    <div class="space-y-3">
+                    <div class="space-y-2">
                         ${diagnostics.length ? diagnostics.map(item => `
                     <div class="border border-slate-200 rounded-lg p-3">
                         <div class="flex flex-wrap justify-between gap-2">
