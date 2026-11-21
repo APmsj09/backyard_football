@@ -5559,130 +5559,6 @@ export function getCoachRecruitingPreferenceFit(
             evaluatedSkills.length
         : null;
 
-    // Read only estimates contained in this team's scouting report.
-    const getAttributeEstimate = (category, attribute) => {
-        const range = ranges?.[category]?.[attribute];
-
-        const low = Number(range?.low);
-        const high = Number(range?.high);
-
-        if (
-            !Number.isFinite(low) ||
-            !Number.isFinite(high) ||
-            high < low
-        ) {
-            return null;
-        }
-
-        return clamp((low + high) / 2, 0, 100);
-    };
-
-    const averageEstimates = values => {
-        const validValues = values.filter(Number.isFinite);
-
-        return validValues.length > 0
-            ? validValues.reduce((sum, value) => sum + value, 0) /
-                validValues.length
-            : null;
-    };
-
-    const getCategoryEstimate = category => {
-        const attributes = Object.keys(ranges?.[category] || {});
-
-        return averageEstimates(
-            attributes.map(attribute =>
-                getAttributeEstimate(category, attribute)
-            )
-        );
-    };
-
-    const getCharacterEstimate = key => {
-        const rawValue =
-            report?.evaluation?.characterEstimates?.[key];
-
-        if (rawValue == null) return null;
-
-        const value = Number(rawValue);
-
-        return Number.isFinite(value)
-            ? clamp(value, 0, 100)
-            : null;
-    };
-
-    // Each priority uses its own evidence source. Some qualities cannot
-    // yet be evaluated and correctly contribute no adjustment.
-    const priorityEstimateReaders = {
-        speed: () => getAttributeEstimate('physical', 'speed'),
-
-        athleticism: () => averageEstimates([
-            getAttributeEstimate('physical', 'speed'),
-            getAttributeEstimate('physical', 'agility'),
-            getAttributeEstimate('physical', 'explosiveness'),
-            getAttributeEstimate('physical', 'jumping'),
-            getAttributeEstimate('physical', 'stamina')
-        ]),
-
-        technique: () => getCategoryEstimate('technical'),
-
-        football_iq: () => averageEstimates([
-            getAttributeEstimate('mental', 'playbookIQ'),
-            getAttributeEstimate('mental', 'decisionMaking')
-        ]),
-
-        reliability: () => getCharacterEstimate('dependability'),
-
-        work_ethic: () => getCharacterEstimate('workEthic'),
-
-        // The player model does not yet contain a dedicated
-        // coachability trait. Do not substitute an unrelated rating.
-        coachability: () => null,
-
-        // Team fit is an imperfect proxy, not a direct teamwork measurement.
-        teamwork: () => getCharacterEstimate('teamFit'),
-
-        physicality: () => averageEstimates([
-            getAttributeEstimate('physical', 'strength'),
-            getAttributeEstimate('mental', 'toughness')
-        ])
-    };
-
-    const requestedPriorities = Array.isArray(
-        identity.evaluationPriorities
-    )
-        ? identity.evaluationPriorities
-        : [];
-
-    const evaluatedPriorities = requestedPriorities
-        .map(priority => {
-            const reader = priorityEstimateReaders[priority];
-
-            if (typeof reader !== 'function') return null;
-
-            const estimate = reader();
-
-            return Number.isFinite(estimate)
-                ? estimate
-                : null;
-        })
-        .filter(Number.isFinite);
-
-    const estimatedPriorityFit = averageEstimates(
-        evaluatedPriorities
-    );
-
-    const priorityCoverage = requestedPriorities.length > 0
-        ? evaluatedPriorities.length / requestedPriorities.length
-        : 0;
-
-    // A coach's stated priorities influence preference, not accuracy.
-    // The effect is scaled by scouting confidence and available evidence.
-    const evaluationPriorityAdjustment =
-        estimatedPriorityFit === null
-            ? 0
-            : ((estimatedPriorityFit - 50) / 50) *
-                2.0 *
-                scoutingConfidence *
-                priorityCoverage;
 
     // A coach receives a small bonus for a preferred position and a
     // smaller penalty when a known position falls outside that preference.
@@ -5910,7 +5786,7 @@ export function getCoachRecruitingPreferenceFit(
 
         evaluationPriorityCoverage: Math.round(
             evaluationPriorityCoverage * 100
-        ),
+        ) / 100,
 
         evaluationPriorityAdjustment: Math.round(
             evaluationPriorityAdjustment * 100
