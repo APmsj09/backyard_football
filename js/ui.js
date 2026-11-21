@@ -11125,7 +11125,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
     const renderStrategyPositionControls = department => {
         const styleByVal = {
             must: 'border-emerald-300 bg-emerald-50 text-emerald-900',
-            high: 'border-blue-300 bg-blue-50 text-blue-900',
+            high: 'border-slate-400 bg-slate-100 text-slate-800',
             normal: 'border-slate-200 bg-slate-50 text-slate-600',
             monitor: 'border-amber-300 bg-amber-50 text-amber-900',
             ignore: 'border-rose-300 bg-rose-50 text-rose-800'
@@ -11408,7 +11408,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 <div>
                                     <span class="font-bold text-slate-900">${strategyEscape(p.name)}</span>
                                     <span class="ml-1.5 text-[10px] text-slate-500">${strategyEscape(String(p.pos || 'ATH').toUpperCase())} · Age ${p.age ?? '—'}</span>
-                                    ${isPlayerMode ? `<span class="ml-1 text-[10px] text-indigo-700 font-semibold">· ${strategyEscape(p.archetypeName || 'Athlete')}</span>` : ''}
+                                    ${isPlayerMode ? `<span class="ml-1 text-[10px] text-slate-500 font-semibold">· ${strategyEscape(p.archetypeName || 'Athlete')}</span>` : ''}
                                 </div>
                             </div>
                             ${isPlayerMode ? `
@@ -12439,21 +12439,21 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button type="button"
                         onclick="window.app_setManagementPreset('casual_gm')"
-                        class="p-2.5 rounded border text-left transition ${team.teamInstructions?.experiencePreset === 'casual_gm' ? 'border-amber-500 bg-amber-50/60 ring-1 ring-amber-500/40' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}">
+                        class="p-2.5 rounded border text-left transition ${team.teamInstructions?.experiencePreset === 'casual_gm' ? 'border-amber-600 bg-amber-50 ring-1 ring-amber-600/30' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}">
                         <div class="font-black text-xs text-slate-900">Casual GM</div>
                         <p class="text-[10px] text-slate-600 mt-1">Guided staff, automated routine tasks, auto-offers on top targets.</p>
                     </button>
 
                     <button type="button"
                         onclick="window.app_setManagementPreset('hands_on_gm')"
-                        class="p-2.5 rounded border text-left transition ${team.teamInstructions?.experiencePreset === 'hands_on_gm' ? 'border-blue-500 bg-blue-50/60 ring-1 ring-blue-500/40' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}">
+                        class="p-2.5 rounded border text-left transition ${team.teamInstructions?.experiencePreset === 'hands_on_gm' ? 'border-slate-700 bg-slate-100 ring-1 ring-slate-500/30' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}">
                         <div class="font-black text-xs text-slate-900">Hands-On GM</div>
                         <p class="text-[10px] text-slate-600 mt-1">Direct control over playbooks, practice, and manual recruiting offers.</p>
                     </button>
 
                     <button type="button"
                         onclick="window.app_setManagementPreset('director_of_football_operations')"
-                        class="p-2.5 rounded border text-left transition ${team.teamInstructions?.experiencePreset === 'director_of_football_operations' ? 'border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500/40' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}">
+                        class="p-2.5 rounded border text-left transition ${team.teamInstructions?.experiencePreset === 'director_of_football_operations' ? 'border-emerald-700 bg-emerald-50 ring-1 ring-emerald-700/30' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}">
                         <div class="font-black text-xs text-slate-900">Director of Ops</div>
                         <p class="text-[10px] text-slate-600 mt-1">Full delegation of coaching duties; focus on staff, finances, and roster strategy.</p>
                     </button>
@@ -12667,7 +12667,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             return `
                                 <button type="button"
                                     onclick="window.app_setGmDirectiveFromStaff('${dirVal}')"
-                                    class="rounded border px-2 py-1 text-[10px] font-bold ${active ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'}">
+                                    class="rounded border px-2 py-1 text-[10px] font-bold ${active ? 'border-slate-900 bg-slate-900 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'}">
                                     ${dirLabel}
                                 </button>`;
                         }).join('')}
@@ -12772,7 +12772,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     <button type="button"
                                         onclick="window.app_removeStrategyOverride('${dept}', 'prospectPriorities', '${strategyEscape(pid)}')"
                                         class="inline-flex items-center gap-1 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-800 hover:bg-rose-50 hover:border-rose-300">
-                                        <span class="uppercase text-[9px] text-indigo-700">${dept === 'recruiting' ? 'REC' : 'SCT'}</span>
+                                        <span class="uppercase text-[9px] font-black text-slate-600">${dept === 'recruiting' ? 'REC' : 'SCT'}</span>
                                         <span>${strategyEscape(p?.name || pid)}: <b>${strategyEscape(String(level).toUpperCase())}</b></span>
                                         <span aria-hidden="true">×</span>
                                     </button>`);
@@ -12952,8 +12952,8 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     onclick="${handler}"
                     class="w-full rounded-lg border ${
                         selected
-                            ? 'border-emerald-500 bg-emerald-50'
-                            : 'border-slate-200 bg-white hover:border-blue-400 hover:bg-blue-50'
+                        ? 'border-emerald-500 bg-emerald-50'
+                        : 'border-slate-200 bg-white hover:border-slate-400 hover:bg-slate-50'
                     } p-3 text-left transition disabled:cursor-default">
 
                     <div class="flex items-center justify-between gap-2">
@@ -12963,7 +12963,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                         <div class="flex items-center gap-1">
                             ${bestFit ? `
-                                <span class="rounded bg-blue-100 px-2 py-1 text-[9px] font-bold uppercase text-blue-800">
+                                <span class="rounded bg-slate-200 px-2 py-1 text-[9px] font-bold uppercase text-slate-700">
                                     Best skill fit
                                 </span>
                             ` : ''}
@@ -13024,8 +13024,8 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         onclick="${handler}"
                         class="w-full flex items-center justify-between gap-3 rounded border ${
                             isSupporting
-                                ? 'border-blue-400 bg-blue-50'
-                                : 'border-slate-200 bg-white hover:bg-slate-50'
+                            ? 'border-slate-500 bg-slate-100'
+                            : 'border-slate-200 bg-white hover:bg-slate-50'
                         } p-2.5 text-left">
 
                         <div class="min-w-0">
@@ -13038,7 +13038,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                         </div>
 
                         <span class="shrink-0 text-[10px] font-bold ${
-                            isSupporting ? 'text-blue-800' : 'text-slate-500'
+                            isSupporting ? 'text-slate-800' : 'text-slate-500'
                         }">
                             ${isSupporting ? 'Remove Support' : '+ Add Support'}
                         </span>
@@ -15163,7 +15163,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                 </div>
             </details>
 
-            <div class="grid grid-cols-1 gap-3">
+            <div class="grid grid-cols-1 gap-2">
                 ${overviewCoaches.filter(entry => !entry.coach.isUserCoach).map(entry => {
                     const outlook = staffOutlooks.get(String(entry.coach.id));
                     const isNPC = !outlook?.isUserCoach;
@@ -15179,12 +15179,12 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     const identitySummaryHtml = identity ? `
                         <div class="xl:col-span-5 grid grid-cols-1 lg:grid-cols-3 gap-2">
 
-                            <div class="rounded-lg border border-blue-200 bg-blue-50/60 p-3">
+                            <div class="rounded-lg border border-slate-300 bg-slate-100 p-3">
                                 <div class="flex items-center justify-between gap-2">
-                                    <span class="text-[9px] font-black uppercase tracking-wide text-blue-800">
+                                    <span class="text-[9px] font-black uppercase tracking-wide text-slate-700">
                                         Offensive Identity
                                     </span>
-                                    <span class="rounded bg-white/80 px-1.5 py-0.5 text-[8px] font-bold uppercase text-blue-700">
+                                    <span class="rounded bg-slate-200 px-1.5 py-0.5 text-[8px] font-bold uppercase text-slate-700">
                                         Offense
                                     </span>
                                 </div>
@@ -15193,7 +15193,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     ${overviewEscape(identity.offenseIdentity)}
                                 </p>
 
-                                <div class="mt-2 border-t border-blue-200 pt-2">
+                                <div class="mt-2 border-t border-slate-300 pt-2">
                                     <span class="block text-[8px] font-bold uppercase tracking-wide text-slate-500">
                                         Preferred Formations
                                     </span>
@@ -15203,12 +15203,12 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                 </div>
                             </div>
 
-                            <div class="rounded-lg border border-rose-200 bg-rose-50/60 p-3">
+                            <div class="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
                                 <div class="flex items-center justify-between gap-2">
                                     <span class="text-[9px] font-black uppercase tracking-wide text-rose-800">
                                         Defensive Identity
                                     </span>
-                                    <span class="rounded bg-white/80 px-1.5 py-0.5 text-[8px] font-bold uppercase text-rose-700">
+                                    <span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[8px] font-bold uppercase text-emerald-800">
                                         Defense
                                     </span>
                                 </div>
@@ -15217,7 +15217,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     ${overviewEscape(identity.defenseIdentity)}
                                 </p>
 
-                                <div class="mt-2 border-t border-rose-200 pt-2">
+                                <div class="mt-2 border-t border-emerald-200 pt-2">
                                     <span class="block text-[8px] font-bold uppercase tracking-wide text-slate-500">
                                         Preferred Formations
                                     </span>
@@ -15232,7 +15232,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     <span class="text-[9px] font-black uppercase tracking-wide text-emerald-800">
                                         Recruiting Priorities
                                     </span>
-                                    <span class="rounded bg-white/80 px-1.5 py-0.5 text-[8px] font-bold uppercase text-emerald-700">
+                                    <span class="rounded bg-amber-100 px-1.5 py-0.5 text-[8px] font-bold uppercase text-amber-800">
                                         Personnel
                                     </span>
                                 </div>
@@ -15241,7 +15241,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     Positions this coach emphasizes
                                 </p>
 
-                                <p class="mt-2 border-t border-emerald-200 pt-2 text-[10px] leading-relaxed font-semibold text-slate-700">
+                                <p class="mt-2 border-t border-amber-200 pt-2 text-[10px] leading-relaxed font-semibold text-slate-700">
                                     ${identityList(identity.recruitingPositions)}
                                 </p>
                             </div>
@@ -15250,7 +15250,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     ` : '';
 
                     const identityDetailsHtml = identity ? `
-                        <details class="xl:col-span-3 rounded border border-slate-200 bg-white">
+                        <details class="xl:col-span-5 rounded border border-slate-200 bg-white">
                             <summary class="cursor-pointer px-3 py-2.5 text-[10px] font-black text-blue-800 hover:bg-slate-50">
                                 Full Tactical &amp; Player Evaluation Profile
                             </summary>
@@ -15413,7 +15413,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                         if (!relationships.length) {
                             return `
-                                <div class="xl:col-span-2 flex min-h-full flex-col justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4">
+                                <div class="xl:col-span-5 flex min-h-full flex-col justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3">
                                     <span class="text-[9px] font-black uppercase tracking-wide text-slate-500">
                                         Staff Chemistry
                                     </span>
@@ -15468,7 +15468,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                         };
 
                         return `
-                            <details class="xl:col-span-2 rounded-lg border border-slate-200 bg-white">
+                            <details class="xl:col-span-5 rounded-lg border border-slate-200 bg-white">
                                 <summary class="flex cursor-pointer items-center justify-between gap-2 px-3 py-2.5 text-[10px] font-bold text-blue-800 hover:bg-slate-50">
                                     <span>
                                         Relationship Breakdown
@@ -15560,11 +15560,11 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                     const leadsLabel = outlook?.leads?.length
                         ? outlook.leads.join(', ')
                         : 'No department lead';
-
                     const clashBanner = isNPC && outlook.schemeClash > 0
-                        ? `<div class="xl:col-span-5 rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[10px] text-amber-950">
-                            <b>⚠️ Tactical Friction (-${outlook.schemeClash} IQ):</b> Your playcalling sliders clash with this coach's ${overviewEscape(outlook.tacticalName)} style.
-                           </div>`
+                        ? `<div class="xl:col-span-5 rounded border border-slate-300 border-l-4 border-l-amber-500 bg-slate-100 px-2.5 py-1.5 text-[10px] text-slate-800">
+                            <b class="font-black uppercase tracking-wide text-slate-900">Scheme Mismatch · Coaching Effectiveness -${outlook.schemeClash}:</b>
+                            Your playcalling settings conflict with this coach's ${overviewEscape(outlook.tacticalName)} style.
+                        </div>`
                         : '';
 
                     const currentOffenseKey =
@@ -15729,9 +15729,9 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                             : '';
 
                     return `
-                        <article class="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm flex flex-col justify-between gap-3 overflow-hidden">
-                            <div class="grid grid-cols-1 xl:grid-cols-5 gap-3">
-                                <div class="xl:col-span-5 flex items-start justify-between gap-3 border-b border-slate-200 pb-2">
+                        <article class="rounded-lg border border-slate-300 bg-white p-3 shadow-sm flex flex-col justify-between gap-2 overflow-hidden">
+                            <div class="grid grid-cols-1 xl:grid-cols-5 gap-2">
+                                <div class="xl:col-span-5 flex items-start justify-between gap-3 border-b border-slate-300 pb-1.5">
                                     <div class="min-w-0">
                                         <div class="flex flex-wrap items-center gap-1.5">
                                             <button type="button"
@@ -15759,7 +15759,7 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     </div>
                                 </div>
 
-                                <div class="xl:col-span-2 grid grid-cols-2 gap-2">
+                                <div class="xl:col-span-5 grid grid-cols-2 sm:grid-cols-6 gap-1.5">
 
                                     <div class="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
                                         <span class="block text-[9px] font-black uppercase tracking-wide text-slate-400">
@@ -15819,9 +15819,19 @@ export function renderStaffTab(gameState, targetContainerId = null) {
 
                                 </div>
 
+                                <details class="xl:col-span-5 rounded border border-slate-300 bg-slate-50">
+                                    <summary class="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-100">
+                                        <span>Full Coaching Breakdown</span>
+                                        <span class="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                                            Tactical identity · Evaluation · Chemistry
+                                        </span>
+                                    </summary>
+
+                                    <div class="grid grid-cols-1 xl:grid-cols-5 gap-2 border-t border-slate-200 p-2">
+
                                 ${outlook ? `
-                                    <div class="xl:col-span-3 rounded border border-blue-200 bg-blue-50/40 p-2 text-[10px] text-slate-700">
-                                        <span class="font-black uppercase text-[9px] text-blue-900 block">
+                                    <div class="xl:col-span-5 rounded border border-slate-200 bg-white p-2 text-[10px] text-slate-700">
+                                        <span class="font-black uppercase text-[9px] text-slate-800 block">
                                             Football Identity
                                         </span>
 
@@ -16010,10 +16020,13 @@ export function renderStaffTab(gameState, targetContainerId = null) {
                                     </div>
                                 ` : ''}
 
+                                    </div>
+                                </details>
+
                                 ${clashBanner}
                             </div>
 
-                            <div class="mt-1 -mx-3.5 -mb-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-3.5 py-3">
+                            <div class="mt-1 -mx-3 -mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-300 bg-slate-50 px-3 py-2.5">
                                 <div class="flex flex-wrap gap-1.5">
                                     ${makeHeadCoachActionHtml}
                                     ${practiceActionHtml}
