@@ -1238,13 +1238,20 @@ function promptCoachCreation(teamId) {
                     not replace your coach.
                 </p>
             </div>
+
+            <!-- COACH_SETUP_POPOUTS -->
         </div>
     `;
 
-    const modalHtmlWithSkills = modalHtml.replace(
-        '<!-- COACH_SKILL_ALLOCATION_BLOCK -->',
-        coachSkillControlsHtml
-    );
+    const modalHtmlWithSkills = modalHtml
+        .replace(
+            '<!-- COACH_SKILL_ALLOCATION_BLOCK -->',
+            coachSkillSummaryHtml
+        )
+        .replace(
+            '<!-- COACH_SETUP_POPOUTS -->',
+            coachSetupPopoutsHtml
+        );
 
     UI.showModal("Build Your Football Identity", modalHtmlWithSkills, () => {
         const name = document.getElementById('new-coach-name').value.trim() || 'GM';
@@ -1255,11 +1262,20 @@ function promptCoachCreation(teamId) {
         const off = document.getElementById('new-coach-offense').value;
         const def = document.getElementById('new-coach-defense').value;
 
+        const communityBackgroundInput = document.getElementById(
+            'new-coach-community-background'
+        );
+
+        if (!communityBackgroundInput) {
+            console.error(
+                'Coach setup error: community background input is missing.'
+            );
+            return;
+        }
+
         const coachCommunityProfile = {
             version: 1,
-            backgroundId: document.getElementById(
-                'new-coach-community-background'
-            ).value,
+            backgroundId: communityBackgroundInput.value,
             experience: Object.fromEntries(
                 coachExperienceKeys.map(({ id }) => [
                     id,
@@ -3244,6 +3260,8 @@ function showWalkOnInvitationModal(invitation) {
                     </p>
                 `}
             </div>
+
+            <!-- COACH_SETUP_POPOUTS -->
         </div>
     `;
 
